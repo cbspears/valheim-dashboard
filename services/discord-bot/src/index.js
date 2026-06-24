@@ -12,6 +12,16 @@ import { createRecap } from './recap.js';
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
 const POLL = parseInt(process.env.POLL_INTERVAL_MS || '15000', 10);
 const TZ = process.env.TZ || 'America/Chicago';
+// Recaps stay silent until this date (server launch). Invalid/unset => no gate.
+const recapsStart = (() => {
+  if (!process.env.RECAPS_START) return null;
+  const d = new Date(`${process.env.RECAPS_START}T00:00:00`);
+  if (Number.isNaN(d.getTime())) {
+    console.warn('[recap] invalid RECAPS_START, ignoring gate');
+    return null;
+  }
+  return d;
+})();
 
 const db = readClient();
 
@@ -32,7 +42,7 @@ async function runLive() {
 
   const relay = createRelay({ db, post, state, saveState });
   const bosses = createBossWatcher({ db, post, state, saveState });
-  const recap = createRecap({ db, post, state, saveState, tz: TZ });
+  const recap = createRecap({ db, post, state, saveState, tz: TZ, startsAt: recapsStart });
 
   await bosses.init(); // seed already-felled bosses so we don't retro-announce
   await saveState();

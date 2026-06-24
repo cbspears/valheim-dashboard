@@ -4,7 +4,7 @@
 import cron from 'node-cron';
 import { formatRecap } from './format.js';
 
-export function createRecap({ db, post, state, saveState, tz = 'America/Chicago' }) {
+export function createRecap({ db, post, state, saveState, tz = 'America/Chicago', startsAt = null }) {
   async function buildStats(period) {
     const now = Date.now();
     const windowStart = new Date(
@@ -73,11 +73,23 @@ export function createRecap({ db, post, state, saveState, tz = 'America/Chicago'
 
   function schedule() {
     const opts = { timezone: tz };
+    // Gate: stay silent until the world launches (startsAt). Relay + boss
+    // announcements are event-driven, so they're naturally quiet before then.
+    const run = (period) => {
+      if (startsAt && Date.now() < startsAt.getTime()) {
+        console.log(`[recap] ${period} gated — recaps begin ${startsAt.toISOString().slice(0, 10)}`);
+        return Promise.resolve();
+      }
+      return postRecap(period);
+    };
     const jobs = [
-      cron.schedule('0 8 * * *', () => postRecap('morning').catch((e) => console.error('[recap] morning:', e.message)), opts),
-      cron.schedule('0 22 * * *', () => postRecap('evening').catch((e) => console.error('[recap] evening:', e.message)), opts),
+      cron.schedule('0 8 * * *', () => run('morning').catch((e) => console.error('[recap] morning:', e.message)), opts),
+      cron.schedule('0 22 * * *', () => run('evening').catch((e) => console.error('[recap] evening:', e.message)), opts),
     ];
-    console.log(`[recap] scheduled 08:00 & 22:00 ${tz}`);
+    console.log(
+      `[recap] scheduled 08:00 & 22:00 ${tz}` +
+        (startsAt ? ` (begins ${startsAt.toISOString().slice(0, 10)})` : '')
+    );
     return jobs;
   }
 
