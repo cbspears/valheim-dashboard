@@ -1,7 +1,7 @@
 // Server identity & static facts. Edit here; the dashboard reads these directly.
 
-export const SERVER_NAME = 'The Fractured Realms';
-export const SERVER_TAGLINE = 'A tenth world for the bold.';
+export const SERVER_NAME = 'Eilif';
+export const SERVER_TAGLINE = 'The Cozy Canon Playthrough';
 export const SERVER_DESCRIPTION =
   'A modded Valheim dedicated server. Bosses gate progression — no sailing ahead of the longship, vikings.';
 
