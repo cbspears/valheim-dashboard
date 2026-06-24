@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+/*
+  ============================================================
+  THE FRACTURED REALMS — Dark Norse Fantasy design system
+  Tailwind v4: design tokens live here in @theme and become
+  utilities automatically (bg-gold, text-ash, border-rune, etc.)
+  ============================================================
+*/
+
+@theme {
+  /* Surfaces */
+  --color-night: #0b0b0f;
+  --color-pitch: #07070a;
+  --color-surface: #14141b;
+  --color-surface-raised: #1b1b25;
+  --color-rune: #2a2a38;
+  --color-rune-bright: #3a3a4c;
+
+  /* Gold (primary accent) */
+  --color-gold: #c8952a;
+  --color-gold-light: #e8b84b;
+  --color-gold-dim: #8a6820;
+
+  /* Text */
+  --color-ash: #e8dcc8;
+  --color-ash-dim: #b3a892;
+  --color-muted: #6a6a7a;
+
+  /* Status / event colors */
+  --color-online: #5aa86a;
+  --color-online-glow: #6fdc86;
+  --color-offline: #5a5a68;
+  --color-death: #b8554f;
+  --color-raid: #cf8a3a;
+  --color-boss: #c8952a;
+  --color-frost: #5a8fb8;
+
+  /* Fonts (wired to next/font CSS vars in layout.tsx) */
+  --font-display: var(--font-cinzel), Georgia, serif;
+  --font-body: var(--font-inter), system-ui, sans-serif;
+
+  /* Radius */
+  --radius-card: 0.625rem;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-night);
+  color: var(--color-ash);
+  font-family: var(--font-body);
+  /* atmospheric vignette + faint aurora glow */
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(200, 149, 42, 0.06), transparent 60%),
+    radial-gradient(ellipse 90% 60% at 80% 110%, rgba(90, 143, 184, 0.05), transparent 55%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Display font helper */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+/* Subtle engraved heading treatment */
+.heading-engraved {
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Thin rune divider (use as <hr className="rune-divider" />) */
+.rune-divider {
+  border: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--color-rune) 20%,
+    var(--color-gold-dim) 50%,
+    var(--color-rune) 80%,
+    transparent
+  );
+  opacity: 0.7;
+}
+
+/* Card surface utility */
+.card-surface {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-rune);
+  border-radius: var(--radius-card);
+}
+
+/* Soft gold focus ring for interactive elements */
+.gold-ring:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+/* Pulsing online dot */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(111, 220, 134, 0.5); }
+  50% { box-shadow: 0 0 0 5px rgba(111, 220, 134, 0); }
+}
+.online-pulse {
+  animation: pulse-glow 2.2s infinite;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--color-pitch); }
+::-webkit-scrollbar-thumb {
+  background: var(--color-rune);
+  border-radius: 5px;
+  border: 2px solid var(--color-pitch);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-rune-bright); }
