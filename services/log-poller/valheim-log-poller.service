@@ -1,0 +1,19 @@
+[Unit]
+Description=Valheim (Eilif) log poller -> dashboard webhook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cbspears
+WorkingDirectory=/home/cbspears/Projects/valheim-dashboard/services/log-poller
+# Absolute path to the nvm-installed Node 20 (systemd does not source nvm).
+# Update if your Node version dir differs: ls ~/.config/nvm/versions/node
+ExecStart=/home/cbspears/.config/nvm/versions/node/v20.20.2/bin/node src/index.js
+Restart=on-failure
+RestartSec=10
+# Keep the byte-offset/roster state across restarts (lives in WorkingDirectory).
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

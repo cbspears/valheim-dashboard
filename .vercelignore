@@ -1,0 +1,3 @@
+# The log poller is a separate Linux service — not part of the Vercel build.
+services/
+.playwright-mcp/

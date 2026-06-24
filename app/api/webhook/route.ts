@@ -4,8 +4,9 @@
 // producers call it:
 //   1. The Valheim "Discord Connector" mod (server-side), forwarding events
 //      (join / leave / death / boss / raid / chat ...).
-//   2. Our Linux SFTP log poller, which tails the server log and replays the
-//      same event shape for things the mod doesn't emit.
+//   2. Our Linux FTP log poller, which tails the server log and replays the
+//      same event shape for things the mod doesn't emit, plus periodic `sync`
+//      reconciliation of the live roster.
 //
 // SECURITY: this handler writes with the Supabase SERVICE ROLE key, which
 // bypasses Row Level Security. It is therefore guarded by a shared secret
@@ -20,12 +21,15 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 // Shape of the JSON we accept. Everything except `type` is optional because
-// not all events involve a player (e.g. a server-wide raid or chat broadcast).
+// not all events involve a player (e.g. a server-wide raid or a roster sync).
 interface WebhookPayload {
   type: string;
   characterName?: string;
   metadata?: Record<string, unknown>;
   worldDay?: number;
+  // ISO timestamp of when the event actually occurred (from the log line).
+  // Lets the poller backfill accurate times instead of server-receive time.
+  occurredAt?: string;
 }
 
 // A privileged client bound to the service role key. Created per request so we
@@ -41,8 +45,6 @@ function serviceClient() {
 
 export async function POST(request: Request) {
   // ---- 1. Authenticate -----------------------------------------------------
-  // Constant work either way; a missing or mismatched secret is rejected with a
-  // generic 401 so we don't hint at why it failed.
   const provided = request.headers.get('x-webhook-secret');
   const expected = process.env.WEBHOOK_SECRET;
   if (!expected || !provided || provided !== expected) {
@@ -65,7 +67,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Normalize the optional fields up front.
   const characterName =
     typeof body.characterName === 'string' && body.characterName.trim()
       ? body.characterName.trim()
@@ -79,14 +80,83 @@ export async function POST(request: Request) {
       ? Math.trunc(body.worldDay)
       : undefined;
 
+  // Honor an explicit event time if the producer supplies a valid ISO string;
+  // otherwise stamp "now". Used for created_at, sessions, and last_seen.
+  const occurredAt = (() => {
+    if (typeof body.occurredAt === 'string') {
+      const t = new Date(body.occurredAt);
+      if (!Number.isNaN(t.getTime())) return t;
+    }
+    return new Date();
+  })();
+  const occurredIso = occurredAt.toISOString();
+
   try {
     const db = serviceClient();
-    const nowIso = new Date().toISOString();
+
+    // ---- 2b. Roster reconciliation (`sync`) --------------------------------
+    // A non-feed control message: metadata.online is the authoritative list of
+    // character names currently connected. We set exactly those online and
+    // everyone else offline, then refresh server_status. This self-heals the
+    // "stuck online" case when a player drops without a clean leave line.
+    if (type === 'sync') {
+      const onlineNames = Array.isArray((metadata as Record<string, unknown>).online)
+        ? ((metadata as Record<string, unknown>).online as unknown[])
+            .filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+            .map((n) => n.trim())
+        : [];
+
+      // Ensure each online name exists, then mark it online + seen.
+      for (const name of onlineNames) {
+        const { data: existing } = await db
+          .from('players')
+          .select('id')
+          .eq('character_name', name)
+          .maybeSingle();
+        if (existing?.id) {
+          await db
+            .from('players')
+            .update({ is_online: true, last_seen_at: occurredIso })
+            .eq('id', existing.id);
+        } else {
+          await db.from('players').insert({
+            character_name: name,
+            first_seen_at: occurredIso,
+            last_seen_at: occurredIso,
+            is_online: true,
+          });
+        }
+      }
+
+      // Everyone not in the online set is offline.
+      if (onlineNames.length > 0) {
+        await db
+          .from('players')
+          .update({ is_online: false })
+          .eq('is_online', true)
+          .not('character_name', 'in', `(${onlineNames.map((n) => `"${n.replace(/"/g, '')}"`).join(',')})`);
+      } else {
+        await db.from('players').update({ is_online: false }).eq('is_online', true);
+      }
+
+      const statusUpdate: Record<string, unknown> = {
+        updated_at: occurredIso,
+        current_players: onlineNames,
+        player_count: onlineNames.length,
+      };
+      // `serverOnline` lets the poller report host up/down explicitly.
+      if (typeof (metadata as Record<string, unknown>).serverOnline === 'boolean') {
+        statusUpdate.is_online = (metadata as Record<string, unknown>).serverOnline as boolean;
+      } else if (onlineNames.length > 0) {
+        statusUpdate.is_online = true;
+      }
+      if (worldDay !== undefined) statusUpdate.world_day = worldDay;
+
+      await db.from('server_status').update(statusUpdate).eq('id', 1);
+      return Response.json({ ok: true, synced: onlineNames.length }, { status: 200 });
+    }
 
     // ---- 3. Resolve / upsert the player ------------------------------------
-    // Players are keyed by character_name (the only stable identifier the mod
-    // reliably gives us). We look up the existing row, then either update its
-    // presence or insert a fresh one.
     let playerId: string | null = null;
 
     if (characterName) {
@@ -98,52 +168,42 @@ export async function POST(request: Request) {
 
       if (existing?.id) {
         playerId = existing.id as string;
-
-        // Touch last_seen on every event from this player; only join/leave
-        // flips the online flag.
-        const update: Record<string, unknown> = { last_seen_at: nowIso };
+        const update: Record<string, unknown> = { last_seen_at: occurredIso };
         if (type === 'join') update.is_online = true;
         else if (type === 'leave') update.is_online = false;
-
         await db.from('players').update(update).eq('id', playerId);
       } else {
-        // First time we've ever seen this character — create the row.
         const { data: inserted } = await db
           .from('players')
           .insert({
             character_name: characterName,
-            first_seen_at: nowIso,
-            last_seen_at: nowIso,
+            first_seen_at: occurredIso,
+            last_seen_at: occurredIso,
             is_online: type === 'join',
           })
           .select('id')
           .single();
-
         playerId = (inserted?.id as string) ?? null;
       }
     }
 
     // ---- 4. Record the event ------------------------------------------------
-    // The events table is the immutable activity feed that powers the dashboard.
     await db.from('events').insert({
       type,
       player_id: playerId,
       character_name: characterName,
       metadata,
-      // created_at is left to the column default (now()).
+      created_at: occurredIso,
     });
 
     // ---- 5. Maintain sessions for join / leave -----------------------------
     if (type === 'join') {
-      // Open a new session for this presence.
       await db.from('sessions').insert({
         player_id: playerId,
         character_name: characterName,
-        joined_at: nowIso,
+        joined_at: occurredIso,
       });
     } else if (type === 'leave') {
-      // Close the player's most recent still-open session (left_at is null) and
-      // stamp its duration in whole minutes.
       let openQuery = db
         .from('sessions')
         .select('id, joined_at')
@@ -151,8 +211,6 @@ export async function POST(request: Request) {
         .order('joined_at', { ascending: false })
         .limit(1);
 
-      // Prefer matching by player_id; fall back to character_name if the player
-      // row somehow didn't resolve.
       openQuery = playerId
         ? openQuery.eq('player_id', playerId)
         : openQuery.eq('character_name', characterName);
@@ -163,26 +221,21 @@ export async function POST(request: Request) {
         const joinedMs = new Date(openSession.joined_at as string).getTime();
         const durationMinutes = Math.max(
           0,
-          Math.round((Date.now() - joinedMs) / 60000)
+          Math.round((occurredAt.getTime() - joinedMs) / 60000)
         );
-
         await db
           .from('sessions')
-          .update({ left_at: nowIso, duration_minutes: durationMinutes })
+          .update({ left_at: occurredIso, duration_minutes: durationMinutes })
           .eq('id', openSession.id);
       }
     }
 
     // ---- 6. Recompute the singleton server_status --------------------------
-    // We refresh the live roster on join/leave (presence changed). worldDay can
-    // ride along on any event (the mod tags boss/raid events with the day), so
-    // we also persist it whenever provided.
     const presenceChanged = type === 'join' || type === 'leave';
     if (presenceChanged || worldDay !== undefined) {
-      const statusUpdate: Record<string, unknown> = { updated_at: nowIso };
+      const statusUpdate: Record<string, unknown> = { updated_at: occurredIso };
 
       if (presenceChanged) {
-        // Source of truth for "who's online" is the players table.
         const { data: onlineRows } = await db
           .from('players')
           .select('character_name')
@@ -195,22 +248,16 @@ export async function POST(request: Request) {
 
         statusUpdate.current_players = currentPlayers;
         statusUpdate.player_count = currentPlayers.length;
-        // The server is definitively online while anyone is connected. With an
-        // empty roster we don't force it offline (the host may still be up) —
-        // preserve whatever the heartbeat last set.
         if (currentPlayers.length > 0) statusUpdate.is_online = true;
       }
 
       if (worldDay !== undefined) statusUpdate.world_day = worldDay;
 
-      // server_status is a single fixed row (id = 1).
       await db.from('server_status').update(statusUpdate).eq('id', 1);
     }
 
     return Response.json({ ok: true }, { status: 200 });
   } catch (err) {
-    // Never surface the service role key, connection strings, or stack traces.
-    // Log a terse message server-side and return a caller-safe error.
     const message = err instanceof Error ? err.message : 'unexpected error';
     console.error('[webhook] failed to process event:', message);
     return Response.json({ error: 'internal_error' }, { status: 500 });

@@ -1,0 +1,16 @@
+[Info   : Unity Log] 06/24/2026 18:00:01: Game server connected
+[Info   : Unity Log] 06/24/2026 18:00:05:  Connections 0 ZDOS:100  sent:0 recv:0
+[Info   :Valheim Plus] Saved 12345 map points to disk.
+[Info   : Unity Log] 06/24/2026 18:01:10: Got connection SteamID 76561198000000001
+[Info   : Unity Log] 06/24/2026 18:01:12: Got handshake from client 76561198000000001
+[Info   : Unity Log] 06/24/2026 18:01:15: Got character ZDOID from Bjorn Ironside : 12345:1
+[Info   : Unity Log] 06/24/2026 18:02:00: Got connection SteamID 76561198000000002
+[Info   : Unity Log] 06/24/2026 18:02:05: Got character ZDOID from Astrid Shieldmaiden : 23456:1
+[Info   : Unity Log] 06/24/2026 18:05:05:  Connections 2 ZDOS:120  sent:0 recv:0
+[Info   : Unity Log] 06/24/2026 18:07:30: Random event set:army_theelder
+[Info   : Unity Log] 06/24/2026 18:08:00: Got character ZDOID from Bjorn Ironside : 0:0
+[Info   : Unity Log] 06/24/2026 18:08:45: Got character ZDOID from Bjorn Ironside : 12999:1
+[Info   : Unity Log] 06/24/2026 18:15:00: Closing socket 76561198000000002
+[Info   : Unity Log] 06/24/2026 18:15:05:  Connections 1 ZDOS:130  sent:0 recv:0
+[Info   : Unity Log] 06/24/2026 18:20:00: Closing socket 76561198000000001
+[Info   : Unity Log] 06/24/2026 18:20:05:  Connections 0 ZDOS:140  sent:0 recv:0
