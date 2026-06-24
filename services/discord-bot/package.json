@@ -1,0 +1,23 @@
+{
+  "name": "eilif-discord-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord bot for the Eilif Valheim server — relays events, announces boss kills, posts daily recaps.",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dry-run": "DRY_RUN=1 node src/index.js",
+    "announce": "node scripts/announce.js",
+    "mark-boss": "node scripts/mark-boss.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "ws": "^8.21.0"
+  }
+}

@@ -1,0 +1,19 @@
+[Unit]
+Description=Eilif Discord bot (event relay, boss announcements, daily recaps)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cbspears
+WorkingDirectory=/home/cbspears/Projects/valheim-dashboard/services/discord-bot
+# Absolute nvm Node 20 path (systemd does not source nvm).
+# Update if your version dir differs: ls ~/.config/nvm/versions/node
+ExecStart=/home/cbspears/.config/nvm/versions/node/v20.20.2/bin/node src/index.js
+Restart=on-failure
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=TZ=America/Chicago
+
+[Install]
+WantedBy=multi-user.target
