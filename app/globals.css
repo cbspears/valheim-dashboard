@@ -9,32 +9,32 @@
 */
 
 @theme {
-  /* Surfaces */
-  --color-night: #0b0b0f;
-  --color-pitch: #07070a;
-  --color-surface: #14141b;
-  --color-surface-raised: #1b1b25;
-  --color-rune: #2a2a38;
-  --color-rune-bright: #3a3a4c;
+  /* Surfaces — blue-slate, tuned to the Eilif concept art (cold world) */
+  --color-night: #0a0d13;
+  --color-pitch: #06080c;
+  --color-surface: #11151d;
+  --color-surface-raised: #1a212e;
+  --color-rune: #2b3441;
+  --color-rune-bright: #3c4858;
 
   /* Gold (primary accent) */
   --color-gold: #c8952a;
   --color-gold-light: #e8b84b;
   --color-gold-dim: #8a6820;
 
-  /* Text */
-  --color-ash: #e8dcc8;
-  --color-ash-dim: #b3a892;
-  --color-muted: #6a6a7a;
+  /* Text — warm parchment on the cool ground (hearth-light contrast) */
+  --color-ash: #e7dccb;
+  --color-ash-dim: #aea796;
+  --color-muted: #6b7585;
 
   /* Status / event colors */
   --color-online: #5aa86a;
   --color-online-glow: #6fdc86;
-  --color-offline: #5a5a68;
-  --color-death: #b8554f;
+  --color-offline: #586472;
+  --color-death: #c25a52;
   --color-raid: #cf8a3a;
   --color-boss: #c8952a;
-  --color-frost: #5a8fb8;
+  --color-frost: #6ea6d0;
 
   /* Fonts (wired to next/font CSS vars in layout.tsx) */
   --font-display: var(--font-cinzel), Georgia, serif;
@@ -59,10 +59,10 @@ body {
     4.   the derived fjord scene (same world as the hero banner), blurred + dark
   */
   background-image:
-    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(200, 149, 42, 0.07), transparent 60%),
-    radial-gradient(ellipse 90% 60% at 80% 110%, rgba(90, 143, 184, 0.06), transparent 55%),
-    linear-gradient(rgba(11, 11, 15, 0.82), rgba(11, 11, 15, 0.93)),
-    url('/bg-fjord.webp');
+    radial-gradient(ellipse 120% 80% at 50% -8%, rgba(200, 149, 42, 0.06), transparent 60%),
+    radial-gradient(ellipse 90% 70% at 75% 108%, rgba(110, 166, 208, 0.08), transparent 55%),
+    linear-gradient(rgba(10, 13, 19, 0.62), rgba(10, 13, 19, 0.80)),
+    url('/bg-eilif.webp');
   background-size: auto, auto, cover, cover;
   background-position: center, center, center, top center;
   background-repeat: no-repeat;
