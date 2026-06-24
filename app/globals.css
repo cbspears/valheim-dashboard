@@ -52,10 +52,20 @@ body {
   background-color: var(--color-night);
   color: var(--color-ash);
   font-family: var(--font-body);
-  /* atmospheric vignette + faint aurora glow */
+  /*
+    Layered, top → bottom:
+    1-2. faint gold + frost aurora glows
+    3.   a dark scrim that dims the photo so text stays readable
+    4.   the derived fjord scene (same world as the hero banner), blurred + dark
+  */
   background-image:
-    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(200, 149, 42, 0.06), transparent 60%),
-    radial-gradient(ellipse 90% 60% at 80% 110%, rgba(90, 143, 184, 0.05), transparent 55%);
+    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(200, 149, 42, 0.07), transparent 60%),
+    radial-gradient(ellipse 90% 60% at 80% 110%, rgba(90, 143, 184, 0.06), transparent 55%),
+    linear-gradient(rgba(11, 11, 15, 0.82), rgba(11, 11, 15, 0.93)),
+    url('/bg-fjord.webp');
+  background-size: auto, auto, cover, cover;
+  background-position: center, center, center, top center;
+  background-repeat: no-repeat;
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
 }

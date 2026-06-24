@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   Users,
   Sun,
@@ -33,13 +34,7 @@ import {
 } from '@/lib/data';
 import { describeEvent } from '@/lib/events';
 import { timeAgo, liveSessionLength } from '@/lib/format';
-import {
-  SERVER_NAME,
-  SERVER_TAGLINE,
-  SERVER_DESCRIPTION,
-  SERVER_ADDRESS,
-  MAX_PLAYERS,
-} from '@/config/server';
+import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/config/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,58 +72,38 @@ export default async function HomePage() {
     <div className="space-y-10">
       <AutoRefresh />
 
-      {/* ───────────────────────── HERO ───────────────────────── */}
-      <Card glow className="border-gold-dim/50">
-        {/* Atmospheric decoration */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-gradient-to-b from-gold/[0.07] via-transparent to-frost/[0.05]"
+      {/* ───────────────────────── HERO BANNER ───────────────────────── */}
+      <div className="overflow-hidden rounded-[var(--radius-card)] border border-gold-dim/40 shadow-[0_0_50px_-14px_rgba(200,149,42,0.45)]">
+        <Image
+          src="/banner-eilif.webp"
+          alt={`${SERVER_NAME} — ${SERVER_TAGLINE}`}
+          width={1983}
+          height={793}
+          priority
+          className="h-auto w-full"
         />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-10 -top-16 select-none font-display text-[12rem] leading-none text-gold/[0.04] sm:text-[16rem]"
-        >
-          ⚔
-        </div>
-
-        <CardBody className="relative px-6 py-12 sm:px-10 sm:py-16">
-          {/* Status line */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-            <Badge tone={isOnline ? 'online' : 'offline'}>
-              <OnlineDot online={isOnline} />
-              {isOnline ? 'Server Online' : 'Server Offline'}
-            </Badge>
-            <span className="flex items-center gap-1.5 text-ash-dim">
-              <Sun size={14} className="text-gold-dim" />
-              Day {worldDay} of the tenth world
-            </span>
-            <span className="flex items-center gap-1.5 text-ash-dim">
-              <Users size={14} className="text-gold-dim" />
-              {playerCount} / {MAX_PLAYERS} sailing
-            </span>
-          </div>
-
-          {/* Title */}
-          <h1 className="heading-engraved mt-6 bg-gradient-to-b from-ash via-gold-light to-gold bg-clip-text text-4xl text-transparent sm:text-6xl">
-            {SERVER_NAME}
-          </h1>
-          <p className="mt-3 font-display text-lg tracking-wide text-gold-light/90 sm:text-xl">
-            {SERVER_TAGLINE}
-          </p>
-          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted sm:text-base">
-            {SERVER_DESCRIPTION}
-          </p>
-
-          {/* Connect pill */}
+        {/* Live status strip beneath the art (keeps the banner pristine) */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-rune bg-pitch/50 px-5 py-3 text-sm backdrop-blur-sm sm:px-7">
+          <Badge tone={isOnline ? 'online' : 'offline'}>
+            <OnlineDot online={isOnline} />
+            {isOnline ? 'Server Online' : 'Server Offline'}
+          </Badge>
+          <span className="flex items-center gap-1.5 text-ash-dim">
+            <Sun size={14} className="text-gold-dim" />
+            Day {worldDay} of the tenth world
+          </span>
+          <span className="flex items-center gap-1.5 text-ash-dim">
+            <Users size={14} className="text-gold-dim" />
+            {playerCount} / {MAX_PLAYERS} sailing
+          </span>
           {SERVER_ADDRESS && (
-            <div className="mt-7 inline-flex items-center gap-2.5 rounded-full border border-rune bg-pitch/60 px-4 py-2">
-              <Signal size={14} className="text-online-glow" />
-              <span className="text-xs uppercase tracking-wider text-muted">Connect</span>
-              <span className="font-mono text-sm text-ash">{SERVER_ADDRESS}</span>
-            </div>
+            <span className="inline-flex items-center gap-2 rounded-full border border-rune bg-pitch/70 px-3 py-1">
+              <Signal size={13} className="text-online-glow" />
+              <span className="font-mono text-xs text-ash">{SERVER_ADDRESS}</span>
+            </span>
           )}
-        </CardBody>
-      </Card>
+        </div>
+      </div>
 
       {/* ───────────────────── STAT STRIP ────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

@@ -3,7 +3,7 @@ import { Cinzel, Inter } from 'next/font/google';
 import './globals.css';
 import { NavBar } from '@/components/NavBar';
 import { Footer } from '@/components/Footer';
-import { SERVER_NAME, SERVER_DESCRIPTION } from '@/config/server';
+import { SERVER_NAME, SERVER_TAGLINE, SERVER_DESCRIPTION } from '@/config/server';
 
 const cinzel = Cinzel({
   subsets: ['latin'],
@@ -19,11 +19,27 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://valheim-dashboard.vercel.app'),
   title: {
     default: `${SERVER_NAME} — Valheim Server`,
     template: `%s · ${SERVER_NAME}`,
   },
   description: SERVER_DESCRIPTION,
+  openGraph: {
+    title: `${SERVER_NAME} — ${SERVER_TAGLINE}`,
+    description: SERVER_DESCRIPTION,
+    siteName: SERVER_NAME,
+    type: 'website',
+    images: [
+      { url: '/og-eilif.jpg', width: 1200, height: 630, alt: `${SERVER_NAME} — ${SERVER_TAGLINE}` },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: `${SERVER_NAME} — ${SERVER_TAGLINE}`,
+    description: SERVER_DESCRIPTION,
+    images: ['/og-eilif.jpg'],
+  },
 };
 
 export default function RootLayout({
