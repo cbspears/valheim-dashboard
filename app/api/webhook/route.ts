@@ -156,6 +156,71 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, synced: onlineNames.length }, { status: 200 });
     }
 
+    // ---- 2c. Full stat suite (`stats`) -------------------------------------
+    // Posted by the ServerCharacters .fch parser. metadata carries the parsed
+    // columns; we resolve the player by character name (backfilling steam_id if
+    // the filename provided one) and upsert their single player_stats row.
+    if (type === 'stats') {
+      if (!characterName) {
+        return Response.json({ error: "'stats' requires characterName" }, { status: 400 });
+      }
+      const m = metadata as Record<string, unknown>;
+      const num = (k: string): number => {
+        const v = m[k];
+        return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+      };
+      const pct = ((): number | null => {
+        const v = m.map_explored_pct;
+        return typeof v === 'number' && Number.isFinite(v) ? v : null;
+      })();
+      const steamId = typeof m.steamId === 'string' && m.steamId.trim() ? m.steamId.trim() : null;
+
+      // Find or create the player so stats have a row to hang off.
+      const { data: existing } = await db
+        .from('players')
+        .select('id, steam_id')
+        .eq('character_name', characterName)
+        .maybeSingle();
+
+      let playerId: string;
+      if (existing?.id) {
+        playerId = existing.id as string;
+        if (steamId && !existing.steam_id) {
+          await db.from('players').update({ steam_id: steamId }).eq('id', playerId);
+        }
+      } else {
+        const { data: inserted } = await db
+          .from('players')
+          .insert({
+            character_name: characterName,
+            steam_id: steamId,
+            first_seen_at: occurredIso,
+            last_seen_at: occurredIso,
+            is_online: false,
+          })
+          .select('id')
+          .single();
+        playerId = inserted!.id as string;
+      }
+
+      await db.from('player_stats').upsert(
+        {
+          player_id: playerId,
+          kills: num('kills'),
+          deaths: num('deaths'),
+          resources_harvested: num('resources_harvested'),
+          items_crafted: num('items_crafted'),
+          distance_traveled: num('distance_traveled'),
+          structures_built: num('structures_built'),
+          map_explored_pct: pct,
+          updated_at: occurredIso,
+        },
+        { onConflict: 'player_id' }
+      );
+
+      return Response.json({ ok: true, player: characterName }, { status: 200 });
+    }
+
     // ---- 3. Resolve / upsert the player ------------------------------------
     let playerId: string | null = null;
 

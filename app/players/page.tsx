@@ -9,6 +9,8 @@ import {
   Pickaxe,
   Hammer,
   Footprints,
+  Castle,
+  Map,
 } from 'lucide-react';
 import { Card, SectionHeader, Badge, EmptyState, OnlineDot } from '@/components/ui';
 import {
@@ -22,6 +24,7 @@ import {
   formatPlaytime,
   formatNumber,
   formatDistance,
+  formatPercent,
 } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -109,6 +112,22 @@ export default async function PlayersPage() {
       accent: 'text-gold',
       empty: 'No tracks in the snow. The map remains unexplored.',
       entries: topBy(withStats, (p) => p.stats?.distance_traveled ?? 0, formatDistance),
+    },
+    {
+      key: 'built',
+      title: 'Master Builder',
+      icon: <Castle size={16} />,
+      accent: 'text-gold',
+      empty: 'Not a single nail driven. The longhouses are yet to rise.',
+      entries: topBy(withStats, (p) => p.stats?.structures_built ?? 0, formatNumber),
+    },
+    {
+      key: 'explored',
+      title: 'Cartographer',
+      icon: <Map size={16} />,
+      accent: 'text-gold',
+      empty: 'The fog hangs thick. No frontier has been charted.',
+      entries: topBy(withStats, (p) => p.stats?.map_explored_pct ?? 0, formatPercent),
     },
   ];
 

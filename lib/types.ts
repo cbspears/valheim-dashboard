@@ -29,6 +29,10 @@ export interface PlayerStats {
   resources_harvested: number;
   items_crafted: number;
   distance_traveled: number;
+  /** Building pieces placed (Valheim `Builds` stat). */
+  structures_built: number;
+  /** Percent of the world disc uncovered on the player's best world, 0–100. */
+  map_explored_pct: number | null;
   biomes_discovered: string[];
   updated_at: string | null;
 }

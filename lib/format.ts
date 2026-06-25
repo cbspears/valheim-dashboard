@@ -49,3 +49,10 @@ export function formatDistance(meters: number | null | undefined): string {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
   return `${Math.round(meters)} m`;
 }
+
+/** 31.9 -> "31.9%" (drops a trailing ".0"). */
+export function formatPercent(pct: number | null | undefined): string {
+  if (!pct || pct <= 0) return '0%';
+  const rounded = Math.round(pct * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}%`;
+}

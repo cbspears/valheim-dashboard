@@ -1,0 +1,18 @@
+[Unit]
+Description=Valheim (Eilif) ServerCharacters .fch stats parser -> dashboard webhook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cbspears
+WorkingDirectory=/home/cbspears/Projects/valheim-dashboard/services/stats-parser
+# Absolute path to the nvm-installed Node 20 (systemd does not source nvm).
+# Update if your Node version dir differs: ls ~/.config/nvm/versions/node
+ExecStart=/home/cbspears/.config/nvm/versions/node/v20.20.2/bin/node src/index.js
+Restart=on-failure
+RestartSec=30
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

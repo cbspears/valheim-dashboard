@@ -1,0 +1,16 @@
+{
+  "name": "valheim-stats-parser",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pulls ServerCharacters .fch profiles over FTP, parses the full Valheim stat suite, and posts it to the dashboard webhook.",
+  "scripts": {
+    "start": "node src/index.js",
+    "once": "node src/index.js --once",
+    "test": "node test-fch.js"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.0.5",
+    "dotenv": "^16.4.5"
+  }
+}
