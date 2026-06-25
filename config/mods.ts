@@ -52,6 +52,16 @@ export const MODS: Mod[] = [
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
   },
+  {
+    name: 'Useful Paths',
+    author: 'Menthus',
+    description:
+      'Run, jog, and walk faster — and burn less stamina — on paths, paved roads, and leveled ground. Makes the road network actually worth building. Configurable.',
+    version: '1.5.0',
+    category: 'QoL',
+    clientRequired: true,
+    url: 'https://thunderstore.io/c/valheim/p/Menthus/Useful_Paths/',
+  },
 
   // ── Still being finalized (server-side — nothing for players to install) ──
   {
