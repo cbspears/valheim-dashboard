@@ -155,7 +155,6 @@ async function main() {
       process.exit(0);
     });
   }
-  // eslint-disable-next-line no-unmodified-loop-condition
   while (!stopped) {
     try {
       await sweep();

@@ -1,10 +1,13 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { clsx } from 'clsx';
 import {
   Boxes,
+  Compass,
   Download,
   ExternalLink,
   Gem,
+  HelpCircle,
   Scale,
   Scroll,
   Server,
@@ -54,7 +57,8 @@ function ModCard({ mod }: { mod: Mod }) {
     <Card
       className={clsx(
         'flex h-full flex-col transition-colors hover:border-rune-bright',
-        mod.category === 'Core' && 'border-l-2 border-l-gold-dim'
+        mod.category === 'Core' && !mod.tentative && 'border-l-2 border-l-gold-dim',
+        mod.tentative && 'border-dashed opacity-90'
       )}
     >
       <CardBody className="flex flex-1 flex-col gap-3">
@@ -62,9 +66,15 @@ function ModCard({ mod }: { mod: Mod }) {
           <h4 className="font-display text-base leading-snug tracking-wide text-ash">
             {mod.name}
           </h4>
-          <Badge tone="neutral" className="shrink-0 font-mono">
-            v{mod.version}
-          </Badge>
+          {mod.version ? (
+            <Badge tone="neutral" className="shrink-0 font-mono">
+              v{mod.version}
+            </Badge>
+          ) : (
+            <Badge tone="neutral" className="shrink-0">
+              latest
+            </Badge>
+          )}
         </div>
 
         <p className="-mt-1 text-xs text-muted">by {mod.author}</p>
@@ -73,7 +83,7 @@ function ModCard({ mod }: { mod: Mod }) {
           {mod.description}
         </p>
 
-        <div className="mt-2 flex items-center justify-between gap-3 border-t border-rune pt-3">
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-rune pt-3">
           {mod.clientRequired ? (
             <Badge tone="gold">
               <Download size={11} />
@@ -83,6 +93,13 @@ function ModCard({ mod }: { mod: Mod }) {
             <Badge tone="neutral">
               <Server size={11} />
               Server-only
+            </Badge>
+          )}
+
+          {mod.tentative && (
+            <Badge tone="neutral" className="text-muted">
+              <HelpCircle size={11} />
+              Considering
             </Badge>
           )}
 
@@ -139,7 +156,14 @@ export default function ModsPage() {
               <Server size={11} />
               Server-only
             </Badge>{' '}
-            are woven into the host already; there is nothing for you to do.
+            are woven into the host already; there is nothing for you to do.{' '}
+            <Link
+              href="/set-sail"
+              className="gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light hover:underline"
+            >
+              <Compass size={13} className="align-middle" />
+              New here? Set sail →
+            </Link>
           </p>
         </CardBody>
       </Card>

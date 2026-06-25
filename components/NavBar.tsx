@@ -13,6 +13,7 @@ const LINKS = [
   { href: '/world', label: 'World' },
   { href: '/events', label: 'Saga' },
   { href: '/mods', label: 'Mods' },
+  { href: '/set-sail', label: 'Set Sail' },
 ];
 
 export function NavBar() {

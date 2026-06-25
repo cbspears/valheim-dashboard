@@ -1,5 +1,8 @@
-// The server's installed mod list. Edit this file to update the Mods page —
-// the dashboard reads it directly (no database needed). Push to redeploy.
+// The server's mod list. Edit this file to update the Mods page — the dashboard
+// reads it directly (no database needed). Push to redeploy.
+//
+// Source of truth: the Obsidian note `05-Server/Mods/Selected-Mods.md`. Keep
+// `tentative` in sync with what's actually locked vs. still being decided.
 
 export type ModCategory = 'Core' | 'QoL' | 'Content' | 'Balance';
 
@@ -7,86 +10,73 @@ export interface Mod {
   name: string;
   author: string;
   description: string;
-  version: string;
+  /** pinned version, if locked. Omit while still on "latest / verify at setup". */
+  version?: string;
   category: ModCategory;
-  /** required client-side too? (players must install) */
+  /** required client-side too? (players must install it themselves) */
   clientRequired: boolean;
+  /** not yet finalized — shown with a "Considering" marker. */
+  tentative?: boolean;
   url?: string;
 }
 
 export const MODS: Mod[] = [
+  // ── Confirmed ────────────────────────────────────────────────────────────
   {
     name: 'BepInExPack Valheim',
     author: 'denikson',
-    description: 'The mod loader framework everything else runs on. Required on client and server.',
-    version: '5.4.2202',
+    description:
+      'The mod loader everything else runs on. A mod manager installs it for you automatically — you rarely touch it directly.',
+    version: '5.4.2333',
     category: 'Core',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/',
   },
   {
-    name: 'ValheimPlus',
-    author: 'ValheimPlus Team',
-    description: 'Massive config-driven tweak suite — build anywhere, stack sizes, stamina, carry weight, and more.',
-    version: '0.9.13',
+    name: 'ValheimPlus (Grantapher fork)',
+    author: 'Grantapher',
+    description:
+      'The backbone tweak suite — raises the player cap, build-from-nearby-chests, infinite fuel, and dozens of light QoL toggles. The version must match the server exactly, so install it through the shared modpack.',
+    version: '0.9.17.1',
     category: 'Core',
     clientRequired: true,
-    url: 'https://thunderstore.io/c/valheim/p/ValheimPlus/ValheimPlus/',
-  },
-  {
-    name: 'Discord Connector',
-    author: 'nwesterhausen',
-    description: 'Relays joins, leaves, deaths, boss kills, and chat from the server to our Discord. Server-only.',
-    version: '3.1.0',
-    category: 'Core',
-    clientRequired: false,
-    url: 'https://thunderstore.io/c/valheim/p/nwesterhausen/DiscordConnector/',
+    url: 'https://thunderstore.io/c/valheim/p/Grantapher/ValheimPlus_Grantapher_Temporary/',
   },
   {
     name: 'PlantEverything',
     author: 'Advize',
-    description: 'Plant and grow every seed, sapling, and vegetable — proper farms and tree harvesting.',
-    version: '1.16.0',
+    description:
+      'Plant and harvest every flower, sapling, and crop with the cultivator — proper farms and managed forests. Yields stay vanilla.',
+    version: '1.20.0',
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
   },
+
+  // ── Still being finalized (server-side — nothing for players to install) ──
   {
-    name: 'EquipmentAndQuickSlots',
-    author: 'RandyKnapp',
-    description: 'Adds three quick-use slots and separate equipment slots so your inventory breathes.',
-    version: '2.1.11',
+    name: 'ServersideQoL',
+    author: 'ArgusMagnus',
+    description:
+      'Server-only comforts: infinite building/farming stamina, auto-closing doors, and chest sorting. Vanilla clients work fine — nothing to install.',
     category: 'QoL',
-    clientRequired: true,
-    url: 'https://thunderstore.io/c/valheim/p/RandyKnapp/EquipmentAndQuickSlots/',
+    clientRequired: false,
+    tentative: true,
+    url: 'https://thunderstore.io/c/valheim/p/ArgusMagnus/ServersideQoL/',
   },
   {
-    name: 'EpicLoot',
-    author: 'RandyKnapp',
-    description: 'Magic items, rarities, enchanting, and loot drops. Gives the late game real chase gear.',
-    version: '0.10.4',
-    category: 'Content',
-    clientRequired: true,
-    url: 'https://thunderstore.io/c/valheim/p/RandyKnapp/EpicLoot/',
-  },
-  {
-    name: 'Useful Trophies',
-    author: 'WonderfulMods',
-    description: 'Turn boss & creature trophies into wearable trinkets with passive bonuses.',
-    version: '1.5.2',
-    category: 'Content',
-    clientRequired: true,
-    url: 'https://thunderstore.io/c/valheim/p/WonderfulMods/UsefulTrophies/',
-  },
-  {
-    name: 'Better Archery',
-    author: 'ishid4',
-    description: 'Reworked bow handling, quivers, and arrow physics for the rangers among us.',
-    version: '3.4.0',
-    category: 'Balance',
-    clientRequired: true,
-    url: 'https://thunderstore.io/c/valheim/p/ishid4/BetterArchery/',
+    name: 'ServerCharacters',
+    author: 'Smoothbrain',
+    description:
+      'Keeps each character saved on the server (auto-backups, no tampering) — and feeds the per-player stats you see across this dashboard. Server-side.',
+    category: 'Core',
+    clientRequired: false,
+    tentative: true,
+    url: 'https://thunderstore.io/c/valheim/p/Smoothbrain/ServerCharacters/',
   },
 ];
 
 export const MOD_CATEGORIES: ModCategory[] = ['Core', 'QoL', 'Content', 'Balance'];
+
+/** Mods a player must install on their own machine (locked picks only). */
+export const CLIENT_MODS: Mod[] = MODS.filter((m) => m.clientRequired && !m.tentative);
