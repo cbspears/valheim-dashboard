@@ -221,6 +221,56 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, player: characterName }, { status: 200 });
     }
 
+    // ---- 2d. Discord scheduled-events sync (`events_sync`) ------------------
+    // The bot posts the guild's current scheduled events; we upsert them and
+    // remove any Discord-sourced rows that have vanished. Manually-seeded demo
+    // rows (discord_event_id IS NULL) are never touched here.
+    if (type === 'events_sync') {
+      const raw = Array.isArray((metadata as Record<string, unknown>).events)
+        ? ((metadata as Record<string, unknown>).events as Array<Record<string, unknown>>)
+        : [];
+
+      const num = (v: unknown, d: number) =>
+        typeof v === 'number' && Number.isFinite(v) ? v : d;
+      const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+      const events = raw.filter(
+        (e) => e && typeof e.discord_event_id === 'string' && typeof e.name === 'string' && e.starts_at
+      );
+
+      for (const e of events) {
+        await db.from('discord_events').upsert(
+          {
+            discord_event_id: e.discord_event_id as string,
+            name: e.name as string,
+            description: str(e.description),
+            host: str(e.host),
+            location: str(e.location),
+            starts_at: e.starts_at as string,
+            ends_at: str(e.ends_at),
+            status: (str(e.status) as string) ?? 'scheduled',
+            user_count: num(e.user_count, 0),
+            cover_url: str(e.cover_url),
+            url: str(e.url),
+            recurrence: str(e.recurrence),
+            recurrence_days: typeof e.recurrence_days === 'number' ? e.recurrence_days : null,
+            updated_at: occurredIso,
+          },
+          { onConflict: 'discord_event_id' }
+        );
+      }
+
+      // Drop Discord-sourced rows no longer present (leave demo rows alone).
+      const ids = events.map((e) => (e.discord_event_id as string).replace(/"/g, ''));
+      let del = db.from('discord_events').delete().not('discord_event_id', 'is', null);
+      if (ids.length > 0) {
+        del = del.not('discord_event_id', 'in', `(${ids.map((i) => `"${i}"`).join(',')})`);
+      }
+      await del;
+
+      return Response.json({ ok: true, synced: events.length }, { status: 200 });
+    }
+
     // ---- 3. Resolve / upsert the player ------------------------------------
     let playerId: string | null = null;
 

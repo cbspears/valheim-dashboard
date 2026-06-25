@@ -85,6 +85,32 @@ export interface RoadmapItem {
   created_at: string;
 }
 
+export interface DiscordEvent {
+  id: string;
+  discord_event_id: string | null;
+  name: string;
+  description: string | null;
+  host: string | null;
+  location: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  status: string; // scheduled | active | completed | canceled
+  user_count: number;
+  cover_url: string | null;
+  url: string | null;
+  /** display label, e.g. "Weekly on Wednesdays" (null = one-off) */
+  recurrence: string | null;
+  /** roll-forward interval in days (7 = weekly; null = one-off) */
+  recurrence_days: number | null;
+  updated_at: string | null;
+}
+
+/** A DiscordEvent with `starts_at` resolved to its next occurrence (recurring rows rolled forward). */
+export interface UpcomingEvent extends DiscordEvent {
+  /** the effective next start (ISO) — same as starts_at for one-offs */
+  next_at: string;
+}
+
 export interface ServerStatus {
   id: number;
   is_online: boolean;

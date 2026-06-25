@@ -50,6 +50,49 @@ export function formatDistance(meters: number | null | undefined): string {
   return `${Math.round(meters)} m`;
 }
 
+// The community's timezone — event times are shown in Central regardless of
+// where the server renders (Vercel runs in UTC). Intl handles the conversion
+// deterministically, so server and client agree (no hydration mismatch).
+const EVENT_TZ = 'America/Chicago';
+
+/** ISO -> "Sat, Jun 27 · 7:00 PM CT". */
+export function formatEventWhen(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    const day = new Intl.DateTimeFormat('en-US', {
+      timeZone: EVENT_TZ,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    }).format(d);
+    const time = new Intl.DateTimeFormat('en-US', {
+      timeZone: EVENT_TZ,
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d);
+    return `${day} · ${time} CT`;
+  } catch {
+    return '—';
+  }
+}
+
+/** Forward-looking countdown chip: "in 40 min" / "tomorrow" / "in 5 days". Timezone-independent (pure duration). */
+export function eventCountdown(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const ms = new Date(iso).getTime() - Date.now();
+  if (Number.isNaN(ms)) return '';
+  if (ms <= 0) return 'happening now';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `in ${mins} min`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `in ${hrs}h`;
+  const days = Math.round(hrs / 24);
+  if (days <= 1) return 'tomorrow';
+  if (days < 14) return `in ${days} days`;
+  return `in ${Math.round(days / 7)} weeks`;
+}
+
 /** 31.9 -> "31.9%" (drops a trailing ".0"). */
 export function formatPercent(pct: number | null | undefined): string {
   if (!pct || pct <= 0) return '0%';

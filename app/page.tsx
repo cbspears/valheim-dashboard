@@ -12,6 +12,7 @@ import {
   Anchor,
   ArrowRight,
   Signal,
+  CalendarClock,
 } from 'lucide-react';
 import {
   Card,
@@ -24,6 +25,7 @@ import {
   StatTile,
 } from '@/components/ui';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
+import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import {
   getServerStatus,
   getOnlinePlayers,
@@ -31,6 +33,7 @@ import {
   getBosses,
   getRecentEvents,
   getActiveSessions,
+  getUpcomingEvents,
 } from '@/lib/data';
 import { describeEvent } from '@/lib/events';
 import { timeAgo, liveSessionLength } from '@/lib/format';
@@ -39,13 +42,14 @@ import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/conf
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const [status, online, allPlayers, bosses, events, activeSessions] = await Promise.all([
+  const [status, online, allPlayers, bosses, events, activeSessions, upcoming] = await Promise.all([
     getServerStatus(),
     getOnlinePlayers(),
     getAllPlayers(),
     getBosses(),
     getRecentEvents(8),
     getActiveSessions(),
+    getUpcomingEvents(3),
   ]);
 
   const isOnline = status?.is_online ?? false;
@@ -221,6 +225,25 @@ export default async function HomePage() {
           </Card>
         </div>
       </section>
+
+      {/* ─────────────────────── COMING UP ──────────────────── */}
+      <Card>
+        <CardHeader
+          title="Coming Up"
+          icon={<CalendarClock size={16} />}
+          action={
+            <Link
+              href="/world"
+              className="gold-ring rounded text-xs font-medium text-gold-light hover:text-gold-light/80"
+            >
+              Full schedule →
+            </Link>
+          }
+        />
+        <CardBody className="p-0">
+          <UpcomingEvents events={upcoming} />
+        </CardBody>
+      </Card>
 
       {/* ─────────────────── WORLD PROGRESS TEASER ───────────── */}
       <Card>

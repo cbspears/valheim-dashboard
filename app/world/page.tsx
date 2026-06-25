@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { Map as MapIcon, Milestone, Hammer, Crown, CalendarClock, Check } from 'lucide-react';
 import { SectionHeader, Card, CardBody, Badge, EmptyState } from '@/components/ui';
 import { BossTimeline } from '@/components/world/BossTimeline';
-import { getBosses, getRoadmap } from '@/lib/data';
+import { UpcomingEvents } from '@/components/events/UpcomingEvents';
+import { getBosses, getRoadmap, getUpcomingEvents } from '@/lib/data';
 import { shortDate } from '@/lib/format';
 import type { RoadmapItem, RoadmapType } from '@/lib/types';
 
@@ -100,7 +101,11 @@ function RoadmapColumn({
 }
 
 export default async function WorldPage() {
-  const [bosses, roadmap] = await Promise.all([getBosses(), getRoadmap()]);
+  const [bosses, roadmap, upcoming] = await Promise.all([
+    getBosses(),
+    getRoadmap(),
+    getUpcomingEvents(10),
+  ]);
 
   const inProgress = roadmap.filter((r) => r.status === 'in_progress');
   const planned = roadmap.filter((r) => r.status === 'planned');
@@ -115,6 +120,23 @@ export default async function WorldPage() {
           icon={<MapIcon size={22} />}
         />
         <BossTimeline bosses={bosses} />
+      </section>
+
+      <section>
+        <SectionHeader
+          title="Scheduled Gatherings"
+          subtitle="Game nights, raids, and revelry — straight from the Discord calendar."
+          icon={<CalendarClock size={22} />}
+        />
+        <Card>
+          <CardBody className="p-0">
+            <UpcomingEvents
+              events={upcoming}
+              detailed
+              emptyMessage="No gatherings on the calendar yet. Schedule one in Discord and it will appear here."
+            />
+          </CardBody>
+        </Card>
       </section>
 
       <section>

@@ -57,7 +57,7 @@ nvm use && npm install && npm run dev
 - `services/stats-parser/` — `npm run once` / `npm start`; unit: `eilif-stats-parser.service`. Pulls ServerCharacters `.fch` over SFTP → `player_stats`.
 
 ## Data model (Supabase)
-`players`, `sessions`, `events`, `player_stats`, `bosses`, `roadmap`, `server_status` — public-read RLS, writes via service role through `/api/webhook`.
+`players`, `sessions`, `events`, `player_stats`, `bosses`, `roadmap`, `server_status`, `discord_events` — public-read RLS, writes via service role through `/api/webhook`.
 
 ## Status
 - ✅ Dashboard (5 pages, dark Norse theme) · ✅ Discord bot (live) · ✅ Log poller (built) · ✅ Stats parser (built + validated)

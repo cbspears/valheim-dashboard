@@ -9,7 +9,11 @@ import { Client, GatewayIntentBits, Events } from 'discord.js';
  * @param {Record<string,string>} opts.channels  key -> channelId (e.g. {server, valheim})
  */
 export async function createDiscordPoster({ token, channels }) {
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  // GuildScheduledEvents (non-privileged) lets the bot read the server's
+  // scheduled events for the dashboard's "Coming Up" sync.
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildScheduledEvents],
+  });
 
   const ready = new Promise((resolve, reject) => {
     client.once(Events.ClientReady, (c) => resolve(c));

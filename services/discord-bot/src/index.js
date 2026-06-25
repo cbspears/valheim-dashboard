@@ -8,6 +8,7 @@ import { createDiscordPoster, createDryRunPoster } from './discord.js';
 import { createRelay } from './relay.js';
 import { createBossWatcher } from './bosses.js';
 import { createRecap } from './recap.js';
+import { createEventsSync } from './events.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
 const POLL = parseInt(process.env.POLL_INTERVAL_MS || '15000', 10);
@@ -64,17 +65,32 @@ async function runLive() {
   // Kick once, then interval.
   await relayLoop();
   await bossLoop();
-  const t1 = setInterval(relayLoop, POLL);
-  const t2 = setInterval(bossLoop, 30000);
+  const timers = [setInterval(relayLoop, POLL), setInterval(bossLoop, 30000)];
 
-  console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s.`);
+  // Optional: mirror Discord scheduled events to the dashboard. Off by default
+  // (EVENTS_SYNC=1) so the seeded demo events stay put until real events exist.
+  let extra = '';
+  if (process.env.EVENTS_SYNC === '1') {
+    const events = createEventsSync({
+      client: poster.client,
+      guildId: process.env.GUILD_ID,
+      webhookUrl: process.env.WEBHOOK_URL,
+      webhookSecret: process.env.WEBHOOK_SECRET,
+    });
+    const interval = parseInt(process.env.EVENTS_INTERVAL_MS || '600000', 10);
+    const eventsLoop = safe('events', () => events.tick());
+    await eventsLoop();
+    timers.push(setInterval(eventsLoop, interval));
+    extra = `, events every ${interval}ms`;
+  }
+
+  console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s${extra}.`);
 
   for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, () => {
       console.log(`[bot] ${sig} — shutting down`);
       stopped = true;
-      clearInterval(t1);
-      clearInterval(t2);
+      for (const t of timers) clearInterval(t);
       poster.destroy();
       process.exit(0);
     });
