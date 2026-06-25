@@ -18,6 +18,7 @@ import type {
   ServerStatus,
   DiscordEvent,
   UpcomingEvent,
+  GalleryPhoto,
 } from './types';
 
 function db() {
@@ -139,6 +140,15 @@ export async function getUpcomingEvents(limit = 10): Promise<UpcomingEvent[]> {
 
   upcoming.sort((a, b) => new Date(a.next_at).getTime() - new Date(b.next_at).getTime());
   return upcoming.slice(0, limit);
+}
+
+export async function getGalleryPhotos(limit = 60): Promise<GalleryPhoto[]> {
+  const { data } = await db()
+    .from('gallery_photos')
+    .select('*')
+    .order('posted_at', { ascending: false })
+    .limit(limit);
+  return (data as GalleryPhoto[]) ?? [];
 }
 
 export async function getRoadmap(): Promise<RoadmapItem[]> {

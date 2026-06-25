@@ -111,6 +111,22 @@ export interface UpcomingEvent extends DiscordEvent {
   next_at: string;
 }
 
+export interface GalleryPhoto {
+  id: string;
+  url: string;
+  storage_path: string | null;
+  caption: string | null;
+  posted_by: string | null;
+  discord_user_id: string | null;
+  source_attachment_id: string | null;
+  source_message_id: string | null;
+  content_type: string | null;
+  width: number | null;
+  height: number | null;
+  posted_at: string;
+  created_at: string | null;
+}
+
 export interface ServerStatus {
   id: number;
   is_online: boolean;

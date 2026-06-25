@@ -13,6 +13,7 @@ const LINKS = [
   { href: '/world', label: 'World' },
   { href: '/events', label: 'Saga' },
   { href: '/mods', label: 'Mods' },
+  { href: '/gallery', label: 'Gallery' },
   { href: '/get-started', label: 'Get Started', cta: true },
 ];
 

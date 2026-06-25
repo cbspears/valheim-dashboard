@@ -9,10 +9,16 @@ import { Client, GatewayIntentBits, Events } from 'discord.js';
  * @param {Record<string,string>} opts.channels  key -> channelId (e.g. {server, valheim})
  */
 export async function createDiscordPoster({ token, channels }) {
-  // GuildScheduledEvents (non-privileged) lets the bot read the server's
-  // scheduled events for the dashboard's "Coming Up" sync.
+  // All non-privileged intents:
+  //  - GuildScheduledEvents: read the server's scheduled events ("Coming Up").
+  //  - GuildMessages: receive messages so the gallery can ingest photos that
+  //    @mention the bot (mentions exempt us from the Message Content intent).
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildScheduledEvents],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildScheduledEvents,
+      GatewayIntentBits.GuildMessages,
+    ],
   });
 
   const ready = new Promise((resolve, reject) => {

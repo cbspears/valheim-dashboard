@@ -9,6 +9,7 @@ import { createRelay } from './relay.js';
 import { createBossWatcher } from './bosses.js';
 import { createRecap } from './recap.js';
 import { createEventsSync } from './events.js';
+import { createGalleryIngest } from './gallery.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
 const POLL = parseInt(process.env.POLL_INTERVAL_MS || '15000', 10);
@@ -81,7 +82,13 @@ async function runLive() {
     const eventsLoop = safe('events', () => events.tick());
     await eventsLoop();
     timers.push(setInterval(eventsLoop, interval));
-    extra = `, events every ${interval}ms`;
+    extra += `, events every ${interval}ms`;
+  }
+
+  // Optional: ingest photos posted to Discord that @mention the bot.
+  if (process.env.GALLERY_INGEST === '1') {
+    createGalleryIngest({ client: poster.client }).attach();
+    extra += ', gallery ingest on';
   }
 
   console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s${extra}.`);

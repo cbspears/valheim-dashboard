@@ -1,0 +1,101 @@
+// Photo-gallery ingest. When someone posts an image in Discord and @mentions
+// the bot, copy the attachment into Supabase Storage (Discord CDN URLs expire)
+// and record it in `gallery_photos` for the dashboard's Gallery page.
+//
+// No privileged Message Content intent needed: Discord delivers full content +
+// attachments for messages that mention the app. We only need GuildMessages.
+//
+// Gated behind GALLERY_INGEST=1 (see index.js).
+
+import { serviceClient } from './supabase.js';
+
+const IMAGE_TYPE = /^image\//;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
+const BUCKET = 'gallery';
+
+export function createGalleryIngest({ client, log = console }) {
+  const db = serviceClient();
+
+  // The caption is the message text with the bot mention stripped out.
+  function captionFrom(message) {
+    const text = (message.content ?? '')
+      .replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '')
+      .trim();
+    return text || null;
+  }
+
+  async function storeOne(att, ctx) {
+    // Skip if we've already ingested this exact attachment.
+    const { data: existing } = await db
+      .from('gallery_photos')
+      .select('id')
+      .eq('source_attachment_id', att.id)
+      .maybeSingle();
+    if (existing) return false;
+
+    const res = await fetch(att.url);
+    if (!res.ok) throw new Error(`download ${res.status}`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+
+    const ext = ((att.name?.split('.').pop() || 'png').toLowerCase().match(/[a-z0-9]+/)?.[0]) || 'png';
+    const path = `${att.id}.${ext}`;
+    const { error: upErr } = await db.storage.from(BUCKET).upload(path, bytes, {
+      contentType: att.contentType ?? 'image/png',
+      upsert: true,
+    });
+    if (upErr) throw new Error(`upload: ${upErr.message}`);
+
+    const { data: pub } = db.storage.from(BUCKET).getPublicUrl(path);
+    const { error: insErr } = await db.from('gallery_photos').insert({
+      url: pub.publicUrl,
+      storage_path: path,
+      caption: ctx.caption,
+      posted_by: ctx.postedBy,
+      discord_user_id: ctx.message.author.id,
+      source_attachment_id: att.id,
+      source_message_id: ctx.message.id,
+      content_type: att.contentType ?? null,
+      width: att.width ?? null,
+      height: att.height ?? null,
+      posted_at: new Date(ctx.message.createdTimestamp).toISOString(),
+    });
+    if (insErr) throw new Error(`insert: ${insErr.message}`);
+    return true;
+  }
+
+  async function handleMessage(message) {
+    try {
+      if (message.author?.bot) return;
+      if (!message.mentions?.has(client.user)) return;
+
+      const images = [...message.attachments.values()].filter(
+        (a) => IMAGE_TYPE.test(a.contentType ?? '') || IMAGE_EXT.test(a.name ?? '')
+      );
+      if (images.length === 0) return;
+
+      const ctx = {
+        caption: captionFrom(message),
+        postedBy: message.member?.displayName ?? message.author.username,
+        message,
+      };
+
+      let added = 0;
+      for (const att of images) {
+        if (await storeOne(att, ctx)) added++;
+      }
+      if (added > 0) {
+        await message.react('🖼️').catch(() => {});
+        log.info?.(`[gallery] stored ${added} photo(s) from ${ctx.postedBy}`);
+      }
+    } catch (e) {
+      log.error?.(`[gallery] ${e.message}`);
+    }
+  }
+
+  function attach() {
+    client.on('messageCreate', handleMessage);
+    log.info?.('[gallery] ingest active — tag the bot with an image to add it');
+  }
+
+  return { attach, handleMessage };
+}
