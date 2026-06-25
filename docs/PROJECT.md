@@ -49,7 +49,7 @@ ServerCharacters .fch ─────FTP──> stats parser ─┼──> /api/
 
 ## 4. Status
 
-- ✅ Dashboard built + verified locally (5 pages) — ⏳ **NOT live yet** (Vercel deploy blocked, see to-dos).
+- ✅ Dashboard built + **LIVE** at https://valheim-dashboard.vercel.app (the long deploy block was a git-author access check, not a rate-limit — fixed; deploys require commit author `charlie@blockspace.media`).
 - ✅ Discord bot **live** (systemd, auto-boot); recaps gated until launch.
 - ✅ Log poller built + parser-tested — not running (waits for server launch).
 - 🌱 Demo data seeded so the dashboard looks alive — **WIPE before go-live.**
