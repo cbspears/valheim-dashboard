@@ -11,6 +11,9 @@ export const WORLD_SEED = 'Yggdrasil'; // cosmetic — set to your real seed if 
 
 // Optional external links shown around the dashboard. Leave '' to hide.
 export const DISCORD_URL = '';
+
+// The bot's @handle in Discord — shown in the Gallery's "how to add" explainer.
+export const DISCORD_BOT_HANDLE = '@Eilif';
 // Public connect address shown on the Hall + Get Started page. The join password
 // is intentionally NOT here (this site is public) — share it privately in Discord.
 export const SERVER_ADDRESS = '194.50.234.131:5914';
