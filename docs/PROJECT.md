@@ -19,8 +19,8 @@ A community hub for the **Eilif** modded Valheim super-server ("The Cozy Canon P
 ## 2. Architecture
 
 ```
-Valheim server (G-Portal) ──FTP──> log poller ───┐
-ServerCharacters .fch ─────FTP──> stats parser ──┼──> /api/webhook ──> Supabase ──┬──> Dashboard (Vercel)
+Valheim server (GTXGaming) ─SFTP─> log poller ───┐
+ServerCharacters .fch ─────SFTP─> stats parser ──┼──> /api/webhook ──> Supabase ──┬──> Dashboard (Vercel)
                                                   │                               └──> Discord bot ──> #valheim / #server
 (manual)  mark-boss script ───────────────────────┘
 ```
@@ -28,8 +28,8 @@ ServerCharacters .fch ─────FTP──> stats parser ──┼──> /a
 - **Dashboard** (`app/`) — Next.js 16 · React 19 · Tailwind v4 · TS · Supabase. 5 pages (Hall/Vikings/World/Saga/Mods). Banner hero + derived blue-slate background + gold-"E" favicon + OG image. → Vercel.
 - **Supabase** — `players, sessions, events, player_stats, bosses, roadmap, server_status`. Public-read RLS; writes go through `/api/webhook` (service-role + `x-webhook-secret`). `occurredAt` + `sync` supported.
 - **Discord bot** (`services/discord-bot/`) — discord.js v14, systemd `eilif-discord-bot` (live, auto-boot). Relays joins/leaves/deaths/raids → `#server`; first boss kills `@everyone` → `#valheim`; **8 AM & 10 PM Central recaps** (deaths leaderboard + Player-of-the-Day) → `#valheim`. Recaps gated by `RECAPS_START`. Scripts: `mark-boss.js`, `announce.js`, `preview.js`.
-- **Log poller** (`services/log-poller/`) — Node + basic-ftp, systemd `valheim-log-poller` (built, not yet running). Tails `BepInEx/LogOutput.log` over FTP → derives presence/sessions/deaths/raids → `/api/webhook`. Parser unit-tested.
-- **Stats parser** (`services/stats-parser/`) — Node + basic-ftp. `ServerCharacters` stores each player's full vanilla `.fch` profile server-side → FTP-pull → parse the `ZPackage` stat array + map-exploration fog → POST `{type:'stats'}` to `/api/webhook` → `player_stats`. Built + validated against 30 real profiles (v37/39/43). The `PlayerStatType` ordinal map is extracted from the live `assembly_valheim.dll` (`scripts/extract-stat-enum.mjs`); the parser reads the stat count dynamically and self-synchronizes past version-variable flag bytes, so a game patch degrades gracefully rather than corrupting data. Runs post-launch under systemd (`eilif-stats-parser`).
+- **Log poller** (`services/log-poller/`) — Node + ssh2-sftp-client, systemd `valheim-log-poller` (built, not yet running). Tails `BepInEx/LogOutput.log` over SFTP → derives presence/sessions/deaths/raids → `/api/webhook`. Parser unit-tested.
+- **Stats parser** (`services/stats-parser/`) — Node + ssh2-sftp-client. `ServerCharacters` stores each player's full vanilla `.fch` profile server-side → SFTP-pull → parse the `ZPackage` stat array + map-exploration fog → POST `{type:'stats'}` to `/api/webhook` → `player_stats`. Built + validated against 30 real profiles (v37/39/43). The `PlayerStatType` ordinal map is extracted from the live `assembly_valheim.dll` (`scripts/extract-stat-enum.mjs`); the parser reads the stat count dynamically and self-synchronizes past version-variable flag bytes, so a game patch degrades gracefully rather than corrupting data. Runs post-launch under systemd (`eilif-stats-parser`).
 
 **Runtime:** Node 20 via nvm (`~/.config/nvm`; system node is 18). Pinned via `.nvmrc`.
 
@@ -37,7 +37,7 @@ ServerCharacters .fch ─────FTP──> stats parser ──┼──> /a
 
 | Decision | Choice | Why |
 |---|---|---|
-| Server file access | **FTP** (not SFTP) | That's what G-Portal exposes (port 32131) |
+| Server file access | **SFTP** (port 8822) | Provider moved to **GTXGaming** (was G-Portal/plain-FTP); GTX exposes SFTP only |
 | Boss-kill tracking | **Manual** (`mark-boss.js`) | No log signal; auto-detect plugin deferred |
 | In-game chat relay | **Deferred** | Needs a client-side mod on every player |
 | `@everyone` | Manual announcements + **first** kill of each boss only | Keep pings rare/meaningful |
@@ -58,7 +58,7 @@ ServerCharacters .fch ─────FTP──> stats parser ──┼──> /a
 ## 5. To-dos / ongoing
 
 1. **[HIGH] Unblock the deploy** — connect GitHub → Vercel (Account Settings → Connections → GitHub; then Project → Settings → Git). Auto-deploy on push; bypasses the CLI penalty. Brings Eilif + all visuals live.
-2. ✅ **Stats parser** — DONE. FTP-pull `*.fch` → parse the stat array (dynamic field count, live build = v43) → map to `player_stats` (keyed on character name; SteamID backfilled from the filename when present). Added **`structures_built`** + **`map_explored_pct`** columns + Master Builder / Cartographer cards.
+2. ✅ **Stats parser** — DONE. SFTP-pull `*.fch` → parse the stat array (dynamic field count, live build = v43) → map to `player_stats` (keyed on character name; SteamID backfilled from the filename when present). Added **`structures_built`** + **`map_explored_pct`** columns + Master Builder / Cartographer cards.
 3. **Install `ServerCharacters`** on server + all clients; **test the ValheimPlus conflict** (Benson's domain). Distribute via r2modman profile.
 4. **Validate the parser** against one real `.fch`.
 5. **At launch:** wipe demo data, bring the log poller online (systemd), confirm recaps un-gate.

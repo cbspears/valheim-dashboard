@@ -12,26 +12,27 @@ function required(name) {
 }
 
 const config = {
-  source: process.env.LOG_SOURCE || 'ftp', // 'ftp' | 'file'
+  source: process.env.LOG_SOURCE || 'sftp', // 'sftp' | 'file'
   logPath: process.env.LOG_PATH || 'BepInEx/LogOutput.log',
   webhookUrl: required('WEBHOOK_URL'),
   webhookSecret: required('WEBHOOK_SECRET'),
   intervalMs: parseInt(process.env.POLL_INTERVAL_MS || '20000', 10),
   syncEveryMs: parseInt(process.env.SYNC_EVERY_MS || '120000', 10),
   statePath: process.env.STATE_PATH || new URL('../state.json', import.meta.url).pathname,
-  ftp: {
-    host: process.env.FTP_HOST,
-    port: parseInt(process.env.FTP_PORT || '21', 10),
-    user: process.env.FTP_USER,
-    password: process.env.FTP_PASSWORD,
-    timeoutMs: parseInt(process.env.FTP_TIMEOUT_MS || '15000', 10),
+  sftp: {
+    host: process.env.SFTP_HOST,
+    port: parseInt(process.env.SFTP_PORT || '8822', 10),
+    username: process.env.SFTP_USER,
+    password: process.env.SFTP_PASSWORD,
+    readyTimeout: parseInt(process.env.SFTP_TIMEOUT_MS || '15000', 10),
   },
 };
 
-if (config.source === 'ftp') {
-  for (const k of ['host', 'user', 'password']) {
-    if (!config.ftp[k]) {
-      console.error(`[config] LOG_SOURCE=ftp requires FTP_${k.toUpperCase()}`);
+if (config.source === 'sftp') {
+  for (const k of ['host', 'username', 'password']) {
+    if (!config.sftp[k]) {
+      const env = k === 'username' ? 'SFTP_USER' : `SFTP_${k.toUpperCase()}`;
+      console.error(`[config] LOG_SOURCE=sftp requires ${env}`);
       process.exit(1);
     }
   }

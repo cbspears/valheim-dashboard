@@ -18,19 +18,19 @@
 
 ## What this is
 
-**Eilif** is a modded Valheim dedicated server (G-Portal). This repo is the whole stack that surrounds it:
+**Eilif** is a modded Valheim dedicated server (GTXGaming). This repo is the whole stack that surrounds it:
 
 | Piece | What it does | Where |
 |---|---|---|
 | 🖥️ **Dashboard** | Public site: who's online, leaderboards, mods, boss-gated world progress + living roadmap | `app/` → Vercel |
 | 🤖 **Discord bot** | Relays joins/deaths/raids to `#server`; first-boss-kill `@everyone` to `#valheim`; 8 AM & 10 PM recaps with a deaths leaderboard + Player-of-the-Day | `services/discord-bot/` |
-| 📜 **Log poller** | Tails the server log over FTP → derives presence/sessions/deaths → dashboard webhook | `services/log-poller/` |
-| 📊 **Stats pipeline** *(planned)* | `ServerCharacters` `.fch` → per-player kills / resources / builds / exploration → `player_stats` | _next_ |
+| 📜 **Log poller** | Tails the server log over SFTP → derives presence/sessions/deaths → dashboard webhook | `services/log-poller/` |
+| 📊 **Stats parser** | `ServerCharacters` `.fch` over SFTP → per-player kills / resources / builds / exploration → `player_stats` | `services/stats-parser/` |
 
 ```
-Valheim server (G-Portal) ──FTP──> log poller ──┐
+Valheim server (GTXGaming) ─SFTP─> log poller ──┐
                                                  ├──> /api/webhook ──> Supabase ──> Dashboard (Vercel)
-ServerCharacters .fch ──FTP──> stats parser ─────┘                        │
+ServerCharacters .fch ─SFTP─> stats parser ──────┘                        │
                                                                           └──> Discord bot ──> #valheim / #server
 ```
 
@@ -53,14 +53,15 @@ nvm use && npm install && npm run dev
 
 ## The services (run on the host, via systemd)
 - `services/discord-bot/` — `npm start`; unit: `eilif-discord-bot.service`. Recaps gated until launch via `RECAPS_START`. Mark a boss: `node scripts/mark-boss.js "Bonemass" "Bjorn,Astrid"`.
-- `services/log-poller/` — `npm start`; unit: `valheim-log-poller.service`. Parses `BepInEx/LogOutput.log` over FTP.
+- `services/log-poller/` — `npm start`; unit: `valheim-log-poller.service`. Parses `BepInEx/LogOutput.log` over SFTP.
+- `services/stats-parser/` — `npm run once` / `npm start`; unit: `eilif-stats-parser.service`. Pulls ServerCharacters `.fch` over SFTP → `player_stats`.
 
 ## Data model (Supabase)
 `players`, `sessions`, `events`, `player_stats`, `bosses`, `roadmap`, `server_status` — public-read RLS, writes via service role through `/api/webhook`.
 
 ## Status
-- ✅ Dashboard (5 pages, dark Norse theme) · ✅ Discord bot (live) · ✅ Log poller (built)
-- 🔜 Stats pipeline (ServerCharacters → `player_stats`) · server world launches **Sept 9**
+- ✅ Dashboard (5 pages, dark Norse theme) · ✅ Discord bot (live) · ✅ Log poller (built) · ✅ Stats parser (built + validated)
+- Services pull over **SFTP** (host: GTXGaming) · server world launches **Sept 9**
 
 ---
 <p align="center"><em>Sailing the tenth world. May your axes stay sharp. 🛡️</em></p>

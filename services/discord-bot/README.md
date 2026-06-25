@@ -1,7 +1,7 @@
 # Eilif Discord Bot
 
 Posts Valheim server activity to Discord and runs daily recaps. Reads from the same Supabase the
-dashboard uses; the FTP log poller (and later the DiscordConnector mod) feed events in.
+dashboard uses; the SFTP log poller (and later the DiscordConnector mod) feed events in.
 
 ## Channel routing
 | Channel | Posts | @everyone? |

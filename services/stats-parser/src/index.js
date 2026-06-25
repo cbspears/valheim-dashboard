@@ -4,14 +4,13 @@
 // plenty). Pass `--once` to run a single sweep and exit (cron / manual use).
 //
 // Source modes (STATS_SOURCE):
-//   ftp  — pull *.fch from a remote directory on the game host (production).
+//   sftp — pull *.fch from a remote directory on the game host (production).
 //   dir  — read *.fch from a local directory (testing against real profiles).
 
 import 'dotenv/config';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
-import { Client as FtpClient } from 'basic-ftp';
+import SftpClient from 'ssh2-sftp-client';
 import { parseProfile, toPlayerStats } from './fch.js';
 
 const log = console;
@@ -26,27 +25,28 @@ function required(name) {
 }
 
 const cfg = {
-  source: process.env.STATS_SOURCE || 'ftp', // 'ftp' | 'dir'
-  // Remote (ftp) or local (dir) directory holding the .fch profiles.
+  source: process.env.STATS_SOURCE || 'sftp', // 'sftp' | 'dir'
+  // Remote (sftp) or local (dir) directory holding the .fch profiles.
   charactersPath: process.env.CHARACTERS_PATH || 'ServerCharacters',
   webhookUrl: required('WEBHOOK_URL'),
   webhookSecret: required('WEBHOOK_SECRET'),
   intervalMs: parseInt(process.env.POLL_INTERVAL_MS || '300000', 10), // 5 min
   // Pin exploration % to the live server's world if known; else best world.
   worldUid: process.env.WORLD_UID ? BigInt(process.env.WORLD_UID) : undefined,
-  ftp: {
-    host: process.env.FTP_HOST,
-    port: parseInt(process.env.FTP_PORT || '21', 10),
-    user: process.env.FTP_USER,
-    password: process.env.FTP_PASSWORD,
-    timeoutMs: parseInt(process.env.FTP_TIMEOUT_MS || '15000', 10),
+  sftp: {
+    host: process.env.SFTP_HOST,
+    port: parseInt(process.env.SFTP_PORT || '8822', 10),
+    username: process.env.SFTP_USER,
+    password: process.env.SFTP_PASSWORD,
+    readyTimeout: parseInt(process.env.SFTP_TIMEOUT_MS || '15000', 10),
   },
 };
 
-if (cfg.source === 'ftp') {
-  for (const k of ['host', 'user', 'password']) {
-    if (!cfg.ftp[k]) {
-      log.error(`[config] STATS_SOURCE=ftp requires FTP_${k.toUpperCase()}`);
+if (cfg.source === 'sftp') {
+  for (const k of ['host', 'username', 'password']) {
+    if (!cfg.sftp[k]) {
+      const env = k === 'username' ? 'SFTP_USER' : `SFTP_${k.toUpperCase()}`;
+      log.error(`[config] STATS_SOURCE=sftp requires ${env}`);
       process.exit(1);
     }
   }
@@ -61,7 +61,7 @@ function steamIdFromFilename(name) {
 // --- Fetch the list of .fch files as { name, buffer } ---
 async function fetchProfiles() {
   if (cfg.source === 'dir') return fetchFromDir();
-  return fetchFromFtp();
+  return fetchFromSftp();
 }
 
 async function fetchFromDir() {
@@ -73,34 +73,22 @@ async function fetchFromDir() {
   return out;
 }
 
-async function fetchFromFtp() {
-  const client = new FtpClient(cfg.ftp.timeoutMs);
-  client.ftp.verbose = false;
+async function fetchFromSftp() {
+  const sftp = new SftpClient();
   try {
-    await client.access({
-      host: cfg.ftp.host,
-      port: cfg.ftp.port,
-      user: cfg.ftp.user,
-      password: cfg.ftp.password,
-      secure: false,
-    });
-    const entries = await client.list(cfg.charactersPath);
+    await sftp.connect(cfg.sftp);
+    const entries = await sftp.list(cfg.charactersPath);
     const out = [];
     for (const e of entries) {
-      if (!e.isFile || !e.name.toLowerCase().endsWith('.fch')) continue;
-      const chunks = [];
-      const sink = new Writable({
-        write(chunk, _enc, cb) {
-          chunks.push(chunk);
-          cb();
-        },
-      });
-      await client.downloadTo(sink, `${cfg.charactersPath}/${e.name}`);
-      out.push({ name: e.name, buffer: Buffer.concat(chunks) });
+      // ssh2-sftp-client: type '-' is a regular file, 'd' a directory.
+      if (e.type !== '-' || !e.name.toLowerCase().endsWith('.fch')) continue;
+      // get() with no destination returns the file contents as a Buffer.
+      const buffer = await sftp.get(`${cfg.charactersPath}/${e.name}`);
+      out.push({ name: e.name, buffer });
     }
     return out;
   } finally {
-    client.close();
+    await sftp.end();
   }
 }
 

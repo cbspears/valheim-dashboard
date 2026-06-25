@@ -4,7 +4,7 @@
 // producers call it:
 //   1. The Valheim "Discord Connector" mod (server-side), forwarding events
 //      (join / leave / death / boss / raid / chat ...).
-//   2. Our Linux FTP log poller, which tails the server log and replays the
+//   2. Our Linux SFTP log poller, which tails the server log and replays the
 //      same event shape for things the mod doesn't emit, plus periodic `sync`
 //      reconciliation of the live roster.
 //

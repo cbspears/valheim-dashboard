@@ -1,5 +1,5 @@
 // Offline parser test: run the synthetic fixture through LogParser and assert
-// the derived event stream is correct. No network, no FTP.
+// the derived event stream is correct. No network, no SFTP.
 import { readFileSync } from 'node:fs';
 import { LogParser } from './src/parser.js';
 

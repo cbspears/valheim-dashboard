@@ -44,7 +44,7 @@ byte layout. Key facts:
 ## Run
 
 ```bash
-cp .env.example .env   # fill in WEBHOOK_SECRET + FTP creds
+cp .env.example .env   # fill in WEBHOOK_SECRET + SFTP creds
 npm install
 
 npm run once           # single sweep, then exit (good for cron / manual)

@@ -3,17 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Tails the Valheim dedicated-server log over FTP and forwards presence/death/raid events to the Eilif dashboard webhook.",
+  "description": "Tails the Valheim dedicated-server log over SFTP and forwards presence/death/raid events to the Eilif dashboard webhook.",
   "engines": {
     "node": ">=20.9.0"
   },
   "scripts": {
     "start": "node src/index.js",
     "test:parser": "node test-parser.js",
-    "test:ftp": "node test-ftp.js"
+    "test:sftp": "node test-sftp.js"
   },
   "dependencies": {
-    "basic-ftp": "^5.0.5",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "ssh2-sftp-client": "^11.0.0"
   }
 }

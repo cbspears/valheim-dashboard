@@ -1,15 +1,14 @@
-// Poller — incrementally tails the server log (over FTP or a local file),
+// Poller — incrementally tails the server log (over SFTP or a local file),
 // runs each new line through LogParser, and forwards derived events to the
 // dashboard webhook. Designed to run forever under systemd.
 
-import { Client as FtpClient } from 'basic-ftp';
-import { Writable } from 'node:stream';
+import SftpClient from 'ssh2-sftp-client';
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { LogParser } from './parser.js';
 
 export class Poller {
   constructor(config, logger = console) {
-    this.cfg = config; // { source, ftp, logPath, webhookUrl, webhookSecret, intervalMs, statePath, syncEveryMs }
+    this.cfg = config; // { source, sftp, logPath, webhookUrl, webhookSecret, intervalMs, statePath, syncEveryMs }
     this.log = logger;
     this.offset = 0;
     this.partial = '';
@@ -39,7 +38,7 @@ export class Poller {
   // --- Fetch new bytes [offset, size) from the configured source ---
   async fetchNewBytes() {
     if (this.cfg.source === 'file') return this.fetchFromFile();
-    return this.fetchFromFtp();
+    return this.fetchFromSftp();
   }
 
   async fetchFromFile() {
@@ -56,18 +55,11 @@ export class Poller {
     return slice.toString('utf8');
   }
 
-  async fetchFromFtp() {
-    const client = new FtpClient(this.cfg.ftp.timeoutMs || 15000);
-    client.ftp.verbose = false;
+  async fetchFromSftp() {
+    const sftp = new SftpClient();
     try {
-      await client.access({
-        host: this.cfg.ftp.host,
-        port: this.cfg.ftp.port,
-        user: this.cfg.ftp.user,
-        password: this.cfg.ftp.password,
-        secure: false,
-      });
-      const size = await client.size(this.cfg.logPath);
+      await sftp.connect(this.cfg.sftp);
+      const { size } = await sftp.stat(this.cfg.logPath);
       if (size < this.offset) {
         this.log.warn?.(`[log] file shrank (${size} < ${this.offset}) — restart/rotation, re-reading from 0`);
         this.offset = 0;
@@ -75,19 +67,16 @@ export class Poller {
       }
       if (size === this.offset) return '';
 
-      const chunks = [];
-      const sink = new Writable({
-        write(chunk, _enc, cb) {
-          chunks.push(chunk);
-          cb();
-        },
+      // Read only the new bytes [offset, size). ssh2's read stream takes an
+      // inclusive `end`, so end = size - 1. get() with no destination returns
+      // the slice as a Buffer.
+      const buf = await sftp.get(this.cfg.logPath, undefined, {
+        readStreamOptions: { start: this.offset, end: size - 1 },
       });
-      // basic-ftp: download starting at a byte offset (issues FTP REST).
-      await client.downloadTo(sink, this.cfg.logPath, this.offset);
       this.offset = size;
-      return Buffer.concat(chunks).toString('utf8');
+      return buf.toString('utf8');
     } finally {
-      client.close();
+      await sftp.end();
     }
   }
 
