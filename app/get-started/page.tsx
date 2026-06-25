@@ -31,7 +31,7 @@ import {
 import { CLIENT_MODS } from '@/config/mods';
 
 export const metadata: Metadata = {
-  title: 'Set Sail',
+  title: 'Get Started',
   description: `New to ${SERVER_NAME}? Install the mods and join the server — step by step, for Windows, Mac, and Linux.`,
 };
 
@@ -136,16 +136,25 @@ function Ext({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
+function SectionTitle({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <h2 className="mb-4 flex items-center gap-2 font-display text-lg tracking-wide text-ash">
+      <span className="text-gold">{icon}</span>
+      {children}
+    </h2>
+  );
+}
+
 /* ── page ──────────────────────────────────────────────────────────────────── */
 
-export default function SetSailPage() {
+export default function GetStartedPage() {
   const discord = DISCORD_URL || null;
 
   return (
     <div className="flex flex-col gap-12">
       <SectionHeader
-        title="Set Sail"
-        subtitle={`New to ${SERVER_NAME}? This is everything you need to install the mods and join the longship — about 15 minutes, no experience required.`}
+        title="Get Started"
+        subtitle={`New to ${SERVER_NAME}? Three steps to install the mods and join the server — about 15 minutes, no experience needed.`}
         icon={<Compass size={22} />}
       />
 
@@ -180,46 +189,49 @@ export default function SetSailPage() {
 
       {/* ── Three-step path ─────────────────────────────────────────────── */}
       <section>
-        <h2 className="mb-4 flex items-center gap-2 font-display text-lg tracking-wide text-ash">
-          <Ship size={18} className="text-gold" />
-          The fast path — three steps
-        </h2>
+        <SectionTitle icon={<Ship size={18} />}>The three steps</SectionTitle>
         <p className="mb-5 max-w-3xl text-sm leading-relaxed text-muted">
-          Don&apos;t install mods by hand. A <strong className="text-ash-dim">mod manager</strong>{' '}
-          does it all for you — it grabs the loader, every mod, and the exact versions, and keeps
-          your modded copy separate from vanilla. It works the same on Windows, Mac, and Linux.
+          The trick is to <strong className="text-ash-dim">not install mods by hand</strong>. A free
+          mod manager grabs the loader, every mod, and the exact versions for you, and keeps your
+          modded copy separate from vanilla. Same three steps on Windows, Mac, and Linux —
+          platform-specific notes are further down.
         </p>
 
         <div className="grid gap-4 lg:grid-cols-3">
           <Step n={1} title="Install a mod manager" icon={<Package size={16} />}>
             <p>
-              Get <Ext href={R2MODMAN_URL}>r2modman</Ext> (free, all platforms) — or the{' '}
-              <em>Thunderstore Mod Manager</em>, which is the same thing. Install it, open it, and
-              pick <span className="text-ash">Valheim</span> from the game list.
+              Download <Ext href={R2MODMAN_URL}>r2modman</Ext> (free; Windows, Mac, Linux) — the
+              Thunderstore Mod Manager is the same tool if you prefer it. Open it and choose{' '}
+              <span className="text-ash">Valheim</span> from the game list.
             </p>
             <p className="text-xs text-muted">
-              It bundles BepInEx (the loader) automatically — you never install that by hand.
+              It installs BepInEx (the mod loader) for you — you never set that up by hand.
             </p>
           </Step>
 
           <Step n={2} title="Add the mods" icon={<Download size={16} />}>
             {MODPACK_PROFILE_CODE ? (
               <p>
-                In r2modman choose <span className="text-ash">Import / Update</span> →{' '}
-                <span className="text-ash">Import code</span> and paste:
+                In r2modman choose <span className="text-ash">Import / Update → Import code</span>{' '}
+                and paste:
                 <code className="mt-1 block rounded bg-surface-raised px-2 py-1 font-mono text-xs text-gold-light">
                   {MODPACK_PROFILE_CODE}
                 </code>
-                That installs the whole pack, version-matched. Done.
+                That installs the whole pack at the right versions in one go. Done.
               </p>
             ) : (
               <>
                 <p>
-                  Search for and install each <Badge tone="gold" className="align-middle"><Download size={10} />Client</Badge> mod
-                  listed below. Versions must match the server <em>exactly</em>.
+                  Inside r2modman, search for and install each of the{' '}
+                  {CLIENT_MODS.length} mods listed in{' '}
+                  <a href="#client-mods" className="text-gold-light hover:underline">
+                    What you install
+                  </a>{' '}
+                  below.
                 </p>
                 <p className="text-xs text-muted">
-                  A one-click shared modpack code is coming — until then, install them individually.
+                  Soon there&apos;ll be a single shared code that installs them all at once — until
+                  then, add the three individually (the manager keeps the versions right).
                 </p>
               </>
             )}
@@ -227,9 +239,9 @@ export default function SetSailPage() {
 
           <Step n={3} title="Launch & connect" icon={<Anchor size={16} />}>
             <p>
-              Hit <span className="text-ash">Start modded</span> in r2modman (not Steam&apos;s normal
-              Play). In game: <span className="text-ash">Start Game → pick your character → Join Game
-              → Join by IP</span>.
+              Click <span className="text-ash">Start modded</span> in r2modman (not Steam&apos;s
+              normal Play button). In game:{' '}
+              <span className="text-ash">Start Game → pick your character → Join Game → Join by IP</span>.
             </p>
             <p>
               Enter{' '}
@@ -241,11 +253,8 @@ export default function SetSailPage() {
       </section>
 
       {/* ── Required client mods ────────────────────────────────────────── */}
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 font-display text-lg tracking-wide text-ash">
-          <Download size={18} className="text-gold" />
-          What you install (client mods)
-        </h2>
+      <section id="client-mods" className="scroll-mt-20">
+        <SectionTitle icon={<Download size={18} />}>What you install (client mods)</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {CLIENT_MODS.map((m) => (
             <Card key={m.name}>
@@ -277,12 +286,50 @@ export default function SetSailPage() {
         </p>
       </section>
 
+      {/* ── First-login best practices (moved up — the happy path) ──────── */}
+      <section>
+        <SectionTitle icon={<ListChecks size={18} />}>
+          You&apos;re in — your first night
+        </SectionTitle>
+        <Card>
+          <CardBody>
+            <ul className="grid gap-4 sm:grid-cols-2">
+              <Tip icon={<MapPin size={16} />} title="Turn on your location">
+                Open the map (<span className="font-mono text-xs">M</span>) and enable{' '}
+                <span className="text-ash">Share position</span> (bottom-left) so the warband can
+                see each other and rally.
+              </Tip>
+              <Tip icon={<UserRound size={16} />} title="Use a clear character name">
+                It&apos;s how you show up in the{' '}
+                <Link href="/players" className="text-gold-light hover:underline">
+                  leaderboards
+                </Link>{' '}
+                and Discord recaps. Make it recognizable.
+              </Tip>
+              <Tip icon={<Bed size={16} />} title="Claim a bed early">
+                Build a bed and sleep in it to set your spawn — dying back at the start is a long row
+                home.
+              </Tip>
+              <Tip icon={<Sailboat size={16} />} title="Don't sail ahead of the longship">
+                Progression is boss-gated — the whole point of the Cozy Canon. Stay with the fleet;
+                don&apos;t rush biomes the group hasn&apos;t unlocked.
+              </Tip>
+              <Tip icon={<RefreshCcw size={16} />} title="Don't auto-update mods">
+                Let the group update together and keep versions pinned. A solo update will lock you
+                out until everyone matches.
+              </Tip>
+              <Tip icon={<MessageCircle size={16} />} title="Live in Discord">
+                Boss raids, base coords, and &quot;is the server up?&quot; all happen there. The
+                server restarts every few hours — a brief drop is normal.
+              </Tip>
+            </ul>
+          </CardBody>
+        </Card>
+      </section>
+
       {/* ── Platform notes ──────────────────────────────────────────────── */}
       <section>
-        <h2 className="mb-4 flex items-center gap-2 font-display text-lg tracking-wide text-ash">
-          <Monitor size={18} className="text-gold" />
-          Pick your platform
-        </h2>
+        <SectionTitle icon={<Monitor size={18} />}>Notes for your platform</SectionTitle>
         <div className="grid gap-4 lg:grid-cols-3">
           <Platform icon={<Monitor size={17} />} name="Windows" difficulty="Easiest" tone="online">
             <p>The smooth path. Install r2modman&apos;s Windows app, pick Valheim, add the mods, Start modded.</p>
@@ -343,51 +390,9 @@ export default function SetSailPage() {
         </CardBody>
       </Card>
 
-      {/* ── First-login best practices ──────────────────────────────────── */}
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 font-display text-lg tracking-wide text-ash">
-          <ListChecks size={18} className="text-gold" />
-          Your first night — good habits
-        </h2>
-        <Card>
-          <CardBody>
-            <ul className="grid gap-4 sm:grid-cols-2">
-              <Tip icon={<MapPin size={16} />} title="Turn on your location">
-                Open the map (<span className="font-mono text-xs">M</span>) and enable{' '}
-                <span className="text-ash">Share position</span> (bottom-left) so the warband can
-                see each other and rally.
-              </Tip>
-              <Tip icon={<UserRound size={16} />} title="Use a clear character name">
-                It&apos;s how you show up in the <Link href="/players" className="text-gold-light hover:underline">leaderboards</Link>{' '}
-                and Discord recaps. Make it recognizable.
-              </Tip>
-              <Tip icon={<Bed size={16} />} title="Claim a bed early">
-                Build a bed and sleep in it to set your spawn — dying back at the start is a long row
-                home.
-              </Tip>
-              <Tip icon={<Sailboat size={16} />} title="Don't sail ahead of the longship">
-                Progression is boss-gated — the whole point of the Cozy Canon. Stay with the fleet;
-                don&apos;t rush biomes the group hasn&apos;t unlocked.
-              </Tip>
-              <Tip icon={<RefreshCcw size={16} />} title="Don't auto-update mods">
-                Let the group update together and keep versions pinned. A solo update will lock you
-                out until everyone matches.
-              </Tip>
-              <Tip icon={<MessageCircle size={16} />} title="Live in Discord">
-                Boss raids, base coords, and &quot;is the server up?&quot; all happen there. The
-                server restarts every few hours — a brief drop is normal.
-              </Tip>
-            </ul>
-          </CardBody>
-        </Card>
-      </section>
-
       {/* ── Troubleshooting ─────────────────────────────────────────────── */}
       <section>
-        <h2 className="mb-4 flex items-center gap-2 font-display text-lg tracking-wide text-ash">
-          <Wrench size={18} className="text-gold" />
-          When something won&apos;t cooperate
-        </h2>
+        <SectionTitle icon={<Wrench size={18} />}>When something won&apos;t cooperate</SectionTitle>
         <Card>
           <CardBody>
             <Trouble symptom="“Incompatible version” or the join is refused">
@@ -416,7 +421,7 @@ export default function SetSailPage() {
         </Card>
         <p className="mt-4 flex items-center gap-2 text-sm text-muted">
           <MessageCircle size={15} className="text-gold-light" />
-          Still beached?{' '}
+          Still stuck?{' '}
           {discord ? (
             <Ext href={discord}>Ask in Discord</Ext>
           ) : (

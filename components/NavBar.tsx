@@ -13,7 +13,7 @@ const LINKS = [
   { href: '/world', label: 'World' },
   { href: '/events', label: 'Saga' },
   { href: '/mods', label: 'Mods' },
-  { href: '/set-sail', label: 'Set Sail' },
+  { href: '/get-started', label: 'Get Started', cta: true },
 ];
 
 export function NavBar() {
@@ -35,20 +35,35 @@ export function NavBar() {
 
         {/* Desktop links */}
         <div className="hidden items-center gap-1 md:flex">
-          {LINKS.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className={clsx(
-                'rounded-md px-3 py-1.5 text-sm font-medium tracking-wide transition-colors gold-ring',
-                isActive(l.href)
-                  ? 'bg-gold/10 text-gold-light'
-                  : 'text-ash-dim hover:bg-surface-raised hover:text-ash'
-              )}
-            >
-              {l.label}
-            </Link>
-          ))}
+          {LINKS.map((l) =>
+            l.cta ? (
+              <Link
+                key={l.href}
+                href={l.href}
+                className={clsx(
+                  'ml-1.5 rounded-md border px-3.5 py-1.5 text-sm font-semibold tracking-wide transition-colors gold-ring',
+                  isActive(l.href)
+                    ? 'border-gold bg-gold/20 text-gold-light'
+                    : 'border-gold-dim bg-gold/10 text-gold-light hover:border-gold hover:bg-gold/20'
+                )}
+              >
+                {l.label}
+              </Link>
+            ) : (
+              <Link
+                key={l.href}
+                href={l.href}
+                className={clsx(
+                  'rounded-md px-3 py-1.5 text-sm font-medium tracking-wide transition-colors gold-ring',
+                  isActive(l.href)
+                    ? 'bg-gold/10 text-gold-light'
+                    : 'text-ash-dim hover:bg-surface-raised hover:text-ash'
+                )}
+              >
+                {l.label}
+              </Link>
+            )
+          )}
         </div>
 
         {/* Mobile toggle */}
@@ -70,8 +85,12 @@ export function NavBar() {
               href={l.href}
               onClick={() => setOpen(false)}
               className={clsx(
-                'block rounded-md px-3 py-2.5 text-sm font-medium',
-                isActive(l.href) ? 'bg-gold/10 text-gold-light' : 'text-ash-dim hover:text-ash'
+                'mt-1 block rounded-md px-3 py-2.5 text-sm font-medium',
+                l.cta
+                  ? 'border border-gold-dim bg-gold/10 font-semibold text-gold-light'
+                  : isActive(l.href)
+                    ? 'bg-gold/10 text-gold-light'
+                    : 'text-ash-dim hover:text-ash'
               )}
             >
               {l.label}

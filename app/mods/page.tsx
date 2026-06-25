@@ -158,11 +158,11 @@ export default function ModsPage() {
             </Badge>{' '}
             are woven into the host already; there is nothing for you to do.{' '}
             <Link
-              href="/set-sail"
+              href="/get-started"
               className="gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light hover:underline"
             >
               <Compass size={13} className="align-middle" />
-              New here? Set sail →
+              New here? Get started →
             </Link>
           </p>
         </CardBody>
