@@ -127,6 +127,18 @@ export interface GalleryPhoto {
   created_at: string | null;
 }
 
+export interface PotyHistoryEntry {
+  id: string;
+  character_name: string;
+  /** category key, e.g. 'boss_kill' | 'most_deaths' | 'underdog' */
+  award_category: string;
+  /** display label, e.g. '👑 Bane of Beasts (Boss-Slayer)' | '🌟 Unsung Hero' */
+  award_label: string;
+  world_day: number | null;
+  awarded_at: string;
+  created_at: string | null;
+}
+
 export interface ServerStatus {
   id: number;
   is_online: boolean;

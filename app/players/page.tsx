@@ -11,13 +11,15 @@ import {
   Footprints,
   Castle,
   Map,
+  Crown,
 } from 'lucide-react';
 import { Card, SectionHeader, Badge, EmptyState, OnlineDot } from '@/components/ui';
 import {
   LeaderboardCard,
   type LeaderboardEntry,
 } from '@/components/players/LeaderboardCard';
-import { getOnlinePlayers, getAllPlayers, getPlayersWithStats } from '@/lib/data';
+import { PotyArchive } from '@/components/players/PotyArchive';
+import { getOnlinePlayers, getAllPlayers, getPlayersWithStats, getPotyArchive } from '@/lib/data';
 import type { PlayerWithStats } from '@/lib/types';
 import {
   timeAgo,
@@ -58,10 +60,11 @@ interface Board {
 }
 
 export default async function PlayersPage() {
-  const [online, roster, withStats] = await Promise.all([
+  const [online, roster, withStats, potyArchive] = await Promise.all([
     getOnlinePlayers(),
     getAllPlayers(),
     getPlayersWithStats(),
+    getPotyArchive(),
   ]);
 
   const boards: Board[] = [
@@ -276,6 +279,16 @@ export default async function PlayersPage() {
             />
           ))}
         </div>
+      </section>
+
+      {/* ── Players of the Day (history) ───────────────────────── */}
+      <section>
+        <SectionHeader
+          title="Players of the Day"
+          subtitle="The nightly crown — every champion the saga has named, and who's worn it most."
+          icon={<Crown size={20} />}
+        />
+        <PotyArchive entries={potyArchive} />
       </section>
     </div>
   );

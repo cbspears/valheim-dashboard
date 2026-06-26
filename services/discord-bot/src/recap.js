@@ -28,20 +28,43 @@ const POTY_CATEGORIES = [
   { key: 'most_hours',     label: '🔥 The Devoted',                  priority: 20,  threshold: 3,   epic: false, metric: 'hours' },
 ];
 
+// --- Player-of-the-Day fairness knobs (tweak freely) -----------------------
+// Anti-monopoly: a viking may win at most this many evenings IN A ROW; the next
+// would-be repeat is handed to the best alternative instead. EPIC wins (boss
+// kill / new biome) are exempt — too rare and big to ever suppress.
+const MAX_WIN_STREAK = 2; // => a 3rd straight crown for the same name is blocked
+
+// "Unsung Hero" spotlight: roughly once a week, the evening crown goes to the
+// quietest viking who still showed up — a deliberately gentle (yes, slightly
+// artificial) award so light-playtime folks get their moment in the hall.
+// Skipped on epic nights (a boss kill still headlines) and when nobody quiet
+// enough was actually on. Excludes last night's winner.
+const UNDERDOG = {
+  key: 'underdog',
+  label: '🌟 Unsung Hero',
+  everyEvenings: 7,    // cadence — ≈ weekly (one evening recap per day)
+  minHours: 0.3,       // must have truly played (~18 min), not a 2-minute blip
+  minActivePlayers: 2, // only meaningful when other vikings were on too
+};
+
 /**
  * Pick the Player of the Day from per-player window metrics (all keyed by
  * character_name). Pure + deterministic; never throws on empty/tie/single.
  * Returns a render-ready { key, label, name, fields, seed } or null.
  *
  * ctx = { windowDeaths, lastCause, hours, bossesPresent, latestBoss,
- *         killsDelta, resourcesDelta, craftsDelta, newBiomes, lastCat, seed }
+ *         killsDelta, resourcesDelta, craftsDelta, newBiomes, lastCat,
+ *         lastWinner, winStreak, forceUnderdog, seed }
+ * Fairness: caps a person at MAX_WIN_STREAK in a row (epic-exempt) and, when
+ * forceUnderdog is due, crowns the quietest active viking as 🌟 Unsung Hero.
  */
 export function selectPlayerOfDay(ctx = {}) {
   const {
     windowDeaths = {}, lastCause = {}, hours = {},
     bossesPresent = {}, latestBoss = {},
     killsDelta = {}, resourcesDelta = {}, craftsDelta = {}, newBiomes = {},
-    lastCat = null, seed = 0,
+    lastCat = null, lastWinner = null, winStreak = 0, forceUnderdog = false,
+    seed = 0,
   } = ctx;
 
   // most_explored metric = count of newly-discovered biomes per player.
@@ -55,37 +78,82 @@ export function selectPlayerOfDay(ctx = {}) {
     killsDelta, resourcesDelta, craftsDelta, hours,
   };
 
-  // STEP 2 tiebreak chain (uniform across categories): metric DESC ->
-  // windowDeaths DESC (grit) -> hours DESC -> character_name ASC (case-insens).
+  // Tiebreak inputs: windowDeaths DESC (grit) -> hours DESC -> name ASC.
   const wd = windowDeaths || {};
   const hr = hours || {};
-  const compare = (metric) => (a, b) =>
-    ((metric || {})[b] || 0) - ((metric || {})[a] || 0) ||
-    (wd[b] || 0) - (wd[a] || 0) ||
-    (hr[b] || 0) - (hr[a] || 0) ||
-    a.toLowerCase().localeCompare(b.toLowerCase());
 
-  // Per category, crown a single winner; keep it if it clears the threshold.
-  const qualifiers = [];
+  // Unsung Hero: crown the quietest viking who still SHOWED UP (least hours),
+  // never last night's winner. Returns a render-ready crown or null.
+  const underdogPick = () => {
+    const active = Object.keys(hr).filter((n) => (hr[n] || 0) > 0);
+    if (active.length < UNDERDOG.minActivePlayers) return null;
+    const pool = active
+      .filter((n) => (hr[n] || 0) >= UNDERDOG.minHours && n !== lastWinner)
+      .sort((a, b) =>
+        (hr[a] || 0) - (hr[b] || 0) ||
+        (wd[a] || 0) - (wd[b] || 0) ||
+        a.toLowerCase().localeCompare(b.toLowerCase()));
+    if (!pool.length) return null;
+    const nm = pool[0];
+    return {
+      key: UNDERDOG.key, label: UNDERDOG.label, name: nm,
+      fields: { hours: hr[nm] != null ? hr[nm] : undefined },
+      seed: seed || 0,
+    };
+  };
+
+  // Build EVERY crown-worthy candidate — each player clearing a category's
+  // threshold, not just the per-category leader — so fairness rules have real
+  // alternatives to fall back on when they skip the usual winner.
+  const candidates = [];
   for (const cat of POTY_CATEGORIES) {
     const metric = metrics[cat.metric] || {};
-    const names = Object.keys(metric).filter((n) => (metric[n] || 0) > 0);
-    if (!names.length) continue;
-    names.sort(compare(metric));
-    const name = names[0];
-    const value = metric[name] || 0;
-    if (value >= cat.threshold) qualifiers.push({ ...cat, name, value });
+    for (const nm of Object.keys(metric)) {
+      const value = metric[nm] || 0;
+      if (value >= cat.threshold) candidates.push({ ...cat, name: nm, value });
+    }
   }
-  if (!qualifiers.length) return null;
 
-  // STEP 3: pure priority tiering (priorities are unique -> a total order).
-  qualifiers.sort((a, b) => b.priority - a.priority || a.key.localeCompare(b.key));
+  // Rank: higher-priority award first; within a category (unique priorities, so
+  // categories never tie) bigger metric then the uniform tiebreak chain.
+  candidates.sort((a, b) =>
+    b.priority - a.priority ||
+    b.value - a.value ||
+    (wd[b.name] || 0) - (wd[a.name] || 0) ||
+    (hr[b.name] || 0) - (hr[a.name] || 0) ||
+    a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 
-  // Soft anti-repeat: skip ONE step if the top is a non-epic repeat of last
-  // night's crown AND an alternative exists.
-  let winner = qualifiers[0];
-  if (!EPIC_KEYS.has(winner.key) && winner.key === lastCat && qualifiers.length >= 2) {
-    winner = qualifiers[1];
+  // Weekly Unsung-Hero spotlight — but never bury an epic night under it
+  // (a boss kill / new biome still headlines; the spotlight waits a day).
+  if (forceUnderdog && !candidates.some((c) => EPIC_KEYS.has(c.key))) {
+    const u = underdogPick();
+    if (u) return u;
+  }
+
+  if (!candidates.length) return null;
+
+  let winner = candidates[0];
+
+  // Anti-monopoly: block a 3rd straight crown for the same person. Epic wins are
+  // exempt — too rare/big to ever suppress.
+  const blocked = winStreak >= MAX_WIN_STREAK && lastWinner ? lastWinner : null;
+  if (blocked && winner.name === blocked && !EPIC_KEYS.has(winner.key)) {
+    const alt = candidates.find((c) => c.name !== blocked);
+    if (alt) {
+      winner = alt;
+    } else {
+      // Only the streak-holder qualifies for anything tonight — spotlight a quiet
+      // viking instead if we can; else let the streak stand (better than no crown).
+      const u = underdogPick();
+      if (u) return u;
+    }
+  }
+
+  // Soft category anti-repeat: avoid the same award two evenings running when a
+  // different-category alternative (by a non-blocked viking) exists.
+  if (!EPIC_KEYS.has(winner.key) && winner.key === lastCat) {
+    const alt = candidates.find((c) => c.key !== winner.key && c.name !== blocked);
+    if (alt) winner = alt;
   }
 
   const name = winner.name;
@@ -109,7 +177,7 @@ export function selectPlayerOfDay(ctx = {}) {
   };
 }
 
-export function createRecap({ db, post, state, saveState, tz = 'America/Chicago', startsAt = null }) {
+export function createRecap({ db, post, state, saveState, writeDb = null, tz = 'America/Chicago', startsAt = null }) {
   async function buildStats(period) {
     const now = Date.now();
     const windowStart = new Date(
@@ -266,10 +334,16 @@ export function createRecap({ db, post, state, saveState, tz = 'America/Chicago'
     // POTY: EVENING ONLY. Morning never computes or shows a crown.
     let poty = null;
     if (period === 'evening') {
+      // Unsung-Hero spotlight comes due once the dry spell reaches the cadence.
+      const underdogDue = (state.eveningsSinceUnderdog || 0) >= UNDERDOG.everyEvenings - 1;
       poty = selectPlayerOfDay({
         windowDeaths, lastCause, hours, bossesPresent, latestBoss,
         killsDelta, resourcesDelta, craftsDelta, newBiomes,
-        lastCat, seed: worldDay,
+        lastCat,
+        lastWinner: state.lastPotyWinner || null,
+        winStreak: state.potyWinStreak || 0,
+        forceUnderdog: underdogDue,
+        seed: worldDay,
       });
     }
 
@@ -292,12 +366,42 @@ export function createRecap({ db, post, state, saveState, tz = 'America/Chicago'
   async function postRecap(period) {
     const stats = await buildStats(period);
     await post('valheim', formatRecap(stats));
-    // STEP 6 state writes (here, not in buildStats which stays read-only):
+    // State writes (here, not in buildStats which stays read-only):
     // refresh the player_stats baseline on EVERY recap...
     state.potyStatsSnapshot = stats._statsSnapshotNext || {};
-    // ...but only remember the crowned category on an evening that crowned one
-    // (a skip leaves it unchanged, so anti-repeat measures days not half-days).
-    if (period === 'evening' && stats.poty) state.lastPotyCategory = stats.poty.key;
+    // ...and on the EVENING, track the crown for the fairness rules.
+    if (period === 'evening') {
+      const poty = stats.poty;
+      if (poty) {
+        state.lastPotyCategory = poty.key;
+        // Per-person streak: extend if the same name repeats, else reset to 1.
+        state.potyWinStreak = poty.name === state.lastPotyWinner ? (state.potyWinStreak || 0) + 1 : 1;
+        state.lastPotyWinner = poty.name;
+        // Underdog cadence: reset on a spotlight, otherwise tick toward the next.
+        state.eveningsSinceUnderdog = poty.key === UNDERDOG.key ? 0 : (state.eveningsSinceUnderdog || 0) + 1;
+      } else {
+        // No crown tonight: a streak must be *consecutive* wins, so it breaks
+        // here; the empty evening still counts toward the next spotlight.
+        state.lastPotyWinner = null;
+        state.potyWinStreak = 0;
+        state.eveningsSinceUnderdog = (state.eveningsSinceUnderdog || 0) + 1;
+      }
+    }
+    // Archive the evening's crown for the dashboard's Player-of-the-Day log
+    // (best-effort; needs a service-role writeDb — null in dry-run/no key).
+    if (period === 'evening' && stats.poty && writeDb) {
+      try {
+        await writeDb.from('poty_history').insert({
+          character_name: stats.poty.name,
+          award_category: stats.poty.key,
+          award_label: stats.poty.label,
+          world_day: stats.worldDay ?? null,
+          awarded_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.error('[recap] poty archive write failed:', e.message);
+      }
+    }
     state.lastRecapAt = new Date().toISOString();
     await saveState();
     return stats;

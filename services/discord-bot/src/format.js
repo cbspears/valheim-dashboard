@@ -64,6 +64,14 @@ const POTY_TEMPLATES = {
     '{name} kept the longfire burning {hours}h. Devotion is its own kind of saga.',
     '{hours} hours of honest toil from {name} today. The longhouse grows because someone refuses to rest.',
   ],
+  // Unsung Hero (underdog spotlight). Every blurb uses ONLY {name} — a quiet
+  // viking may have ~0 of every stat, so these must never reach for one.
+  underdog: [
+    'Not every saga is loud — {name} kept the longfire lit and the hall warm tonight. Skål to the steady ones.',
+    'The clan raises a horn to {name}: fewer hours, no less heart. Every viking’s name belongs in the saga.',
+    '{name} sailed in for a spell and left the realm brighter for it. The gods may not have noticed — the hall did.',
+    'Tonight the hall toasts {name}, who shows up, hammer in hand, and asks for no glory. That’s its own kind of legend.',
+  ],
 };
 
 // Small, pure 31-multiplier string hash (stable across runs).

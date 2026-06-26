@@ -19,6 +19,7 @@ import type {
   DiscordEvent,
   UpcomingEvent,
   GalleryPhoto,
+  PotyHistoryEntry,
 } from './types';
 
 function db() {
@@ -149,6 +150,19 @@ export async function getGalleryPhotos(limit = 60): Promise<GalleryPhoto[]> {
     .order('posted_at', { ascending: false })
     .limit(limit);
   return (data as GalleryPhoto[]) ?? [];
+}
+
+/**
+ * Player-of-the-Day archive (newest first). The bot writes one row per evening
+ * recap; the Vikings page renders a log + derives a "most crowned" tally.
+ */
+export async function getPotyArchive(limit = 120): Promise<PotyHistoryEntry[]> {
+  const { data } = await db()
+    .from('poty_history')
+    .select('*')
+    .order('awarded_at', { ascending: false })
+    .limit(limit);
+  return (data as PotyHistoryEntry[]) ?? [];
 }
 
 export async function getRoadmap(): Promise<RoadmapItem[]> {

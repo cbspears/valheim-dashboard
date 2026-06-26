@@ -3,7 +3,7 @@
 //   dry-run   : no Discord login; print what it would post (validates formatting)
 import 'dotenv/config';
 import { loadState, saveState as persistState } from './state.js';
-import { readClient } from './supabase.js';
+import { readClient, serviceClient } from './supabase.js';
 import { createDiscordPoster, createDryRunPoster } from './discord.js';
 import { createRelay } from './relay.js';
 import { createBossWatcher } from './bosses.js';
@@ -44,7 +44,9 @@ async function runLive() {
 
   const relay = createRelay({ db, post, state, saveState });
   const bosses = createBossWatcher({ db, post, state, saveState });
-  const recap = createRecap({ db, post, state, saveState, tz: TZ, startsAt: recapsStart });
+  const writeDb = process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceClient() : null;
+  if (!writeDb) console.warn('[recap] no SUPABASE_SERVICE_ROLE_KEY — Player-of-the-Day archive disabled');
+  const recap = createRecap({ db, post, state, saveState, writeDb, tz: TZ, startsAt: recapsStart });
 
   await bosses.init(); // seed already-felled bosses so we don't retro-announce
   await saveState();
