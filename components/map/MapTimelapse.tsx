@@ -1,0 +1,131 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { Pause, Play, SkipForward } from 'lucide-react';
+import {
+  MAP_DEMO_DAYS,
+  MAP_DEMO_LABELS,
+} from '@/config/map-demo.generated';
+
+const frameSrc = (day: number) => `/map-demo/day-${String(day).padStart(3, '0')}.webp`;
+
+/** Milliseconds per frame while playing (~10s for a full season). */
+const FRAME_MS = 100;
+
+export function MapTimelapse() {
+  const [day, setDay] = useState(MAP_DEMO_DAYS);
+  const [playing, setPlaying] = useState(false);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Warm the browser cache so scrubbing is instant: newest frames first
+  // (that's what visitors see), then the rest in the background.
+  useEffect(() => {
+    const order: number[] = [];
+    for (let d = MAP_DEMO_DAYS; d >= 1; d--) order.push(d);
+    let i = 0;
+    const loadNext = () => {
+      if (i >= order.length) return;
+      const img = new Image();
+      img.onload = img.onerror = loadNext;
+      img.src = frameSrc(order[i++]);
+    };
+    // a few parallel lanes
+    for (let lane = 0; lane < 4; lane++) loadNext();
+  }, []);
+
+  useEffect(() => {
+    if (!playing) {
+      if (timer.current) clearInterval(timer.current);
+      timer.current = null;
+      return;
+    }
+    timer.current = setInterval(() => {
+      setDay((d) => {
+        if (d >= MAP_DEMO_DAYS) {
+          setPlaying(false);
+          return d;
+        }
+        return d + 1;
+      });
+    }, FRAME_MS);
+    return () => {
+      if (timer.current) clearInterval(timer.current);
+    };
+  }, [playing]);
+
+  const togglePlay = () => {
+    if (!playing && day >= MAP_DEMO_DAYS) setDay(1); // replay from the start
+    setPlaying((p) => !p);
+  };
+
+  return (
+    <div>
+      {/* The map itself */}
+      <div className="relative overflow-hidden rounded-lg border border-rune bg-pitch">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={frameSrc(day)}
+          alt={`The known world as of day ${day}`}
+          className="block aspect-square w-full select-none"
+          draggable={false}
+        />
+        {MAP_DEMO_LABELS.filter((l) => l.day <= day).map((l) => (
+          <div
+            key={l.name}
+            className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 animate-[fadeIn_0.6s_ease]"
+            style={{ left: `${l.x * 100}%`, top: `${l.y * 100}%` }}
+          >
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="block h-1.5 w-1.5 rotate-45 border border-gold bg-gold/70 shadow-[0_0_6px_rgba(200,149,42,0.8)]" />
+              <span className="whitespace-nowrap font-display text-[11px] tracking-wide text-gold-light [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+                {l.name}
+              </span>
+            </div>
+          </div>
+        ))}
+        {/* day readout, engraved into the corner */}
+        <div className="absolute right-3 top-3 rounded-md border border-rune bg-pitch/75 px-2.5 py-1 font-display text-sm text-gold-light backdrop-blur-sm">
+          Day {day}
+        </div>
+      </div>
+
+      {/* Scrubber + transport */}
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          onClick={togglePlay}
+          aria-label={playing ? 'Pause the timelapse' : 'Play the timelapse'}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gold-dim bg-gold/10 text-gold-light transition-colors hover:border-gold hover:bg-gold/20 gold-ring"
+        >
+          {playing ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
+        </button>
+        <input
+          type="range"
+          min={1}
+          max={MAP_DEMO_DAYS}
+          value={day}
+          onChange={(e) => {
+            setPlaying(false);
+            setDay(Number(e.target.value));
+          }}
+          aria-label="Scrub through the season"
+          className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-surface-raised"
+          style={{ accentColor: 'var(--color-gold, #c8952a)' }}
+        />
+        <button
+          onClick={() => {
+            setPlaying(false);
+            setDay(MAP_DEMO_DAYS);
+          }}
+          aria-label="Jump to today"
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-rune bg-surface-raised px-3 text-xs font-medium tracking-wide text-ash-dim transition-colors hover:text-ash gold-ring"
+        >
+          <SkipForward size={13} />
+          Today
+        </button>
+      </div>
+      <p className="mt-2 text-center text-xs text-muted">
+        Day {day} of {MAP_DEMO_DAYS} — drag the slider to travel through the saga.
+      </p>
+    </div>
+  );
+}

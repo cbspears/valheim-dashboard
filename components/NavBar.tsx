@@ -11,6 +11,7 @@ const LINKS = [
   { href: '/', label: 'Hall' },
   { href: '/players', label: 'Vikings' },
   { href: '/world', label: 'World' },
+  { href: '/map', label: 'Map' },
   { href: '/events', label: 'Saga' },
   { href: '/mods', label: 'Mods' },
   { href: '/gallery', label: 'Gallery' },
