@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Camera, Pause, Play, SkipForward, X } from 'lucide-react';
+import { Camera, Minus, Pause, Play, Plus, RotateCcw, SkipForward, X } from 'lucide-react';
 import {
   MAP_DEMO_DAYS,
   MAP_DEMO_LABELS,
@@ -27,7 +27,7 @@ const pinVerb = (kind: MapLabel['kind']) =>
 const frameSrc = (day: number) => `/map-demo/day-${String(day).padStart(3, '0')}.webp`;
 
 /** One glyph per marker kind — base/poi are player pins; boss/trader are system layers. */
-function MarkerGlyph({ kind }: { kind: 'base' | 'poi' | 'boss' | 'trader' }) {
+function MarkerGlyph({ kind }: { kind: MapLabel['kind'] }) {
   const glow = 'shadow-[0_0_6px_rgba(200,149,42,0.8)]';
   switch (kind) {
     case 'base':
@@ -43,12 +43,18 @@ function MarkerGlyph({ kind }: { kind: 'base' | 'poi' | 'boss' | 'trader' }) {
 
 /** Milliseconds per frame while playing (~10s for a full season). */
 const FRAME_MS = 100;
+const MAX_ZOOM = 4;
 
 export function MapTimelapse() {
   const [day, setDay] = useState(MAP_DEMO_DAYS);
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState<MapLabel | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 }); // in % of the (unscaled) content
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; y: number } | null>(null);
+  const moved = useRef(false);
 
   // Warm the browser cache so scrubbing is instant: newest frames first
   // (that's what visitors see), then the rest in the background.
@@ -62,7 +68,6 @@ export function MapTimelapse() {
       img.onload = img.onerror = loadNext;
       img.src = frameSrc(order[i++]);
     };
-    // a few parallel lanes
     for (let lane = 0; lane < 4; lane++) loadNext();
   }, []);
 
@@ -91,50 +96,141 @@ export function MapTimelapse() {
     setPlaying((p) => !p);
   };
 
+  // pan is limited so the map edge never leaves the frame
+  const clampPan = (p: { x: number; y: number }, z: number) => {
+    const limit = ((z - 1) * 50) / z;
+    return {
+      x: Math.max(-limit, Math.min(limit, p.x)),
+      y: Math.max(-limit, Math.min(limit, p.y)),
+    };
+  };
+
+  const changeZoom = (factor: number) => {
+    setZoom((z) => {
+      const next = Math.max(1, Math.min(MAX_ZOOM, z * factor));
+      setPan((p) => clampPan(p, next));
+      return next;
+    });
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (zoom === 1) return;
+    drag.current = { x: e.clientX, y: e.clientY };
+    moved.current = false;
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.current || !viewportRef.current) return;
+    const rect = viewportRef.current.getBoundingClientRect();
+    const dx = e.clientX - drag.current.x;
+    const dy = e.clientY - drag.current.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) moved.current = true;
+    drag.current = { x: e.clientX, y: e.clientY };
+    setPan((p) =>
+      clampPan(
+        { x: p.x + (dx / rect.width) * (100 / zoom), y: p.y + (dy / rect.height) * (100 / zoom) },
+        zoom,
+      ),
+    );
+  };
+  const onPointerUp = () => {
+    drag.current = null;
+  };
+
   return (
     <div>
-      {/* The map itself */}
-      <div className="relative overflow-hidden rounded-lg border border-rune bg-pitch">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={frameSrc(day)}
-          alt={`The known world as of day ${day}`}
-          className="block aspect-square w-full select-none"
-          draggable={false}
-        />
-        {MAP_DEMO_LABELS.filter((l) => l.day <= day).map((l) => (
-          <button
-            key={l.name}
-            onClick={() => setSelected(l)}
-            className="group absolute -translate-x-1/2 -translate-y-1/2 animate-[fadeIn_0.6s_ease] cursor-pointer gold-ring"
-            style={{ left: `${l.x * 100}%`, top: `${l.y * 100}%` }}
-            aria-label={`${l.name} — ${KIND_LABEL[l.kind]}, ${pinVerb(l.kind)} ${l.by} on day ${l.day}`}
-          >
-            <div className="flex flex-col items-center gap-0.5">
-              <MarkerGlyph kind={l.kind} />
-              <span className="whitespace-nowrap font-display text-[11px] tracking-wide text-gold-light [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
-                {l.name}
-              </span>
-            </div>
-            {/* hover card */}
-            <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-rune bg-pitch/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm group-hover:block">
-              <div className="font-display text-xs text-gold-light">{l.name}</div>
-              <div className="mt-0.5 text-[11px] text-ash-dim">
-                {KIND_LABEL[l.kind]} · {pinVerb(l.kind)}{' '}
-                <span className="text-ash">{l.by}</span> · Day {l.day}
+      {/* The map viewport — capped so it never outgrows the screen */}
+      <div
+        ref={viewportRef}
+        className="relative mx-auto aspect-square w-full max-w-[min(100%,66vh)] touch-none overflow-hidden rounded-lg border border-rune bg-pitch"
+        style={{ cursor: zoom > 1 ? (drag.current ? 'grabbing' : 'grab') : undefined }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+      >
+        {/* zoomable content: frame + markers scale together, marker chrome counter-scales */}
+        <div
+          className="relative h-full w-full"
+          style={{ transform: `scale(${zoom}) translate(${pan.x}%, ${pan.y}%)` }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={frameSrc(day)}
+            alt={`The known world as of day ${day}`}
+            className="block h-full w-full select-none"
+            draggable={false}
+          />
+          {MAP_DEMO_LABELS.filter((l) => l.day <= day).map((l) => (
+            <button
+              key={l.name}
+              onClick={() => {
+                if (!moved.current) setSelected(l);
+              }}
+              className="group absolute animate-[fadeIn_0.6s_ease] cursor-pointer gold-ring"
+              style={{
+                left: `${l.x * 100}%`,
+                top: `${l.y * 100}%`,
+                transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+              }}
+              aria-label={`${l.name} — ${KIND_LABEL[l.kind]}, ${pinVerb(l.kind)} ${l.by} on day ${l.day}`}
+            >
+              <div className="flex flex-col items-center gap-0.5">
+                <MarkerGlyph kind={l.kind} />
+                <span className="whitespace-nowrap font-display text-[11px] tracking-wide text-gold-light [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+                  {l.name}
+                </span>
               </div>
-              {DEMO_PLACE_PHOTOS[l.name] && (
-                <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gold-dim">
-                  <Camera size={11} /> {DEMO_PLACE_PHOTOS[l.name].length}{' '}
-                  {DEMO_PLACE_PHOTOS[l.name].length === 1 ? 'photo' : 'photos'} — click to view
+              {/* hover card */}
+              <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-rune bg-pitch/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm group-hover:block">
+                <div className="font-display text-xs text-gold-light">{l.name}</div>
+                <div className="mt-0.5 text-[11px] text-ash-dim">
+                  {KIND_LABEL[l.kind]} · {pinVerb(l.kind)}{' '}
+                  <span className="text-ash">{l.by}</span> · Day {l.day}
                 </div>
-              )}
-            </div>
-          </button>
-        ))}
+                {DEMO_PLACE_PHOTOS[l.name] && (
+                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gold-dim">
+                    <Camera size={11} /> {DEMO_PLACE_PHOTOS[l.name].length}{' '}
+                    {DEMO_PLACE_PHOTOS[l.name].length === 1 ? 'photo' : 'photos'} — click to view
+                  </div>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+
         {/* day readout, engraved into the corner */}
         <div className="absolute right-3 top-3 rounded-md border border-rune bg-pitch/75 px-2.5 py-1 font-display text-sm text-gold-light backdrop-blur-sm">
           Day {day}
+        </div>
+        {/* zoom controls */}
+        <div className="absolute left-3 top-3 flex flex-col gap-1">
+          <button
+            onClick={() => changeZoom(1.5)}
+            aria-label="Zoom in"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-rune bg-pitch/75 text-ash-dim backdrop-blur-sm transition-colors hover:text-gold-light gold-ring"
+          >
+            <Plus size={15} />
+          </button>
+          <button
+            onClick={() => changeZoom(1 / 1.5)}
+            aria-label="Zoom out"
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-rune bg-pitch/75 text-ash-dim backdrop-blur-sm transition-colors hover:text-gold-light gold-ring"
+          >
+            <Minus size={15} />
+          </button>
+          {zoom > 1 && (
+            <button
+              onClick={() => {
+                setZoom(1);
+                setPan({ x: 0, y: 0 });
+              }}
+              aria-label="Reset view"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-rune bg-pitch/75 text-ash-dim backdrop-blur-sm transition-colors hover:text-gold-light gold-ring"
+            >
+              <RotateCcw size={14} />
+            </button>
+          )}
         </div>
         {/* marker legend */}
         <div className="absolute bottom-3 left-3 flex items-center gap-3.5 rounded-md border border-rune bg-pitch/75 px-2.5 py-1.5 backdrop-blur-sm">

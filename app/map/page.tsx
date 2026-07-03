@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Map, Compass, CalendarDays, Landmark, EyeOff, History } from 'lucide-react';
+import { Map, Camera, Compass, CalendarDays, Landmark, EyeOff, History } from 'lucide-react';
 import { SectionHeader, Card, CardBody, StatTile, Badge } from '@/components/ui';
 import { MapTimelapse } from '@/components/map/MapTimelapse';
 import {
@@ -70,6 +70,30 @@ export default function MapPage() {
             Notable places only, vikings — homes and discoveries, not wood piles. The Cartographer
             keeps the map honest. Boss altars and traders chart themselves when found — no pin
             needed.
+          </p>
+        </CardBody>
+      </Card>
+
+      {/* How to add photos to a place */}
+      <Card className="mb-6 border-l-2 border-l-gold">
+        <CardBody>
+          <div className="mb-3 flex items-center gap-2">
+            <Camera size={18} className="text-gold" />
+            <h2 className="font-display text-base tracking-wide text-ash">
+              Add photos to a place
+            </h2>
+          </div>
+          <p className="text-sm leading-relaxed text-ash-dim">
+            Post a screenshot in Discord, tag the bot, and{' '}
+            <span className="font-semibold text-ash">name the place in your caption</span> — e.g.{' '}
+            <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+              @Eilif sunset at Draugheim
+            </span>
+            . The photo lands in the{' '}
+            <span className="text-ash">Gallery</span> and on{' '}
+            <span className="text-ash">Draugheim&apos;s marker</span> here — click any marker to
+            see its album. Pin first or photo first, either order works: a photo naming a place
+            that isn&apos;t pinned yet attaches itself the moment the pin appears.
           </p>
         </CardBody>
       </Card>
