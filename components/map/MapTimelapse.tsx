@@ -9,9 +9,23 @@ import {
 } from '@/config/map-demo.generated';
 
 /** Demo only — in production these come from gallery_photos rows linked to the marker. */
-const DEMO_PLACE_PHOTOS: Record<string, string[]> = {
-  Midgard: ['/banner-eilif.webp', '/og-eilif.jpg'],
-  Draugheim: ['/bg-eilif.webp'],
+interface PlacePhoto {
+  src: string;
+  by: string;
+  day: number;
+  caption?: string;
+}
+const DEMO_PLACE_PHOTOS: Record<string, PlacePhoto[]> = {
+  Midgard: [
+    { src: '/map-demo/photos/midgard-1.webp', by: 'Astrid', day: 3, caption: 'The first hearth' },
+    { src: '/map-demo/photos/midgard-2.webp', by: 'Bjorn', day: 18, caption: 'Longhouse at dusk' },
+    { src: '/map-demo/photos/midgard-3.webp', by: 'Einar', day: 34 },
+    { src: '/map-demo/photos/midgard-4.webp', by: 'Sean', day: 61, caption: 'Foggy morning watch' },
+    { src: '/map-demo/photos/midgard-5.webp', by: 'Benson', day: 89, caption: 'The night of the raid' },
+  ],
+  Draugheim: [
+    { src: '/map-demo/photos/draugheim-1.webp', by: 'Astrid', day: 42, caption: 'Home among the bogs' },
+  ],
 };
 
 const KIND_LABEL: Record<MapLabel['kind'], string> = {
@@ -318,15 +332,38 @@ export function MapTimelapse() {
                 <span className="text-ash">{selected.by}</span> · Day {selected.day}
               </p>
               {DEMO_PLACE_PHOTOS[selected.name] ? (
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  {DEMO_PLACE_PHOTOS[selected.name].map((src) => (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      key={src}
-                      src={src}
-                      alt={`${selected.name} — from the gallery`}
-                      className="aspect-video w-full rounded-md border border-rune object-cover"
-                    />
+                <div
+                  className={`mt-4 grid gap-2 ${
+                    DEMO_PLACE_PHOTOS[selected.name].length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+                  }`}
+                >
+                  {DEMO_PLACE_PHOTOS[selected.name].map((photo, i) => (
+                    <figure
+                      key={photo.src}
+                      className={
+                        // with an odd count >1, let the first photo span the full row
+                        DEMO_PLACE_PHOTOS[selected.name].length > 1 &&
+                        DEMO_PLACE_PHOTOS[selected.name].length % 2 === 1 &&
+                        i === 0
+                          ? 'col-span-2'
+                          : undefined
+                      }
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={photo.src}
+                        alt={photo.caption ?? `${selected.name} — from the gallery`}
+                        className="aspect-video w-full rounded-md border border-rune object-cover"
+                      />
+                      <figcaption className="mt-1 flex items-baseline justify-between gap-2 px-0.5">
+                        <span className="truncate text-[11px] text-ash-dim">
+                          {photo.caption ?? selected.name}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-muted">
+                          {photo.by} · Day {photo.day}
+                        </span>
+                      </figcaption>
+                    </figure>
                   ))}
                 </div>
               ) : (
