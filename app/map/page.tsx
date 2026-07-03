@@ -68,7 +68,8 @@ export default function MapPage() {
           </div>
           <p className="mt-3 text-xs text-muted">
             Notable places only, vikings — homes and discoveries, not wood piles. The Cartographer
-            keeps the map honest.
+            keeps the map honest. Boss altars and traders chart themselves when found — no pin
+            needed.
           </p>
         </CardBody>
       </Card>

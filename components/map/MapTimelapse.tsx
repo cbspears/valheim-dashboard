@@ -9,6 +9,21 @@ import {
 
 const frameSrc = (day: number) => `/map-demo/day-${String(day).padStart(3, '0')}.webp`;
 
+/** One glyph per marker kind — base/poi are player pins; boss/trader are system layers. */
+function MarkerGlyph({ kind }: { kind: 'base' | 'poi' | 'boss' | 'trader' }) {
+  const glow = 'shadow-[0_0_6px_rgba(200,149,42,0.8)]';
+  switch (kind) {
+    case 'base':
+      return <span className={`block h-2 w-2 border border-gold bg-gold/80 ${glow}`} />;
+    case 'poi':
+      return <span className={`block h-1.5 w-1.5 rotate-45 border border-gold bg-gold/40 ${glow}`} />;
+    case 'boss':
+      return <span className={`block h-2.5 w-2.5 rounded-full border-2 border-gold bg-death/40 ${glow}`} />;
+    case 'trader':
+      return <span className={`block h-2 w-2 rounded-full border border-gold bg-gold/80 ${glow}`} />;
+  }
+}
+
 /** Milliseconds per frame while playing (~10s for a full season). */
 const FRAME_MS = 100;
 
@@ -76,11 +91,7 @@ export function MapTimelapse() {
             style={{ left: `${l.x * 100}%`, top: `${l.y * 100}%` }}
           >
             <div className="flex flex-col items-center gap-0.5">
-              {l.kind === 'base' ? (
-                <span className="block h-2 w-2 border border-gold bg-gold/80 shadow-[0_0_6px_rgba(200,149,42,0.8)]" />
-              ) : (
-                <span className="block h-1.5 w-1.5 rotate-45 border border-gold bg-gold/40 shadow-[0_0_6px_rgba(200,149,42,0.8)]" />
-              )}
+              <MarkerGlyph kind={l.kind} />
               <span className="whitespace-nowrap font-display text-[11px] tracking-wide text-gold-light [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
                 {l.name}
               </span>
@@ -92,15 +103,20 @@ export function MapTimelapse() {
           Day {day}
         </div>
         {/* marker legend */}
-        <div className="absolute bottom-3 left-3 flex items-center gap-4 rounded-md border border-rune bg-pitch/75 px-2.5 py-1.5 backdrop-blur-sm">
-          <span className="flex items-center gap-1.5 text-[11px] tracking-wide text-ash-dim">
-            <span className="block h-2 w-2 border border-gold bg-gold/80" />
-            Base
-          </span>
-          <span className="flex items-center gap-1.5 text-[11px] tracking-wide text-ash-dim">
-            <span className="block h-1.5 w-1.5 rotate-45 border border-gold bg-gold/40" />
-            Place of interest
-          </span>
+        <div className="absolute bottom-3 left-3 flex items-center gap-3.5 rounded-md border border-rune bg-pitch/75 px-2.5 py-1.5 backdrop-blur-sm">
+          {(
+            [
+              ['base', 'Base'],
+              ['poi', 'Place of interest'],
+              ['boss', 'Boss altar'],
+              ['trader', 'Trader'],
+            ] as const
+          ).map(([kind, label]) => (
+            <span key={kind} className="flex items-center gap-1.5 text-[11px] tracking-wide text-ash-dim">
+              <MarkerGlyph kind={kind} />
+              {label}
+            </span>
+          ))}
         </div>
       </div>
 
