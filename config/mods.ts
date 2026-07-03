@@ -1,8 +1,9 @@
 // The server's mod list. Edit this file to update the Mods page — the dashboard
 // reads it directly (no database needed). Push to redeploy.
 //
-// Source of truth: the Obsidian note `05-Server/Mods/Selected-Mods.md`. Keep
-// `tentative` in sync with what's actually locked vs. still being decided.
+// Source of truth: verified on the live server 2026-07-03 (see Obsidian note
+// `05-Server/Mods/Selected-Mods.md`). Keep `tentative` in sync with what's
+// actually locked vs. still being piloted.
 
 export type ModCategory = 'Core' | 'QoL' | 'Content' | 'Balance';
 
@@ -63,26 +64,62 @@ export const MODS: Mod[] = [
     url: 'https://thunderstore.io/c/valheim/p/Menthus/Useful_Paths/',
   },
 
-  // ── Still being finalized (server-side — nothing for players to install) ──
+  // ── Server-only, confirmed (nothing for players to install) ───────────────
   {
     name: 'ServersideQoL',
     author: 'ArgusMagnus',
     description:
-      'Server-only comforts: infinite building/farming stamina, auto-closing doors, and chest sorting. Vanilla clients work fine — nothing to install.',
+      'Server-only comforts: infinite building and farming stamina, and doors that swing shut behind you. Vanilla clients work fine — nothing to install.',
+    version: '1.8.0',
     category: 'QoL',
     clientRequired: false,
-    tentative: true,
     url: 'https://thunderstore.io/c/valheim/p/ArgusMagnus/ServersideQoL/',
   },
   {
-    name: 'ServerCharacters',
-    author: 'Smoothbrain',
+    name: 'Eilif Companion',
+    author: 'Blockspace (custom-built)',
     description:
-      'Keeps each character saved on the server (auto-backups, no tampering) — and feeds the per-player stats you see across this dashboard. Server-side.',
+      "The voice of the Hall itself — carries the in-game /oath swearing and speaks as Eilif. Built just for this server; nothing to install.",
+    version: '0.1.0',
     category: 'Core',
     clientRequired: false,
+  },
+
+  // ── Server-only, piloting (feeds this dashboard — nothing to install) ─────
+  {
+    name: 'GsValheimStats Emitter',
+    author: 'Proudlock_Technology',
+    description:
+      'Server-side eyes and ears — streams live presence and boss-kill data straight into this dashboard. Piloting now; nothing to install.',
+    version: '0.2.4',
+    category: 'Content',
+    clientRequired: false,
     tentative: true,
-    url: 'https://thunderstore.io/c/valheim/p/Smoothbrain/ServerCharacters/',
+    url: 'https://thunderstore.io/c/valheim/p/Proudlock_Technology/GsValheimStatsEmitter/',
+  },
+  {
+    name: 'WebMap',
+    author: 'Zevaryx (repack of h0tw1r3)',
+    description:
+      "Renders the living world map that feeds this site's Map page. Piloting now; server-side, nothing to install.",
+    version: '2.7.1',
+    category: 'Content',
+    clientRequired: false,
+    tentative: true,
+    url: 'https://thunderstore.io/c/valheim/p/Zevaryx/WebMap/',
+  },
+
+  // ── Client-optional, piloting ──────────────────────────────────────────────
+  {
+    name: 'GsValheimStatsClient',
+    author: 'Proudlock_Technology',
+    description:
+      'Richer per-viking stats — deaths, biomes explored, playtime — feeding the leaderboards. Optional while it pilots; install it if you want your name on the deeper stats pages.',
+    version: '0.2.9',
+    category: 'Content',
+    clientRequired: true,
+    tentative: true,
+    url: 'https://thunderstore.io/c/valheim/p/Proudlock_Technology/GsValheimStatsClient/',
   },
 ];
 

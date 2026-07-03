@@ -48,3 +48,4 @@ plugins/eilif-companion/obj/
 plugins/eilif-companion/bin/
 # NOTE: plugins/eilif-companion/dist/EilifCompanion.dll IS committed (the deployable artifact).
 plugins/eilif-companion/.voice-token
+pilot-staging/
