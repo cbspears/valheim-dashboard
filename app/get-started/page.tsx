@@ -20,6 +20,8 @@ import {
   ListChecks,
   Ship,
   TriangleAlert,
+  ScrollText,
+  ArrowRight,
 } from 'lucide-react';
 import { Card, CardBody, SectionHeader, Badge } from '@/components/ui';
 import {
@@ -157,6 +159,30 @@ export default function GetStartedPage() {
         subtitle={`New to ${SERVER_NAME}? Three steps to install the mods and join the server — about 15 minutes, no experience needed.`}
         icon={<Compass size={22} />}
       />
+
+      {/* ── First: the Oath ─────────────────────────────────────────────── */}
+      <Link href="/oath" className="group block gold-ring rounded-lg">
+        <Card glow className="border-l-2 border-l-gold transition-colors group-hover:border-gold">
+          <CardBody className="flex items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <ScrollText size={20} className="mt-0.5 shrink-0 text-gold" />
+              <div>
+                <h3 className="font-display text-base tracking-wide text-ash">
+                  First — swear the Oath
+                </h3>
+                <p className="mt-1 text-sm leading-relaxed text-ash-dim">
+                  Before the mods, before the map: read the charter and add your mark. One line in
+                  Discord with your viking name, and the saga knows you. Every age begins with a
+                  vow.
+                </p>
+              </div>
+            </div>
+            <span className="flex shrink-0 items-center gap-1.5 text-sm font-semibold text-gold-light transition-transform group-hover:translate-x-0.5">
+              Take the Oath <ArrowRight size={15} />
+            </span>
+          </CardBody>
+        </Card>
+      </Link>
 
       {/* ── Connect at a glance ─────────────────────────────────────────── */}
       <Card className="border-l-2 border-l-gold-dim">
