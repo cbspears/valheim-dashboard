@@ -47,13 +47,13 @@ export default function MapPage() {
               <p className="text-sm leading-relaxed text-ash-dim">
                 Type in chat:{' '}
                 <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                  /pin The Dark Chapel
+                </span>{' '}
+                — or{' '}
+                <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
                   /pin base Odinshold
                 </span>{' '}
-                for a settlement, or{' '}
-                <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
-                  /pin poi The Dark Chapel
-                </span>{' '}
-                for a landmark.
+                if it&apos;s a settlement.
               </p>
             </div>
             <div className="flex items-start gap-3">
@@ -61,8 +61,8 @@ export default function MapPage() {
                 3
               </span>
               <p className="text-sm leading-relaxed text-ash-dim">
-                The Cartographer blesses it in Discord — approved names join the atlas, and the
-                Saga, forever.
+                That&apos;s it — your pin joins the atlas at the next map update, and the Saga
+                remembers who named it.
               </p>
             </div>
           </div>
