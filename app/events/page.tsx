@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
-import { ScrollText } from 'lucide-react';
+import { ScrollText, BookOpenText } from 'lucide-react';
 import { SectionHeader } from '@/components/ui';
 import { EventFeed } from '@/components/events/EventFeed';
-import { getAllEvents } from '@/lib/data';
+import { EpisodeList } from '@/components/events/EpisodeList';
+import { getAllEvents, getSessionsSince, getEventsSince } from '@/lib/data';
+import { buildEpisodes } from '@/lib/episodes';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,17 +13,33 @@ export const metadata: Metadata = {
 };
 
 export default async function EventsPage() {
-  const events = await getAllEvents(200);
+  const [events, sessions, sagaEvents] = await Promise.all([
+    getAllEvents(200),
+    getSessionsSince(70),
+    getEventsSince(70),
+  ]);
+
+  const episodes = buildEpisodes(sessions, sagaEvents);
 
   return (
-    <div className="flex flex-col gap-8">
-      <SectionHeader
-        title="The Saga"
-        subtitle="Every deed, death, and triumph."
-        icon={<ScrollText size={22} />}
-      />
+    <div className="flex flex-col gap-12">
+      <section className="flex flex-col gap-6">
+        <SectionHeader
+          title="The Episodes"
+          subtitle="Each night the vikings gather becomes a chapter of the season."
+          icon={<BookOpenText size={22} />}
+        />
+        <EpisodeList episodes={episodes} />
+      </section>
 
-      <EventFeed events={events} />
+      <section className="flex flex-col gap-6">
+        <SectionHeader
+          title="The Full Chronicle"
+          subtitle="Every deed, death, and triumph — as it was recorded."
+          icon={<ScrollText size={22} />}
+        />
+        <EventFeed events={events} />
+      </section>
     </div>
   );
 }

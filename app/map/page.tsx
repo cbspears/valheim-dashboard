@@ -5,6 +5,7 @@ import { MapTimelapse } from '@/components/map/MapTimelapse';
 import {
   MAP_DEMO_DAYS,
   MAP_DEMO_LABELS,
+  MAP_DEMO_REVEALED_BY_DAY,
   MAP_DEMO_REVEALED_PCT,
 } from '@/config/map-demo.generated';
 import { SERVER_NAME } from '@/config/server';
@@ -15,6 +16,14 @@ export const metadata: Metadata = {
 };
 
 export default function MapPage() {
+  // how much fresh ground the warband charted in the last seven days
+  const byDay = MAP_DEMO_REVEALED_BY_DAY;
+  const weeklyGrowth = byDay.length > 7 ? byDay[byDay.length - 1] - byDay[byDay.length - 8] : 0;
+  const weeklyHint =
+    weeklyGrowth > 0
+      ? `+${weeklyGrowth.toFixed(1)}% charted this past week`
+      : 'Charted by walking and sailing it';
+
   return (
     <div>
       <SectionHeader
@@ -125,7 +134,7 @@ export default function MapPage() {
           label="World revealed"
           value={`${MAP_DEMO_REVEALED_PCT}%`}
           icon={<Compass size={15} />}
-          hint="Charted by walking and sailing it"
+          hint={weeklyHint}
         />
         <StatTile
           label="Named places"

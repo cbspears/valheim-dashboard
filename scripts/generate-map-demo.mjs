@@ -232,6 +232,38 @@ mkdirSync(OUT_DIR, { recursive: true });
 const frame = new Uint8Array(SIZE * SIZE * 3);
 let revealedPx = 0;
 
+// per-day revealed % (index 0 = day 1) + a snapshot of the cumulative mask as
+// it stood one week (7 days) before the finale, for the "world grew" overlay
+const worldPx = Math.PI * WORLD_R * WORLD_R;
+const revealedByDay = [];
+let weekAgoMask = null;
+
+// feather an arbitrary 0/255 mask with the same soft edge used on the frames
+function featherOf(src) {
+  const R = 2, W = 2 * R + 1;
+  const t = new Uint16Array(SIZE * SIZE);
+  const out = new Uint8Array(SIZE * SIZE);
+  for (let y = 0; y < SIZE; y++) {
+    let acc = 0;
+    for (let x = -R; x <= R; x++) acc += src[y * SIZE + Math.min(SIZE - 1, Math.max(0, x))];
+    for (let x = 0; x < SIZE; x++) {
+      t[y * SIZE + x] = acc;
+      const xa = Math.max(0, x - R), xb = Math.min(SIZE - 1, x + R + 1);
+      acc += src[y * SIZE + xb] - src[y * SIZE + xa];
+    }
+  }
+  for (let x = 0; x < SIZE; x++) {
+    let acc = 0;
+    for (let y = -R; y <= R; y++) acc += t[Math.min(SIZE - 1, Math.max(0, y)) * SIZE + x];
+    for (let y = 0; y < SIZE; y++) {
+      out[y * SIZE + x] = Math.round(acc / (W * W));
+      const ya = Math.max(0, y - R), yb = Math.min(SIZE - 1, y + R + 1);
+      acc += t[yb * SIZE + x] - t[ya * SIZE + x];
+    }
+  }
+  return out;
+}
+
 async function renderFrame(day) {
   featherMask();
   for (let i = 0; i < SIZE * SIZE; i++) {
@@ -274,11 +306,32 @@ for (let day = 1; day <= DAYS; day++) {
     labels.push({ name: def.name, day, kind: def.kind, by: def.by, x: p.x / SIZE, y: p.y / SIZE });
   }
   await renderFrame(day);
+  // record how much of the world stands charted at the close of this day
+  let dayPx = 0;
+  for (let i = 0; i < mask.length; i++) if (mask[i]) dayPx++;
+  revealedByDay.push(Number(((dayPx / worldPx) * 100).toFixed(1)));
+  // freeze the frontier as it was a week before the finale
+  if (day === DAYS - 7) weekAgoMask = mask.slice();
 }
 revealedPx = mask.reduce((n, v) => n + (v ? 1 : 0), 0);
 console.timeEnd('generate');
 
-const worldPx = Math.PI * WORLD_R * WORLD_R;
+// ── "The World Grew": territory revealed in the final week, as a gold overlay ─
+{
+  const diff = new Uint8Array(SIZE * SIZE);
+  for (let i = 0; i < diff.length; i++) diff[i] = mask[i] && !weekAgoMask[i] ? 255 : 0;
+  const grew = featherOf(diff);
+  const overlay = new Uint8Array(SIZE * SIZE * 4);
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const j = i * 4;
+    overlay[j] = 200; overlay[j + 1] = 149; overlay[j + 2] = 42;
+    overlay[j + 3] = Math.round((grew[i] / 255) * 90);
+  }
+  await sharp(Buffer.from(overlay), { raw: { width: SIZE, height: SIZE, channels: 4 } })
+    .webp({ quality: 80, alphaQuality: 100 })
+    .toFile(join(OUT_DIR, 'overlay-week.webp'));
+}
+
 const meta = {
   days: DAYS,
   revealedPct: Math.round((revealedPx / worldPx) * 100),
@@ -306,6 +359,8 @@ export interface MapLabel {
 
 export const MAP_DEMO_DAYS = ${DAYS};
 export const MAP_DEMO_REVEALED_PCT = ${meta.revealedPct};
+/** Percent of the world charted at the close of each day (index 0 = day 1). */
+export const MAP_DEMO_REVEALED_BY_DAY: number[] = ${JSON.stringify(revealedByDay)};
 export const MAP_DEMO_LABELS: MapLabel[] = ${JSON.stringify(
     labels.map((l) => ({ ...l, x: Number(l.x.toFixed(4)), y: Number(l.y.toFixed(4)) })),
     null,

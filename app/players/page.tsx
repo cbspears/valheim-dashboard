@@ -12,6 +12,7 @@ import {
   Castle,
   Map,
   Crown,
+  CalendarDays,
 } from 'lucide-react';
 import { Card, SectionHeader, Badge, EmptyState, OnlineDot } from '@/components/ui';
 import {
@@ -19,7 +20,16 @@ import {
   type LeaderboardEntry,
 } from '@/components/players/LeaderboardCard';
 import { PotyArchive } from '@/components/players/PotyArchive';
-import { getOnlinePlayers, getAllPlayers, getPlayersWithStats, getPotyArchive } from '@/lib/data';
+import { AttendanceCalendar } from '@/components/players/AttendanceCalendar';
+import { HowWeDie } from '@/components/players/HowWeDie';
+import {
+  getOnlinePlayers,
+  getAllPlayers,
+  getPlayersWithStats,
+  getPotyArchive,
+  getSessionsSince,
+  getEventsSince,
+} from '@/lib/data';
 import type { PlayerWithStats } from '@/lib/types';
 import {
   timeAgo,
@@ -60,12 +70,20 @@ interface Board {
 }
 
 export default async function PlayersPage() {
-  const [online, roster, withStats, potyArchive] = await Promise.all([
+  const [online, roster, withStats, potyArchive, sessions, deaths] = await Promise.all([
     getOnlinePlayers(),
     getAllPlayers(),
     getPlayersWithStats(),
     getPotyArchive(),
+    getSessionsSince(70),
+    getEventsSince(70, ['death']),
   ]);
+
+  const attendanceSessions = sessions.map((s) => ({
+    character_name: s.character_name,
+    joined_at: s.joined_at,
+    duration_minutes: s.duration_minutes,
+  }));
 
   const boards: Board[] = [
     {
@@ -259,6 +277,16 @@ export default async function PlayersPage() {
         </Card>
       </section>
 
+      {/* ── Attendance Constellation ───────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="Nights at the Hearth"
+          subtitle="Ten weeks of gathering — every night the longhouse fires were lit, and by whom."
+          icon={<CalendarDays size={20} />}
+        />
+        <AttendanceCalendar sessions={attendanceSessions} />
+      </section>
+
       {/* ── Leaderboards ───────────────────────────────────────── */}
       <section>
         <SectionHeader
@@ -278,6 +306,18 @@ export default async function PlayersPage() {
               emptyMessage={board.empty}
             />
           ))}
+        </div>
+      </section>
+
+      {/* ── How We Die ─────────────────────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="How We Die"
+          subtitle="Every warrior meets Valhalla eventually. These are the roads that take them there."
+          icon={<Skull size={20} />}
+        />
+        <div className="grid grid-cols-1 lg:grid-cols-2">
+          <HowWeDie deaths={deaths} />
         </div>
       </section>
 

@@ -90,6 +90,27 @@ export async function getRecentSessions(limit = 50): Promise<GameSession[]> {
   return (data as GameSession[]) ?? [];
 }
 
+/** All sessions from the last `days` days, oldest first (attendance calendar, episodes). */
+export async function getSessionsSince(days = 70): Promise<GameSession[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data } = await db()
+    .from('sessions')
+    .select('*')
+    .gte('joined_at', since)
+    .order('joined_at', { ascending: true })
+    .limit(2000);
+  return (data as GameSession[]) ?? [];
+}
+
+/** Events from the last `days` days, oldest first; optionally filtered by type. */
+export async function getEventsSince(days = 70, types?: string[]): Promise<GameEvent[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  let q = db().from('events').select('*').gte('created_at', since);
+  if (types?.length) q = q.in('type', types);
+  const { data } = await q.order('created_at', { ascending: true }).limit(2000);
+  return (data as GameEvent[]) ?? [];
+}
+
 export async function getActiveSessions(): Promise<GameSession[]> {
   const { data } = await db()
     .from('sessions')

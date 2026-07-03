@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Camera, Minus, Pause, Play, Plus, RotateCcw, SkipForward, X } from 'lucide-react';
+import { Camera, Minus, Pause, Play, Plus, RotateCcw, SkipForward, Sparkles, X } from 'lucide-react';
 import {
   MAP_DEMO_DAYS,
   MAP_DEMO_LABELS,
@@ -65,6 +65,8 @@ export function MapTimelapse() {
   const [selected, setSelected] = useState<MapLabel | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 }); // in % of the (unscaled) content
+  const [showWeek, setShowWeek] = useState(false); // "the world grew" overlay
+  const atLatest = day >= MAP_DEMO_DAYS; // the week-diff only reads true at today
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
@@ -175,6 +177,17 @@ export function MapTimelapse() {
             className="block h-full w-full select-none"
             draggable={false}
           />
+          {atLatest && showWeek && (
+            // territory charted in the final week — pans/zooms with the map
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src="/map-demo/overlay-week.webp"
+              alt=""
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 block h-full w-full select-none animate-[pulse_3s_ease-in-out_infinite]"
+              draggable={false}
+            />
+          )}
           {MAP_DEMO_LABELS.filter((l) => l.day <= day).map((l) => (
             <button
               key={l.name}
@@ -243,6 +256,21 @@ export function MapTimelapse() {
               className="flex h-8 w-8 items-center justify-center rounded-md border border-rune bg-pitch/75 text-ash-dim backdrop-blur-sm transition-colors hover:text-gold-light gold-ring"
             >
               <RotateCcw size={14} />
+            </button>
+          )}
+          {atLatest && (
+            <button
+              onClick={() => setShowWeek((s) => !s)}
+              aria-label="Highlight this week's discoveries"
+              aria-pressed={showWeek}
+              title="This week's discoveries"
+              className={`flex h-8 w-8 items-center justify-center rounded-md border backdrop-blur-sm transition-colors gold-ring ${
+                showWeek
+                  ? 'border-gold bg-gold/20 text-gold-light'
+                  : 'border-rune bg-pitch/75 text-ash-dim hover:text-gold-light'
+              }`}
+            >
+              <Sparkles size={14} />
             </button>
           )}
         </div>

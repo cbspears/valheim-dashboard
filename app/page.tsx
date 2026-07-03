@@ -6,7 +6,6 @@ import {
   Swords,
   Skull,
   Crown,
-  Clock,
   ScrollText,
   Map as MapIcon,
   Anchor,
@@ -25,6 +24,7 @@ import {
   StatTile,
 } from '@/components/ui';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
+import { Hearth } from '@/components/home/Hearth';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import {
   getServerStatus,
@@ -32,39 +32,27 @@ import {
   getAllPlayers,
   getBosses,
   getRecentEvents,
-  getActiveSessions,
   getUpcomingEvents,
 } from '@/lib/data';
 import { describeEvent } from '@/lib/events';
-import { timeAgo, liveSessionLength } from '@/lib/format';
+import { timeAgo } from '@/lib/format';
 import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/config/server';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const [status, online, allPlayers, bosses, events, activeSessions, upcoming] = await Promise.all([
+  const [status, online, allPlayers, bosses, events, upcoming] = await Promise.all([
     getServerStatus(),
     getOnlinePlayers(),
     getAllPlayers(),
     getBosses(),
     getRecentEvents(8),
-    getActiveSessions(),
     getUpcomingEvents(3),
   ]);
 
   const isOnline = status?.is_online ?? false;
   const playerCount = status?.player_count ?? online.length;
   const worldDay = status?.world_day ?? 0;
-
-  // Map a player to the join time of their currently-open session so we can show a
-  // live "in the realm" duration. Sessions may be keyed by player_id or character_name.
-  const joinedByPlayer = new Map<string, string>();
-  const joinedByName = new Map<string, string>();
-  for (const s of activeSessions) {
-    if (s.player_id && !joinedByPlayer.has(s.player_id)) joinedByPlayer.set(s.player_id, s.joined_at);
-    if (s.character_name && !joinedByName.has(s.character_name))
-      joinedByName.set(s.character_name, s.joined_at);
-  }
 
   const totalBosses = bosses.length || 8;
   const felledBosses = bosses.filter((b) => b.is_killed);
@@ -136,51 +124,8 @@ export default async function HomePage() {
         />
 
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          {/* Currently Online */}
-          <Card>
-            <CardHeader
-              title="Currently Online"
-              icon={<Users size={16} />}
-              action={
-                <Badge tone={online.length > 0 ? 'online' : 'offline'}>
-                  {online.length} {online.length === 1 ? 'viking' : 'vikings'}
-                </Badge>
-              }
-            />
-            <CardBody className="p-0">
-              {online.length === 0 ? (
-                <EmptyState
-                  icon={<Anchor size={28} />}
-                  title="The mead hall is quiet…"
-                  message="No vikings are sailing right now."
-                />
-              ) : (
-                <ul className="divide-y divide-rune">
-                  {online.map((p) => {
-                    const joinedAt =
-                      joinedByPlayer.get(p.id) ?? joinedByName.get(p.character_name) ?? null;
-                    return (
-                      <li
-                        key={p.id}
-                        className="flex items-center justify-between gap-3 px-5 py-3"
-                      >
-                        <div className="flex min-w-0 items-center gap-3">
-                          <OnlineDot online />
-                          <span className="truncate font-medium text-ash">
-                            {p.character_name}
-                          </span>
-                        </div>
-                        <span className="flex shrink-0 items-center gap-1.5 text-xs text-ash-dim">
-                          <Clock size={13} className="text-gold-dim" />
-                          {joinedAt ? liveSessionLength(joinedAt) : 'in the realm'}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </CardBody>
-          </Card>
+          {/* The Hearth — server pulse + who's online */}
+          <Hearth status={status} online={online} />
 
           {/* Recent Saga */}
           <Card>
