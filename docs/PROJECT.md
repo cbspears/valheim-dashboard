@@ -3,6 +3,17 @@
 Living doc for the Eilif Valheim server dashboard + integrations. Updated 2026-06-24.
 See [README](../README.md) for the quick overview.
 
+> **⚠️ 2026-07 update (supersedes parts of §2–3 below):** ServerCharacters is
+> hard-incompatible with ValheimPlus → the `.fch` stats-parser path is dead;
+> plan of record is now the **GsValheimStats** Emitter+Client mods → a new
+> `/api/gs-ingest` endpoint (see the Obsidian review
+> `08-Dashboard/03-Full-Review-2026-07-02.md`). New since then: **/map**
+> (fog-masked world atlas + in-game-day timelapse + player pins + place photo
+> albums + weekly explored-diff; full map/seed stay secret), the Hall
+> **Hearth** pulse card, Vikings **attendance grid** + **How We Die**, and
+> Saga **Episodes** (`lib/episodes.ts`). Demo data for all of it is seeded in
+> Supabase and listed on the launch wipe list in the Obsidian tracker.
+
 ---
 
 ## 1. Requirements (what this is for)
