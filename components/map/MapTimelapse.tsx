@@ -1,11 +1,28 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Pause, Play, SkipForward } from 'lucide-react';
+import { Camera, Pause, Play, SkipForward, X } from 'lucide-react';
 import {
   MAP_DEMO_DAYS,
   MAP_DEMO_LABELS,
+  type MapLabel,
 } from '@/config/map-demo.generated';
+
+/** Demo only — in production these come from gallery_photos rows linked to the marker. */
+const DEMO_PLACE_PHOTOS: Record<string, string[]> = {
+  Midgard: ['/banner-eilif.webp', '/og-eilif.jpg'],
+  Draugheim: ['/bg-eilif.webp'],
+};
+
+const KIND_LABEL: Record<MapLabel['kind'], string> = {
+  base: '⌂ Base',
+  poi: '◆ Place of interest',
+  boss: 'Boss altar',
+  trader: 'Trader',
+};
+
+const pinVerb = (kind: MapLabel['kind']) =>
+  kind === 'base' || kind === 'poi' ? 'pinned by' : 'first sighted by';
 
 const frameSrc = (day: number) => `/map-demo/day-${String(day).padStart(3, '0')}.webp`;
 
@@ -30,6 +47,7 @@ const FRAME_MS = 100;
 export function MapTimelapse() {
   const [day, setDay] = useState(MAP_DEMO_DAYS);
   const [playing, setPlaying] = useState(false);
+  const [selected, setSelected] = useState<MapLabel | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Warm the browser cache so scrubbing is instant: newest frames first
@@ -85,10 +103,12 @@ export function MapTimelapse() {
           draggable={false}
         />
         {MAP_DEMO_LABELS.filter((l) => l.day <= day).map((l) => (
-          <div
+          <button
             key={l.name}
-            className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 animate-[fadeIn_0.6s_ease]"
+            onClick={() => setSelected(l)}
+            className="group absolute -translate-x-1/2 -translate-y-1/2 animate-[fadeIn_0.6s_ease] cursor-pointer gold-ring"
             style={{ left: `${l.x * 100}%`, top: `${l.y * 100}%` }}
+            aria-label={`${l.name} — ${KIND_LABEL[l.kind]}, ${pinVerb(l.kind)} ${l.by} on day ${l.day}`}
           >
             <div className="flex flex-col items-center gap-0.5">
               <MarkerGlyph kind={l.kind} />
@@ -96,7 +116,21 @@ export function MapTimelapse() {
                 {l.name}
               </span>
             </div>
-          </div>
+            {/* hover card */}
+            <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-rune bg-pitch/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm group-hover:block">
+              <div className="font-display text-xs text-gold-light">{l.name}</div>
+              <div className="mt-0.5 text-[11px] text-ash-dim">
+                {KIND_LABEL[l.kind]} · {pinVerb(l.kind)}{' '}
+                <span className="text-ash">{l.by}</span> · Day {l.day}
+              </div>
+              {DEMO_PLACE_PHOTOS[l.name] && (
+                <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gold-dim">
+                  <Camera size={11} /> {DEMO_PLACE_PHOTOS[l.name].length}{' '}
+                  {DEMO_PLACE_PHOTOS[l.name].length === 1 ? 'photo' : 'photos'} — click to view
+                </div>
+              )}
+            </div>
+          </button>
         ))}
         {/* day readout, engraved into the corner */}
         <div className="absolute right-3 top-3 rounded-md border border-rune bg-pitch/75 px-2.5 py-1 font-display text-sm text-gold-light backdrop-blur-sm">
@@ -155,8 +189,66 @@ export function MapTimelapse() {
         </button>
       </div>
       <p className="mt-2 text-center text-xs text-muted">
-        Day {day} of {MAP_DEMO_DAYS} — drag the slider to travel through the saga.
+        Day {day} of {MAP_DEMO_DAYS} — drag the slider to travel through the saga. Hover a marker
+        for its story; click for photos.
       </p>
+
+      {/* place panel */}
+      {selected && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-pitch/80 p-4 backdrop-blur-sm"
+          onClick={() => setSelected(null)}
+        >
+          <div
+            className="card-surface w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-rune px-5 py-3.5">
+              <div className="flex items-center gap-2.5">
+                <MarkerGlyph kind={selected.kind} />
+                <h3 className="font-display text-base tracking-wide text-ash">{selected.name}</h3>
+              </div>
+              <button
+                onClick={() => setSelected(null)}
+                aria-label="Close"
+                className="rounded-md p-1.5 text-ash-dim hover:text-ash gold-ring"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-sm text-ash-dim">
+                {KIND_LABEL[selected.kind]} · {pinVerb(selected.kind)}{' '}
+                <span className="text-ash">{selected.by}</span> · Day {selected.day}
+              </p>
+              {DEMO_PLACE_PHOTOS[selected.name] ? (
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {DEMO_PLACE_PHOTOS[selected.name].map((src) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={src}
+                      src={src}
+                      alt={`${selected.name} — from the gallery`}
+                      className="aspect-video w-full rounded-md border border-rune object-cover"
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 rounded-md border border-dashed border-rune px-4 py-5 text-center text-xs text-muted">
+                  No photos of {selected.name} yet.
+                </p>
+              )}
+              <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-muted">
+                <Camera size={13} className="mt-0.5 shrink-0 text-gold-dim" />
+                <span>
+                  Post a screenshot in Discord, tag the bot, and name the place in your caption —
+                  it lands in the Gallery and here.
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

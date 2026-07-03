@@ -9,6 +9,8 @@ export interface MapLabel {
   day: number;
   /** base/poi = the two player-pin categories; boss/trader = system layers placed automatically */
   kind: MapMarkerKind;
+  /** who pinned it (player pins) or first sighted it (system layers) */
+  by: string;
   /** position as a fraction of the map image (0–1) */
   x: number;
   y: number;
@@ -21,6 +23,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "Midgard",
     "day": 1,
     "kind": "base",
+    "by": "the warband",
     "x": 0.5,
     "y": 0.5
   },
@@ -28,6 +31,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "Juno Beach II",
     "day": 9,
     "kind": "poi",
+    "by": "Bjorn",
     "x": 0.5133,
     "y": 0.416
   },
@@ -35,6 +39,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "Eikthyr's Altar",
     "day": 12,
     "kind": "boss",
+    "by": "Astrid",
     "x": 0.4696,
     "y": 0.4377
   },
@@ -42,6 +47,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "Haldor",
     "day": 22,
     "kind": "trader",
+    "by": "Einar",
     "x": 0.4956,
     "y": 0.527
   },
@@ -49,6 +55,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "Draugheim",
     "day": 31,
     "kind": "base",
+    "by": "Astrid",
     "x": 0.3553,
     "y": 0.629
   },
@@ -56,6 +63,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "The Elder's Altar",
     "day": 44,
     "kind": "boss",
+    "by": "Sean",
     "x": 0.4831,
     "y": 0.423
   },
@@ -63,6 +71,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "The Dark Chapel",
     "day": 50,
     "kind": "poi",
+    "by": "Bjorn",
     "x": 0.2856,
     "y": 0.523
   },
@@ -70,6 +79,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "Benson's Folly",
     "day": 68,
     "kind": "base",
+    "by": "Benson",
     "x": 0.4169,
     "y": 0.3835
   },
@@ -77,6 +87,7 @@ export const MAP_DEMO_LABELS: MapLabel[] = [
     "name": "Skald's Rest",
     "day": 86,
     "kind": "poi",
+    "by": "Einar",
     "x": 0.2737,
     "y": 0.5123
   }

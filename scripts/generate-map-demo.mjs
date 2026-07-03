@@ -150,17 +150,17 @@ const parties = [
   { x: C, y: C, heading: rng() * Math.PI * 2 },
 ];
 const labelDefs = [
-  { name: 'Midgard', day: 1, kind: 'base' },
-  { name: 'Juno Beach II', day: 9, kind: 'poi' },
-  { name: "Eikthyr's Altar", day: 12, kind: 'boss' },
-  { name: 'Haldor', day: 22, kind: 'trader' },
-  { name: 'Draugheim', day: 31, kind: 'base' },
-  { name: "The Elder's Altar", day: 44, kind: 'boss' },
-  { name: 'The Dark Chapel', day: 50, kind: 'poi' },
-  { name: "Benson's Folly", day: 68, kind: 'base' },
-  { name: "Skald's Rest", day: 86, kind: 'poi' },
+  { name: 'Midgard', day: 1, kind: 'base', by: 'the warband' },
+  { name: 'Juno Beach II', day: 9, kind: 'poi', by: 'Bjorn' },
+  { name: "Eikthyr's Altar", day: 12, kind: 'boss', by: 'Astrid' },
+  { name: 'Haldor', day: 22, kind: 'trader', by: 'Einar' },
+  { name: 'Draugheim', day: 31, kind: 'base', by: 'Astrid' },
+  { name: "The Elder's Altar", day: 44, kind: 'boss', by: 'Sean' },
+  { name: 'The Dark Chapel', day: 50, kind: 'poi', by: 'Bjorn' },
+  { name: "Benson's Folly", day: 68, kind: 'base', by: 'Benson' },
+  { name: "Skald's Rest", day: 86, kind: 'poi', by: 'Einar' },
 ];
-const labels = [{ name: 'Midgard', day: 1, kind: 'base', x: C / SIZE, y: C / SIZE }];
+const labels = [{ name: 'Midgard', day: 1, kind: 'base', by: 'the warband', x: C / SIZE, y: C / SIZE }];
 
 function landAt(x, y) {
   return isLand[Math.round(y) * SIZE + Math.round(x)] === 1;
@@ -271,7 +271,7 @@ for (let day = 1; day <= DAYS; day++) {
   const def = labelDefs.find((d) => d.day === day && d.name !== 'Midgard');
   if (def) {
     const p = parties[parties.length - 1];
-    labels.push({ name: def.name, day, kind: def.kind, x: p.x / SIZE, y: p.y / SIZE });
+    labels.push({ name: def.name, day, kind: def.kind, by: def.by, x: p.x / SIZE, y: p.y / SIZE });
   }
   await renderFrame(day);
 }
@@ -297,6 +297,8 @@ export interface MapLabel {
   day: number;
   /** base/poi = the two player-pin categories; boss/trader = system layers placed automatically */
   kind: MapMarkerKind;
+  /** who pinned it (player pins) or first sighted it (system layers) */
+  by: string;
   /** position as a fraction of the map image (0–1) */
   x: number;
   y: number;
