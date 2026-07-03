@@ -76,7 +76,11 @@ export function MapTimelapse() {
             style={{ left: `${l.x * 100}%`, top: `${l.y * 100}%` }}
           >
             <div className="flex flex-col items-center gap-0.5">
-              <span className="block h-1.5 w-1.5 rotate-45 border border-gold bg-gold/70 shadow-[0_0_6px_rgba(200,149,42,0.8)]" />
+              {l.kind === 'base' ? (
+                <span className="block h-2 w-2 border border-gold bg-gold/80 shadow-[0_0_6px_rgba(200,149,42,0.8)]" />
+              ) : (
+                <span className="block h-1.5 w-1.5 rotate-45 border border-gold bg-gold/40 shadow-[0_0_6px_rgba(200,149,42,0.8)]" />
+              )}
               <span className="whitespace-nowrap font-display text-[11px] tracking-wide text-gold-light [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
                 {l.name}
               </span>
@@ -86,6 +90,17 @@ export function MapTimelapse() {
         {/* day readout, engraved into the corner */}
         <div className="absolute right-3 top-3 rounded-md border border-rune bg-pitch/75 px-2.5 py-1 font-display text-sm text-gold-light backdrop-blur-sm">
           Day {day}
+        </div>
+        {/* marker legend */}
+        <div className="absolute bottom-3 left-3 flex items-center gap-4 rounded-md border border-rune bg-pitch/75 px-2.5 py-1.5 backdrop-blur-sm">
+          <span className="flex items-center gap-1.5 text-[11px] tracking-wide text-ash-dim">
+            <span className="block h-2 w-2 border border-gold bg-gold/80" />
+            Base
+          </span>
+          <span className="flex items-center gap-1.5 text-[11px] tracking-wide text-ash-dim">
+            <span className="block h-1.5 w-1.5 rotate-45 border border-gold bg-gold/40" />
+            Place of interest
+          </span>
         </div>
       </div>
 

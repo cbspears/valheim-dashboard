@@ -24,6 +24,55 @@ export default function MapPage() {
         action={<Badge tone="gold">Demo</Badge>}
       />
 
+      {/* How to pin — the naming of places */}
+      <Card className="mb-6 border-l-2 border-l-gold">
+        <CardBody>
+          <div className="mb-3 flex items-center gap-2">
+            <Landmark size={18} className="text-gold" />
+            <h2 className="font-display text-base tracking-wide text-ash">Name a place</h2>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="flex items-start gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
+                1
+              </span>
+              <p className="text-sm leading-relaxed text-ash-dim">
+                Stand at the spot in-game — the pin lands exactly where you are.
+              </p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
+                2
+              </span>
+              <p className="text-sm leading-relaxed text-ash-dim">
+                Type in chat:{' '}
+                <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                  /pin base Odinshold
+                </span>{' '}
+                for a settlement, or{' '}
+                <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                  /pin poi The Dark Chapel
+                </span>{' '}
+                for a landmark.
+              </p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
+                3
+              </span>
+              <p className="text-sm leading-relaxed text-ash-dim">
+                The Cartographer blesses it in Discord — approved names join the atlas, and the
+                Saga, forever.
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-muted">
+            Notable places only, vikings — homes and discoveries, not wood piles. The Cartographer
+            keeps the map honest.
+          </p>
+        </CardBody>
+      </Card>
+
       {/* Demo explainer */}
       <Card className="mb-6 border-l-2 border-l-gold">
         <CardBody>
