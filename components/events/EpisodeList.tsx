@@ -1,7 +1,9 @@
-import { Skull, Compass, Clock, ScrollText } from 'lucide-react';
+import Link from 'next/link';
+import { Skull, Compass, Clock, ScrollText, Swords } from 'lucide-react';
 import type { Episode } from '@/lib/episodes';
 import { phraseDeath } from '@/lib/episodes';
 import { Card, EmptyState } from '@/components/ui';
+import { bossPath } from '@/lib/slug';
 
 const EVENT_TZ = 'America/Chicago';
 
@@ -83,8 +85,19 @@ function EpisodeCard({ ep }: { ep: Episode }) {
         )}
       </div>
 
-      {/* title */}
-      <h3 className="mt-1.5 font-display text-xl text-gold-light">{ep.title}</h3>
+      {/* title — a sword glyph links to the war-room when this night felled a forsaken */}
+      <h3 className="mt-1.5 flex items-center gap-2 font-display text-xl text-gold-light">
+        {ep.title}
+        {ep.bossKills.length > 0 && (
+          <Link
+            href={bossPath(ep.bossKills[0])}
+            title={`Visit ${ep.bossKills[0]}'s war-room`}
+            className="gold-ring inline-flex text-gold-dim transition-colors hover:text-gold-light"
+          >
+            <Swords size={16} />
+          </Link>
+        )}
+      </h3>
 
       {/* participant chips */}
       {ep.participants.length > 0 && (

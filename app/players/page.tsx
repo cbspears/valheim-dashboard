@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import {
   Users,
   Sailboat,
@@ -10,7 +11,7 @@ import {
   Hammer,
   Footprints,
   Castle,
-  Map,
+  Map as MapIcon,
   Crown,
   CalendarDays,
 } from 'lucide-react';
@@ -38,6 +39,8 @@ import {
   formatDistance,
   formatPercent,
 } from '@/lib/format';
+import { vikingPath } from '@/lib/slug';
+import { epithetFor } from '@/lib/epithets';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,6 +87,26 @@ export default async function PlayersPage() {
     joined_at: s.joined_at,
     duration_minutes: s.duration_minutes,
   }));
+
+  // Auto-generated epithets for the roster subtitles (deterministic; judged
+  // against the whole warband). Death causes feed the Treefoe override.
+  const causesByName = new Map<string, string[]>();
+  for (const e of deaths) {
+    const nm = e.character_name;
+    if (!nm) continue;
+    const cause = typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : '';
+    if (!cause) continue;
+    const arr = causesByName.get(nm) ?? [];
+    arr.push(cause);
+    causesByName.set(nm, arr);
+  }
+  const epithetByName = new Map<string, string>();
+  for (const p of withStats) {
+    epithetByName.set(
+      p.character_name,
+      epithetFor(p, withStats, causesByName.get(p.character_name) ?? []).title
+    );
+  }
 
   const boards: Board[] = [
     {
@@ -145,7 +168,7 @@ export default async function PlayersPage() {
     {
       key: 'explored',
       title: 'Cartographer',
-      icon: <Map size={16} />,
+      icon: <MapIcon size={16} />,
       accent: 'text-gold',
       empty: 'The fog hangs thick. No frontier has been charted.',
       entries: topBy(withStats, (p) => p.stats?.map_explored_pct ?? 0, formatPercent),
@@ -250,12 +273,20 @@ export default async function PlayersPage() {
                         <OnlineDot online={p.is_online} />
                       </td>
                       <td className="px-2 py-3">
-                        <span className="font-display text-ash">
+                        <Link
+                          href={vikingPath(p.character_name)}
+                          className="gold-ring font-display text-ash transition-colors hover:text-gold-light"
+                        >
                           {p.character_name}
-                        </span>
+                        </Link>
                         {p.is_online && (
                           <span className="ml-2 align-middle text-[11px] uppercase tracking-wide text-online-glow">
                             online
+                          </span>
+                        )}
+                        {epithetByName.get(p.character_name) && (
+                          <span className="mt-0.5 block font-display text-xs text-gold-dim">
+                            {epithetByName.get(p.character_name)}
                           </span>
                         )}
                         <span className="mt-0.5 block text-xs text-muted sm:hidden">

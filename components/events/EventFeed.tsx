@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { format, isToday, isYesterday } from 'date-fns';
 import { clsx } from 'clsx';
 import { ScrollText } from 'lucide-react';
@@ -8,6 +9,7 @@ import type { GameEvent, EventType } from '@/lib/types';
 import { describeEvent, EVENT_FILTERS } from '@/lib/events';
 import { Card, Badge, EmptyState } from '@/components/ui';
 import { timeAgo, shortDate } from '@/lib/format';
+import { bossPath } from '@/lib/slug';
 
 type BadgeTone = 'gold' | 'online' | 'offline' | 'death' | 'raid' | 'frost' | 'neutral';
 
@@ -141,6 +143,12 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
                 <ul>
                   {group.events.map((e) => {
                     const { icon: Icon, accent, description, label } = describeEvent(e);
+                    // Boss kills carry the beast's name in metadata — link straight to its
+                    // war-room. No other event type identifies a boss reliably, so we don't guess.
+                    const bossName =
+                      e.type === 'boss' && typeof e.metadata?.boss === 'string'
+                        ? e.metadata.boss
+                        : null;
                     return (
                       <li
                         key={e.id}
@@ -153,9 +161,16 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
                           <Icon size={16} className={accent} />
                         </span>
 
-                        <p className="min-w-0 flex-1 truncate text-sm text-ash">
-                          {description}
-                        </p>
+                        {bossName ? (
+                          <Link
+                            href={bossPath(bossName)}
+                            className="gold-ring min-w-0 flex-1 truncate text-sm text-ash transition-colors hover:text-gold-light"
+                          >
+                            {description}
+                          </Link>
+                        ) : (
+                          <p className="min-w-0 flex-1 truncate text-sm text-ash">{description}</p>
+                        )}
 
                         <Badge
                           tone={BADGE_TONE[e.type] ?? 'neutral'}

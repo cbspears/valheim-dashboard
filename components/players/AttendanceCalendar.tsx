@@ -62,14 +62,23 @@ function noonUtcFor(offsetDays: number, base: number): Date {
   return new Date(base + offsetDays * 86_400_000);
 }
 
-export function AttendanceCalendar({ sessions }: { sessions: AttendanceSession[] }) {
+export function AttendanceCalendar({
+  sessions,
+  lockedTo,
+}: {
+  sessions: AttendanceSession[];
+  /** Pin the grid to a single viking and hide the chip selector (viking pages). */
+  lockedTo?: string;
+}) {
   const vikings = useMemo(() => {
     const set = new Set<string>();
     for (const s of sessions) if (s.character_name) set.add(s.character_name);
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [sessions]);
 
-  const [selected, setSelected] = useState<string | null>(null); // null = all vikings
+  const [chosen, setChosen] = useState<string | null>(null); // null = all vikings
+  const selected = lockedTo ?? chosen; // lockedTo wins and can't be changed
+  const setSelected = setChosen;
 
   const { columns, todayKey, hoursByKey } = useMemo(() => {
     // Bucket sessions → per-day hours + distinct vikings (respecting the filter).
@@ -174,17 +183,19 @@ export function AttendanceCalendar({ sessions }: { sessions: AttendanceSession[]
 
   return (
     <div className="card-surface p-5">
-      {/* View selector */}
-      <div className="mb-5 flex flex-wrap gap-2">
-        <Chip active={!single} onClick={() => setSelected(null)}>
-          All vikings
-        </Chip>
-        {vikings.map((v) => (
-          <Chip key={v} active={selected === v} onClick={() => setSelected(v)}>
-            {v}
+      {/* View selector — hidden when the grid is pinned to one viking */}
+      {!lockedTo && (
+        <div className="mb-5 flex flex-wrap gap-2">
+          <Chip active={!single} onClick={() => setSelected(null)}>
+            All vikings
           </Chip>
-        ))}
-      </div>
+          {vikings.map((v) => (
+            <Chip key={v} active={selected === v} onClick={() => setSelected(v)}>
+              {v}
+            </Chip>
+          ))}
+        </div>
+      )}
 
       {/* Grid */}
       <div className="overflow-x-auto">

@@ -20,6 +20,7 @@ import type {
   UpcomingEvent,
   GalleryPhoto,
   PotyHistoryEntry,
+  Oath,
 } from './types';
 
 function db() {
@@ -88,6 +89,16 @@ export async function getRecentSessions(limit = 50): Promise<GameSession[]> {
     .order('joined_at', { ascending: false })
     .limit(limit);
   return (data as GameSession[]) ?? [];
+}
+
+/** The sworn oaths, oldest first (the Oath page + Hall teaser). */
+export async function getOaths(): Promise<Oath[]> {
+  const { data } = await db()
+    .from('oaths')
+    .select('*')
+    .order('sworn_at', { ascending: true })
+    .limit(100);
+  return (data as Oath[]) ?? [];
 }
 
 /** All sessions from the last `days` days, oldest first (attendance calendar, episodes). */

@@ -1,7 +1,9 @@
+import Link from 'next/link';
 import { clsx } from 'clsx';
 import { Crown, Lock, Swords, Target, Trophy } from 'lucide-react';
 import { Badge, Card, CardBody, EmptyState } from '@/components/ui';
 import { shortDate } from '@/lib/format';
+import { bossPath } from '@/lib/slug';
 import type { Boss } from '@/lib/types';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
@@ -154,15 +156,18 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                 </p>
 
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <h3
-                    className={clsx(
-                      'font-display text-lg',
-                      status === 'killed' && 'text-ash',
-                      status === 'next' && 'text-ash-dim',
-                      status === 'locked' && 'text-muted'
-                    )}
-                  >
-                    {boss.name}
+                  <h3 className="font-display text-lg">
+                    <Link
+                      href={bossPath(boss.name)}
+                      className={clsx(
+                        'gold-ring rounded transition-colors hover:text-gold-light',
+                        status === 'killed' && 'text-ash',
+                        status === 'next' && 'text-ash-dim',
+                        status === 'locked' && 'text-muted'
+                      )}
+                    >
+                      {boss.name}
+                    </Link>
                   </h3>
                   <Badge tone={status === 'locked' ? 'offline' : 'frost'}>{boss.biome}</Badge>
                   {status === 'killed' && <Badge tone="gold">Defeated</Badge>}

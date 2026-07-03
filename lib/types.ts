@@ -20,6 +20,24 @@ export interface Player {
   last_seen_at: string | null;
   total_playtime_minutes: number;
   is_online: boolean;
+  /** self-described, via Discord ("@Eilif bio: ...") — may be null */
+  bio: string | null;
+  /** self-described job/role (Cartographer, Shipwright...) — may be null */
+  role: string | null;
+}
+
+/** A sworn signature on the Oath page, collected via Discord. */
+export interface Oath {
+  id: string;
+  /** the in-game name as the viking gave it */
+  character_name: string | null;
+  player_id: string | null;
+  discord_id: string | null;
+  discord_name: string | null;
+  oath_text: string;
+  match_status: 'exact' | 'fuzzy' | 'unmatched' | string;
+  sworn_at: string;
+  created_at: string | null;
 }
 
 export interface PlayerStats {

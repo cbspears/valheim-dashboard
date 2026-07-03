@@ -12,6 +12,7 @@ import {
   ArrowRight,
   Signal,
   CalendarClock,
+  Feather,
 } from 'lucide-react';
 import {
   Card,
@@ -33,6 +34,7 @@ import {
   getBosses,
   getRecentEvents,
   getUpcomingEvents,
+  getOaths,
 } from '@/lib/data';
 import { describeEvent } from '@/lib/events';
 import { timeAgo } from '@/lib/format';
@@ -41,14 +43,20 @@ import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/conf
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const [status, online, allPlayers, bosses, events, upcoming] = await Promise.all([
+  const [status, online, allPlayers, bosses, events, upcoming, oaths] = await Promise.all([
     getServerStatus(),
     getOnlinePlayers(),
     getAllPlayers(),
     getBosses(),
     getRecentEvents(8),
     getUpcomingEvents(3),
+    getOaths(),
   ]);
+
+  const oathCount = oaths.length;
+  const latestOath = oathCount > 0 ? oaths[oathCount - 1] : null;
+  const latestOathName =
+    latestOath?.character_name?.trim() || latestOath?.discord_name || 'A viking';
 
   const isOnline = status?.is_online ?? false;
   const playerCount = status?.player_count ?? online.length;
@@ -170,6 +178,38 @@ export default async function HomePage() {
           </Card>
         </div>
       </section>
+
+      {/* ─────────────────────── THE OATH TEASER ─────────────── */}
+      <Link href="/oath" className="gold-ring block rounded-[var(--radius-card)]">
+        <Card className="border-l-2 border-l-gold transition-colors hover:border-gold-dim/60 hover:bg-surface-raised/40">
+          <CardBody className="flex items-center gap-4">
+            <span className="hidden shrink-0 text-gold sm:block">
+              <Feather size={22} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                <h3 className="font-display text-base tracking-wide text-ash">The Oath</h3>
+                <span className="text-sm text-muted">
+                  · {oathCount} sworn
+                </span>
+              </div>
+              {latestOath ? (
+                <p className="mt-0.5 truncate text-sm text-ash-dim">
+                  <span className="font-display text-gold-light">{latestOathName}</span>
+                  <span className="italic"> — &ldquo;{latestOath.oath_text}&rdquo;</span>
+                </p>
+              ) : (
+                <p className="mt-0.5 text-sm text-ash-dim">
+                  Swear the charter before we sail — be the first to set your mark.
+                </p>
+              )}
+            </div>
+            <span className="shrink-0 text-gold-light">
+              <ArrowRight size={16} />
+            </span>
+          </CardBody>
+        </Card>
+      </Link>
 
       {/* ─────────────────────── COMING UP ──────────────────── */}
       <Card>

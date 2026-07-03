@@ -10,6 +10,7 @@ import { createBossWatcher } from './bosses.js';
 import { createRecap } from './recap.js';
 import { createEventsSync } from './events.js';
 import { createGalleryIngest } from './gallery.js';
+import { createOathIngest } from './oaths.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
 const POLL = parseInt(process.env.POLL_INTERVAL_MS || '15000', 10);
@@ -91,6 +92,13 @@ async function runLive() {
   if (process.env.GALLERY_INGEST === '1') {
     createGalleryIngest({ client: poster.client }).attach();
     extra += ', gallery ingest on';
+  }
+
+  // Optional: record sworn oaths (+ bio/role) posted to Discord that @mention
+  // the bot. Off by default (OATH_INGEST=1) like the gallery ingest.
+  if (process.env.OATH_INGEST === '1') {
+    createOathIngest({ client: poster.client }).attach();
+    extra += ', oath ingest on';
   }
 
   console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s${extra}.`);

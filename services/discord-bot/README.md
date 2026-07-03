@@ -44,6 +44,25 @@ Two cron jobs (08:00 and 22:00 `America/Chicago`) post an activity embed to #val
 active, hours logged, deaths, boss kills, who's online, and the world day — over the window since
 the last recap.
 
+## The Oath ingest (`OATH_INGEST=1`, off by default)
+When enabled, the bot records **oaths** posted in Discord that @mention it onto the dashboard's
+Signature Wall (`/oath`), plus self-served **bio**/**role** profile updates. Because Discord names
+≠ in-game names, the message carries the **in-game name**, which is matched to a roster viking:
+exact (case/space-insensitive) → fuzzy (Levenshtein similarity ≥ 0.75 vs full name or first token,
+links `player_id`) → unmatched (kept anyway, `player_id` null — an oath is never lost).
+
+Accepted formats (keyword case-insensitive):
+```
+@Eilif oath — YourVikingName: your oath, one line
+@Eilif oath - YourVikingName: your oath, one line
+@Eilif oath: YourVikingName — your oath, one line
+@Eilif bio — YourVikingName: a line about you
+@Eilif role — YourVikingName: Cartographer
+```
+Reactions: **📜** on a recorded oath (plus **❓** when the name didn't match a viking), **📝** on a
+bio/role update (**❓** if no viking matched). Re-swearing **replaces** that Discord user's previous
+oath (one per user). Needs `SUPABASE_SERVICE_ROLE_KEY` and the GuildMessages intent (already set).
+
 ## Run as a service
 ```bash
 sudo cp eilif-discord-bot.service /etc/systemd/system/
