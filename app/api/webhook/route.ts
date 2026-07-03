@@ -30,6 +30,9 @@ interface WebhookPayload {
   // ISO timestamp of when the event actually occurred (from the log line).
   // Lets the poller backfill accurate times instead of server-receive time.
   occurredAt?: string;
+  // `oath` only — the sworn text, forwarded verbatim from the /oath chat
+  // command via the log poller.
+  text?: string;
 }
 
 // A privileged client bound to the service role key. Created per request so we
@@ -269,6 +272,57 @@ export async function POST(request: Request) {
       await del;
 
       return Response.json({ ok: true, synced: events.length }, { status: 200 });
+    }
+
+    // ---- 2e. In-game sworn oath (`oath`) ------------------------------------
+    // Forwarded by the log poller from the Eilif companion plugin's /oath
+    // command. Replace semantics: swearing again overwrites the prior oath.
+    // A player never fails to be recorded — if the character name doesn't
+    // match a known player we still insert it, unmatched, for a manual fix.
+    if (type === 'oath') {
+      const oathCharacterName = characterName;
+      const oathText = typeof body.text === 'string' ? body.text.trim() : '';
+      if (!oathCharacterName || !oathText) {
+        return Response.json(
+          { error: "'oath' requires non-empty characterName and text" },
+          { status: 400 }
+        );
+      }
+
+      // Escape ilike wildcards (% _) so the character name is matched literally.
+      const escapedName = oathCharacterName.replace(/[%_]/g, (c) => `\\${c}`);
+
+      const { data: player } = await db
+        .from('players')
+        .select('id, character_name')
+        .ilike('character_name', escapedName)
+        .maybeSingle();
+
+      const canonicalName = (player?.character_name as string | undefined) ?? oathCharacterName;
+      const playerId = (player?.id as string | undefined) ?? null;
+
+      // Replace semantics: drop any prior oath tied to this player (or, absent
+      // a player match, this same character name) before inserting the new one.
+      if (playerId) {
+        await db.from('oaths').delete().eq('player_id', playerId);
+      } else {
+        await db
+          .from('oaths')
+          .delete()
+          .is('player_id', null)
+          .ilike('character_name', canonicalName.replace(/[%_]/g, (c) => `\\${c}`));
+      }
+
+      await db.from('oaths').insert({
+        character_name: canonicalName,
+        player_id: playerId,
+        oath_text: oathText,
+        match_status: playerId ? 'exact' : 'unmatched',
+        source: 'ingame',
+        sworn_at: occurredIso,
+      });
+
+      return Response.json({ ok: true }, { status: 200 });
     }
 
     // ---- 3. Resolve / upsert the player ------------------------------------

@@ -132,6 +132,12 @@ export class Poller {
       this.lastSyncAt = Date.now();
       return;
     }
+    if (ev.type === 'oath') {
+      // Oath payload carries `text` at the top level (not nested in metadata).
+      this.log.info?.(`[event] oath ${ev.characterName}`);
+      await this.postEvent({ type: 'oath', characterName: ev.characterName, text: ev.metadata.text });
+      return;
+    }
     const { type, characterName, metadata } = ev;
     this.log.info?.(`[event] ${type}${characterName ? ` ${characterName}` : ''}${metadata?.event ? ` (${metadata.event})` : ''}`);
     await this.postEvent({ type, characterName, metadata });

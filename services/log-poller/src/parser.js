@@ -41,6 +41,10 @@ const RE = {
   connections: /Connections (\d+) ZDOS/,
   randomEvent: /Random event set:(\S+)/,
   serverConnected: /Game server connected/,
+  // The Eilif companion plugin's /oath chat command. Marker can be embedded
+  // anywhere in the standard BepInEx log prefix; name/text split on the FIRST
+  // " | " so a text containing " | " itself stays intact.
+  oath: /\[EILIF_OATH\]\s*(.+)$/,
 };
 
 export class LogParser {
@@ -74,6 +78,21 @@ export class LogParser {
   processLine(line) {
     const events = [];
     if (!line) return events;
+
+    // --- In-game sworn oath (/oath) ---
+    const o = line.match(RE.oath);
+    if (o) {
+      const rest = o[1];
+      const sep = rest.indexOf(' | ');
+      if (sep !== -1) {
+        const name = rest.slice(0, sep).trim();
+        const text = rest.slice(sep + ' | '.length).trim();
+        if (name && text) {
+          events.push({ type: 'oath', characterName: name, metadata: { text } });
+        }
+      }
+      return events;
+    }
 
     // --- Death or spawn (character ZDOID) ---
     const z = line.match(RE.zdoid);

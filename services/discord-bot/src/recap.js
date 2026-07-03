@@ -177,7 +177,7 @@ export function selectPlayerOfDay(ctx = {}) {
   };
 }
 
-export function createRecap({ db, post, state, saveState, writeDb = null, tz = 'America/Chicago', startsAt = null }) {
+export function createRecap({ db, post, state, saveState, writeDb = null, tz = 'America/Chicago', startsAt = null, onPotyCrowned = null }) {
   async function buildStats(period) {
     const now = Date.now();
     const windowStart = new Date(
@@ -400,6 +400,14 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
         });
       } catch (e) {
         console.error('[recap] poty archive write failed:', e.message);
+      }
+    }
+    // Thin hook: let the Voice of the Hall crown the winner in-game (best-effort).
+    if (period === 'evening' && stats.poty && onPotyCrowned) {
+      try {
+        await onPotyCrowned(stats.poty, stats.worldDay ?? null);
+      } catch (e) {
+        console.error('[recap] poty voice hook failed:', e.message);
       }
     }
     state.lastRecapAt = new Date().toISOString();

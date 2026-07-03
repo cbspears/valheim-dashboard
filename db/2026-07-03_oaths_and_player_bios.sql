@@ -19,3 +19,7 @@ create policy "public read oaths" on public.oaths for select using (true);
 -- always GENERATED from their deeds (players have no control over it).
 alter table public.players add column if not exists bio text;
 alter table public.players add column if not exists role text;
+
+-- (second migration, oath_source, also applied 2026-07-03:)
+-- where the oath was sworn: 'discord' (bot mention) or 'ingame' (/oath chat via the Eilif companion plugin)
+alter table public.oaths add column if not exists source text not null default 'discord';

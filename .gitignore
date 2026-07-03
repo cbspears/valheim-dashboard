@@ -40,3 +40,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .playwright-mcp
+
+# eilif-companion plugin (BepInEx / .NET build)
+# Reference DLLs are re-copied from the live game + BepInEx pack via refresh-libs.sh (never committed).
+plugins/eilif-companion/libs/
+plugins/eilif-companion/obj/
+plugins/eilif-companion/bin/
+# NOTE: plugins/eilif-companion/dist/EilifCompanion.dll IS committed (the deployable artifact).
+plugins/eilif-companion/.voice-token

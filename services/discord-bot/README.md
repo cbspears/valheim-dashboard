@@ -63,6 +63,36 @@ Reactions: **📜** on a recorded oath (plus **❓** when the name didn't match 
 bio/role update (**❓** if no viking matched). Re-swearing **replaces** that Discord user's previous
 oath (one per user). Needs `SUPABASE_SERVICE_ROLE_KEY` and the GuildMessages intent (already set).
 
+## The Voice of the Hall (`VOICE_ENGINE=1`, off by default)
+Eilif's brain. A server-side game plugin polls `GET /api/voice` and **speaks** queued lines in-game
+as "Eilif"; this bot decides **what** gets queued and **when**, writing rows to the `voice_lines`
+table (service role). Eilif is a *presence, not a chatterbox*.
+
+**Ambient cadence:** roughly **one ambient line per 2 hours of someone-online time** — never to an
+empty hall. A 60s tick accumulates online-minutes whenever `server_status.player_count > 0`; at
+120 accumulated minutes (with players still on) it queues one line and resets. **Any** event or
+manual line also resets the clock. The accumulator lives in `state.json`, so restarts don't
+double-speak. Ambient content rotates over ~21 templates (day-cycle ambience using the world day,
+dated **callbacks** to deaths from ~1/2/4 weeks ago, and pure atmosphere), never repeating a
+template within its last 5 uses.
+
+**Event lines (immediate; bypass the cadence, reset the clock):**
+- **POTY coronation** — when the evening recap crowns a Player of the Day (thin hook at the
+  `poty_history` insert): *"The hall has spoken. Tonight the crown rests on {name}."*
+- **Death milestones** — every 50th warband death: *"That was the warband's {n}th death. The ravens
+  grow fat."* (idempotent via `state.json`).
+- **First biome** — a `discovery` event entering a new biome earns a welcome line.
+- **Oath echoes** — an in-game oath (`oaths` where `source='ingame'`, `announced_at` null) gets an
+  in-game echo *"The hall heard you, {firstName}."* **and** is cross-posted to #valheim; then
+  `announced_at` is set.
+
+**Puppet mode:** a member with **Administrator** permission can say `@Eilif say: <line>` to queue a
+`manual` line (reacts **🗣️**). Non-admins are ignored silently; ordinary oath/bio/role messages pass
+straight through to the oath ingest.
+
+**Housekeeping:** queued-but-unspoken lines older than 24h are marked spoken on each tick, so stale
+ambience can't flood the hall when the server comes back. Needs `SUPABASE_SERVICE_ROLE_KEY`.
+
 ## Run as a service
 ```bash
 sudo cp eilif-discord-bot.service /etc/systemd/system/

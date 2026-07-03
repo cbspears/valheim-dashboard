@@ -11,6 +11,7 @@ import { createRecap } from './recap.js';
 import { createEventsSync } from './events.js';
 import { createGalleryIngest } from './gallery.js';
 import { createOathIngest } from './oaths.js';
+import { createVoiceEngine } from './voice.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
 const POLL = parseInt(process.env.POLL_INTERVAL_MS || '15000', 10);
@@ -47,7 +48,17 @@ async function runLive() {
   const bosses = createBossWatcher({ db, post, state, saveState });
   const writeDb = process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceClient() : null;
   if (!writeDb) console.warn('[recap] no SUPABASE_SERVICE_ROLE_KEY — Player-of-the-Day archive disabled');
-  const recap = createRecap({ db, post, state, saveState, writeDb, tz: TZ, startsAt: recapsStart });
+
+  // Optional: the Voice of the Hall brain. Off by default (VOICE_ENGINE=1).
+  // Created before the recap so the evening POTY crown can hook into it.
+  const voice = process.env.VOICE_ENGINE === '1'
+    ? createVoiceEngine({ client: poster.client, db, post, state, saveState })
+    : null;
+
+  const recap = createRecap({
+    db, post, state, saveState, writeDb, tz: TZ, startsAt: recapsStart,
+    onPotyCrowned: voice ? voice.announcePoty : null,
+  });
 
   await bosses.init(); // seed already-felled bosses so we don't retro-announce
   await saveState();
@@ -99,6 +110,16 @@ async function runLive() {
   if (process.env.OATH_INGEST === '1') {
     createOathIngest({ client: poster.client }).attach();
     extra += ', oath ingest on';
+  }
+
+  // Optional: the Voice of the Hall — ambient cadence + event lines queued to
+  // the voice_lines table for the in-game Eilif plugin, plus `@Eilif say:`.
+  if (voice) {
+    voice.attach();
+    const voiceLoop = safe('voice', () => voice.tick());
+    await voiceLoop();
+    timers.push(setInterval(voiceLoop, 60000));
+    extra += ', voice engine on';
   }
 
   console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s${extra}.`);
