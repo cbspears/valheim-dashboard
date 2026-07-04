@@ -21,4 +21,4 @@ export const SERVER_ADDRESS = '194.50.234.131:5914';
 // Shared r2modman / Thunderstore Mod Manager profile code. Once you publish the
 // version-pinned modpack, paste its code here and the Get Started page switches
 // to the one-click "import this code" flow. Leave '' until then.
-export const MODPACK_PROFILE_CODE = '';
+export const MODPACK_PROFILE_CODE = '019f2efe-a405-53ef-8ac5-471888a1090c';
