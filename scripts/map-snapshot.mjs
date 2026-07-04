@@ -37,17 +37,24 @@ async function snapshot() {
   await sftp.end();
 
   const map = await sharp(mapPng).removeAlpha().raw().toBuffer();
-  // feather the hard fog mask slightly so the edge of the known world glows soft
-  const fog = await sharp(fogPng).blur(1.2).raw().toBuffer();
+  // sharp may expand the 1-channel fog PNG to 3 channels on raw() — honor the
+  // actual stride instead of assuming one byte per pixel
+  const fogRes = await sharp(fogPng).blur(1.2).raw().toBuffer({ resolveWithObject: true });
+  const fog = fogRes.data, fs_ = fogRes.info.channels;
+  // a wide, faint gold halo around anything explored — keeps a small young
+  // world visible as an ember on the page instead of a black void
+  const haloRes = await sharp(fogPng).blur(14).raw().toBuffer({ resolveWithObject: true });
+  const halo = haloRes.data, hs_ = haloRes.info.channels;
 
   // dark blue-slate unexplored texture (matches the site's pitch background)
   const out = Buffer.alloc(SIZE * SIZE * 3);
   for (let i = 0; i < SIZE * SIZE; i++) {
-    const a = fog[i] / 255;
+    const a = fog[i * fs_] / 255;
+    const g = (halo[i * hs_] / 255) * (1 - a) * 0.55; // halo only OUTSIDE the revealed area
     const j = i * 3;
-    out[j] = map[j] * a + 11 * (1 - a);
-    out[j + 1] = map[j + 1] * a + 14 * (1 - a);
-    out[j + 2] = map[j + 2] * a + 20 * (1 - a);
+    out[j] = Math.min(255, map[j] * a + 11 * (1 - a) + 200 * g);
+    out[j + 1] = Math.min(255, map[j + 1] * a + 14 * (1 - a) + 149 * g);
+    out[j + 2] = Math.min(255, map[j + 2] * a + 20 * (1 - a) + 42 * g);
   }
 
   const webp = await sharp(out, { raw: { width: SIZE, height: SIZE, channels: 3 } })
@@ -56,7 +63,7 @@ async function snapshot() {
 
   // explored percent (of the world disc, radius ~= SIZE/2 * 0.95)
   let lit = 0;
-  for (let i = 0; i < SIZE * SIZE; i++) if (fog[i] > 40) lit++;
+  for (let i = 0; i < SIZE * SIZE; i++) if (fog[i * fs_] > 40) lit++;
   const discPx = Math.PI * Math.pow((SIZE / 2) * 0.95, 2);
   const revealedPct = +(100 * lit / discPx).toFixed(2);
 
