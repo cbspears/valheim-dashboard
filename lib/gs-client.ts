@@ -132,3 +132,150 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
     gsStats,
   };
 }
+
+// ─── Boss detection (server milestones + client/server bossKillEvents) ────────
+//
+// Ground truth from the GsValheimStatsEmitter 0.2.x decompile:
+//   • milestones[] = [{ key, label, kind, tsUtc }] where kind ∈
+//     'boss'|'bounty'|'progression'. Boss milestones are exactly the seven
+//     `defeated_*` Valheim global keys below (the Emitter tags kind='boss' via
+//     key.StartsWith("defeated_")). NEW-only per emitter process, but its
+//     knownKeys set is persisted in state.tsv — so on a fresh deploy / lost
+//     state file EVERY existing global key re-fires as a milestone at once.
+//     => the DB write MUST be idempotent (only flip a bosses row still
+//        is_killed=false). Mini-boss defeats (defeated_serpent, …) are NOT in
+//        this map and are deliberately not matched.
+//   • bossKillEvents[] (both source:'server' and source:'client') =
+//     [{ boss, fightSec, firstBlood, topDamagePlayer, topDamage, participants,
+//        tsUtc }] where `boss` is the creature gameObject name (Eikthyr, gd_king,
+//        Dragon, …) — NOT the global key. Mapped via BOSS_OBJECT_TO_NAME.
+//
+// Both maps resolve to the exact `bosses.name` values seeded in Supabase.
+// The Bog Witch (bosses row, biome "Deep North") has NO entry in either map:
+// Valheim ships no Deep North boss / global key yet, so it can never auto-fire
+// — it stays manual (scripts/mark-boss.js) until the update lands.
+
+/** Valheim boss-defeat global key (milestone `key`) → `bosses.name`. */
+export const BOSS_MILESTONE_KEY_TO_NAME: Record<string, string> = {
+  defeated_eikthyr: 'Eikthyr',
+  defeated_gdking: 'The Elder',
+  defeated_bonemass: 'Bonemass',
+  defeated_dragon: 'Moder',
+  defeated_goblinking: 'Yagluth',
+  defeated_queen: 'The Queen',
+  defeated_fader: 'Fader',
+};
+
+/** Boss creature gameObject name (bossKillEvents `boss`) → `bosses.name`. */
+export const BOSS_OBJECT_TO_NAME: Record<string, string> = {
+  Eikthyr: 'Eikthyr',
+  gd_king: 'The Elder',
+  Bonemass: 'Bonemass',
+  Dragon: 'Moder',
+  GoblinKing: 'Yagluth',
+  SeekerQueen: 'The Queen',
+  Fader: 'Fader',
+};
+
+export interface ParsedBossMilestone {
+  key: string;
+  bossName: string;
+  tsUtc: string | null;
+}
+
+/**
+ * Extract boss-defeat milestones from a server payload. Returns one entry per
+ * recognized `defeated_*` global key (deduped within the payload). Ignores
+ * bounty/progression milestones and any unmapped/mini-boss keys.
+ */
+export function parseBossMilestones(body: Obj): ParsedBossMilestone[] {
+  const out: ParsedBossMilestone[] = [];
+  const seen = new Set<string>();
+  for (const m of arr(body.milestones)) {
+    const key = str(m.key);
+    if (!key || seen.has(key)) continue;
+    const bossName = BOSS_MILESTONE_KEY_TO_NAME[key];
+    if (!bossName) continue;
+    seen.add(key);
+    out.push({ key, bossName, tsUtc: str(m.tsUtc) });
+  }
+  return out;
+}
+
+export interface ParsedBossKill {
+  bossName: string;
+  boss: string;
+  fightSec: number;
+  firstBlood: string | null;
+  topDamagePlayer: string | null;
+  topDamage: number;
+  participants: number;
+  tsUtc: string;
+}
+
+/**
+ * Parse bossKillEvents[] (server- or client-emitted) into fight-detail rows,
+ * mapping the raw creature name to `bosses.name` and dropping anything without
+ * a mappable boss + a valid tsUtc (the dedupe key, mirroring deathEvents).
+ */
+export function parseBossKillEvents(raw: unknown): ParsedBossKill[] {
+  return arr(raw)
+    .map((e): ParsedBossKill | null => {
+      const boss = str(e.boss);
+      const tsUtc = str(e.tsUtc);
+      if (!boss || !tsUtc || Number.isNaN(Date.parse(tsUtc))) return null;
+      const bossName = BOSS_OBJECT_TO_NAME[boss] ?? BOSS_OBJECT_TO_NAME[boss.replace(/\(Clone\)$/i, '').trim()];
+      if (!bossName) return null;
+      return {
+        bossName,
+        boss,
+        fightSec: Math.round(num(e.fightSec)),
+        firstBlood: str(e.firstBlood),
+        topDamagePlayer: str(e.topDamagePlayer),
+        topDamage: Math.round(num(e.topDamage)),
+        participants: Math.round(num(e.participants)),
+        tsUtc,
+      };
+    })
+    .filter((x): x is ParsedBossKill => x !== null);
+}
+
+export interface ParsedDistances {
+  /** DistanceTraveled — the total the .fch profile tracks (metres). */
+  distanceTraveled: number;
+  walk: number;
+  run: number;
+  sail: number;
+  air: number;
+  /** The raw vh_Distance* subset, verbatim, for future leaderboards. */
+  raw: Record<string, number>;
+}
+
+/**
+ * Pull the raw distance counters out of the reporter's `stats` map
+ * (keys "vh_<PlayerStatType>": DistanceTraveled/Walk/Run/Sail/Air, metres —
+ * enum names verified against services/stats-parser/src/fch.js). Returns null
+ * when the self entry / stats map is absent, or when every distance is zero.
+ */
+export function parseSelfDistances(body: Obj): ParsedDistances | null {
+  const reporter = str(body.reporter);
+  const players = arr(body.players);
+  const self =
+    (reporter ? players.find((p) => str(p.name) === reporter && (p.stats !== undefined || p.deaths !== undefined)) : undefined) ??
+    players.find((p) => p.stats !== undefined || p.deaths !== undefined);
+  const stats = (self?.stats && typeof self.stats === 'object' ? self.stats : {}) as Obj;
+  const g = (k: string): number => Math.round(num(stats[k]));
+
+  const distanceTraveled = g('vh_DistanceTraveled');
+  const walk = g('vh_DistanceWalk');
+  const run = g('vh_DistanceRun');
+  const sail = g('vh_DistanceSail');
+  const air = g('vh_DistanceAir');
+
+  const raw: Record<string, number> = {};
+  for (const [k, v] of Object.entries(stats)) {
+    if (/^vh_Distance/.test(k)) raw[k] = Math.round(num(v));
+  }
+  if (distanceTraveled <= 0 && walk <= 0 && run <= 0 && sail <= 0 && air <= 0) return null;
+  return { distanceTraveled, walk, run, sail, air, raw };
+}

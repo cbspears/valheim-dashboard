@@ -55,6 +55,17 @@ export interface GsClientStats {
   };
   currentLifeStartedUtc: string | null;
   platformId: string | null;
+  /**
+   * Per-mode distance counters (metres) from the .fch profile, folded in by
+   * /api/gs-ingest. Optional so blobs written before this landed still type.
+   */
+  distances?: {
+    total: number;
+    walk: number;
+    run: number;
+    sail: number;
+    air: number;
+  };
 }
 
 export interface PlayerStats {
@@ -118,6 +129,20 @@ export interface Boss {
   killed_at: string | null;
   players_present: string[];
   notes: string | null;
+  /**
+   * Fight detail from GsValheimStats bossKillEvents (db/2026-07-04_boss_kills_and_distance.sql).
+   * Optional so rows read before the migration still type. Powers the /boss
+   * "Full Record" surface.
+   */
+  fight_stats?: {
+    fightSec: number;
+    firstBlood: string | null;
+    topDamagePlayer: string | null;
+    topDamage: number;
+    participants: number;
+    tsUtc: string;
+    source: string;
+  } | null;
 }
 
 export type RoadmapStatus = 'planned' | 'in_progress' | 'completed' | string;

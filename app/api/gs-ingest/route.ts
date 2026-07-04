@@ -1,5 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
-import { parseSelfSnapshot } from '@/lib/gs-client';
+import {
+  parseSelfSnapshot,
+  parseSelfDistances,
+  parseBossMilestones,
+  parseBossKillEvents,
+  type ParsedBossKill,
+} from '@/lib/gs-client';
 
 // GsValheimStats ingest (v0) — the server-side Emitter POSTs here every ~120s
 // (instantly on join/leave): { schemaVersion: 1, game: 'valheim', source: 'server',
@@ -209,8 +215,20 @@ async function ingestPlayerStats(body: Obj): Promise<void> {
   const prev = (prevRows?.[0] ?? null) as Obj | null;
   const prevNum = (k: string): number => num(prev?.[k]);
 
+  // Distances (metres) from the .fch profile counters: total goes to the
+  // dedicated distance_traveled column; the per-mode breakdown + raw vh_ subset
+  // are folded into gs_stats so future leaderboards need no further ingest
+  // change. Same GREATEST guard so a profile reset can't roll it backwards.
+  const dist = parseSelfDistances(body);
+
   // Keep the richer gs_stats blob unless this snapshot advances (guards resets).
-  const gsStats = s.damageDealt >= prevNum('damage_dealt') ? s.gsStats : (prev?.gs_stats ?? s.gsStats);
+  const advancing = s.damageDealt >= prevNum('damage_dealt');
+  const baseGs = advancing ? s.gsStats : ((prev?.gs_stats as Obj | undefined) ?? s.gsStats);
+  const gsStats: Obj = { ...(baseGs as Obj) };
+  if (dist) {
+    gsStats.distances = { total: dist.distanceTraveled, walk: dist.walk, run: dist.run, sail: dist.sail, air: dist.air };
+    gsStats.distancesRaw = dist.raw;
+  }
 
   const full: Obj = {
     player_id: pid,
@@ -219,6 +237,7 @@ async function ingestPlayerStats(body: Obj): Promise<void> {
     resources_harvested: Math.max(s.resourcesHarvested, prevNum('resources_harvested')),
     items_crafted: Math.max(s.itemsCrafted, prevNum('items_crafted')),
     structures_built: Math.max(s.structuresBuilt, prevNum('structures_built')),
+    distance_traveled: Math.max(dist?.distanceTraveled ?? 0, prevNum('distance_traveled')),
     damage_dealt: Math.max(s.damageDealt, prevNum('damage_dealt')),
     boss_kills: Math.max(s.bossKills, prevNum('boss_kills')),
     longest_life_sec: Math.max(s.longestLifeSec, prevNum('longest_life_sec')),
@@ -243,9 +262,132 @@ async function ingestPlayerStats(body: Obj): Promise<void> {
     resources_harvested: full.resources_harvested,
     items_crafted: full.items_crafted,
     structures_built: full.structures_built,
+    distance_traveled: full.distance_traveled,
     updated_at: now,
   };
   await client.from('player_stats').upsert(base, { onConflict: 'player_id' });
+}
+
+// ─── Boss detection ──────────────────────────────────────────────────────────
+//
+// Server payloads carry `milestones[]`; a boss-defeat milestone (a Valheim
+// `defeated_*` global key) is the authoritative trigger. On FIRST sight (the
+// bosses row still is_killed=false) we flip that row — is_killed=true,
+// killed_at=now, players_present=the online roster from the SAME payload — and
+// insert a type='boss' event mirroring scripts/mark-boss.js's shape
+// ({ boss, players:"N vikings" }). That single flip cascades automatically:
+//   bosses row → World timeline (BossTimeline) → /boss war-room → the Discord
+//   bot's is_killed poll (@everyone) → saga (lib/episodes boss case).
+// Idempotent: milestones re-POST every ~120s and re-fire wholesale on a fresh
+// emitter deploy, so we only act while is_killed=false and only emit the event
+// when our guarded UPDATE actually flips a row.
+async function ingestBossMilestones(body: Record<string, unknown>, roster: string[]): Promise<void> {
+  const milestones = parseBossMilestones(body);
+  if (milestones.length === 0) return;
+
+  const client = db();
+  const names = [...new Set(milestones.map((m) => m.bossName))];
+  const { data: rows } = await client
+    .from('bosses')
+    .select('id, name, is_killed')
+    .in('name', names);
+  const byName = new Map<string, { id: string; is_killed: boolean }>(
+    (rows ?? []).map((r) => [r.name as string, { id: r.id as string, is_killed: !!r.is_killed }]),
+  );
+
+  for (const m of milestones) {
+    const row = byName.get(m.bossName);
+    if (!row || row.is_killed) continue; // unknown boss (e.g. Bog Witch) or already felled
+
+    const killedAt = m.tsUtc && !Number.isNaN(Date.parse(m.tsUtc)) ? new Date(m.tsUtc).toISOString() : new Date().toISOString();
+
+    // Guarded flip: .eq('is_killed', false) makes the re-POST a no-op and the
+    // returned rows tell us whether WE were the one to fell it (→ emit event once).
+    const { data: flipped } = await client
+      .from('bosses')
+      .update({ is_killed: true, killed_at: killedAt, players_present: roster })
+      .eq('id', row.id)
+      .eq('is_killed', false)
+      .select('id');
+
+    if (!flipped || flipped.length === 0) continue; // lost the race / already flipped
+
+    await client.from('events').insert({
+      type: 'boss',
+      character_name: null,
+      metadata: {
+        boss: m.bossName,
+        players: `${roster.length} viking${roster.length === 1 ? '' : 's'}`,
+        milestoneKey: m.key,
+        source: 'gs-milestone',
+      },
+      created_at: killedAt,
+    });
+  }
+}
+
+// Enrich a felled boss with the fight detail from bossKillEvents[] (emitted by
+// BOTH the server and participating clients). Canonical home is bosses.fight_stats
+// (jsonb) — renderable by the /boss "Full Record" surface. Order-independent and
+// idempotent: dedupe on the boss's tsUtc, and prefer the report with the most
+// participants (the server's server-wide view beats any single client's). If the
+// fight_stats column doesn't exist yet (pre-migration), fall back to stashing the
+// detail on the matching boss event row's metadata so nothing is lost.
+async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): Promise<void> {
+  const events = parseBossKillEvents(raw);
+  if (events.length === 0) return;
+
+  // Collapse duplicates within this payload: one entry per boss, best participants.
+  const best = new Map<string, ParsedBossKill>();
+  for (const e of events) {
+    const cur = best.get(e.bossName);
+    if (!cur || e.participants > cur.participants) best.set(e.bossName, e);
+  }
+
+  const client = db();
+  const names = [...best.keys()];
+  const { data: rows } = await client
+    .from('bosses')
+    .select('id, name, fight_stats')
+    .in('name', names);
+
+  for (const row of rows ?? []) {
+    const e = best.get(row.name as string);
+    if (!e) continue;
+    const incoming = {
+      fightSec: e.fightSec,
+      firstBlood: e.firstBlood,
+      topDamagePlayer: e.topDamagePlayer,
+      topDamage: e.topDamage,
+      participants: e.participants,
+      tsUtc: e.tsUtc,
+      source,
+    };
+    const existing = (row as { fight_stats?: { tsUtc?: string; participants?: number } | null }).fight_stats ?? null;
+    // Dedupe / prefer richer: skip when we already hold this fight with at least
+    // as many participants.
+    if (existing && existing.tsUtc === e.tsUtc && (existing.participants ?? 0) >= e.participants) continue;
+
+    const { error } = await client.from('bosses').update({ fight_stats: incoming }).eq('id', row.id);
+    if (!error) continue;
+
+    // Graceful degradation (fight_stats column missing): merge onto the latest
+    // boss event row for this boss instead.
+    const { data: ev } = await client
+      .from('events')
+      .select('id, metadata')
+      .eq('type', 'boss')
+      .eq('metadata->>boss', e.bossName)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const evRow = ev?.[0];
+    if (evRow) {
+      await client
+        .from('events')
+        .update({ metadata: { ...(evRow.metadata as Record<string, unknown>), fight: incoming } })
+        .eq('id', evRow.id);
+    }
+  }
 }
 
 export async function POST(req: Request) {
@@ -283,6 +425,9 @@ export async function POST(req: Request) {
     }
     await ingestDeathEvents(body.deathEvents);
     await ingestPlayerStats(body as Record<string, unknown>);
+    // Client payloads also carry bossKillEvents (this client's view of a fight)
+    // — enrich, but never flip a boss from a client (the server milestone owns that).
+    await ingestBossKillEvents(body.bossKillEvents, 'client');
     return Response.json({ status: 'inserted' });
   }
 
@@ -306,6 +451,11 @@ export async function POST(req: Request) {
   else if (count !== null) statusUpdate.player_count = count;
   if (worldDay !== undefined) statusUpdate.world_day = worldDay;
   await client.from('server_status').update(statusUpdate).eq('id', 1);
+
+  // Boss detection: the server payload's milestones flip the bosses row (the
+  // authoritative first-kill trigger); its own bossKillEvents add fight detail.
+  await ingestBossMilestones(body, names ?? []);
+  await ingestBossKillEvents(body.bossKillEvents, 'server');
 
   return Response.json({ status: 'inserted' });
 }
