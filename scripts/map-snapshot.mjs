@@ -21,6 +21,25 @@ pollerRequire('dotenv').config({ path: join(ROOT, '.env.local') });
 
 const REMOTE = '/194.50.234.131_5914/BepInEx/plugins/WebMap/map_data/Dedicated';
 const SIZE = 2048;
+const STATE_FILE = join(ROOT, 'scripts', '.map-snapshot-state.json');
+const fs = rootRequire('fs');
+
+function loadState() {
+  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return { days: [] }; }
+}
+function saveState(st) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(st));
+}
+
+/** The in-game day, from the dashboard's own status API (fed by the Emitter). */
+async function currentWorldDay() {
+  try {
+    const r = await fetch('https://valheim-dashboard.vercel.app/api/status', { cache: 'no-store' });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return typeof j.worldDay === 'number' && j.worldDay > 0 ? Math.floor(j.worldDay) : null;
+  } catch { return null; }
+}
 
 async function snapshot() {
   const sftp = new SftpClient();
@@ -82,14 +101,42 @@ async function snapshot() {
   });
   const r1 = await put('current.webp');
   if (!r1.ok) throw new Error('upload current: HTTP ' + r1.status + ' ' + (await r1.text()).slice(0, 120));
-  const r2 = await put(`frames/${new Date().toISOString().replace(/[:.]/g, '-')}.webp`);
-  if (!r2.ok) console.warn('frame archive failed: HTTP', r2.status);
 
-  console.log(`[map-snapshot] ${new Date().toISOString()} uploaded (${(webp.length / 1024).toFixed(0)}KB, revealed ${revealedPct}%)`);
+  // ONE frame per IN-GAME day (Charlie's cadence): upsert day-N every cycle
+  // while the world is on day N — when the day rolls over, day-N stays frozen
+  // at its final state, which makes each frame the day's end-of-day picture.
+  const day = await currentWorldDay();
+  let dayNote = 'day unknown (frame skipped)';
+  if (day !== null) {
+    const dayPath = `frames-by-day/day-${String(day).padStart(4, '0')}.webp`;
+    const rd = await put(dayPath);
+    if (rd.ok) {
+      const st = loadState();
+      if (!st.days.includes(day)) { st.days.push(day); st.days.sort((a, b) => a - b); saveState(st); }
+      // public manifest the dashboard reads to build the real timelapse
+      const manifest = JSON.stringify({
+        days: st.days,
+        prefix: 'frames-by-day/day-',
+        updatedAt: new Date().toISOString(),
+      });
+      const rm = await fetch(`${base}/object/map/frames-manifest.json`, {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json', 'x-upsert': 'true' },
+        body: manifest,
+      });
+      dayNote = `day ${day} framed${rm.ok ? '' : ' (manifest failed HTTP ' + rm.status + ')'}`;
+    } else {
+      dayNote = `day frame failed HTTP ${rd.status}`;
+    }
+  }
+
+  console.log(`[map-snapshot] ${new Date().toISOString()} uploaded (${(webp.length / 1024).toFixed(0)}KB, revealed ${revealedPct}%, ${dayNote})`);
 }
 
 const loop = process.argv.includes('--loop');
 await snapshot().catch((e) => { console.error('[map-snapshot] failed:', e.message); if (!loop) process.exit(1); });
 if (loop) {
-  setInterval(() => snapshot().catch((e) => console.error('[map-snapshot] failed:', e.message)), 10 * 60 * 1000);
+  // 5-minute cadence: an in-game day is ~30 real minutes, so each day gets
+  // several upserts and its frozen frame lands within minutes of rollover.
+  setInterval(() => snapshot().catch((e) => console.error('[map-snapshot] failed:', e.message)), 5 * 60 * 1000);
 }

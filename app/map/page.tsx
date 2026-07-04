@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Map, Camera, Compass, CalendarDays, Landmark, EyeOff, History } from 'lucide-react';
 import { SectionHeader, Card, CardBody, StatTile, Badge } from '@/components/ui';
 import { MapTimelapse } from '@/components/map/MapTimelapse';
-import { ZoomableMap } from '@/components/map/ZoomableMap';
+import { LiveWorld } from '@/components/map/LiveWorld';
 import {
   MAP_DEMO_DAYS,
   MAP_DEMO_LABELS,
@@ -43,15 +43,10 @@ export default async function MapPage() {
       {liveMap && (
         <Card glow className="mx-auto mb-8 max-w-3xl">
           <CardBody>
-            <ZoomableMap
-              src={`${liveMap.url}?t=${Date.now()}`}
-              alt="The known world, as the server tells it"
-              corner={
-                <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-md border border-online/40 bg-pitch/75 px-2.5 py-1 text-xs font-medium text-online-glow backdrop-blur-sm">
-                  <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-online" />
-                  Live
-                </div>
-              }
+            <LiveWorld
+              currentUrl={liveMap.url}
+              updatedLabel={liveMap.updatedAt}
+              frames={liveMap.frames}
             />
             <p className="mt-3 text-center text-xs text-muted">
               The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it —

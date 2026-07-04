@@ -91,13 +91,37 @@ export async function getRecentSessions(limit = 50): Promise<GameSession[]> {
   return (data as GameSession[]) ?? [];
 }
 
-/** The live fog-masked world map snapshot, if the pipeline has published one. */
-export async function getLiveMap(): Promise<{ url: string; updatedAt: string | null } | null> {
-  const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/map/current.webp`;
+export interface LiveMapFrame {
+  day: number;
+  url: string;
+}
+
+/** The live fog-masked world map snapshot + the per-in-game-day frame archive. */
+export async function getLiveMap(): Promise<
+  { url: string; updatedAt: string | null; frames: LiveMapFrame[] } | null
+> {
+  const bucket = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/map`;
+  const url = `${bucket}/current.webp`;
   try {
     const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
     if (!head.ok) return null;
-    return { url, updatedAt: head.headers.get('last-modified') };
+    let frames: LiveMapFrame[] = [];
+    try {
+      const mf = await fetch(`${bucket}/frames-manifest.json`, { cache: 'no-store' });
+      if (mf.ok) {
+        const m = (await mf.json()) as { days?: number[]; prefix?: string };
+        frames = (m.days ?? [])
+          .filter((d) => Number.isFinite(d))
+          .sort((a, b) => a - b)
+          .map((day) => ({
+            day,
+            url: `${bucket}/${m.prefix ?? 'frames-by-day/day-'}${String(day).padStart(4, '0')}.webp`,
+          }));
+      }
+    } catch {
+      /* no manifest yet — live-only */
+    }
+    return { url, updatedAt: head.headers.get('last-modified'), frames };
   } catch {
     return null;
   }
