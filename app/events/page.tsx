@@ -3,7 +3,7 @@ import { ScrollText, BookOpenText } from 'lucide-react';
 import { SectionHeader } from '@/components/ui';
 import { EventFeed } from '@/components/events/EventFeed';
 import { EpisodeList } from '@/components/events/EpisodeList';
-import { getAllEvents, getSessionsSince, getEventsSince } from '@/lib/data';
+import { getAllEvents, getSessionsSince, getEventsSince, getOaths, getPinsForEpisodes } from '@/lib/data';
 import { buildEpisodes } from '@/lib/episodes';
 
 export const dynamic = 'force-dynamic';
@@ -13,13 +13,15 @@ export const metadata: Metadata = {
 };
 
 export default async function EventsPage() {
-  const [events, sessions, sagaEvents] = await Promise.all([
+  const [events, sessions, sagaEvents, oaths, pins] = await Promise.all([
     getAllEvents(200),
     getSessionsSince(70),
     getEventsSince(70),
+    getOaths(),
+    getPinsForEpisodes(70),
   ]);
 
-  const episodes = buildEpisodes(sessions, sagaEvents);
+  const episodes = buildEpisodes(sessions, sagaEvents, oaths, pins);
 
   return (
     <div className="flex flex-col gap-12">

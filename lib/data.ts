@@ -146,6 +146,28 @@ export async function getPins(): Promise<LivePin[]> {
   return (data as LivePin[]) ?? [];
 }
 
+/**
+ * Pins as the Saga episode builder needs them: name + kind + author + the
+ * created_at instant, so each place can be bucketed to its America/Chicago
+ * calendar day. Oldest first. Separate from getPins() (which powers the live
+ * map and omits created_at) so neither caller drags the other's columns.
+ */
+export async function getPinsForEpisodes(days = 70): Promise<
+  { name: string; kind: string | null; by_character_name: string | null; created_at: string }[]
+> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data } = await db()
+    .from('pins')
+    .select('name, kind, by_character_name, created_at')
+    .gte('created_at', since)
+    .order('created_at', { ascending: true })
+    .limit(2000);
+  return (
+    (data as { name: string; kind: string | null; by_character_name: string | null; created_at: string }[]) ??
+    []
+  );
+}
+
 /** The sworn oaths, oldest first (the Oath page + Hall teaser). */
 export async function getOaths(): Promise<Oath[]> {
   const { data } = await db()

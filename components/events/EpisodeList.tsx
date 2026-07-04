@@ -99,6 +99,11 @@ function EpisodeCard({ ep }: { ep: Episode }) {
         )}
       </h3>
 
+      {/* dynamic saga blurb of what happened this day */}
+      {ep.description && (
+        <p className="mt-2 text-sm leading-relaxed text-ash-dim">{ep.description}</p>
+      )}
+
       {/* participant chips */}
       {ep.participants.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
