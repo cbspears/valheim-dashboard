@@ -1,0 +1,18 @@
+[Unit]
+Description=Eilif map snapshot loop (WebMap SFTP pull -> fog-masked frames)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cbspears
+WorkingDirectory=/home/cbspears/Projects/valheim-dashboard
+# Absolute nvm Node 20 path (systemd does not source nvm).
+ExecStart=/home/cbspears/.config/nvm/versions/node/v20.20.2/bin/node scripts/map-snapshot.mjs --loop
+Restart=on-failure
+RestartSec=30
+Environment=NODE_ENV=production
+Environment=TZ=America/Chicago
+
+[Install]
+WantedBy=multi-user.target
