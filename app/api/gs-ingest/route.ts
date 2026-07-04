@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { parseSelfSnapshot } from '@/lib/gs-client';
 
 // GsValheimStats ingest (v0) — the server-side Emitter POSTs here every ~120s
 // (instantly on join/leave): { schemaVersion: 1, game: 'valheim', source: 'server',
@@ -132,6 +133,119 @@ async function ingestDeathEvents(rawEvents: unknown): Promise<void> {
       created_at: p.occurredIso,
     })),
   );
+
+  // The log poller may race ahead of the client's 120s cycle and log the same
+  // death first, but WITHOUT the real cause (no metadata.source, no cause). Now
+  // that we have the authoritative cause row, drop any causeless poller-derived
+  // death for the same character within ±3 minutes so it isn't double-counted.
+  await Promise.all(
+    fresh.map(async (p) => {
+      const t = Date.parse(p.occurredIso);
+      const lo = new Date(t - 3 * 60_000).toISOString();
+      const hi = new Date(t + 3 * 60_000).toISOString();
+      await client
+        .from('events')
+        .delete()
+        .eq('type', 'death')
+        .eq('character_name', p.name)
+        .gte('created_at', lo)
+        .lte('created_at', hi)
+        .is('metadata->>source', null)
+        .is('metadata->>cause', null);
+    }),
+  );
+}
+
+// ─── Client per-player cumulative stats ──────────────────────────────────────
+//
+// The client mod's Emit() posts players[]: the FIRST element (name === reporter)
+// is the local player and is the ONLY authoritative cumulative source — it carries
+// `stats` (the raw .fch profile counters, keyed "vh_<StatType>"), `kills`,
+// `deaths`, `bossKills`, plus weapon/creature/craft/pickup/boss breakdowns. Any
+// further players[] entries are OTHER players observed by the reporter (partial
+// combat only, no cumulative counters) — we deliberately ignore those here so a
+// bystander's snapshot never clobbers someone's real totals. Result: exactly one
+// authoritative writer per character, which makes the read-modify-write below
+// race-free in practice.
+//
+// Snapshots are cumulative and re-posted every ~120s, so the merge is idempotent
+// and uses GREATEST (never let a fresh character / profile reset roll counters
+// backwards). The pure parse lives in lib/gs-client so it stays unit-testable.
+
+type Obj = Record<string, unknown>;
+
+function num(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+
+/** Merge the reporter's cumulative snapshot into player_stats (idempotent, GREATEST). */
+async function ingestPlayerStats(body: Obj): Promise<void> {
+  const s = parseSelfSnapshot(body);
+  if (!s) return;
+
+  const client = db();
+  const now = new Date().toISOString();
+
+  // Resolve (or create) the players row for the reporter (mirrors the deaths path).
+  const { data: found } = await client
+    .from('players')
+    .select('id')
+    .eq('character_name', s.reporter)
+    .limit(1);
+  let pid = (found?.[0]?.id as string | undefined) ?? undefined;
+  if (!pid) {
+    const { data: ins } = await client
+      .from('players')
+      .insert({ character_name: s.reporter, first_seen_at: now, last_seen_at: now, is_online: false })
+      .select('id')
+      .single();
+    pid = ins?.id as string | undefined;
+  }
+  if (!pid) return;
+
+  // Read the current row so we can GREATEST cumulative counters and avoid a
+  // reset/rollback writing lower numbers (only-writer-per-row makes this safe).
+  const { data: prevRows } = await client.from('player_stats').select('*').eq('player_id', pid).limit(1);
+  const prev = (prevRows?.[0] ?? null) as Obj | null;
+  const prevNum = (k: string): number => num(prev?.[k]);
+
+  // Keep the richer gs_stats blob unless this snapshot advances (guards resets).
+  const gsStats = s.damageDealt >= prevNum('damage_dealt') ? s.gsStats : (prev?.gs_stats ?? s.gsStats);
+
+  const full: Obj = {
+    player_id: pid,
+    kills: Math.max(s.kills, prevNum('kills')),
+    deaths: Math.max(s.deaths, prevNum('deaths')),
+    resources_harvested: Math.max(s.resourcesHarvested, prevNum('resources_harvested')),
+    items_crafted: Math.max(s.itemsCrafted, prevNum('items_crafted')),
+    structures_built: Math.max(s.structuresBuilt, prevNum('structures_built')),
+    damage_dealt: Math.max(s.damageDealt, prevNum('damage_dealt')),
+    boss_kills: Math.max(s.bossKills, prevNum('boss_kills')),
+    longest_life_sec: Math.max(s.longestLifeSec, prevNum('longest_life_sec')),
+    best_kills_before_death: Math.max(s.bestKillsBeforeDeath, prevNum('best_kills_before_death')),
+    gs_stats: gsStats,
+    gs_reporter: s.reporter,
+    gs_world: s.world,
+    gs_updated_at: now,
+    updated_at: now,
+  };
+
+  const { error } = await client.from('player_stats').upsert(full, { onConflict: 'player_id' });
+  if (!error) return;
+
+  // Graceful degradation: if the 2026-07-04 migration hasn't been applied yet,
+  // the gs_* columns don't exist — retry with only the pre-existing base columns
+  // so headline counters still land.
+  const base: Obj = {
+    player_id: full.player_id,
+    kills: full.kills,
+    deaths: full.deaths,
+    resources_harvested: full.resources_harvested,
+    items_crafted: full.items_crafted,
+    structures_built: full.structures_built,
+    updated_at: now,
+  };
+  await client.from('player_stats').upsert(base, { onConflict: 'player_id' });
 }
 
 export async function POST(req: Request) {
@@ -153,11 +267,22 @@ export async function POST(req: Request) {
     return Response.json({ error: 'unexpected payload' }, { status: 400 });
   }
 
-  // Client payloads (per-player stats): we consume `deathEvents` (real cause of
-  // death — the thing only the client knows) and ack the rest. Everything else
-  // (kills/skills/materials leaderboards) lands in a later pass.
+  // Client payloads (per-player stats): consume `deathEvents` (real cause of
+  // death — the thing only the client knows) AND merge the reporter's cumulative
+  // per-player stats into player_stats. Everything else is acked.
+  //
+  // World guard (opt-in): the client files stats under its own world name. If
+  // GS_EXPECTED_WORLD is set and the payload's world doesn't match, skip both the
+  // deaths and the stats merge so a client pointed at the wrong world can't
+  // pollute this dashboard. Unset (pilot default) = accept any world.
   if (body.source !== 'server') {
+    const expected = process.env.GS_EXPECTED_WORLD;
+    const payloadWorld = typeof body.world === 'string' ? body.world : null;
+    if (expected && payloadWorld && payloadWorld !== expected) {
+      return Response.json({ status: 'ignored', reason: 'world mismatch' });
+    }
     await ingestDeathEvents(body.deathEvents);
+    await ingestPlayerStats(body as Record<string, unknown>);
     return Response.json({ status: 'inserted' });
   }
 

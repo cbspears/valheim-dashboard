@@ -40,6 +40,23 @@ export interface Oath {
   created_at: string | null;
 }
 
+/** GsValheimStatsClient long-tail breakdown blob (player_stats.gs_stats jsonb). */
+export interface GsClientStats {
+  weapons: { weapon: string; damageDealt: number; kills: number; hardestHit: number; biggestSwing: number }[];
+  creatureKills: { creature: string; kills: number }[];
+  bossDamage: { boss: string; damageDealt: number; fightSec: number }[];
+  skills: { skill: string; level: number }[];
+  materials: { material: string; amount: number }[];
+  records: {
+    topWeapon: string | null;
+    topWeaponDamage: number;
+    hardestHit: number;
+    biggestSwing: number;
+  };
+  currentLifeStartedUtc: string | null;
+  platformId: string | null;
+}
+
 export interface PlayerStats {
   player_id: string;
   kills: number;
@@ -53,6 +70,21 @@ export interface PlayerStats {
   map_explored_pct: number | null;
   biomes_discovered: string[];
   updated_at: string | null;
+  // ── GsValheimStatsClient merge (db/2026-07-04_gs_player_stats.sql) ──
+  // Optional so rows written before the migration / by other writers still type.
+  /** Total damage dealt (sum of per-weapon damageDealt), cumulative. */
+  damage_dealt?: number;
+  /** Boss creature kills, cumulative. */
+  boss_kills?: number;
+  /** Longest single life in seconds (client-tracked active playtime). */
+  longest_life_sec?: number;
+  /** Most kills in a single life (client-tracked). */
+  best_kills_before_death?: number;
+  /** Long-tail breakdown: weapons/creatures/boss/skills/materials/records. */
+  gs_stats?: GsClientStats | null;
+  gs_reporter?: string | null;
+  gs_world?: string | null;
+  gs_updated_at?: string | null;
 }
 
 export interface PlayerWithStats extends Player {

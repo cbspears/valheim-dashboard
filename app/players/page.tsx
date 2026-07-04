@@ -6,6 +6,7 @@ import {
   Sailboat,
   Skull,
   Swords,
+  Flame,
   Clock,
   Pickaxe,
   Hammer,
@@ -124,6 +125,14 @@ export default async function PlayersPage() {
       accent: 'text-gold',
       empty: 'No blood has been spilled across the realms.',
       entries: topBy(withStats, (p) => p.stats?.kills ?? 0, formatNumber),
+    },
+    {
+      key: 'damage',
+      title: 'Deadliest Blade',
+      icon: <Flame size={16} />,
+      accent: 'text-gold',
+      empty: 'No wounds dealt. Every blade still rests in its sheath.',
+      entries: topBy(withStats, (p) => p.stats?.damage_dealt ?? 0, formatNumber),
     },
     {
       key: 'hours',

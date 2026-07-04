@@ -6,6 +6,7 @@ import {
   Clock,
   Skull,
   Swords,
+  Flame,
   Pickaxe,
   Hammer,
   Footprints,
@@ -19,6 +20,7 @@ import {
 import { Badge, SectionHeader, StatTile, Card, EmptyState } from '@/components/ui';
 import { AttendanceCalendar } from '@/components/players/AttendanceCalendar';
 import { DeathLog } from '@/components/viking/DeathLog';
+import { FeatsOfArms } from '@/components/viking/FeatsOfArms';
 import { NamedPlaces } from '@/components/viking/NamedPlaces';
 import { PhotoWall } from '@/components/viking/PhotoWall';
 import {
@@ -138,6 +140,12 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
       show: (stats?.kills ?? 0) > 0,
     },
     {
+      label: 'Damage',
+      value: formatNumber(stats?.damage_dealt),
+      icon: <Flame size={15} />,
+      show: (stats?.damage_dealt ?? 0) > 0,
+    },
+    {
       label: 'Deaths',
       value: formatNumber(stats?.deaths),
       icon: <Skull size={15} />,
@@ -209,6 +217,18 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           {shownTiles.map((t) => (
             <StatTile key={t.label} label={t.label} value={t.value} icon={t.icon} />
           ))}
+        </section>
+      )}
+
+      {/* ── Feats of Arms (client-mod combat records) ──────────── */}
+      {stats?.gs_stats && (
+        <section>
+          <SectionHeader
+            title="Feats of Arms"
+            subtitle={`The weapons ${first} favored, the beasts felled, and the bosses bled.`}
+            icon={<Swords size={20} />}
+          />
+          <FeatsOfArms stats={stats} first={first} />
         </section>
       )}
 
