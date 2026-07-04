@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Map, Camera, Compass, CalendarDays, Landmark, EyeOff, History } from 'lucide-react';
 import { SectionHeader, Card, CardBody, StatTile, Badge } from '@/components/ui';
 import { MapTimelapse } from '@/components/map/MapTimelapse';
+import { ZoomableMap } from '@/components/map/ZoomableMap';
 import {
   MAP_DEMO_DAYS,
   MAP_DEMO_LABELS,
@@ -42,19 +43,16 @@ export default async function MapPage() {
       {liveMap && (
         <Card glow className="mx-auto mb-8 max-w-3xl">
           <CardBody>
-            <div className="relative mx-auto aspect-square w-full max-w-[min(100%,66vh)] overflow-hidden rounded-lg border border-rune bg-pitch">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`${liveMap.url}?t=${Date.now()}`}
-                alt="The known world, as the server tells it"
-                className="block h-full w-full select-none"
-                draggable={false}
-              />
-              <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-md border border-online/40 bg-pitch/75 px-2.5 py-1 text-xs font-medium text-online-glow backdrop-blur-sm">
-                <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-online" />
-                Live
-              </div>
-            </div>
+            <ZoomableMap
+              src={`${liveMap.url}?t=${Date.now()}`}
+              alt="The known world, as the server tells it"
+              corner={
+                <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-md border border-online/40 bg-pitch/75 px-2.5 py-1 text-xs font-medium text-online-glow backdrop-blur-sm">
+                  <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-online" />
+                  Live
+                </div>
+              }
+            />
             <p className="mt-3 text-center text-xs text-muted">
               The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it —
               refreshed from the server every ~10 minutes
