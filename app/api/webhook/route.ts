@@ -368,6 +368,33 @@ export async function POST(request: Request) {
       return Response.json({ ok: true }, { status: 200 });
     }
 
+    // ---- 2g. Death dedupe (defense in depth) --------------------------------
+    // Two producers can both report the same death: the canonical
+    // GsValheimStatsClient path (metadata.source === 'gs', carries a real
+    // cause) and the legacy SFTP log-poller path (parses "ZDOID ... 0:0" log
+    // lines, metadata is empty — the server log has no cause). When both are
+    // live at once each death would otherwise produce two rows (and two
+    // Discord posts). If a death for this character already exists within
+    // +/-3 minutes of this one (either order, any metadata), treat this as
+    // the same death and skip the insert + every downstream side-effect.
+    if (type === 'death' && characterName) {
+      const DEDUPE_WINDOW_MS = 3 * 60 * 1000;
+      const lowerBound = new Date(occurredAt.getTime() - DEDUPE_WINDOW_MS).toISOString();
+      const upperBound = new Date(occurredAt.getTime() + DEDUPE_WINDOW_MS).toISOString();
+      const { data: dupe } = await db
+        .from('events')
+        .select('id')
+        .eq('type', 'death')
+        .eq('character_name', characterName)
+        .gte('created_at', lowerBound)
+        .lte('created_at', upperBound)
+        .limit(1)
+        .maybeSingle();
+      if (dupe?.id) {
+        return Response.json({ ok: true, deduped: true }, { status: 200 });
+      }
+    }
+
     // ---- 3. Resolve / upsert the player ------------------------------------
     let playerId: string | null = null;
 

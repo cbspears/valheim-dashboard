@@ -22,9 +22,13 @@ export function createRelay({ db, post, state, saveState }) {
         await post('server', payload);
         posted++;
       }
-      state.relay.lastEventAt = ev.created_at; // advance cursor even for skipped types
+      // Advance + persist the cursor after EVERY row (posted or skipped), not
+      // just at the end of the batch. If the process dies mid-batch, the next
+      // tick resumes strictly after the last row it actually posted — so a
+      // crash can never cause the same death (or any event) to go out twice.
+      state.relay.lastEventAt = ev.created_at;
+      await saveState();
     }
-    await saveState();
     return posted;
   }
 

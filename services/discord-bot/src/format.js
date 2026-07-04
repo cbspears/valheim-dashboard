@@ -135,6 +135,117 @@ function renderPotyBlurb(poty) {
   return tpl.replace(/\{(\w+)\}/g, (_, k) => (disp[k] != null ? disp[k] : ''));
 }
 
+// --- Death message copy -----------------------------------------------------
+// #server gets exactly one line per death row (relay.js owns exactly-once
+// delivery — see its cursor). What follows just keeps the copy from
+// repeating and reading well. Cause classification mirrors lib/episodes.ts's
+// ENV_DEATHS semantics (bare HitType words vs named bosses vs plain creature
+// names) but the wording here is the bot's own, kept in the same Norse/saga
+// register as the recap + POTY copy above.
+
+function pickOne(pool) {
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function article(word) {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a';
+}
+
+function fillTemplate(tpl, vars) {
+  return tpl.replace(/\{(\w+)\}/g, (_, k) => (vars[k] != null ? vars[k] : ''));
+}
+
+// Bare environmental HitType words, as gs-ingest/GsValheimStatsClient report
+// them (e.g. "tree", "fall", "drowning") — same key set as episodes.ts's
+// ENV_DEATHS, own phrasing.
+const ENV_DEATH_POOLS = {
+  fall: ['{name} took a fatal fall.', "{name} forgot vikings can't fly.", 'Gravity finally caught up with {name}.'],
+  falling: ['{name} took a fatal fall.', "{name} forgot vikings can't fly.", 'Gravity finally caught up with {name}.'],
+  drowning: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
+  drowned: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
+  drown: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
+  water: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
+  tree: ['{name} was flattened by a falling tree.', 'A tree had the last word with {name}.', '{name} lost an argument with a tree.'],
+  fire: ['{name} burned to a crisp.', '{name} got too close to the flames.', 'Fire took {name} tonight.'],
+  burning: ['{name} burned to a crisp.', '{name} got too close to the flames.', 'Fire took {name} tonight.'],
+  smoke: ['{name} choked on hearth-smoke.'],
+  freezing: ['{name} froze solid in the cold.', 'The cold finally caught up with {name}.'],
+  cold: ['{name} froze solid in the cold.', 'The cold finally caught up with {name}.'],
+  poison: ['{name} succumbed to poison.', "Something {name} touched didn't agree with them."],
+  poisoned: ['{name} succumbed to poison.', "Something {name} touched didn't agree with them."],
+  stalagmite: ['{name} was skewered from above.'],
+  stalagtite: ['{name} was skewered from above.'],
+  impact: ['{name} was broken by the fall.'],
+  cartcollision: ['{name} was run down by their own cart. Embarrassing.'],
+  structural: ['{name} was crushed under falling timber.'],
+  turret: ['{name} was shot down by a ballista. Friendly fire, perhaps?'],
+  boat: ['{name} went down with their ship.'],
+  self: ["{name} was undone by their own hand. We don't ask questions."],
+  edgeofworld: ['{name} sailed off the edge of the world.', "{name} found out what's past the edge — nothing good."],
+  ashlandsocean: ['{name} was boiled alive in the Ashlands sea.'],
+  ashlandsoceanfloor: ['{name} was boiled alive in the Ashlands sea.'],
+  lava: ['{name} was swallowed by molten rock.'],
+};
+
+// Named forsaken ones (mirrors episodes.ts's BOSSES set) read as a proper
+// clash rather than "killed by a X".
+const BOSS_NAMES = new Set(['eikthyr', 'the elder', 'bonemass', 'moder', 'yagluth', 'the queen', 'fader']);
+
+const BOSS_TEMPLATES = [
+  '{name} fell in battle against {cause}.',
+  '{cause} sent {name} to Valhalla.',
+  '{name} did not rise again after facing {cause}.',
+  'Only ash remains where {name} met {cause}.',
+];
+
+// Plain creature names (e.g. "Neck", "Greydwarf", "Deathsquito").
+const CREATURE_TEMPLATES = [
+  '{name} was killed by {article} {cause}.',
+  '{name} tragically fell to {article} {cause}.',
+  '{name} met their end at the claws of {article} {cause}.',
+  '{articleCap} {cause} put {name} in the ground.',
+  "{name} didn't see the {cause} coming.",
+];
+
+// No cause at all — legacy log-derived deaths (unmodded players) carry empty
+// metadata, since the server log never records what killed you.
+const NO_CAUSE_TEMPLATES = [
+  '{name} has fallen.',
+  '{name} met their end in the wilds.',
+  'The realm claims another: {name}.',
+  '{name} did not make it home tonight.',
+  'Valhalla gains a new guest: {name}.',
+];
+
+/**
+ * Build the #server death line body (no leading emoji). `boldName` should
+ * already be markdown-escaped/bolded; `rawCause` is metadata.cause verbatim
+ * (a bare creature/boss name or HitType word, or absent).
+ */
+export function buildDeathMessage(boldName, rawCause) {
+  const cause = typeof rawCause === 'string' ? rawCause.trim() : '';
+  if (!cause) return fillTemplate(pickOne(NO_CAUSE_TEMPLATES), { name: boldName });
+
+  const low = cause.toLowerCase();
+  const escapedCause = escapeMd(cause);
+
+  if (ENV_DEATH_POOLS[low]) {
+    return fillTemplate(pickOne(ENV_DEATH_POOLS[low]), { name: boldName });
+  }
+
+  if (BOSS_NAMES.has(low) || /^the\s/i.test(cause)) {
+    return fillTemplate(pickOne(BOSS_TEMPLATES), { name: boldName, cause: escapedCause });
+  }
+
+  const art = article(cause);
+  return fillTemplate(pickOne(CREATURE_TEMPLATES), {
+    name: boldName,
+    cause: escapedCause,
+    article: art,
+    articleCap: art[0].toUpperCase() + art.slice(1),
+  });
+}
+
 /**
  * Compact one-line feed messages for #server.
  * Returns null for event types the feed should ignore (chat, boss, unknown).
@@ -149,7 +260,7 @@ export function formatFeedEvent(event) {
       return { content: `🚪 **${name}** left the realm` };
     case 'death': {
       const cause = str(meta, 'cause');
-      return { content: cause ? `💀 **${name}** ${cause}` : `💀 **${name}** has fallen` };
+      return { content: `💀 ${buildDeathMessage(`**${nameMd(name)}**`, cause)}` };
     }
     case 'raid':
       return { content: `⚔️ ${str(meta, 'event') || 'A raid has begun'}` };
