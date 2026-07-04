@@ -246,16 +246,37 @@ function titleFor(e: Omit<Episode, 'title'>): string {
   return QUIET_TITLES[(e.number - 1) % QUIET_TITLES.length];
 }
 
+// Keyed by the LOWERCASED cause (phraseDeath lowercases before lookup). Covers
+// Valheim's environmental HitData.HitType words as GsValheimStatsClient reports
+// them (e.g. "tree", "fall", "drowning", "edgeofworld", "self") plus a few
+// friendly synonyms — so any non-creature death still reads as a full clause.
 const ENV_DEATHS: Record<string, string> = {
   fall: 'fell to their death',
+  falling: 'fell to their death',
   drowning: 'claimed by dark water',
   drowned: 'claimed by dark water',
+  drown: 'claimed by dark water',
+  water: 'claimed by dark water',
   tree: 'crushed by a falling tree',
   fire: 'lost to the flames',
+  burning: 'lost to the flames',
   smoke: 'choked on hearth-smoke',
   freezing: 'frozen in the cold',
   cold: 'frozen in the cold',
+  poison: 'succumbed to poison',
+  poisoned: 'succumbed to poison',
   stalagmite: 'skewered from above',
+  stalagtite: 'skewered from above',
+  impact: 'broken by the fall',
+  cartcollision: 'run down by their own cart',
+  structural: 'crushed by falling timber',
+  turret: 'shot down by a ballista',
+  boat: 'wrecked with their ship',
+  self: 'undone by their own hand',
+  edgeofworld: "sailed off the edge of the world",
+  ashlandsocean: 'boiled in the Ashlands sea',
+  ashlandsoceanfloor: 'boiled in the Ashlands sea',
+  lava: 'swallowed by molten rock',
 };
 
 // Named forsaken ones read as "felled by …" rather than "taken by a …".
