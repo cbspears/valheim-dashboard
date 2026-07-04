@@ -2,12 +2,16 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Camera, User, Clock, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { EmptyState } from '@/components/ui';
+import { EmptyState, VikingLink } from '@/components/ui';
 import { timeAgo } from '@/lib/format';
 import type { GalleryPhoto } from '@/lib/types';
 
+/** A gallery photo, with its "posted by" credit already resolved (or not) to
+ *  a real viking — see `matchVikingName` in lib/slug.ts, applied by the page. */
+type CreditedPhoto = GalleryPhoto & { matchedViking: string | null };
+
 /** Masonry grid of community photos. Click a photo to open it full-size in a lightbox. */
-export function PhotoGrid({ photos }: { photos: GalleryPhoto[] }) {
+export function PhotoGrid({ photos }: { photos: CreditedPhoto[] }) {
   const [index, setIndex] = useState<number | null>(null);
   const isOpen = index !== null;
   const active = isOpen ? photos[index] : null;
@@ -73,7 +77,12 @@ export function PhotoGrid({ photos }: { photos: GalleryPhoto[] }) {
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-ash">
                   <User size={12} className="shrink-0 text-gold-dim" />
-                  <span className="truncate">{p.posted_by ?? 'Unknown viking'}</span>
+                  <VikingLink
+                    name={p.matchedViking}
+                    className="gold-ring truncate rounded-sm transition-colors hover:text-gold-light"
+                  >
+                    {p.posted_by ?? 'Unknown viking'}
+                  </VikingLink>
                 </span>
                 <span className="inline-flex shrink-0 items-center gap-1.5 text-muted">
                   <Clock size={12} />
@@ -146,7 +155,12 @@ export function PhotoGrid({ photos }: { photos: GalleryPhoto[] }) {
             <figcaption className="mt-3 max-w-2xl text-center">
               {active.caption && <p className="text-sm text-ash">{active.caption}</p>}
               <p className="mt-1 text-xs text-muted">
-                <span className="text-gold-light">{active.posted_by ?? 'Unknown viking'}</span>
+                <VikingLink
+                  name={active.matchedViking}
+                  className="gold-ring rounded-sm text-gold-light transition-colors hover:text-gold"
+                >
+                  {active.posted_by ?? 'Unknown viking'}
+                </VikingLink>
                 {' · '}
                 {timeAgo(active.posted_at)}
                 {photos.length > 1 && (

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Skull, Compass, Clock, ScrollText, Swords } from 'lucide-react';
 import type { Episode } from '@/lib/episodes';
 import { phraseDeath } from '@/lib/episodes';
-import { Card, EmptyState } from '@/components/ui';
+import { Card, EmptyState, VikingLink } from '@/components/ui';
 import { bossPath } from '@/lib/slug';
 
 const EVENT_TZ = 'America/Chicago';
@@ -107,7 +107,10 @@ function EpisodeCard({ ep }: { ep: Episode }) {
               key={p.name}
               className="rounded-full border border-rune bg-surface-raised px-2.5 py-0.5 text-xs text-ash-dim"
             >
-              {p.name}
+              <VikingLink
+                name={p.name}
+                className="gold-ring rounded-full transition-colors hover:text-gold-light"
+              />
             </span>
           ))}
         </div>
@@ -140,7 +143,12 @@ function EpisodeCard({ ep }: { ep: Episode }) {
         <ul className="mt-3 space-y-1 border-t border-rune/60 pt-3">
           {ep.deaths.map((d, i) => (
             <li key={`${d.name}-${i}`} className="text-xs text-ash-dim">
-              <span className="text-ash">{d.name.split(/\s+/)[0]}</span>
+              <VikingLink
+                name={d.name}
+                className="gold-ring rounded-sm text-ash transition-colors hover:text-gold-light"
+              >
+                {d.name.split(/\s+/)[0]}
+              </VikingLink>
               <span className="text-muted"> — {phraseDeath(d.cause)}</span>
             </li>
           ))}

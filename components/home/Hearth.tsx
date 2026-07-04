@@ -1,5 +1,5 @@
 import { Flame, Sun } from 'lucide-react';
-import { Card, CardHeader, CardBody, OnlineDot } from '@/components/ui';
+import { Card, CardHeader, CardBody, OnlineDot, VikingLink } from '@/components/ui';
 import type { Player, ServerStatus } from '@/lib/types';
 
 type HearthState = 'lively' | 'banked' | 'sleeping';
@@ -75,7 +75,10 @@ export function Hearth({
               {online.map((p) => (
                 <li key={p.id} className="flex items-center gap-2.5 text-sm">
                   <OnlineDot online />
-                  <span className="truncate text-ash">{p.character_name}</span>
+                  <VikingLink
+                    name={p.character_name}
+                    className="gold-ring truncate rounded-sm text-ash transition-colors hover:text-gold-light"
+                  />
                 </li>
               ))}
             </ul>

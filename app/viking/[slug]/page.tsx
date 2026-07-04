@@ -29,6 +29,7 @@ import {
   getEventsSince,
   getPotyArchive,
   getGalleryPhotos,
+  getBosses,
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
 import { epithetFor, generatedBioLine } from '@/lib/epithets';
@@ -97,12 +98,13 @@ interface Tile {
 export default async function VikingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  const [roster, sessions, deaths, potyArchive, photos] = await Promise.all([
+  const [roster, sessions, deaths, potyArchive, photos, bosses] = await Promise.all([
     getPlayersWithStats(),
     getSessionsSince(70),
     getEventsSince(70, ['death']),
     getPotyArchive(),
     getGalleryPhotos(),
+    getBosses(),
   ]);
 
   const viking = findViking(roster, slug);
@@ -228,7 +230,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
             subtitle={`The weapons ${first} favored, the beasts felled, and the bosses bled.`}
             icon={<Swords size={20} />}
           />
-          <FeatsOfArms stats={stats} first={first} />
+          <FeatsOfArms stats={stats} first={first} knownBosses={bosses} />
         </section>
       )}
 

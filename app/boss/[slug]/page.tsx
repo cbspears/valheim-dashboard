@@ -2,11 +2,11 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Users, ScrollText, Camera, Swords, Map as MapIcon, CalendarClock } from 'lucide-react';
-import { Card, CardHeader, CardBody, EmptyState } from '@/components/ui';
+import { Card, CardHeader, CardBody, EmptyState, VikingLink } from '@/components/ui';
 import { BossHero } from '@/components/boss/BossHero';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
-import { getBosses, getGalleryPhotos, getUpcomingEvents } from '@/lib/data';
-import { slugify, vikingPath } from '@/lib/slug';
+import { getBosses, getGalleryPhotos, getUpcomingEvents, getAllPlayers } from '@/lib/data';
+import { slugify, vikingPath, matchVikingName } from '@/lib/slug';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,9 +35,10 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
   if (!boss) notFound();
 
   if (boss.is_killed) {
-    const photos = await getGalleryPhotos();
+    const [photos, roster] = await Promise.all([getGalleryPhotos(), getAllPlayers()]);
     const nameLower = boss.name.toLowerCase();
     const depiction = photos.find((p) => p.caption?.toLowerCase().includes(nameLower)) ?? null;
+    const depictionPoster = matchVikingName(depiction?.posted_by, roster);
     const onMap = BOSSES_ON_MAP.has(nameLower);
 
     return (
@@ -92,7 +93,15 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
                 className="w-full rounded-[var(--radius-card)] border border-rune object-cover"
               />
               {depiction.posted_by && (
-                <p className="mt-2 text-xs text-muted">Posted by {depiction.posted_by}</p>
+                <p className="mt-2 text-xs text-muted">
+                  Posted by{' '}
+                  <VikingLink
+                    name={depictionPoster}
+                    className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                  >
+                    {depiction.posted_by}
+                  </VikingLink>
+                </p>
               )}
             </CardBody>
           ) : (

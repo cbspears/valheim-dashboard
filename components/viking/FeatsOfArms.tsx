@@ -1,7 +1,8 @@
 import { Swords, Sword, Zap, Timer, Crosshair, Crown } from 'lucide-react';
-import { Card, EmptyState } from '@/components/ui';
+import { Card, EmptyState, BossLink } from '@/components/ui';
 import { formatNumber } from '@/lib/format';
-import type { PlayerStats } from '@/lib/types';
+import { matchBossName } from '@/lib/slug';
+import type { PlayerStats, Boss } from '@/lib/types';
 
 /** Seconds -> "1h 4m" / "12m 30s" / "45s". */
 function dur(sec: number): string {
@@ -36,7 +37,17 @@ interface Rec {
  * (favored weapon, hardest hit, longest life…) plus the beasts they've felled
  * and the boss damage they've dealt. Renders nothing until the client reports.
  */
-export function FeatsOfArms({ stats, first }: { stats: PlayerStats | null; first: string }) {
+export function FeatsOfArms({
+  stats,
+  first,
+  knownBosses = [],
+}: {
+  stats: PlayerStats | null;
+  first: string;
+  /** Known forsaken, used to resolve `bossDamage[].boss` (a raw prefab-ish
+   *  token) to a real boss before linking — see `matchBossName`. */
+  knownBosses?: Boss[];
+}) {
   const gs = stats?.gs_stats ?? null;
   if (!gs) return null;
 
@@ -140,14 +151,23 @@ export function FeatsOfArms({ stats, first }: { stats: PlayerStats | null; first
             <h3 className="font-display text-sm uppercase tracking-wide text-ash">Bane of Bosses</h3>
           </div>
           <ol className="flex-1 divide-y divide-rune/50">
-            {bosses.map((b) => (
-              <li key={b.boss} className="flex items-center gap-3 px-5 py-2.5">
-                <span className="flex-1 truncate text-sm text-ash">{pretty(b.boss)}</span>
-                <span className="shrink-0 text-sm tabular-nums text-ash-dim">
-                  {formatNumber(b.damageDealt)} dmg
-                </span>
-              </li>
-            ))}
+            {bosses.map((b) => {
+              const label = pretty(b.boss);
+              const matched = matchBossName(label, knownBosses);
+
+              return (
+                <li key={b.boss} className="flex items-center gap-3 px-5 py-2.5">
+                  <span className="flex-1 truncate text-sm text-ash">
+                    <BossLink name={matched} className="hover:text-gold-light">
+                      {label}
+                    </BossLink>
+                  </span>
+                  <span className="shrink-0 text-sm tabular-nums text-ash-dim">
+                    {formatNumber(b.damageDealt)} dmg
+                  </span>
+                </li>
+              );
+            })}
           </ol>
         </Card>
       )}

@@ -23,6 +23,8 @@ import {
   EmptyState,
   OnlineDot,
   StatTile,
+  VikingLink,
+  BossLink,
 } from '@/components/ui';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
 import { Hearth } from '@/components/home/Hearth';
@@ -160,13 +162,28 @@ export default async function HomePage() {
                 <ul className="divide-y divide-rune">
                   {events.map((e) => {
                     const { icon: Icon, accent, description } = describeEvent(e);
+                    // Boss kills carry the beast's name in metadata — link the
+                    // whole line to its war-room (mirrors EventFeed on /events).
+                    const bossName =
+                      e.type === 'boss' && typeof e.metadata?.boss === 'string'
+                        ? e.metadata.boss
+                        : null;
                     return (
                       <li key={e.id} className="flex items-start gap-3 px-5 py-3">
                         <span className={`mt-0.5 shrink-0 ${accent}`}>
                           <Icon size={16} />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm leading-snug text-ash-dim">{description}</p>
+                          {bossName ? (
+                            <BossLink
+                              name={bossName}
+                              className="gold-ring block text-sm leading-snug text-ash-dim transition-colors hover:text-gold-light"
+                            >
+                              {description}
+                            </BossLink>
+                          ) : (
+                            <p className="text-sm leading-snug text-ash-dim">{description}</p>
+                          )}
                           <p className="mt-0.5 text-xs text-muted">{timeAgo(e.created_at)}</p>
                         </div>
                       </li>
@@ -195,6 +212,8 @@ export default async function HomePage() {
               </div>
               {latestOath ? (
                 <p className="mt-0.5 truncate text-sm text-ash-dim">
+                  {/* Not a VikingLink: this whole teaser is already an <a> to
+                      /oath, and nested anchors are invalid HTML. */}
                   <span className="font-display text-gold-light">{latestOathName}</span>
                   <span className="italic"> — &ldquo;{latestOath.oath_text}&rdquo;</span>
                 </p>
@@ -281,7 +300,7 @@ export default async function HomePage() {
                 {felledBosses.map((b) => (
                   <Badge key={b.id} tone="gold">
                     <Crown size={12} />
-                    {b.name}
+                    <BossLink name={b.name} className="gold-ring rounded-sm transition-colors hover:underline" />
                   </Badge>
                 ))}
               </div>
@@ -299,7 +318,11 @@ export default async function HomePage() {
               <div>
                 <p className="text-xs uppercase tracking-wider text-muted">Current objective</p>
                 <p className="mt-0.5 text-ash">
-                  Hunt <span className="font-display text-gold-light">{nextBoss.name}</span>
+                  Hunt{' '}
+                  <BossLink
+                    name={nextBoss.name}
+                    className="gold-ring rounded-sm font-display text-gold-light transition-colors hover:text-gold"
+                  />
                   <span className="text-muted"> in the {nextBoss.biome}</span>
                 </p>
               </div>

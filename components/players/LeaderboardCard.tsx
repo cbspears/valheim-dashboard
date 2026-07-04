@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { clsx } from 'clsx';
-import { Card, EmptyState } from '@/components/ui';
+import { Card, EmptyState, VikingLink } from '@/components/ui';
 
 export interface LeaderboardEntry {
   id: string;
@@ -68,7 +68,10 @@ export function LeaderboardCard({
                     first ? 'font-medium text-gold-light' : 'text-ash'
                   )}
                 >
-                  {entry.name}
+                  <VikingLink
+                    name={entry.name}
+                    className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                  />
                 </span>
                 <span
                   className={clsx(

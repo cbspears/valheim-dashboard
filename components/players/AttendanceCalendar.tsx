@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { clsx } from 'clsx';
+import { VikingLink } from '@/components/ui';
 
 /** Minimal serialized session shape handed down from the server page. */
 export interface AttendanceSession {
@@ -279,13 +280,25 @@ export function AttendanceCalendar({
             <span className="font-display text-gold-light">
               {longest} {longest === 1 ? 'night' : 'nights'}
             </span>
-            {single && selected ? <span className="text-muted"> — {selected}</span> : null}
+            {single && selected ? (
+              <span className="text-muted">
+                {' '}
+                —{' '}
+                <VikingLink
+                  name={selected}
+                  className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                />
+              </span>
+            ) : null}
           </span>
           {champion && (
             <span className="text-muted">
               Most faithful:{' '}
-              <span className="font-display text-ash-dim">{champion.name}</span> ({champion.len}{' '}
-              in a row)
+              <VikingLink
+                name={champion.name}
+                className="gold-ring rounded-sm font-display text-ash-dim transition-colors hover:text-gold-light"
+              />{' '}
+              ({champion.len} in a row)
             </span>
           )}
         </div>

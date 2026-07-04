@@ -4,3 +4,5 @@ export { Badge } from './Badge';
 export { EmptyState } from './EmptyState';
 export { OnlineDot } from './OnlineDot';
 export { StatTile } from './StatTile';
+export { VikingLink } from './VikingLink';
+export { BossLink } from './BossLink';

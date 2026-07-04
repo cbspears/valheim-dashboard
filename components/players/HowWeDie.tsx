@@ -1,6 +1,6 @@
 import { Skull } from 'lucide-react';
 import { clsx } from 'clsx';
-import { Card } from '@/components/ui';
+import { Card, VikingLink } from '@/components/ui';
 import type { GameEvent } from '@/lib/types';
 
 /** Raw death cause → saga-flavored label. Unknown causes fall to "The mists". */
@@ -114,8 +114,12 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
 
           {deadliest && (
             <p className="border-t border-rune/60 pt-3 text-xs text-muted">
-              <span className="font-display text-ash-dim">{deadliest.name}</span> has died{' '}
-              {deadliest.count} times — more than any other viking. Valhalla knows the way.
+              <VikingLink
+                name={deadliest.name}
+                className="gold-ring rounded-sm font-display text-ash-dim transition-colors hover:text-gold-light"
+              />{' '}
+              has died {deadliest.count} times — more than any other viking. Valhalla knows the
+              way.
             </p>
           )}
         </div>

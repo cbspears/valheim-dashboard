@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { clsx } from 'clsx';
 import { Crown, Lock, Swords, Target, Trophy } from 'lucide-react';
-import { Badge, Card, CardBody, EmptyState } from '@/components/ui';
+import { Badge, Card, CardBody, EmptyState, VikingLink } from '@/components/ui';
 import { shortDate } from '@/lib/format';
 import { bossPath } from '@/lib/slug';
 import type { Boss } from '@/lib/types';
@@ -186,7 +186,10 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                         <span className="text-xs text-muted">War party:</span>
                         {boss.players_present.map((p) => (
                           <Badge key={p} tone="neutral" className="text-[11px]">
-                            {p}
+                            <VikingLink
+                              name={p}
+                              className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                            />
                           </Badge>
                         ))}
                       </div>

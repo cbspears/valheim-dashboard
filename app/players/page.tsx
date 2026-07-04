@@ -16,7 +16,7 @@ import {
   Crown,
   CalendarDays,
 } from 'lucide-react';
-import { Card, SectionHeader, Badge, EmptyState, OnlineDot } from '@/components/ui';
+import { Card, SectionHeader, Badge, EmptyState, OnlineDot, VikingLink } from '@/components/ui';
 import {
   LeaderboardCard,
   type LeaderboardEntry,
@@ -227,7 +227,10 @@ export default async function PlayersPage() {
                 <OnlineDot online />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-display text-base text-ash">
-                    {p.character_name}
+                    <VikingLink
+                      name={p.character_name}
+                      className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                    />
                   </p>
                   <p className="truncate text-xs text-muted">
                     {formatPlaytime(p.total_playtime_minutes)} logged

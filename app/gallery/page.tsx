@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { Images, Camera, MessageSquare, Sparkles } from 'lucide-react';
 import { SectionHeader, Card, CardBody, Badge } from '@/components/ui';
 import { PhotoGrid } from '@/components/gallery/PhotoGrid';
-import { getGalleryPhotos } from '@/lib/data';
+import { getGalleryPhotos, getAllPlayers } from '@/lib/data';
+import { matchVikingName } from '@/lib/slug';
 import { SERVER_NAME, DISCORD_BOT_HANDLE } from '@/config/server';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +14,13 @@ export const metadata: Metadata = {
 };
 
 export default async function GalleryPage() {
-  const photos = await getGalleryPhotos();
+  const [photos, roster] = await Promise.all([getGalleryPhotos(), getAllPlayers()]);
+  // Credits arrive as a Discord display name — resolve loosely against the
+  // roster so we only link the credit when it's actually one of our vikings.
+  const photosWithCredit = photos.map((p) => ({
+    ...p,
+    matchedViking: matchVikingName(p.posted_by, roster),
+  }));
 
   return (
     <div>
@@ -71,7 +78,7 @@ export default async function GalleryPage() {
         </CardBody>
       </Card>
 
-      <PhotoGrid photos={photos} />
+      <PhotoGrid photos={photosWithCredit} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { Crown } from 'lucide-react';
 import { clsx } from 'clsx';
-import { Card, EmptyState } from '@/components/ui';
+import { Card, EmptyState, VikingLink } from '@/components/ui';
 import { LeaderboardCard } from '@/components/players/LeaderboardCard';
 import type { PotyHistoryEntry } from '@/lib/types';
 
@@ -66,7 +66,10 @@ export function PotyArchive({ entries }: { entries: PotyHistoryEntry[] }) {
                 {crownDate(e.awarded_at)}
               </span>
               <span className="flex-1 truncate font-display text-sm text-ash">
-                {e.character_name}
+                <VikingLink
+                  name={e.character_name}
+                  className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                />
               </span>
               <span className="shrink-0 truncate text-xs text-ash-dim">
                 {e.award_label}

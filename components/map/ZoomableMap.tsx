@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
+import { VikingLink } from '@/components/ui';
 
 const MAX_ZOOM = 6;
 
@@ -120,7 +121,11 @@ export function ZoomableMap({
                 {m.by ? (
                   <>
                     {' '}
-                    · pinned by <span className="text-ash">{m.by}</span>
+                    · pinned by{' '}
+                    <VikingLink
+                      name={m.by}
+                      className="pointer-events-auto gold-ring rounded-sm text-ash transition-colors hover:text-gold-light"
+                    />
                   </>
                 ) : null}
               </div>
