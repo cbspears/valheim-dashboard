@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pause, Play, SkipForward } from 'lucide-react';
 import { ZoomableMap } from './ZoomableMap';
-import type { LiveMapFrame } from '@/lib/data';
+import type { LiveMapFrame, LivePin } from '@/lib/data';
 
 const FRAME_MS = 700; // real days are few (for now) — let each one breathe
 
@@ -13,10 +13,12 @@ export function LiveWorld({
   currentUrl,
   updatedLabel,
   frames,
+  pins = [],
 }: {
   currentUrl: string;
   updatedLabel: string | null;
   frames: LiveMapFrame[];
+  pins?: LivePin[];
 }) {
   // positions 0..frames.length-1 = archived days; frames.length = Now
   const nowIndex = frames.length;
@@ -54,6 +56,7 @@ export function LiveWorld({
       <ZoomableMap
         src={src}
         alt={`The known world — ${label}`}
+        markers={atNow ? pins.map((p) => ({ id: p.id, x: p.x, y: p.y, kind: p.kind, name: p.name, by: p.by_character_name })) : []}
         corner={
           <div className="absolute right-3 top-3 flex items-center gap-2">
             <div className="rounded-md border border-rune bg-pitch/75 px-2.5 py-1 font-display text-sm text-gold-light backdrop-blur-sm">

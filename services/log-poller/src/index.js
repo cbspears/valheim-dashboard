@@ -18,6 +18,9 @@ const config = {
   webhookSecret: required('WEBHOOK_SECRET'),
   intervalMs: parseInt(process.env.POLL_INTERVAL_MS || '20000', 10),
   syncEveryMs: parseInt(process.env.SYNC_EVERY_MS || '120000', 10),
+  // Emit log-derived `death` events? Default true. Flip to false once
+  // GsValheimStatsClient feeds real causes via /api/gs-ingest (avoids double-count).
+  emitDeaths: (process.env.EMIT_DEATHS || 'true').toLowerCase() !== 'false',
   statePath: process.env.STATE_PATH || new URL('../state.json', import.meta.url).pathname,
   sftp: {
     host: process.env.SFTP_HOST,

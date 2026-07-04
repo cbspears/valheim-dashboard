@@ -177,7 +177,7 @@ export function selectPlayerOfDay(ctx = {}) {
   };
 }
 
-export function createRecap({ db, post, state, saveState, writeDb = null, tz = 'America/Chicago', startsAt = null, onPotyCrowned = null }) {
+export function createRecap({ db, post, state, saveState, writeDb = null, tz = 'America/Chicago', startsAt = null, onPotyCrowned = null, channel = 'valheim' }) {
   async function buildStats(period) {
     const now = Date.now();
     const windowStart = new Date(
@@ -365,7 +365,7 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
 
   async function postRecap(period) {
     const stats = await buildStats(period);
-    await post('valheim', formatRecap(stats));
+    await post(channel, formatRecap(stats));
     // State writes (here, not in buildStats which stays read-only):
     // refresh the player_stats baseline on EVERY recap...
     state.potyStatsSnapshot = stats._statsSnapshotNext || {};

@@ -50,6 +50,11 @@ const RE = {
   // insensitively and the sworn text is kept exactly as shouted.
   //   Console: <color=orange>Testman</color>: <color=#FFEB04FF>/OATH I SWEAR ...</color>
   consoleOath: /Console:\s*<color=orange>(.+?)<\/color>:\s*<color=[^>]*>\/oath\s+(.+?)<\/color>/i,
+  // The Eilif companion plugin's /pin capture (Harmony patch on
+  // Chat.OnNewChatMessage — unlike /oath this NEEDS the plugin, since a
+  // world position isn't available from the console echo alone).
+  //   [EILIF_PIN] Testman | poi | The Dark Chapel | 123.4 | -567.8
+  pin: /\[EILIF_PIN\]\s*(.+?)\s*\|\s*(base|poi)\s*\|\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*$/,
 };
 
 export class LogParser {
@@ -110,13 +115,33 @@ export class LogParser {
       return events;
     }
 
+    // --- In-game pin (/pin, via the Eilif companion plugin) ---
+    const p = line.match(RE.pin);
+    if (p) {
+      const [, name, kind, place, worldX, worldZ] = p;
+      if (name && place) {
+        events.push({
+          type: 'pin',
+          characterName: name.trim(),
+          metadata: { kind, name: place.trim(), worldX: parseFloat(worldX), worldZ: parseFloat(worldZ) },
+        });
+      }
+      return events;
+    }
+
     // --- Death or spawn (character ZDOID) ---
     const z = line.match(RE.zdoid);
     if (z) {
       const name = z[1].trim();
       const isDead = z[2] === '0' && z[3] === '0';
       if (isDead) {
-        events.push({ type: 'death', characterName: name, metadata: { cause: 'has fallen' } });
+        // Valheim's dedicated-server log records THAT a character died (the
+        // ZDOID reset to 0:0) but never HOW — the vanilla log carries no
+        // killer/cause. So we do NOT fabricate one; downstream renderers show an
+        // honest fallback (feed: "<name> has fallen"; death-roll: "Lost to the
+        // wilds"). To surface a REAL cause we'd need a server plugin to emit it
+        // to the log for us to parse, exactly like the /oath path above.
+        events.push({ type: 'death', characterName: name, metadata: {} });
       } else {
         // A spawn. Treat as a join only if this name isn't already online
         // (otherwise it's a respawn / world-change reload).

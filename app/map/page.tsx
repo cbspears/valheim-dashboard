@@ -10,7 +10,7 @@ import {
   MAP_DEMO_REVEALED_PCT,
 } from '@/config/map-demo.generated';
 import { SERVER_NAME } from '@/config/server';
-import { getLiveMap } from '@/lib/data';
+import { getLiveMap, getPins } from '@/lib/data';
 
 export const metadata: Metadata = {
   title: 'Map',
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function MapPage() {
-  const liveMap = await getLiveMap();
+  const [liveMap, pins] = await Promise.all([getLiveMap(), getPins()]);
   // how much fresh ground the warband charted in the last seven days
   const byDay = MAP_DEMO_REVEALED_BY_DAY;
   const weeklyGrowth = byDay.length > 7 ? byDay[byDay.length - 1] - byDay[byDay.length - 8] : 0;
@@ -47,6 +47,7 @@ export default async function MapPage() {
               currentUrl={liveMap.url}
               updatedLabel={liveMap.updatedAt}
               frames={liveMap.frames}
+              pins={pins}
             />
             <p className="mt-3 text-center text-xs text-muted">
               The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it —

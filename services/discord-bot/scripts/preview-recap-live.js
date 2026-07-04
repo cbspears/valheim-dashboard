@@ -20,7 +20,7 @@ const post = (p) => poster.post('server', p);
 // Intro — clearly mark this as a preview so the channel isn't confused.
 await post({
   content:
-    '🔎 **Preview — the daily recap format.** The real one posts to **#valheim** at 8 AM & 10 PM once the server launches. Two samples below: a normal evening, then the new **🌟 Unsung Hero** spotlight that occasionally crowns a quieter viking.',
+    '🔎 **Preview — Player of the Day.** (Pilot: recaps currently post here to **#server** at 8 AM & 10 PM; will move to #valheim at launch.) Two samples below: a normal evening, then the new **🌟 Unsung Hero** spotlight that occasionally crowns a quieter viking.',
 });
 
 // Sample 1 — a normal evening → 💀 The Bold (most deaths).

@@ -5,9 +5,38 @@ import { Minus, Plus, RotateCcw } from 'lucide-react';
 
 const MAX_ZOOM = 6;
 
+export interface ZoomableMapMarker {
+  id: string;
+  x: number; // 0-1 fraction of the image
+  y: number;
+  kind: 'base' | 'poi';
+  name: string;
+  by?: string | null;
+}
+
+/** One glyph per pin kind (mirrors MapTimelapse's demo glyphs). */
+function MarkerGlyph({ kind }: { kind: ZoomableMapMarker['kind'] }) {
+  const glow = 'shadow-[0_0_6px_rgba(200,149,42,0.8)]';
+  return kind === 'base' ? (
+    <span className={`block h-2 w-2 border border-gold bg-gold/80 ${glow}`} />
+  ) : (
+    <span className={`block h-1.5 w-1.5 rotate-45 border border-gold bg-gold/40 ${glow}`} />
+  );
+}
+
 /** The map viewport: zoom buttons + drag-to-pan, edge-clamped. Same interaction
  *  model as the demo timelapse; this one wraps a single (live) image. */
-export function ZoomableMap({ src, alt, corner }: { src: string; alt: string; corner?: React.ReactNode }) {
+export function ZoomableMap({
+  src,
+  alt,
+  corner,
+  markers = [],
+}: {
+  src: string;
+  alt: string;
+  corner?: React.ReactNode;
+  markers?: ZoomableMapMarker[];
+}) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 }); // % of unscaled content
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -67,6 +96,37 @@ export function ZoomableMap({ src, alt, corner }: { src: string; alt: string; co
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src} alt={alt} className="block h-full w-full select-none" draggable={false} />
+
+        {markers.map((m) => (
+          <div
+            key={m.id}
+            className="group absolute animate-[fadeIn_0.6s_ease]"
+            style={{
+              left: `${m.x * 100}%`,
+              top: `${m.y * 100}%`,
+              transform: `translate(-50%, -50%) scale(${1 / zoom})`,
+            }}
+          >
+            <div className="flex flex-col items-center gap-0.5">
+              <MarkerGlyph kind={m.kind} />
+              <span className="whitespace-nowrap font-display text-[11px] tracking-wide text-gold-light [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+                {m.name}
+              </span>
+            </div>
+            <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-rune bg-pitch/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm group-hover:block">
+              <div className="font-display text-xs text-gold-light">{m.name}</div>
+              <div className="mt-0.5 text-[11px] text-ash-dim">
+                {m.kind === 'base' ? '⌂ Base' : '◆ Place of interest'}
+                {m.by ? (
+                  <>
+                    {' '}
+                    · pinned by <span className="text-ash">{m.by}</span>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="absolute left-3 top-3 flex flex-col gap-1">

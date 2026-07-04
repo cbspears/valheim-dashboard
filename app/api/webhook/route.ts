@@ -325,6 +325,49 @@ export async function POST(request: Request) {
       return Response.json({ ok: true }, { status: 200 });
     }
 
+    // ---- 2f. In-game pin (`pin`) ---------------------------------------------
+    // Forwarded by the log poller from the Eilif companion plugin's Harmony
+    // patch on Chat.OnNewChatMessage (needs the plugin — unlike /oath this
+    // can't be captured mod-free, since a world position isn't in the console
+    // echo). Replace semantics: re-pinning the same name (case-insensitive)
+    // moves it. WORLD_RADIUS is Valheim's world size constant (10000m); the
+    // orientation (which axis maps to image up/down) is a best guess pending
+    // live calibration against a real pin.
+    if (type === 'pin') {
+      const pinCharacterName = characterName;
+      const pinName = typeof metadata.name === 'string' ? metadata.name.trim() : '';
+      const pinKind = metadata.kind === 'base' ? 'base' : 'poi';
+      const worldX = typeof metadata.worldX === 'number' ? metadata.worldX : null;
+      const worldZ = typeof metadata.worldZ === 'number' ? metadata.worldZ : null;
+      if (!pinCharacterName || !pinName || worldX === null || worldZ === null) {
+        return Response.json(
+          { error: "'pin' requires non-empty characterName, metadata.name, metadata.worldX, metadata.worldZ" },
+          { status: 400 }
+        );
+      }
+
+      const WORLD_RADIUS = 10000;
+      const x = Math.min(1, Math.max(0, (worldX + WORLD_RADIUS) / (2 * WORLD_RADIUS)));
+      const y = Math.min(1, Math.max(0, (WORLD_RADIUS - worldZ) / (2 * WORLD_RADIUS)));
+
+      const { data: status } = await db.from('server_status').select('world_day').eq('id', 1).maybeSingle();
+      const day = (status?.world_day as number | undefined) ?? 1;
+
+      await db.from('pins').delete().ilike('name', pinName.replace(/[%_]/g, (c) => `\\${c}`));
+      await db.from('pins').insert({
+        name: pinName,
+        kind: pinKind,
+        by_character_name: pinCharacterName,
+        world_x: worldX,
+        world_z: worldZ,
+        x,
+        y,
+        day,
+      });
+
+      return Response.json({ ok: true }, { status: 200 });
+    }
+
     // ---- 3. Resolve / upsert the player ------------------------------------
     let playerId: string | null = null;
 

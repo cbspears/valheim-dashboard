@@ -138,7 +138,20 @@ export class Poller {
       await this.postEvent({ type: 'oath', characterName: ev.characterName, text: ev.metadata.text });
       return;
     }
+    if (ev.type === 'pin') {
+      this.log.info?.(`[event] pin ${ev.characterName} -> ${ev.metadata.name} (${ev.metadata.kind})`);
+      await this.postEvent({ type: 'pin', characterName: ev.characterName, metadata: ev.metadata });
+      return;
+    }
     const { type, characterName, metadata } = ev;
+    // Death source of record: the server log only knows THAT a player died, not
+    // how. Once GsValheimStatsClient is rolled out (its `deathEvents` carry the
+    // real cause → /api/gs-ingest), set EMIT_DEATHS=false here so the two sources
+    // don't double-count. Until then this stays the reliable death signal.
+    if (type === 'death' && this.cfg.emitDeaths === false) {
+      this.log.info?.(`[event] death ${characterName} suppressed (EMIT_DEATHS=false; gs-ingest owns deaths)`);
+      return;
+    }
     this.log.info?.(`[event] ${type}${characterName ? ` ${characterName}` : ''}${metadata?.event ? ` (${metadata.event})` : ''}`);
     await this.postEvent({ type, characterName, metadata });
   }

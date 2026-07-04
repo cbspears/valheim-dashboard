@@ -127,6 +127,25 @@ export async function getLiveMap(): Promise<
   }
 }
 
+export interface LivePin {
+  id: string;
+  name: string;
+  kind: 'base' | 'poi';
+  by_character_name: string | null;
+  x: number;
+  y: number;
+  day: number | null;
+}
+
+/** Real player-placed pins on the live map (via in-game /pin). */
+export async function getPins(): Promise<LivePin[]> {
+  const { data } = await db()
+    .from('pins')
+    .select('id, name, kind, by_character_name, x, y, day')
+    .order('created_at', { ascending: true });
+  return (data as LivePin[]) ?? [];
+}
+
 /** The sworn oaths, oldest first (the Oath page + Hall teaser). */
 export async function getOaths(): Promise<Oath[]> {
   const { data } = await db()

@@ -72,7 +72,7 @@ namespace EilifCompanion
                 Log.LogInfo($"[Eilif] Voice half active. Polling {_voiceUrl.Value} every {_pollSeconds.Value}s while players online.");
 
             new Harmony(PluginGuid).PatchAll();
-            Log.LogInfo($"[Eilif] {PluginName} v{PluginVersion} loaded. /oath capture armed.");
+            Log.LogInfo($"[Eilif] {PluginName} v{PluginVersion} loaded. /oath capture armed, /pin capture armed.");
         }
 
         // Main-thread pump: poll timer + drain the outbound line queue.
@@ -213,6 +213,48 @@ namespace EilifCompanion
                 ZRoutedRpc.instance.InvokeRoutedRPC(p.m_uid, "ChatMessage", args);
 
             Log.LogInfo($"[Eilif] Spoke ({talkType}) as '{speaker}' to {peers.Count} peer(s): {text}");
+        }
+    }
+
+    // ---- /pin capture -------------------------------------------------------
+    // Unlike /oath (which the mod-free "shout console echo" already captures),
+    // a pin needs the player's real world position — that's only available on
+    // the server by hooking the chat pipeline directly. Chat.OnNewChatMessage
+    // is confirmed (via decompile) to run server-side for SHOUTED messages
+    // (proximity/whisper chat never reaches the dedicated server), carrying
+    // the sender's position at the moment they spoke. We log it in the same
+    // tagged-line style as [EILIF_OATH] so the log poller can parse it with
+    // zero extra transport.
+    [HarmonyPatch(typeof(Chat), "OnNewChatMessage")]
+    internal static class Patch_OnNewChatMessage_Pin
+    {
+        // name|kind, e.g. "/pin The Dark Chapel" or "/pin base Odinshold"
+        private static readonly System.Text.RegularExpressions.Regex PinRe =
+            new System.Text.RegularExpressions.Regex(
+                @"^\s*/pin\s+(?:(base)\s+)?(.+?)\s*$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        static void Prefix(GameObject go, long senderID, Vector3 pos, Talker.Type type, UserInfo sender, string text)
+        {
+            try
+            {
+                if (type != Talker.Type.Shout || string.IsNullOrEmpty(text)) return;
+                var m = PinRe.Match(text);
+                if (!m.Success) return;
+
+                string kind = m.Groups[1].Success ? "base" : "poi";
+                string name = m.Groups[2].Value.Trim();
+                if (string.IsNullOrEmpty(name)) return;
+
+                string who = sender?.Name ?? "unknown";
+                // world x/z only — the dashboard converts to map-fraction coords.
+                EilifCompanionPlugin.Log.LogInfo(
+                    $"[EILIF_PIN] {who} | {kind} | {name} | {pos.x.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)} | {pos.z.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}");
+            }
+            catch (Exception ex)
+            {
+                EilifCompanionPlugin.Log.LogWarning($"[Eilif] pin capture failed: {ex.Message}");
+            }
         }
     }
 

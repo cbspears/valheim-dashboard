@@ -58,6 +58,7 @@ async function runLive() {
   const recap = createRecap({
     db, post, state, saveState, writeDb, tz: TZ, startsAt: recapsStart,
     onPotyCrowned: voice ? voice.announcePoty : null,
+    channel: process.env.RECAP_CHANNEL || 'valheim',
   });
 
   await bosses.init(); // seed already-felled bosses so we don't retro-announce
