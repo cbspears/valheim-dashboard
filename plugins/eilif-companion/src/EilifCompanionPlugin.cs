@@ -22,7 +22,7 @@ namespace EilifCompanion
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
         public const string PluginName = "Eilif Companion";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.1.1";
 
         internal static ManualLogSource Log;
 
@@ -54,9 +54,9 @@ namespace EilifCompanion
                     new AcceptableValueRange<int>(30, 3600)));
             _speakerName = Config.Bind("Voice", "SpeakerName", "Eilif",
                 "Fallback speaker name used when a line has no 'speaker' field.");
-            _chatType = Config.Bind("Voice", "ChatType", "shout",
-                new ConfigDescription("How spoken lines are broadcast: 'shout' (global, reliable) or 'normal' (proximity-based).",
-                    new AcceptableValueList<string>("shout", "normal")));
+            _chatType = Config.Bind("Voice", "ChatType", "center",
+                new ConfigDescription("How spoken lines are broadcast: 'center' (raid-banner style, most reliable), 'shout' (chat, global) or 'normal' (chat, proximity).",
+                    new AcceptableValueList<string>("center", "shout", "normal")));
 
             try
             {
@@ -174,33 +174,45 @@ namespace EilifCompanion
             }
         }
 
-        // Broadcast a line as a global in-game chat message. Main thread only.
+        // Broadcast a line to all connected players. Main thread only.
         private void Speak(VoiceLine line)
         {
             if (ZRoutedRpc.instance == null) return; // shouldn't happen; Update guards, queue may lag
 
             string speaker = string.IsNullOrEmpty(line.speaker) ? _speakerName.Value : line.speaker;
-            var talkType = string.Equals(_chatType.Value, "normal", StringComparison.OrdinalIgnoreCase)
-                ? Talker.Type.Normal
-                : Talker.Type.Shout;
+            string mode = (_chatType.Value ?? "center").ToLowerInvariant();
+            string text = line.text ?? "";
 
+            if (mode == "center")
+            {
+                // The raid-banner channel: MessageHud.RPC_ShowMessage(long sender, int type, string text).
+                // No UserInfo involved, so it is immune to the platform privacy check that rejects
+                // synthetic chat senders ("Failed to get player info..."). Renders center-screen on
+                // every connected client, exactly like "The forest is moving...".
+                ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, "ShowMessage",
+                    new object[] { (int)MessageHud.MessageType.Center, text });
+                Log.LogInfo($"[Eilif] Spoke (center): {text}");
+                return;
+            }
+
+            var talkType = mode == "normal" ? Talker.Type.Normal : Talker.Type.Shout;
             var userInfo = new UserInfo
             {
                 Name = speaker,
-                // Synthetic, valid (non-null) id so UserInfo.Serialize never NRE's server-side.
-                UserId = new PlatformUserID("BlockspaceEilif", "eilif")
+                // Steam-shaped synthetic id: same-platform senders skip the PlayFab lookup path
+                // that rejected our custom platform id outright.
+                UserId = new PlatformUserID("Steam", "76561198000000001")
             };
+            var args = new object[] { Vector3.zero, (int)talkType, userInfo, text };
 
-            // Mirrors how the game (Chat/Talker) emits chat: the routed "ChatMessage" RPC.
-            // Signature (assembly_valheim 0.221.x): Chat.RPC_ChatMessage(long sender, Vector3 position,
-            //   int type, UserInfo userInfo, string text). The leading 'sender' long is supplied by the
-            //   routing layer, so it is NOT part of the params array below.
-            ZRoutedRpc.instance.InvokeRoutedRPC(
-                ZRoutedRpc.Everybody,
-                "ChatMessage",
-                new object[] { Vector3.zero, (int)talkType, userInfo, line.text ?? "" });
+            // Per-peer sends: never invoke the server's own ChatMessage handler (its player-info
+            // lookup throws on synthetic senders); deliver straight to each connected client.
+            var peers = ZNet.instance?.GetPeers();
+            if (peers == null || peers.Count == 0) return;
+            foreach (var p in peers)
+                ZRoutedRpc.instance.InvokeRoutedRPC(p.m_uid, "ChatMessage", args);
 
-            Log.LogInfo($"[Eilif] Spoke ({talkType}) as '{speaker}': {line.text}");
+            Log.LogInfo($"[Eilif] Spoke ({talkType}) as '{speaker}' to {peers.Count} peer(s): {text}");
         }
     }
 

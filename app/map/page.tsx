@@ -9,13 +9,18 @@ import {
   MAP_DEMO_REVEALED_PCT,
 } from '@/config/map-demo.generated';
 import { SERVER_NAME } from '@/config/server';
+import { getLiveMap } from '@/lib/data';
 
 export const metadata: Metadata = {
   title: 'Map',
   description: `The known world of ${SERVER_NAME} — only what the warband has charted.`,
 };
 
-export default function MapPage() {
+// the live snapshot check must run per-request
+export const dynamic = 'force-dynamic';
+
+export default async function MapPage() {
+  const liveMap = await getLiveMap();
   // how much fresh ground the warband charted in the last seven days
   const byDay = MAP_DEMO_REVEALED_BY_DAY;
   const weeklyGrowth = byDay.length > 7 ? byDay[byDay.length - 1] - byDay[byDay.length - 8] : 0;
@@ -30,8 +35,35 @@ export default function MapPage() {
         title="The Known World"
         subtitle="Only what the warband has charted. The rest of the world keeps its secrets."
         icon={<Map size={22} />}
-        action={<Badge tone="gold">Demo</Badge>}
+        action={liveMap ? <Badge tone="online">Live</Badge> : <Badge tone="gold">Demo</Badge>}
       />
+
+      {/* The LIVE known world — fed by the real server (fog-masked before upload) */}
+      {liveMap && (
+        <Card glow className="mx-auto mb-8 max-w-3xl">
+          <CardBody>
+            <div className="relative mx-auto aspect-square w-full max-w-[min(100%,66vh)] overflow-hidden rounded-lg border border-rune bg-pitch">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`${liveMap.url}?t=${Date.now()}`}
+                alt="The known world, as the server tells it"
+                className="block h-full w-full select-none"
+                draggable={false}
+              />
+              <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-md border border-online/40 bg-pitch/75 px-2.5 py-1 text-xs font-medium text-online-glow backdrop-blur-sm">
+                <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-online" />
+                Live
+              </div>
+            </div>
+            <p className="mt-3 text-center text-xs text-muted">
+              The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it —
+              refreshed from the server every ~10 minutes
+              {liveMap.updatedAt ? ` · last charted ${new Date(liveMap.updatedAt).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })} CT` : ''}.
+              The unexplored dark is real: nobody has been there yet.
+            </p>
+          </CardBody>
+        </Card>
+      )}
 
       {/* How to pin — the naming of places */}
       <Card className="mb-6 border-l-2 border-l-gold">

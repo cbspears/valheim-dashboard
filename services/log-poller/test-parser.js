@@ -84,5 +84,15 @@ for (const { label, line, expect } of oathCases) {
 console.log(oathOk ? 'OATH PARSING OK' : 'OATH PARSING FAILED');
 if (!oathOk) ok = false;
 
+
+// --- console-echo oath capture (mod-free path) ---
+{
+  const p2 = new LogParser();
+  const ev = p2.processLine('[Info   : Unity Log] 07/04/2026 01:02:49: Console: <color=orange>Testman</color>: <color=#FFEB04FF>/OATH I SWEAR TO HAVE A GOOD TIME</color>');
+  if (!(ev.length === 1 && ev[0].type === 'oath' && ev[0].characterName === 'Testman' && ev[0].metadata.text === 'I SWEAR TO HAVE A GOOD TIME')) { console.log('console-echo oath FAILED'); ok = false; }
+  else if (p2.processLine('[Info   : Unity Log] Console: <color=orange>T</color>: <color=#FFEB04FF>JUST A SHOUT</color>').length !== 0) { console.log('plain shout matched FAILED'); ok = false; }
+  else console.log('CONSOLE OATH OK');
+}
+
 console.log(ok ? '\nPARSER OK' : '\nPARSER FAILED');
 process.exit(ok ? 0 : 1);

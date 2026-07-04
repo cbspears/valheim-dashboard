@@ -45,6 +45,11 @@ const RE = {
   // anywhere in the standard BepInEx log prefix; name/text split on the FIRST
   // " | " so a text containing " | " itself stays intact.
   oath: /\[EILIF_OATH\]\s*(.+)$/,
+  // Shouted /oath as echoed by the server console — the mod-free capture path.
+  // Shout text arrives display-uppercased; the oath keyword is matched case-
+  // insensitively and the sworn text is kept exactly as shouted.
+  //   Console: <color=orange>Testman</color>: <color=#FFEB04FF>/OATH I SWEAR ...</color>
+  consoleOath: /Console:\s*<color=orange>(.+?)<\/color>:\s*<color=[^>]*>\/oath\s+(.+?)<\/color>/i,
 };
 
 export class LogParser {
@@ -90,6 +95,17 @@ export class LogParser {
         if (name && text) {
           events.push({ type: 'oath', characterName: name, metadata: { text } });
         }
+      }
+      return events;
+    }
+
+    // --- In-game sworn oath (shouted, via the server's console echo) ---
+    const co = line.match(RE.consoleOath);
+    if (co) {
+      const name = co[1].trim();
+      const text = co[2].trim();
+      if (name && text) {
+        events.push({ type: 'oath', characterName: name, metadata: { text } });
       }
       return events;
     }

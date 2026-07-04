@@ -91,6 +91,18 @@ export async function getRecentSessions(limit = 50): Promise<GameSession[]> {
   return (data as GameSession[]) ?? [];
 }
 
+/** The live fog-masked world map snapshot, if the pipeline has published one. */
+export async function getLiveMap(): Promise<{ url: string; updatedAt: string | null } | null> {
+  const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/map/current.webp`;
+  try {
+    const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    if (!head.ok) return null;
+    return { url, updatedAt: head.headers.get('last-modified') };
+  } catch {
+    return null;
+  }
+}
+
 /** The sworn oaths, oldest first (the Oath page + Hall teaser). */
 export async function getOaths(): Promise<Oath[]> {
   const { data } = await db()
