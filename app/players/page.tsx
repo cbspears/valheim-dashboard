@@ -31,6 +31,7 @@ import {
   getPotyArchive,
   getSessionsSince,
   getEventsSince,
+  playtimeMinutesByCharacter,
 } from '@/lib/data';
 import type { PlayerWithStats } from '@/lib/types';
 import {
@@ -74,7 +75,7 @@ interface Board {
 }
 
 export default async function PlayersPage() {
-  const [online, roster, withStats, potyArchive, sessions, deaths] = await Promise.all([
+  const [online_, roster_, withStats_, potyArchive, sessions, deaths] = await Promise.all([
     getOnlinePlayers(),
     getAllPlayers(),
     getPlayersWithStats(),
@@ -87,6 +88,26 @@ export default async function PlayersPage() {
     character_name: s.character_name,
     joined_at: s.joined_at,
     duration_minutes: s.duration_minutes,
+  }));
+
+  // The `players.total_playtime_minutes` column isn't kept fresh by the real
+  // pipeline yet — derive it live from session rows so Hours Logged / Total
+  // Time reflect real playtime instead of reading back as 0.
+  const onlineNames = new Set(online_.map((p) => p.character_name));
+  const playtimeByName = playtimeMinutesByCharacter(sessions, onlineNames);
+  const online = online_.map((p) => ({
+    ...p,
+    total_playtime_minutes: playtimeByName.get(p.character_name) ?? p.total_playtime_minutes,
+  }));
+  const roster = roster_
+    .map((p) => ({
+      ...p,
+      total_playtime_minutes: playtimeByName.get(p.character_name) ?? p.total_playtime_minutes,
+    }))
+    .sort((a, b) => b.total_playtime_minutes - a.total_playtime_minutes);
+  const withStats = withStats_.map((p) => ({
+    ...p,
+    total_playtime_minutes: playtimeByName.get(p.character_name) ?? p.total_playtime_minutes,
   }));
 
   // Auto-generated epithets for the roster subtitles (deterministic; judged

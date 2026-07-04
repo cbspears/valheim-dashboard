@@ -168,6 +168,63 @@ export async function getSessionsSince(days = 70): Promise<GameSession[]> {
   return (data as GameSession[]) ?? [];
 }
 
+/**
+ * Live-computed total playtime per character, in minutes, from session rows.
+ *
+ * The `players.total_playtime_minutes` column is only as fresh as whatever
+ * last wrote it (historically the demo seed); the real log-poller pipeline
+ * doesn't currently maintain it, so it reads back as 0 for every real viking
+ * even though sessions with real durations exist. Deriving it here from the
+ * sessions the pages already fetch keeps "Hours Logged" / "Total Time"
+ * truthful without touching the poller.
+ *
+ * Sessions with a `duration_minutes` are trusted as-is. A session still open
+ * (`left_at` null) only counts elapsed time (`joined_at` -> now) if the
+ * character is *currently online* per `players.is_online` — i.e. it's
+ * genuinely their live session. Any other open session (the poller missed a
+ * `leave`, so it never closed) is dropped rather than guessed at — crediting
+ * it with elapsed real time would count an overnight AFK/disconnect, or a
+ * stale session left behind by a since-ended one, as active playtime.
+ *
+ * @param onlineNames character_names currently online (from the `players`
+ *   table), used to decide which open session, if any, is still live.
+ */
+export function playtimeMinutesByCharacter(
+  sessions: GameSession[],
+  onlineNames: ReadonlySet<string> = new Set()
+): Map<string, number> {
+  const byName = new Map<string, GameSession[]>();
+  for (const s of sessions) {
+    if (!s.character_name) continue;
+    const arr = byName.get(s.character_name) ?? [];
+    arr.push(s);
+    byName.set(s.character_name, arr);
+  }
+
+  const now = Date.now();
+  const totals = new Map<string, number>();
+  for (const [name, list] of byName) {
+    const sorted = [...list].sort(
+      (a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime()
+    );
+    let total = 0;
+    sorted.forEach((s, i) => {
+      if (s.duration_minutes != null) {
+        total += s.duration_minutes;
+        return;
+      }
+      // Open session: only the most recent one, for a character currently
+      // online, counts as live. Earlier/stale dangling opens are unknown
+      // duration — skip rather than overcount.
+      if (i === sorted.length - 1 && onlineNames.has(name)) {
+        total += Math.max(0, Math.round((now - new Date(s.joined_at).getTime()) / 60_000));
+      }
+    });
+    totals.set(name, total);
+  }
+  return totals;
+}
+
 /** Events from the last `days` days, oldest first; optionally filtered by type. */
 export async function getEventsSince(days = 70, types?: string[]): Promise<GameEvent[]> {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();

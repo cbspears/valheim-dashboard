@@ -30,6 +30,7 @@ import {
   getPotyArchive,
   getGalleryPhotos,
   getBosses,
+  playtimeMinutesByCharacter,
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
 import { epithetFor, generatedBioLine } from '@/lib/epithets';
@@ -98,7 +99,7 @@ interface Tile {
 export default async function VikingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  const [roster, sessions, deaths, potyArchive, photos, bosses] = await Promise.all([
+  const [roster_, sessions, deaths, potyArchive, photos, bosses] = await Promise.all([
     getPlayersWithStats(),
     getSessionsSince(70),
     getEventsSince(70, ['death']),
@@ -106,6 +107,16 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
     getGalleryPhotos(),
     getBosses(),
   ]);
+
+  // The `players.total_playtime_minutes` column isn't kept fresh by the real
+  // pipeline yet — derive it live from session rows so Hours reflects real
+  // playtime instead of reading back as 0.
+  const onlineNames = new Set(roster_.filter((p) => p.is_online).map((p) => p.character_name));
+  const playtimeByName = playtimeMinutesByCharacter(sessions, onlineNames);
+  const roster = roster_.map((p) => ({
+    ...p,
+    total_playtime_minutes: playtimeByName.get(p.character_name) ?? p.total_playtime_minutes,
+  }));
 
   const viking = findViking(roster, slug);
   if (!viking) notFound();

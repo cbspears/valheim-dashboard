@@ -1,0 +1,1132 @@
+{
+  "_meta": {
+    "archived_at": "2026-07-04",
+    "reason": "Sidelining demo/fiction data now that the real server (test world 'Dedicated') is live with real players Chærlie, Psifour, Testman, Ivar Hollowleg. This file is the pre-delete snapshot for reversibility."
+  },
+  "players": [],
+  "sessions": [],
+  "player_stats": [],
+  "events": [
+    {
+      "id": "f5876ebd-ae37-4667-877e-a6b5dc3b2455",
+      "type": "join",
+      "player_id": null,
+      "character_name": "Bjorn Ironside",
+      "metadata": {},
+      "created_at": "2026-06-24T18:46:38.71183+00:00"
+    },
+    {
+      "id": "12da5b71-0dd6-4c45-8205-32de53918b0e",
+      "type": "join",
+      "player_id": null,
+      "character_name": "Astrid Shieldmaiden",
+      "metadata": {},
+      "created_at": "2026-06-24T18:49:38.71183+00:00"
+    },
+    {
+      "id": "5fcb8298-6b64-42ce-93aa-80c1aafc707a",
+      "type": "join",
+      "player_id": null,
+      "character_name": "Ragnar Lothbrok",
+      "metadata": {},
+      "created_at": "2026-06-24T18:56:38.71183+00:00"
+    },
+    {
+      "id": "c9007e6c-61dc-4b95-adb2-4d8730dc54a2",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Ragnar Lothbrok",
+      "metadata": {
+        "cause": "was slain by a Draugr"
+      },
+      "created_at": "2026-06-24T19:26:38.71183+00:00"
+    },
+    {
+      "id": "2549660c-8a91-43ae-930e-5c93ab083d91",
+      "type": "chat",
+      "player_id": null,
+      "character_name": "Astrid Shieldmaiden",
+      "metadata": {
+        "message": "who has poison mead??"
+      },
+      "created_at": "2026-06-24T19:36:38.71183+00:00"
+    },
+    {
+      "id": "661a474e-8923-454d-a51f-836e553a8294",
+      "type": "chat",
+      "player_id": null,
+      "character_name": "Bjorn Ironside",
+      "metadata": {
+        "message": "i got like 6, meet at the dock"
+      },
+      "created_at": "2026-06-24T19:38:38.71183+00:00"
+    },
+    {
+      "id": "22f0a6e2-5244-4558-9a37-35f228592814",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Ragnar Lothbrok",
+      "metadata": {
+        "cause": "drowned"
+      },
+      "created_at": "2026-06-24T19:51:38.71183+00:00"
+    },
+    {
+      "id": "da5ac1f0-292d-4266-8222-c8963ba12b78",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Bjorn Ironside",
+      "metadata": {
+        "cause": "was slain by a Greydwarf Brute"
+      },
+      "created_at": "2026-06-24T20:08:38.71183+00:00"
+    },
+    {
+      "id": "d4f7c982-8290-4c1b-ab52-68eef5bc0b83",
+      "type": "chat",
+      "player_id": null,
+      "character_name": "Ragnar Lothbrok",
+      "metadata": {
+        "message": "lol bjorn"
+      },
+      "created_at": "2026-06-24T20:09:38.71183+00:00"
+    },
+    {
+      "id": "3a27a024-0c37-4e87-8110-bd8132d76c65",
+      "type": "join",
+      "player_id": null,
+      "character_name": "Freya Stormborn",
+      "metadata": {},
+      "created_at": "2026-06-24T17:46:38.71183+00:00"
+    },
+    {
+      "id": "45081549-6a33-4db9-ada7-dad3564ed49c",
+      "type": "leave",
+      "player_id": null,
+      "character_name": "Freya Stormborn",
+      "metadata": {},
+      "created_at": "2026-06-24T18:46:38.71183+00:00"
+    },
+    {
+      "id": "59c40066-7555-4edc-aaa0-ed368ee1748c",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Olaf the Stout",
+      "metadata": {
+        "cause": "fell from a high place"
+      },
+      "created_at": "2026-06-24T14:46:38.71183+00:00"
+    },
+    {
+      "id": "0744591d-ab0b-4a5a-97f2-a6a0b0881dcc",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Greydwarf",
+        "world_day": 85
+      },
+      "created_at": "2026-06-23T19:22:00.217942+00:00"
+    },
+    {
+      "id": "d80a9d2e-33c8-4b28-965d-8be09a2b2aa0",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Fall",
+        "world_day": 74
+      },
+      "created_at": "2026-06-18T03:36:28.544486+00:00"
+    },
+    {
+      "id": "db98fc4f-a482-46a4-b262-99f702df27da",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Tree",
+        "world_day": 92
+      },
+      "created_at": "2026-06-28T00:06:39.08848+00:00"
+    },
+    {
+      "id": "dc6b3c7d-d210-4a74-a88d-b85827d45841",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Draugr",
+        "world_day": 87
+      },
+      "created_at": "2026-06-25T01:13:43.98238+00:00"
+    },
+    {
+      "id": "e7ba0ace-6090-40aa-a8a1-b3df0b97e31a",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "The Elder",
+        "world_day": 83
+      },
+      "created_at": "2026-06-23T02:52:28.314246+00:00"
+    },
+    {
+      "id": "ef6e53c3-ac07-434f-afb9-9df7cea4265f",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Skeleton",
+        "world_day": 51
+      },
+      "created_at": "2026-06-05T01:31:08.519611+00:00"
+    },
+    {
+      "id": "f321bc29-ec69-479e-99ff-e452da68f3c7",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Fall",
+        "world_day": 17
+      },
+      "created_at": "2026-05-17T01:49:17.433714+00:00"
+    },
+    {
+      "id": "fd80c484-ec16-4997-bb41-0c9044e2cb6f",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Troll",
+        "world_day": 15
+      },
+      "created_at": "2026-05-16T03:58:58.651245+00:00"
+    },
+    {
+      "id": "1d46926f-4ab4-4d6f-ae98-489896ba47cd",
+      "type": "discovery",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "found a sunken crypt",
+        "world_day": 53
+      },
+      "created_at": "2026-06-05T02:16:31.516167+00:00"
+    },
+    {
+      "id": "2ccff1bd-ba47-49dd-ba96-53f3979cbd4e",
+      "type": "discovery",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "charted the eastern strait",
+        "world_day": 37
+      },
+      "created_at": "2026-05-27T01:26:53.945435+00:00"
+    },
+    {
+      "id": "4350597a-439a-4c54-ae0c-941ab274f886",
+      "type": "discovery",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "entered the Swamp",
+        "world_day": 49
+      },
+      "created_at": "2026-06-04T01:30:03.6109+00:00"
+    },
+    {
+      "id": "4a4616a8-1c08-4eaa-a414-896ebbb9abcd",
+      "type": "discovery",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "sighted the Plains from a peak",
+        "world_day": 87
+      },
+      "created_at": "2026-06-25T00:23:14.398165+00:00"
+    },
+    {
+      "id": "8583ea58-a1f6-4684-8dbb-1e2d5f62403e",
+      "type": "discovery",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "found Haldor the trader",
+        "world_day": 28
+      },
+      "created_at": "2026-05-23T01:23:36.758035+00:00"
+    },
+    {
+      "id": "8db0ed2a-492f-49a3-9dc9-8455044df03f",
+      "type": "raid",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "The forest is moving...",
+        "world_day": 42
+      },
+      "created_at": "2026-05-31T02:04:03.991921+00:00"
+    },
+    {
+      "id": "abe2e1f9-f561-4bc0-a47a-bf81de59debb",
+      "type": "discovery",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "reached the Mountain",
+        "world_day": 74
+      },
+      "created_at": "2026-06-18T04:08:11.453631+00:00"
+    },
+    {
+      "id": "b2aeb989-6115-4d7e-bcf4-d844c01df283",
+      "type": "discovery",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "found a tar pit the hard way",
+        "world_day": 94
+      },
+      "created_at": "2026-06-29T03:02:42.22686+00:00"
+    },
+    {
+      "id": "b6a7b1f7-f27c-46d3-85bb-438b13377a30",
+      "type": "raid",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "The forest is moving...",
+        "world_day": 98
+      },
+      "created_at": "2026-07-01T00:13:17.926782+00:00"
+    },
+    {
+      "id": "12ad2676-fd2a-43bc-915d-2fed9f60169c",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Tree",
+        "world_day": 60
+      },
+      "created_at": "2026-06-10T01:39:08.729841+00:00"
+    },
+    {
+      "id": "1491e778-c245-4960-b711-2b2257a1419a",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Troll",
+        "world_day": 38
+      },
+      "created_at": "2026-05-29T02:49:14.047719+00:00"
+    },
+    {
+      "id": "174e4f68-25a1-4796-b1b6-68372906fd1a",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Skeleton",
+        "world_day": 78
+      },
+      "created_at": "2026-06-20T01:42:45.232578+00:00"
+    },
+    {
+      "id": "19b96338-03dc-4eaf-9087-64da78338b2d",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Greydwarf",
+        "world_day": 10
+      },
+      "created_at": "2026-05-13T03:19:34.296005+00:00"
+    },
+    {
+      "id": "2131f5bb-c674-42a1-bb08-c0e2e83a7244",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Fall",
+        "world_day": 8
+      },
+      "created_at": "2026-05-12T03:38:02.553048+00:00"
+    },
+    {
+      "id": "cea1ed38-5f11-488b-8c83-807bd22f9fdf",
+      "type": "raid",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "A foul smell from the swamp",
+        "world_day": 67
+      },
+      "created_at": "2026-06-14T02:14:41.144413+00:00"
+    },
+    {
+      "id": "ee585044-ced1-4e56-ad20-7d1abb39b4c8",
+      "type": "raid",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "You are being hunted...",
+        "world_day": 83
+      },
+      "created_at": "2026-06-23T01:33:03.074582+00:00"
+    },
+    {
+      "id": "fb177a33-615f-4b5e-871e-34e67d95606f",
+      "type": "discovery",
+      "player_id": null,
+      "character_name": "Sigrid Bonecrusher",
+      "metadata": {
+        "detail": "entered the Black Forest",
+        "world_day": 13
+      },
+      "created_at": "2026-05-15T02:26:28.40071+00:00"
+    },
+    {
+      "id": "23e4eda1-8c8e-43a0-b012-a838e1f0e581",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Troll",
+        "world_day": 98
+      },
+      "created_at": "2026-07-01T00:52:05.074422+00:00"
+    },
+    {
+      "id": "29efaca3-3fdc-443d-85f8-06443c355b54",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Greydwarf",
+        "world_day": 87
+      },
+      "created_at": "2026-06-25T00:54:26.421126+00:00"
+    },
+    {
+      "id": "2ebec15d-6084-45c7-b4f3-e3e073997192",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Fall",
+        "world_day": 76
+      },
+      "created_at": "2026-06-19T03:28:20.243979+00:00"
+    },
+    {
+      "id": "38642e92-d8ff-4cac-94ce-e0ceeb6b43c7",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Fire",
+        "world_day": 38
+      },
+      "created_at": "2026-05-29T03:22:56.142857+00:00"
+    },
+    {
+      "id": "3d250dca-95db-4791-b86e-6fb08b4537c8",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Tree",
+        "world_day": 42
+      },
+      "created_at": "2026-05-31T02:57:48.779451+00:00"
+    },
+    {
+      "id": "470827c9-8667-4e6e-a89c-daf62224a054",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Leech",
+        "world_day": 20
+      },
+      "created_at": "2026-05-19T03:16:58.072824+00:00"
+    },
+    {
+      "id": "488c9de5-fa38-4c76-8e36-b5c43c44823d",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Drowning",
+        "world_day": 85
+      },
+      "created_at": "2026-06-23T20:02:45.901857+00:00"
+    },
+    {
+      "id": "48a7fb28-e11b-46fe-8a17-f7a004385940",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "The Elder",
+        "world_day": 19
+      },
+      "created_at": "2026-05-18T01:03:34.672284+00:00"
+    },
+    {
+      "id": "5fbc16f2-b5d0-444a-8002-b6c181d15d92",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Troll",
+        "world_day": 26
+      },
+      "created_at": "2026-05-21T03:44:48.010427+00:00"
+    },
+    {
+      "id": "61a96b54-ccdf-4dea-8769-40d802cf0c57",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Skeleton",
+        "world_day": 29
+      },
+      "created_at": "2026-05-24T02:16:49.932647+00:00"
+    },
+    {
+      "id": "6baa9a74-64cb-46a6-a1c9-779c597cffe6",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Serpent",
+        "world_day": 87
+      },
+      "created_at": "2026-06-24T19:38:15.733482+00:00"
+    },
+    {
+      "id": "870bfbdb-cfb5-4c71-8cb6-51a23705d127",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Troll",
+        "world_day": 17
+      },
+      "created_at": "2026-05-17T01:56:33.448821+00:00"
+    },
+    {
+      "id": "87adaa54-15da-445e-9f4b-ef833ced4bbc",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Troll",
+        "world_day": 74
+      },
+      "created_at": "2026-06-18T01:38:55.792121+00:00"
+    },
+    {
+      "id": "88b2471d-b7a5-475d-8718-e2bf679aa69a",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Drowning",
+        "world_day": 11
+      },
+      "created_at": "2026-05-14T03:06:14.276312+00:00"
+    },
+    {
+      "id": "8ec4c5a3-31b8-44e8-9795-ce1256724402",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Tree",
+        "world_day": 49
+      },
+      "created_at": "2026-06-04T00:33:31.515024+00:00"
+    },
+    {
+      "id": "95434b74-91eb-4cf9-bfe4-0ef0a7288f92",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Fire",
+        "world_day": 80
+      },
+      "created_at": "2026-06-21T03:30:17.174959+00:00"
+    },
+    {
+      "id": "a3f26fec-9bf3-49ae-afde-de165f73bc63",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Fall",
+        "world_day": 56
+      },
+      "created_at": "2026-06-07T02:49:54.223247+00:00"
+    },
+    {
+      "id": "a642061d-c557-4114-8dd5-ed45e74bfc5f",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Greydwarf",
+        "world_day": 19
+      },
+      "created_at": "2026-05-18T01:24:49.221443+00:00"
+    },
+    {
+      "id": "a7c9e2e9-8af0-4c3a-8fc6-e462614f2815",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Drowning",
+        "world_day": 64
+      },
+      "created_at": "2026-06-12T00:29:03.730502+00:00"
+    },
+    {
+      "id": "a9181a94-bcea-407d-80f0-d29e7e39ca71",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Boar",
+        "world_day": 13
+      },
+      "created_at": "2026-05-15T02:43:03.396376+00:00"
+    },
+    {
+      "id": "af3a0db3-670f-4510-be86-e04bd7156cdf",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Leech",
+        "world_day": 76
+      },
+      "created_at": "2026-06-19T01:37:44.001061+00:00"
+    },
+    {
+      "id": "b3529223-39f8-4235-bb81-f77302cb9b1a",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Leech",
+        "world_day": 83
+      },
+      "created_at": "2026-06-23T01:31:37.899013+00:00"
+    },
+    {
+      "id": "b5ef3127-856f-4c44-8109-9f61851b54a1",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Draugr",
+        "world_day": 37
+      },
+      "created_at": "2026-05-27T01:48:20.027298+00:00"
+    },
+    {
+      "id": "baaca65c-a8b2-43c6-80b7-2d124ab70ebd",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Drowning",
+        "world_day": 58
+      },
+      "created_at": "2026-06-09T02:16:18.725004+00:00"
+    },
+    {
+      "id": "bdbc66b1-8a24-46fe-887d-7616f23b1e73",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Skeleton",
+        "world_day": 100
+      },
+      "created_at": "2026-07-02T04:04:12.858021+00:00"
+    },
+    {
+      "id": "be83d14b-8cdd-4b14-9c05-8c9607ed372b",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Fall",
+        "world_day": 17
+      },
+      "created_at": "2026-05-17T02:40:11.062582+00:00"
+    },
+    {
+      "id": "c1eb4a20-1c30-4359-9f88-ed9db0219fa9",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Greydwarf",
+        "world_day": 65
+      },
+      "created_at": "2026-06-12T03:45:27.707314+00:00"
+    },
+    {
+      "id": "c3a350e7-4694-4440-9f91-c50c9a784277",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Draugr",
+        "world_day": 87
+      },
+      "created_at": "2026-06-25T02:00:37.107434+00:00"
+    },
+    {
+      "id": "d3365be8-129f-4f50-a303-7b0ecdfe1261",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Tree",
+        "world_day": 11
+      },
+      "created_at": "2026-05-14T03:51:19.062089+00:00"
+    },
+    {
+      "id": "d669d99e-3f28-4b68-96c2-7d93b08d1e84",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Greydwarf",
+        "world_day": 35
+      },
+      "created_at": "2026-05-27T01:07:52.954056+00:00"
+    },
+    {
+      "id": "d740cdcf-bd7a-4184-bfc3-9350b6cc3c48",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Greydwarf",
+        "world_day": 55
+      },
+      "created_at": "2026-06-07T01:42:02.616842+00:00"
+    },
+    {
+      "id": "d7b5d5e1-7c5b-427b-b960-dfead14255bc",
+      "type": "death",
+      "player_id": null,
+      "character_name": "Helga Frostgaze",
+      "metadata": {
+        "cause": "Greydwarf",
+        "world_day": 33
+      },
+      "created_at": "2026-05-25T03:12:25.1807+00:00"
+    }
+  ],
+  "oaths": [
+    {
+      "id": "a3130141-d759-47ce-9a29-e6e5d719cb33",
+      "character_name": "Erikk teh Lost",
+      "player_id": null,
+      "discord_id": null,
+      "discord_name": "definitely_erik",
+      "oath_text": "I swear to get lost only in ways that make good stories.",
+      "match_status": "unmatched",
+      "sworn_at": "2026-05-20T17:25:09.449895+00:00",
+      "created_at": "2026-07-03T17:25:09.449895+00:00",
+      "source": "discord",
+      "announced_at": null
+    },
+    {
+      "id": "502ba115-cd62-4acf-bbbe-c0f78e52cdc8",
+      "character_name": "Freya Stormborn",
+      "player_id": null,
+      "discord_id": null,
+      "discord_name": "freyaplays",
+      "oath_text": "I swear the hearth will never go cold on my watch.",
+      "match_status": "fuzzy",
+      "sworn_at": "2026-05-14T17:25:09.449895+00:00",
+      "created_at": "2026-07-03T17:25:09.449895+00:00",
+      "source": "discord",
+      "announced_at": null
+    },
+    {
+      "id": "e4475354-5402-410d-bb81-7e380a2852b1",
+      "character_name": "Olaf the Stout",
+      "player_id": null,
+      "discord_id": null,
+      "discord_name": "olaf2077",
+      "oath_text": "I swear to test every mead first. For safety.",
+      "match_status": "exact",
+      "sworn_at": "2026-05-15T17:25:09.449895+00:00",
+      "created_at": "2026-07-03T17:25:09.449895+00:00",
+      "source": "discord",
+      "announced_at": null
+    },
+    {
+      "id": "0af9b457-3210-4a18-98f5-e853cccc7b37",
+      "character_name": "Helga Frostgaze",
+      "player_id": null,
+      "discord_id": null,
+      "discord_name": "helgz",
+      "oath_text": "I swear to name every place we find, whether it wants a name or not.",
+      "match_status": "exact",
+      "sworn_at": "2026-05-19T17:25:09.449895+00:00",
+      "created_at": "2026-07-03T17:25:09.449895+00:00",
+      "source": "discord",
+      "announced_at": null
+    },
+    {
+      "id": "83d6eb6a-3e99-4d9d-829f-c677dec734ad",
+      "character_name": "Ragnar Lothbrok",
+      "player_id": null,
+      "discord_id": null,
+      "discord_name": "rag_lo",
+      "oath_text": "I swear to keep the community chest stocked and my complaints unstocked.",
+      "match_status": "exact",
+      "sworn_at": "2026-05-12T17:25:09.449895+00:00",
+      "created_at": "2026-07-03T17:25:09.449895+00:00",
+      "source": "discord",
+      "announced_at": null
+    },
+    {
+      "id": "c1984c2a-8a64-4aa8-bda2-8e0422677d77",
+      "character_name": "Astrid Shieldmaiden",
+      "player_id": null,
+      "discord_id": null,
+      "discord_name": "astrid_irl",
+      "oath_text": "I swear to lead every boss charge, and to die at least once to something embarrassing.",
+      "match_status": "exact",
+      "sworn_at": "2026-05-10T17:25:09.449895+00:00",
+      "created_at": "2026-07-03T17:25:09.449895+00:00",
+      "source": "discord",
+      "announced_at": null
+    },
+    {
+      "id": "952f390d-e369-4479-9a54-908ead7716da",
+      "character_name": "Bjorn Ironside",
+      "player_id": null,
+      "discord_id": null,
+      "discord_name": "bjornnn",
+      "oath_text": "I swear no viking sails alone while my longship floats.",
+      "match_status": "exact",
+      "sworn_at": "2026-05-11T17:25:09.449895+00:00",
+      "created_at": "2026-07-03T17:25:09.449895+00:00",
+      "source": "discord",
+      "announced_at": null
+    }
+  ],
+  "poty_history": [
+    {
+      "id": "1a3a81f1-fa85-4827-9d8a-f8a0079ae80c",
+      "character_name": "Astrid Shieldmaiden",
+      "award_category": "most_hours",
+      "award_label": "🔥 The Devoted",
+      "world_day": 30,
+      "awarded_at": "2026-06-25T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "995001bb-908b-4456-aeda-3e51ce24355e",
+      "character_name": "Erik the Lost",
+      "award_category": "underdog",
+      "award_label": "🌟 Unsung Hero",
+      "world_day": 29,
+      "awarded_at": "2026-06-24T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "2a9280a6-93e2-4503-bbf2-bc749d140e35",
+      "character_name": "Bjorn Ironside",
+      "award_category": "most_deaths",
+      "award_label": "💀 The Bold",
+      "world_day": 28,
+      "awarded_at": "2026-06-23T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "fb1f5978-592a-4851-9e65-4c57c7196409",
+      "character_name": "Ragnar Lothbrok",
+      "award_category": "boss_kill",
+      "award_label": "👑 Bane of Beasts (Boss-Slayer)",
+      "world_day": 27,
+      "awarded_at": "2026-06-22T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "719f11cc-011d-4a9d-8873-ed1fcd40c5cc",
+      "character_name": "Astrid Shieldmaiden",
+      "award_category": "most_explored",
+      "award_label": "🧭 Trailblazer",
+      "world_day": 26,
+      "awarded_at": "2026-06-21T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "3c02921e-e563-46a0-b422-16d16ae3b927",
+      "character_name": "Sigrid Bonecrusher",
+      "award_category": "most_resources",
+      "award_label": "🪓 The Industrious",
+      "world_day": 25,
+      "awarded_at": "2026-06-20T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "f7ecc271-49d4-4b1f-a50a-84292bbe1eb2",
+      "character_name": "Helga Frostgaze",
+      "award_category": "underdog",
+      "award_label": "🌟 Unsung Hero",
+      "world_day": 24,
+      "awarded_at": "2026-06-19T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "56102167-70a1-4bc4-bbab-6d390d550b7f",
+      "character_name": "Bjorn Ironside",
+      "award_category": "most_kills",
+      "award_label": "⚔️ Monster-Hunter",
+      "world_day": 23,
+      "awarded_at": "2026-06-18T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "96b25ce5-cadb-440c-bbe3-d55c7a033955",
+      "character_name": "Astrid Shieldmaiden",
+      "award_category": "most_crafted",
+      "award_label": "🔨 Master of the Forge",
+      "world_day": 22,
+      "awarded_at": "2026-06-17T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "81ffacb8-dca0-4d14-9991-31f581213b98",
+      "character_name": "Freya Stormborn",
+      "award_category": "most_deaths",
+      "award_label": "💀 The Bold",
+      "world_day": 21,
+      "awarded_at": "2026-06-16T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "f141be1d-f65d-426c-919f-071202d73adc",
+      "character_name": "Ragnar Lothbrok",
+      "award_category": "most_hours",
+      "award_label": "🔥 The Devoted",
+      "world_day": 20,
+      "awarded_at": "2026-06-15T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    },
+    {
+      "id": "28247d5e-7034-4dbc-9eaf-dc4ee6ee1081",
+      "character_name": "Olaf the Stout",
+      "award_category": "boss_kill",
+      "award_label": "👑 Bane of Beasts (Boss-Slayer)",
+      "world_day": 19,
+      "awarded_at": "2026-06-14T01:18:27.835994+00:00",
+      "created_at": "2026-06-26T01:18:27.835994+00:00"
+    }
+  ],
+  "discord_events": [
+    {
+      "id": "fa12870a-753d-412b-be53-13a59852a958",
+      "discord_event_id": null,
+      "name": "Valheim Night",
+      "description": "Our weekly midweek raid — gather the warband, push the frontier, and chip away at the next boss.",
+      "host": "The Jarl",
+      "location": "In-game · #server",
+      "starts_at": "2026-07-02T01:00:00+00:00",
+      "ends_at": null,
+      "status": "scheduled",
+      "user_count": 8,
+      "cover_url": null,
+      "url": null,
+      "recurrence": "Weekly on Wednesdays",
+      "recurrence_days": 7,
+      "updated_at": "2026-06-25T22:39:40.972634+00:00"
+    },
+    {
+      "id": "8ba513e5-5eb3-463b-b9b3-e88dfc4cab65",
+      "discord_event_id": null,
+      "name": "Valheim Night",
+      "description": "The big Saturday session — longer sail, more vikings, mead by the longfire afterward.",
+      "host": "The Jarl",
+      "location": "In-game · #server",
+      "starts_at": "2026-06-28T00:00:00+00:00",
+      "ends_at": null,
+      "status": "scheduled",
+      "user_count": 11,
+      "cover_url": null,
+      "url": null,
+      "recurrence": "Weekly on Saturdays",
+      "recurrence_days": 7,
+      "updated_at": "2026-06-25T22:39:40.972634+00:00"
+    },
+    {
+      "id": "f476ccfa-086f-4280-b21f-7456f94102fb",
+      "discord_event_id": null,
+      "name": "Tavern Party",
+      "description": "A night off from the grind — drinks, music, and silly contests in the mead hall. Bring your finest brew.",
+      "host": "Astrid",
+      "location": "The Mead Hall (in-game)",
+      "starts_at": "2026-07-05T01:00:00+00:00",
+      "ends_at": null,
+      "status": "scheduled",
+      "user_count": 14,
+      "cover_url": null,
+      "url": null,
+      "recurrence": null,
+      "recurrence_days": null,
+      "updated_at": "2026-06-25T22:39:40.972634+00:00"
+    },
+    {
+      "id": "8eda24b3-f29d-4849-96ea-0d451c0f57f3",
+      "discord_event_id": null,
+      "name": "Sean's Coliseum Tournament",
+      "description": "A 1v1 bracket to the last Viking standing. Forge your finest gear — glory, bragging rights, and a champion's hoard await.",
+      "host": "Sean",
+      "location": "The Arena",
+      "starts_at": "2026-07-11T23:00:00+00:00",
+      "ends_at": null,
+      "status": "scheduled",
+      "user_count": 19,
+      "cover_url": null,
+      "url": null,
+      "recurrence": null,
+      "recurrence_days": null,
+      "updated_at": "2026-06-25T22:39:40.972634+00:00"
+    }
+  ],
+  "gallery_photos": [
+    {
+      "id": "5c095890-0370-40a3-aff2-94defa9d5193",
+      "url": "https://valheim-dashboard.vercel.app/banner-eilif.webp",
+      "storage_path": null,
+      "caption": "First light over the new longhouse — worth every trip for stone.",
+      "posted_by": "Bjorn Ironside",
+      "discord_user_id": null,
+      "source_attachment_id": null,
+      "source_message_id": null,
+      "content_type": null,
+      "width": null,
+      "height": null,
+      "posted_at": "2026-06-25T21:03:12.313637+00:00",
+      "created_at": "2026-06-25T23:03:12.313637+00:00"
+    },
+    {
+      "id": "1bcb4f93-f7fb-4be4-986e-a543a7ee3291",
+      "url": "https://valheim-dashboard.vercel.app/bg-eilif.webp",
+      "storage_path": null,
+      "caption": "Caught the mountains glowing on the sail home from the Swamp.",
+      "posted_by": "Astrid Shieldmaiden",
+      "discord_user_id": null,
+      "source_attachment_id": null,
+      "source_message_id": null,
+      "content_type": null,
+      "width": null,
+      "height": null,
+      "posted_at": "2026-06-24T23:03:12.313637+00:00",
+      "created_at": "2026-06-25T23:03:12.313637+00:00"
+    },
+    {
+      "id": "33a82074-1336-4840-a63a-af5e2f6ad02f",
+      "url": "https://valheim-dashboard.vercel.app/og-eilif.jpg",
+      "storage_path": null,
+      "caption": "The whole warband before we took Bonemass. Skål!",
+      "posted_by": "Ragnar Lothbrok",
+      "discord_user_id": null,
+      "source_attachment_id": null,
+      "source_message_id": null,
+      "content_type": null,
+      "width": null,
+      "height": null,
+      "posted_at": "2026-06-22T23:03:12.313637+00:00",
+      "created_at": "2026-06-25T23:03:12.313637+00:00"
+    },
+    {
+      "id": "42817237-a5ac-4d7a-a18c-688463446be1",
+      "url": "https://valheim-dashboard.vercel.app/bg-eilif.webp",
+      "storage_path": null,
+      "caption": "Base build progress — the great hall finally has a roof.",
+      "posted_by": "Olaf the Stout",
+      "discord_user_id": null,
+      "source_attachment_id": null,
+      "source_message_id": null,
+      "content_type": null,
+      "width": null,
+      "height": null,
+      "posted_at": "2026-06-20T23:03:12.313637+00:00",
+      "created_at": "2026-06-25T23:03:12.313637+00:00"
+    },
+    {
+      "id": "c2b38248-32d2-4e58-825b-4ac6e540d8a0",
+      "url": "https://valheim-dashboard.vercel.app/banner-eilif.webp",
+      "storage_path": null,
+      "caption": "Sunset raid party assembling at the dock.",
+      "posted_by": "Sigrid",
+      "discord_user_id": null,
+      "source_attachment_id": null,
+      "source_message_id": null,
+      "content_type": null,
+      "width": null,
+      "height": null,
+      "posted_at": "2026-06-17T23:03:12.313637+00:00",
+      "created_at": "2026-06-25T23:03:12.313637+00:00"
+    }
+  ],
+  "bosses_field_reset": [
+    {
+      "id": "9e6cccde-a5da-4da4-8119-766a567c4935",
+      "name": "Eikthyr",
+      "biome": "Meadows",
+      "sort_order": 1,
+      "is_killed": false,
+      "killed_at": null,
+      "players_present": [
+        "Bjorn Ironside",
+        "Astrid Shieldmaiden",
+        "Ragnar Lothbrok",
+        "Olaf the Stout"
+      ],
+      "notes": "First blood. Easy fight, nobody died."
+    },
+    {
+      "id": "521b9b5f-e172-4fe2-9efe-e1072e7eaf07",
+      "name": "The Elder",
+      "biome": "Black Forest",
+      "sort_order": 2,
+      "is_killed": false,
+      "killed_at": null,
+      "players_present": [
+        "Bjorn Ironside",
+        "Astrid Shieldmaiden",
+        "Ragnar Lothbrok",
+        "Freya Stormborn",
+        "Olaf the Stout",
+        "Sigrid Bonecrusher"
+      ],
+      "notes": "Took two tries. Ragnar died to a stomp. Swamp is now unlocked."
+    }
+  ]
+}
