@@ -55,14 +55,55 @@ function topBy(
   players: PlayerWithStats[],
   selector: (p: PlayerWithStats) => number,
   format: (n: number) => string,
-  n = 5
+  n = 5,
+  subtitleFor?: (p: PlayerWithStats) => string | undefined
 ): LeaderboardEntry[] {
   return players
-    .map((p) => ({ id: p.id, name: p.character_name, raw: selector(p) }))
+    .map((p) => ({ id: p.id, name: p.character_name, raw: selector(p), player: p }))
     .filter((e) => e.raw > 0)
     .sort((a, b) => b.raw - a.raw)
     .slice(0, n)
-    .map((e) => ({ id: e.id, name: e.name, value: format(e.raw) }));
+    .map((e) => ({
+      id: e.id,
+      name: e.name,
+      value: format(e.raw),
+      subtitle: subtitleFor?.(e.player),
+    }));
+}
+
+/**
+ * A concurrent ingest agent may stash per-mode travel distances (walked /
+ * sailed / run) somewhere inside `player_stats.gs_stats` jsonb. The shape
+ * isn't finalized, so this reads a handful of plausible layouts defensively
+ * and falls back to no subtitle if none match — never throws, never assumes.
+ */
+function travelSubtitle(p: PlayerWithStats): string | undefined {
+  const gs = p.stats?.gs_stats as unknown;
+  if (!gs || typeof gs !== 'object') return undefined;
+
+  const obj = gs as Record<string, unknown>;
+  const bag =
+    (obj.distanceByMode as Record<string, unknown> | undefined) ??
+    (obj.travel as Record<string, unknown> | undefined) ??
+    (obj.movement as Record<string, unknown> | undefined) ??
+    obj;
+
+  const num = (v: unknown): number => (typeof v === 'number' && v > 0 ? v : 0);
+  const walked = num(bag.walked) || num(bag.Walk) || num(bag.walk);
+  const sailed = num(bag.sailed) || num(bag.Sail) || num(bag.sail) || num(bag.boat);
+  const run = num(bag.run) || num(bag.Run) || num(bag.ran);
+
+  const total = walked + sailed + run;
+  if (total <= 0) return undefined;
+
+  const shares: [string, number][] = [
+    ['mostly by sea', sailed],
+    ['mostly at a run', run],
+    ['mostly on foot', walked],
+  ];
+  shares.sort((a, b) => b[1] - a[1]);
+  const [label, top] = shares[0];
+  return top / total >= 0.5 ? label : undefined;
 }
 
 interface Board {
@@ -71,6 +112,10 @@ interface Board {
   icon: ReactNode;
   accent: string;
   empty: string;
+  /** headline above `empty`; defaults to "No deeds recorded" */
+  emptyTitle?: string;
+  /** always-visible in-tone note under the title (e.g. data source context) */
+  subtitle?: string;
   entries: LeaderboardEntry[];
 }
 
@@ -184,8 +229,15 @@ export default async function PlayersPage() {
       title: 'Farthest Wandered',
       icon: <Footprints size={16} />,
       accent: 'text-gold',
-      empty: 'No tracks in the snow. The map remains unexplored.',
-      entries: topBy(withStats, (p) => p.stats?.distance_traveled ?? 0, formatDistance),
+      emptyTitle: 'No trails blazed yet',
+      empty: 'No footsteps have been counted across the realms. As vikings wander, their trails will be tallied here.',
+      entries: topBy(
+        withStats,
+        (p) => p.stats?.distance_traveled ?? 0,
+        formatDistance,
+        5,
+        travelSubtitle
+      ),
     },
     {
       key: 'built',
@@ -200,7 +252,9 @@ export default async function PlayersPage() {
       title: 'Cartographer',
       icon: <MapIcon size={16} />,
       accent: 'text-gold',
-      empty: 'The fog hangs thick. No frontier has been charted.',
+      subtitle: "Awaiting the mapmakers' ledgers — coverage arrives once vikings opt in to the map uploader.",
+      emptyTitle: 'No frontier charted',
+      empty: 'The fog hangs thick over every shore. No mapmaker has yet turned in their ledger.',
       entries: topBy(withStats, (p) => p.stats?.map_explored_pct ?? 0, formatPercent),
     },
   ];
@@ -368,6 +422,8 @@ export default async function PlayersPage() {
               accent={board.accent}
               entries={board.entries}
               emptyMessage={board.empty}
+              emptyTitle={board.emptyTitle}
+              subtitle={board.subtitle}
             />
           ))}
         </div>

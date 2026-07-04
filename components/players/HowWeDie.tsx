@@ -3,7 +3,15 @@ import { clsx } from 'clsx';
 import { Card, VikingLink } from '@/components/ui';
 import type { GameEvent } from '@/lib/types';
 
-/** Raw death cause → saga-flavored label. Unknown causes fall to "The mists". */
+/**
+ * Sentinel key for deaths with no recorded cause. Most of these are historical,
+ * log-derived deaths captured before the death-cause mod rolled out — the
+ * cause isn't a mysterious category, it's genuinely lost to time. Kept
+ * distinct from real causes so it never gets confused with one.
+ */
+const UNRECORDED = '__unrecorded__';
+
+/** Raw death cause → saga-flavored label. Causes we haven't mapped yet also fall to UNRECORDED. */
 const CAUSE_LABELS: Record<string, string> = {
   Tree: 'Betrayed by a tree',
   Fall: 'Gravity',
@@ -64,29 +72,46 @@ const CAUSE_OBSERVATION: Record<string, string> = {
 };
 
 function labelFor(cause: string): string {
-  return CAUSE_LABELS[cause] ?? 'The mists';
+  return CAUSE_LABELS[cause] ?? 'Unwitnessed';
 }
 
 export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
-  // Tally raw causes.
+  // Tally raw causes. Anything without a recorded cause — or with a cause
+  // string we haven't mapped to a label — collapses into the UNRECORDED
+  // bucket, since we can't tell those apart from "genuinely unknown."
   const counts = new Map<string, number>();
   const byViking = new Map<string, number>();
   for (const e of deaths) {
-    const cause = typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : 'Unknown';
+    const raw = typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : '';
+    const cause = raw && CAUSE_LABELS[raw] ? raw : UNRECORDED;
     counts.set(cause, (counts.get(cause) ?? 0) + 1);
     if (e.character_name) {
       byViking.set(e.character_name, (byViking.get(e.character_name) ?? 0) + 1);
     }
   }
 
-  const rows = [...counts.entries()]
-    .map(([cause, count]) => ({ cause, label: labelFor(cause), count }))
+  // Real (recorded) causes lead the story, ranked by count. The unrecorded
+  // bucket is always last, however large — it isn't a cause, it's an absence
+  // of data, and shouldn't visually compete with real ones.
+  const realRows = [...counts.entries()]
+    .filter(([cause]) => cause !== UNRECORDED)
+    .map(([cause, count]) => ({ cause, label: labelFor(cause), count, unrecorded: false as const }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 
+  const unrecordedCount = counts.get(UNRECORDED) ?? 0;
+  const unrecordedRow =
+    unrecordedCount > 0
+      ? { cause: UNRECORDED, label: 'Unwitnessed', count: unrecordedCount, unrecorded: true as const }
+      : null;
+
+  const rows = unrecordedRow ? [...realRows, unrecordedRow] : realRows;
+
   const total = deaths.length;
-  const top = rows[0];
+  const top = realRows[0];
   const max = top?.count ?? 1;
-  const observation = top ? CAUSE_OBSERVATION[top.cause] ?? 'The North collects its due, one viking at a time.' : '';
+  const observation = top
+    ? CAUSE_OBSERVATION[top.cause] ?? 'The North collects its due, one viking at a time.'
+    : 'No cause has yet been witnessed and recorded — the reaper keeps his ledger closed.';
 
   // Deadliest viking — only called out if one name clearly dominates.
   const tally = [...byViking.entries()].sort((a, b) => b[1] - a[1]);
@@ -117,28 +142,56 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
 
           <ul className="flex flex-col gap-2">
             {rows.map((r) => {
-              const pct = Math.round((r.count / max) * 100);
+              // The unrecorded bucket is scaled against itself, not the real
+              // causes' max — otherwise its (often large) historical count
+              // would dwarf every real cause's bar and bury the story.
+              const pct = r.unrecorded ? 100 : Math.round((r.count / max) * 100);
               return (
-                <li key={r.cause} className="flex items-center gap-3">
-                  <span className="w-40 shrink-0 truncate font-display text-sm text-ash">
+                <li
+                  key={r.cause}
+                  className={clsx('flex items-center gap-3', r.unrecorded && 'opacity-60')}
+                  title={r.unrecorded ? 'Before the ravens kept watch — no cause was recorded.' : undefined}
+                >
+                  <span
+                    className={clsx(
+                      'w-40 shrink-0 truncate font-display text-sm',
+                      r.unrecorded ? 'italic text-muted' : 'text-ash'
+                    )}
+                  >
                     {r.label}
                   </span>
                   <div className="relative h-5 flex-1 overflow-hidden rounded-sm bg-surface-raised/50">
                     <div
                       className={clsx(
                         'h-full rounded-sm',
-                        r.cause === top.cause ? 'bg-death/70' : 'bg-death/40'
+                        r.unrecorded
+                          ? 'border border-dashed border-rune bg-surface-raised/80'
+                          : top && r.cause === top.cause
+                            ? 'bg-death/70'
+                            : 'bg-death/40'
                       )}
                       style={{ width: `${Math.max(pct, 4)}%` }}
                     />
                   </div>
-                  <span className="w-8 shrink-0 text-right text-sm tabular-nums text-ash-dim">
+                  <span
+                    className={clsx(
+                      'w-8 shrink-0 text-right text-sm tabular-nums',
+                      r.unrecorded ? 'text-muted' : 'text-ash-dim'
+                    )}
+                  >
                     {r.count}
                   </span>
                 </li>
               );
             })}
           </ul>
+
+          {unrecordedRow && (
+            <p className="text-xs italic text-muted">
+              {unrecordedRow.count} unwitnessed — before the ravens kept watch, these falls went
+              unrecorded. The count is true; the cause is lost to time.
+            </p>
+          )}
 
           {deadliest && (
             <p className="border-t border-rune/60 pt-3 text-xs text-muted">

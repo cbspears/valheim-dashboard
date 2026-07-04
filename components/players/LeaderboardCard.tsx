@@ -7,6 +7,8 @@ export interface LeaderboardEntry {
   name: string;
   /** pre-formatted display value */
   value: string;
+  /** optional secondary line under the name, e.g. "mostly by sea" */
+  subtitle?: string;
 }
 
 /**
@@ -19,6 +21,8 @@ export function LeaderboardCard({
   accent = 'text-gold',
   entries,
   emptyMessage,
+  emptyTitle = 'No deeds recorded',
+  subtitle,
 }: {
   title: string;
   icon: ReactNode;
@@ -26,18 +30,25 @@ export function LeaderboardCard({
   accent?: string;
   entries: LeaderboardEntry[];
   emptyMessage: string;
+  /** headline shown above `emptyMessage` when there are no entries */
+  emptyTitle?: string;
+  /** small in-tone note under the title, always shown (e.g. explaining a data source that isn't live yet) */
+  subtitle?: string;
 }) {
   return (
     <Card className="flex flex-col">
-      <div className="flex items-center gap-2.5 border-b border-rune px-5 py-3.5">
-        <span className={accent}>{icon}</span>
-        <h3 className="font-display text-sm uppercase tracking-wide text-ash">{title}</h3>
+      <div className="flex flex-col gap-0.5 border-b border-rune px-5 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <span className={accent}>{icon}</span>
+          <h3 className="font-display text-sm uppercase tracking-wide text-ash">{title}</h3>
+        </div>
+        {subtitle && <p className="pl-[1.65rem] text-xs text-muted">{subtitle}</p>}
       </div>
 
       {entries.length === 0 ? (
         <EmptyState
           icon={<span className={clsx('opacity-60', accent)}>{icon}</span>}
-          title="No deeds recorded"
+          title={emptyTitle}
           message={emptyMessage}
         />
       ) : (
@@ -62,16 +73,21 @@ export function LeaderboardCard({
                 >
                   {rank}
                 </span>
-                <span
-                  className={clsx(
-                    'flex-1 truncate font-display text-sm',
-                    first ? 'font-medium text-gold-light' : 'text-ash'
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={clsx(
+                      'block truncate font-display text-sm',
+                      first ? 'font-medium text-gold-light' : 'text-ash'
+                    )}
+                  >
+                    <VikingLink
+                      name={entry.name}
+                      className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                    />
+                  </span>
+                  {entry.subtitle && (
+                    <span className="block truncate text-xs text-muted">{entry.subtitle}</span>
                   )}
-                >
-                  <VikingLink
-                    name={entry.name}
-                    className="gold-ring rounded-sm transition-colors hover:text-gold-light"
-                  />
                 </span>
                 <span
                   className={clsx(
