@@ -175,6 +175,10 @@ export interface GalleryPhoto {
   height: number | null;
   posted_at: string;
   created_at: string | null;
+  // Gallery ↔ map link (db/2026-07-04_gallery_pin_link.sql). Optional so rows
+  // read before the migration still type. `pin` is the embedded place, when linked.
+  pin_id?: string | null;
+  pin?: { name: string; kind: string } | null;
 }
 
 export interface PotyHistoryEntry {

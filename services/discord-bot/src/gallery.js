@@ -8,10 +8,15 @@
 // Gated behind GALLERY_INGEST=1 (see index.js).
 
 import { serviceClient } from './supabase.js';
+import { matchPinInCaption } from './pinMatch.js';
 
 const IMAGE_TYPE = /^image\//;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
 const BUCKET = 'gallery';
+
+// A best-effort insert error that just means the pin_id column isn't there yet
+// (migration db/2026-07-04_gallery_pin_link.sql not applied). We retry without it.
+const MISSING_PIN_COLUMN = /pin_id|column .* does not exist|schema cache/i;
 
 export function createGalleryIngest({ client, log = console }) {
   const db = serviceClient();
@@ -46,7 +51,7 @@ export function createGalleryIngest({ client, log = console }) {
     if (upErr) throw new Error(`upload: ${upErr.message}`);
 
     const { data: pub } = db.storage.from(BUCKET).getPublicUrl(path);
-    const { error: insErr } = await db.from('gallery_photos').insert({
+    const row = {
       url: pub.publicUrl,
       storage_path: path,
       caption: ctx.caption,
@@ -58,9 +63,29 @@ export function createGalleryIngest({ client, log = console }) {
       width: att.width ?? null,
       height: att.height ?? null,
       posted_at: new Date(ctx.message.createdTimestamp).toISOString(),
-    });
+    };
+    // Attach to a map pin if the caption names one (gallery ↔ map link).
+    if (ctx.pinId) row.pin_id = ctx.pinId;
+
+    let { error: insErr } = await db.from('gallery_photos').insert(row);
+    // Degrade gracefully if the pin_id column isn't live yet: keep the photo.
+    if (insErr && row.pin_id && MISSING_PIN_COLUMN.test(insErr.message)) {
+      delete row.pin_id;
+      ({ error: insErr } = await db.from('gallery_photos').insert(row));
+    }
     if (insErr) throw new Error(`insert: ${insErr.message}`);
     return true;
+  }
+
+  // Look up the map pin (if any) whose place name appears in the caption.
+  async function matchPin(caption) {
+    if (!caption) return null;
+    try {
+      const { data: pins } = await db.from('pins').select('id, name');
+      return matchPinInCaption(caption, pins ?? [])?.id ?? null;
+    } catch {
+      return null; // pins unavailable — just store the photo unlinked
+    }
   }
 
   async function handleMessage(message) {
@@ -73,9 +98,11 @@ export function createGalleryIngest({ client, log = console }) {
       );
       if (images.length === 0) return;
 
+      const caption = captionFrom(message);
       const ctx = {
-        caption: captionFrom(message),
+        caption,
         postedBy: message.member?.displayName ?? message.author.username,
+        pinId: await matchPin(caption),
         message,
       };
 

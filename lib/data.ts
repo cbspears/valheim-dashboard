@@ -231,12 +231,54 @@ export async function getUpcomingEvents(limit = 10): Promise<UpcomingEvent[]> {
 }
 
 export async function getGalleryPhotos(limit = 60): Promise<GalleryPhoto[]> {
+  // Embed the linked map pin (place name) so the Gallery can show a place tag.
+  // Falls back to a plain select if the pin_id column/FK isn't live yet
+  // (db/2026-07-04_gallery_pin_link.sql not applied), so pages never crash.
+  const withPin = await db()
+    .from('gallery_photos')
+    .select('*, pin:pins(name, kind)')
+    .order('posted_at', { ascending: false })
+    .limit(limit);
+  if (!withPin.error) return (withPin.data as GalleryPhoto[]) ?? [];
+
   const { data } = await db()
     .from('gallery_photos')
     .select('*')
     .order('posted_at', { ascending: false })
     .limit(limit);
   return (data as GalleryPhoto[]) ?? [];
+}
+
+export interface PinPhoto {
+  id: string;
+  url: string;
+  caption: string | null;
+  posted_by: string | null;
+  posted_at: string;
+}
+
+/**
+ * Photos linked to a map pin, keyed by pin_id — powers the map's place panel.
+ * Returns an empty map if the pin_id column isn't live yet (pre-migration).
+ */
+export async function getPhotosByPin(): Promise<Record<string, PinPhoto[]>> {
+  const { data, error } = await db()
+    .from('gallery_photos')
+    .select('id, url, caption, posted_by, posted_at, pin_id')
+    .not('pin_id', 'is', null)
+    .order('posted_at', { ascending: true });
+  if (error || !data) return {};
+  const byPin: Record<string, PinPhoto[]> = {};
+  for (const row of data as (PinPhoto & { pin_id: string })[]) {
+    (byPin[row.pin_id] ??= []).push({
+      id: row.id,
+      url: row.url,
+      caption: row.caption,
+      posted_by: row.posted_by,
+      posted_at: row.posted_at,
+    });
+  }
+  return byPin;
 }
 
 /**

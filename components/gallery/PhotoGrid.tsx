@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Camera, User, Clock, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import Link from 'next/link';
+import { Camera, User, Clock, MapPin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { EmptyState, VikingLink } from '@/components/ui';
 import { timeAgo } from '@/lib/format';
 import type { GalleryPhoto } from '@/lib/types';
@@ -9,6 +10,22 @@ import type { GalleryPhoto } from '@/lib/types';
 /** A gallery photo, with its "posted by" credit already resolved (or not) to
  *  a real viking — see `matchVikingName` in lib/slug.ts, applied by the page. */
 type CreditedPhoto = GalleryPhoto & { matchedViking: string | null };
+
+/** A small "linked to a map place" tag → the map. Rendered when the photo's
+ *  caption named a pinned place (gallery ↔ map link). */
+function PlaceTag({ name }: { name: string }) {
+  return (
+    <Link
+      href="/map"
+      onClick={(e) => e.stopPropagation()}
+      className="gold-ring inline-flex max-w-full items-center gap-1 rounded-full border border-gold-dim/50 bg-gold/10 px-2 py-0.5 text-[11px] font-medium text-gold-light transition-colors hover:border-gold hover:bg-gold/20"
+      title={`See ${name} on the map`}
+    >
+      <MapPin size={11} className="shrink-0" />
+      <span className="truncate">{name}</span>
+    </Link>
+  );
+}
 
 /** Masonry grid of community photos. Click a photo to open it full-size in a lightbox. */
 export function PhotoGrid({ photos }: { photos: CreditedPhoto[] }) {
@@ -74,6 +91,7 @@ export function PhotoGrid({ photos }: { photos: CreditedPhoto[] }) {
             </button>
             <figcaption className="space-y-2 p-4">
               {p.caption && <p className="text-sm leading-relaxed text-ash-dim">{p.caption}</p>}
+              {p.pin?.name && <PlaceTag name={p.pin.name} />}
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-ash">
                   <User size={12} className="shrink-0 text-gold-dim" />
@@ -154,6 +172,11 @@ export function PhotoGrid({ photos }: { photos: CreditedPhoto[] }) {
             />
             <figcaption className="mt-3 max-w-2xl text-center">
               {active.caption && <p className="text-sm text-ash">{active.caption}</p>}
+              {active.pin?.name && (
+                <div className="mt-2 flex justify-center">
+                  <PlaceTag name={active.pin.name} />
+                </div>
+              )}
               <p className="mt-1 text-xs text-muted">
                 <VikingLink
                   name={active.matchedViking}

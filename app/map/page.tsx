@@ -1,16 +1,14 @@
 import type { Metadata } from 'next';
-import { Map, Camera, Compass, CalendarDays, Landmark, EyeOff, History } from 'lucide-react';
-import { SectionHeader, Card, CardBody, StatTile, Badge } from '@/components/ui';
-import { MapTimelapse } from '@/components/map/MapTimelapse';
+import { Map, Camera, Landmark, History } from 'lucide-react';
+import { SectionHeader, Card, CardBody, Badge, EmptyState } from '@/components/ui';
 import { LiveWorld } from '@/components/map/LiveWorld';
-import {
-  MAP_DEMO_DAYS,
-  MAP_DEMO_LABELS,
-  MAP_DEMO_REVEALED_BY_DAY,
-  MAP_DEMO_REVEALED_PCT,
-} from '@/config/map-demo.generated';
+// NOTE: the demo timelapse (`components/map/MapTimelapse`) + its fixtures
+// (`config/map-demo.generated.ts`, `public/map-demo/`) are intentionally NOT
+// rendered here anymore — the real live world + real replay + real /pin markers
+// are the whole story now. The demo files are kept on disk as the launch-day
+// reference (and as the model for this page's look), just no longer imported.
 import { SERVER_NAME } from '@/config/server';
-import { getLiveMap, getPins } from '@/lib/data';
+import { getLiveMap, getPins, getPhotosByPin } from '@/lib/data';
 
 export const metadata: Metadata = {
   title: 'Map',
@@ -21,14 +19,11 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function MapPage() {
-  const [liveMap, pins] = await Promise.all([getLiveMap(), getPins()]);
-  // how much fresh ground the warband charted in the last seven days
-  const byDay = MAP_DEMO_REVEALED_BY_DAY;
-  const weeklyGrowth = byDay.length > 7 ? byDay[byDay.length - 1] - byDay[byDay.length - 8] : 0;
-  const weeklyHint =
-    weeklyGrowth > 0
-      ? `+${weeklyGrowth.toFixed(1)}% charted this past week`
-      : 'Charted by walking and sailing it';
+  const [liveMap, pins, photosByPin] = await Promise.all([
+    getLiveMap(),
+    getPins(),
+    getPhotosByPin(),
+  ]);
 
   return (
     <div>
@@ -36,11 +31,12 @@ export default async function MapPage() {
         title="The Known World"
         subtitle="Only what the warband has charted. The rest of the world keeps its secrets."
         icon={<Map size={22} />}
-        action={liveMap ? <Badge tone="online">Live</Badge> : <Badge tone="gold">Demo</Badge>}
+        action={liveMap ? <Badge tone="online">Live</Badge> : null}
       />
 
-      {/* The LIVE known world — fed by the real server (fog-masked before upload) */}
-      {liveMap && (
+      {/* The LIVE known world — fed by the real server (fog-masked before upload),
+          with the real per-in-game-day replay scrubber and real /pin markers. */}
+      {liveMap ? (
         <Card glow className="mx-auto mb-8 max-w-3xl">
           <CardBody>
             <LiveWorld
@@ -48,6 +44,7 @@ export default async function MapPage() {
               updatedLabel={liveMap.updatedAt}
               frames={liveMap.frames}
               pins={pins}
+              photosByPin={photosByPin}
             />
             <p className="mt-3 text-center text-xs text-muted">
               The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it —
@@ -55,6 +52,16 @@ export default async function MapPage() {
               {liveMap.updatedAt ? ` · last charted ${new Date(liveMap.updatedAt).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })} CT` : ''}.
               The unexplored dark is real: nobody has been there yet.
             </p>
+          </CardBody>
+        </Card>
+      ) : (
+        <Card className="mx-auto mb-8 max-w-3xl">
+          <CardBody>
+            <EmptyState
+              icon={<Map size={28} />}
+              title="The map charts itself once the warband sails"
+              message={`As soon as the ${SERVER_NAME} server is live, its fog-masked world lands here — terrain appears only where vikings have actually walked or sailed, a snapshot is archived every in-game day for the season replay, and every /pin becomes a marker.`}
+            />
           </CardBody>
         </Card>
       )}
@@ -133,58 +140,14 @@ export default async function MapPage() {
         </CardBody>
       </Card>
 
-      {/* Demo explainer */}
-      <Card className="mb-6 border-l-2 border-l-gold">
-        <CardBody>
-          <p className="text-sm leading-relaxed text-ash-dim">
-            <EyeOff size={14} className="mr-1.5 inline align-text-bottom text-gold-dim" />
-            This is a <span className="font-semibold text-ash">demo</span> — a simulated world
-            with {MAP_DEMO_DAYS} simulated days of exploration. At launch it becomes the real{' '}
-            {SERVER_NAME} world, refreshed from the server itself: terrain appears only where
-            vikings have actually walked or sailed, and unexplored lands stay hidden — the full
-            map never leaves the server. A snapshot is archived every day from Day 1, so the
-            timelapse below will replay the entire saga.
-          </p>
-        </CardBody>
-      </Card>
-
-      {/* Season at a glance */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatTile
-          label="Days charted"
-          value={MAP_DEMO_DAYS}
-          icon={<CalendarDays size={15} />}
-          hint="One snapshot per day, from launch night on"
-        />
-        <StatTile
-          label="World revealed"
-          value={`${MAP_DEMO_REVEALED_PCT}%`}
-          icon={<Compass size={15} />}
-          hint={weeklyHint}
-        />
-        <StatTile
-          label="Named places"
-          value={MAP_DEMO_LABELS.length}
-          icon={<Landmark size={15} />}
-          hint="Naming a place writes it into the atlas"
-        />
-      </div>
-
-      {/* The atlas + timelapse */}
-      <Card glow className="mx-auto max-w-3xl">
-        <CardBody>
-          <MapTimelapse />
-        </CardBody>
-      </Card>
-
       <div className="mx-auto mt-6 max-w-3xl">
         <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">
           <History size={14} className="mt-0.5 shrink-0 text-gold-dim" />
           <span>
-            How it works at launch: the server tracks everywhere the warband has been and renders
-            the charted world; the dashboard pulls a fresh masked snapshot every half hour and
-            archives one frame per day. Watching the light spread across the dark is the story of
-            the season — and the finale gets the full replay.
+            How it works: the server tracks everywhere the warband has been and renders the charted
+            world; the dashboard pulls a fresh masked snapshot every half hour and archives one
+            frame per in-game day. Watching the light spread across the dark is the story of the
+            season — press play above to replay it — and the finale gets the full replay.
           </span>
         </p>
       </div>

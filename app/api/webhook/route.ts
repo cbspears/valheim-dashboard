@@ -14,6 +14,7 @@
 // and NEVER logged — only generic, caller-safe messages leave this file.
 
 import { createClient } from '@supabase/supabase-js';
+import { matchPinInCaption } from '@/lib/pin-match';
 
 // Always run on the Node.js runtime (we need the service role key + full SDK)
 // and never cache — every webhook mutates state and must execute on request.
@@ -354,16 +355,46 @@ export async function POST(request: Request) {
       const day = (status?.world_day as number | undefined) ?? 1;
 
       await db.from('pins').delete().ilike('name', pinName.replace(/[%_]/g, (c) => `\\${c}`));
-      await db.from('pins').insert({
-        name: pinName,
-        kind: pinKind,
-        by_character_name: pinCharacterName,
-        world_x: worldX,
-        world_z: worldZ,
-        x,
-        y,
-        day,
-      });
+      const { data: newPin } = await db
+        .from('pins')
+        .insert({
+          name: pinName,
+          kind: pinKind,
+          by_character_name: pinCharacterName,
+          world_x: worldX,
+          world_z: worldZ,
+          x,
+          y,
+          day,
+        })
+        .select('id')
+        .single();
+
+      // ---- Retro-match (BIDIRECTIONAL): back-fill photos that named this place
+      // before it was pinned. Photo-first / pin-later works because a caption
+      // mentioning an unpinned place stays unlinked until the pin shows up. We
+      // scan not-yet-linked photos whose caption contains the new name (narrowed
+      // by ilike, then confirmed with the same word-boundary rule as the bot).
+      // Best-effort + isolated: if pin_id isn't live yet, or anything fails, the
+      // pin is still created — this never fails the request.
+      if (newPin?.id) {
+        try {
+          const like = `%${pinName.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+          const { data: candidates } = await db
+            .from('gallery_photos')
+            .select('id, caption')
+            .is('pin_id', null)
+            .ilike('caption', like);
+          const toLink = (candidates ?? [])
+            .filter((p) => matchPinInCaption(p.caption as string | null, [{ id: newPin.id as string, name: pinName }]))
+            .map((p) => p.id as string);
+          if (toLink.length > 0) {
+            await db.from('gallery_photos').update({ pin_id: newPin.id }).in('id', toLink);
+          }
+        } catch (e) {
+          console.error('[webhook] pin retro-match skipped:', e instanceof Error ? e.message : 'error');
+        }
+      }
 
       return Response.json({ ok: true }, { status: 200 });
     }
