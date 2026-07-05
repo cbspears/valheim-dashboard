@@ -4,6 +4,7 @@
 import {
   parseBossMilestones,
   parseBossKillEvents,
+  parseBossFighters,
   parseSelfDistances,
   BOSS_MILESTONE_KEY_TO_NAME,
   BOSS_OBJECT_TO_NAME,
@@ -96,5 +97,33 @@ assert.deepEqual(Object.keys(d.raw).sort(), [
 ]);
 // No distance counters → null (don't clobber with zeros).
 assert.equal(parseSelfDistances({ reporter: 'X', players: [{ name: 'X', stats: { vh_Builds: 5 } }] }), null);
+
+// ── 4. parseBossFighters: TRUE fighters (damage>0) ∪ bossKillEvents MVPs ──────
+// Mirrors the real Emitter server payload: players[].boss[] carries per-player
+// cumulative { boss:<gameObject>, kills, damageDealt }; only damage>0 counts, and
+// the online roster (which may include non-combatants) is NOT a fighter source.
+const fightersPayload = {
+  onlinePlayers: ['Steve', 'Testmantwo', 'Ivar Hollowleg'], // Ivar was online but idle
+  players: [
+    { name: 'Steve', boss: [{ boss: 'Eikthyr', kills: 1, damageDealt: 277 }], weapons: [] },
+    { name: 'Testmantwo', boss: [{ boss: 'Eikthyr', kills: 0, damageDealt: 140 }], weapons: [] },
+    { name: 'Ivar Hollowleg', boss: [{ boss: 'Eikthyr', kills: 0, damageDealt: 0 }], weapons: [] },
+    { name: 'Runa', boss: [{ boss: 'gd_king', kills: 0, damageDealt: 55 }], weapons: [] },
+  ],
+  bossKillEvents: [
+    { boss: 'Eikthyr', fightSec: 82, firstBlood: 'Steve', topDamagePlayer: 'Steve', topDamage: 277, participants: 2, tsUtc: ts },
+  ],
+};
+const fighters = parseBossFighters(fightersPayload);
+assert.deepEqual([...fighters.Eikthyr].sort(), ['Steve', 'Testmantwo'], 'Eikthyr fighters = damage-dealers only, Ivar (0 dmg / idle) excluded');
+assert.deepEqual(fighters['The Elder'], ['Runa'], 'gd_king maps to The Elder via its lone damage-dealer');
+// bossKillEvents MVPs are unioned in even if a player somehow lacked a players[] damage row.
+const mvpOnly = parseBossFighters({
+  players: [],
+  bossKillEvents: [{ boss: 'Bonemass', firstBlood: 'Ulf', topDamagePlayer: 'Sigrid', topDamage: 10, participants: 2, tsUtc: ts }],
+});
+assert.deepEqual(mvpOnly.Bonemass.sort(), ['Sigrid', 'Ulf'], 'MVPs union in for a boss with no players[] damage rows');
+// No fighters derivable → empty map (caller degrades to the online roster).
+assert.deepEqual(parseBossFighters({ onlinePlayers: ['A', 'B'] }), {}, 'roster alone yields no fighters');
 
 console.log('OK — all boss + distance parser assertions passed');

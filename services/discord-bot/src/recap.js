@@ -254,10 +254,10 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
           a.name.toLowerCase().localeCompare(b.name.toLowerCase())
       );
 
-    // --- Bosses felled in window (+ POTY candidates from players_present).
+    // --- Bosses felled in window (+ POTY candidates from the TRUE fighters).
     const { data: bossRows } = await db
       .from('bosses')
-      .select('name, biome, killed_at, players_present')
+      .select('name, biome, killed_at, players_present, fight_stats')
       .eq('is_killed', true)
       .gte('killed_at', startIso);
 
@@ -265,7 +265,17 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     const bossesPresent = {};
     const latestBoss = {};
     for (const b of bossRows || []) {
-      const present = Array.isArray(b.players_present) ? b.players_present : [];
+      // The boss-slayer crown must reward DEEDS, not mere presence: credit the
+      // honest fighter set (those who actually dealt damage / drew first blood /
+      // struck hardest), falling back to players_present only for legacy rows
+      // recorded before fighters were captured (never the raw online roster now).
+      const fighters =
+        b.fight_stats && Array.isArray(b.fight_stats.fighters) && b.fight_stats.fighters.length > 0
+          ? b.fight_stats.fighters
+          : Array.isArray(b.players_present)
+            ? b.players_present
+            : [];
+      const present = fighters;
       const t = b.killed_at ? new Date(b.killed_at).getTime() : 0;
       for (const raw of present) {
         const nm = (raw || '').trim();

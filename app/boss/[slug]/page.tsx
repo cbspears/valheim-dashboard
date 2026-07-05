@@ -66,27 +66,50 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
       <div className="flex flex-col gap-8">
         <BossHero boss={boss} />
 
-        {/* The Circle */}
-        <Card>
-          <CardHeader title="The Circle" icon={<Users size={16} />} />
-          <CardBody>
-            {boss.players_present.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {boss.players_present.map((name) => (
-                  <Link
-                    key={name}
-                    href={vikingPath(name)}
-                    className="gold-ring rounded-full border border-rune bg-surface-raised px-3 py-1 text-sm text-ash-dim transition-colors hover:border-gold-dim hover:text-gold-light"
-                  >
-                    {name}
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted">No war party recorded for this fight.</p>
-            )}
-          </CardBody>
-        </Card>
+        {/* The Circle — the TRUE war party (those who actually fought). Prefer the
+            honest fighter set; fall back to players_present for rows recorded
+            before fighters were captured. Anyone who was online but didn't swing
+            is noted in a muted line so the record stays honest without inflating
+            the war-party. */}
+        {(() => {
+          const fs = boss.fight_stats;
+          const fighters =
+            fs?.fighters && fs.fighters.length > 0 ? fs.fighters : boss.players_present;
+          const fighterSet = new Set(fighters.map((n) => n.toLowerCase()));
+          const alsoInRealm = (fs?.onlineAtKill ?? []).filter(
+            (n) => !fighterSet.has(n.toLowerCase()),
+          );
+
+          return (
+            <Card>
+              <CardHeader title="The Circle" icon={<Users size={16} />} />
+              <CardBody>
+                {fighters.length > 0 ? (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {fighters.map((name) => (
+                        <Link
+                          key={name}
+                          href={vikingPath(name)}
+                          className="gold-ring rounded-full border border-rune bg-surface-raised px-3 py-1 text-sm text-ash-dim transition-colors hover:border-gold-dim hover:text-gold-light"
+                        >
+                          {name}
+                        </Link>
+                      ))}
+                    </div>
+                    {alsoInRealm.length > 0 && (
+                      <p className="mt-3 text-xs text-muted">
+                        Also in the realm: {alsoInRealm.join(', ')}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted">No war party recorded for this fight.</p>
+                )}
+              </CardBody>
+            </Card>
+          );
+        })()}
 
         {/* The Retelling */}
         <Card>
@@ -146,7 +169,8 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
         {/* The Full Record — real fight detail from bosses.fight_stats. */}
         {(() => {
           const fs = boss.fight_stats;
-          const length = fs ? formatFightLength(fs.fightSec) : null;
+          const length =
+            fs && typeof fs.fightSec === 'number' ? formatFightLength(fs.fightSec) : null;
           const firstBlood = fs?.firstBlood?.trim() || null;
           const topPlayer = fs?.topDamagePlayer?.trim() || null;
           const topDamage =

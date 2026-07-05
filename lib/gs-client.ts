@@ -202,6 +202,57 @@ export function parseBossMilestones(body: Obj): ParsedBossMilestone[] {
   return out;
 }
 
+/** Map a raw boss gameObject name (tolerating a "(Clone)" suffix) → bosses.name. */
+function mapBossObject(raw: string): string | null {
+  return BOSS_OBJECT_TO_NAME[raw] ?? BOSS_OBJECT_TO_NAME[raw.replace(/\(Clone\)$/i, '').trim()] ?? null;
+}
+
+/**
+ * Derive the TRUE fighters per boss from a snapshot — the honest "who actually
+ * swung at this beast", not the online roster at kill time.
+ *
+ * Two grounded sources, unioned:
+ *   1. players[].boss[] — the Emitter's server-wide observed combat. Each player
+ *      entry lists { boss: <gameObject>, kills, damageDealt }; a player who dealt
+ *      damageDealt > 0 (or landed a kill) on that boss demonstrably fought it.
+ *      (Emitter decompile: players[] iterates Bosses.Values, emitting an entry
+ *      only when damageDealt > 0 || kills > 0.)
+ *   2. bossKillEvents[].{firstBlood, topDamagePlayer} — the MVP/first-strike from
+ *      the fight record (present on both server- and client-emitted payloads).
+ *
+ * Returns bosses.name → deduped fighter names. Empty map when nothing is derivable
+ * (the caller degrades to the online roster rather than blanking the war party).
+ */
+export function parseBossFighters(body: Obj): Record<string, string[]> {
+  const acc: Record<string, Set<string>> = {};
+  const add = (bossName: string, name: string | null) => {
+    if (!name) return;
+    (acc[bossName] ??= new Set()).add(name);
+  };
+
+  // 1. Per-player observed damage/kills on each boss.
+  for (const p of arr(body.players)) {
+    const name = str(p.name);
+    if (!name) continue;
+    for (const b of arr(p.boss)) {
+      if (num(b.damageDealt) <= 0 && num(b.kills) <= 0) continue;
+      const raw = str(b.boss);
+      const bossName = raw ? mapBossObject(raw) : null;
+      if (bossName) add(bossName, name);
+    }
+  }
+
+  // 2. First-blood + top-damage heroes from the fight record.
+  for (const e of parseBossKillEvents(body.bossKillEvents)) {
+    add(e.bossName, e.firstBlood);
+    add(e.bossName, e.topDamagePlayer);
+  }
+
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(acc)) out[k] = [...v];
+  return out;
+}
+
 export interface ParsedBossKill {
   bossName: string;
   boss: string;

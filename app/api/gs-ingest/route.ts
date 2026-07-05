@@ -4,6 +4,7 @@ import {
   parseSelfDistances,
   parseBossMilestones,
   parseBossKillEvents,
+  parseBossFighters,
   type ParsedBossKill,
 } from '@/lib/gs-client';
 
@@ -315,7 +316,15 @@ async function ingestPlayerStats(body: Obj): Promise<void> {
 // Idempotent: milestones re-POST every ~120s and re-fire wholesale on a fresh
 // emitter deploy, so we only act while is_killed=false and only emit the event
 // when our guarded UPDATE actually flips a row.
-async function ingestBossMilestones(body: Record<string, unknown>, roster: string[]): Promise<void> {
+//
+// `fighters` maps bosses.name → the TRUE fighter list derived from the same
+// payload (parseBossFighters); `roster` is the reconciled online roster (the
+// degrade-to fallback so a war party is never blanked).
+async function ingestBossMilestones(
+  body: Record<string, unknown>,
+  roster: string[],
+  fighters: Record<string, string[]>,
+): Promise<void> {
   const milestones = parseBossMilestones(body);
   if (milestones.length === 0) return;
 
@@ -335,23 +344,40 @@ async function ingestBossMilestones(body: Record<string, unknown>, roster: strin
 
     const killedAt = m.tsUtc && !Number.isNaN(Date.parse(m.tsUtc)) ? new Date(m.tsUtc).toISOString() : new Date().toISOString();
 
+    // TRUE fighters if we have any; degrade to the online roster ONLY when empty
+    // (never blank a war party). The online roster is preserved separately on
+    // fight_stats.onlineAtKill so the war-room can still honestly note who else
+    // was in the realm without inflating the war-party.
+    const fought = fighters[m.bossName] ?? [];
+    const present = fought.length > 0 ? fought : roster;
+
     // Guarded flip: .eq('is_killed', false) makes the re-POST a no-op and the
     // returned rows tell us whether WE were the one to fell it (→ emit event once).
+    // Keep this write to columns that always exist so a pre-migration fight_stats
+    // column can never block the kill from registering.
     const { data: flipped } = await client
       .from('bosses')
-      .update({ is_killed: true, killed_at: killedAt, players_present: roster })
+      .update({ is_killed: true, killed_at: killedAt, players_present: present })
       .eq('id', row.id)
       .eq('is_killed', false)
       .select('id');
 
     if (!flipped || flipped.length === 0) continue; // lost the race / already flipped
 
+    // Seed fight_stats with the fighter list + the online-roster-at-kill (both
+    // best-effort so a missing column can't undo the flip above). ingestBossKillEvents
+    // unions richer fight detail on top and preserves both fields.
+    await client
+      .from('bosses')
+      .update({ fight_stats: { fighters: fought, onlineAtKill: roster, source: 'gs-milestone' } })
+      .eq('id', row.id);
+
     await client.from('events').insert({
       type: 'boss',
       character_name: null,
       metadata: {
         boss: m.bossName,
-        players: `${roster.length} viking${roster.length === 1 ? '' : 's'}`,
+        players: `${present.length} viking${present.length === 1 ? '' : 's'}`,
         milestoneKey: m.key,
         source: 'gs-milestone',
       },
@@ -360,13 +386,37 @@ async function ingestBossMilestones(body: Record<string, unknown>, roster: strin
   }
 }
 
+type FightStats = {
+  fightSec?: number;
+  firstBlood?: string | null;
+  topDamagePlayer?: string | null;
+  topDamage?: number;
+  participants?: number;
+  tsUtc?: string;
+  source?: string;
+  fighters?: string[];
+  onlineAtKill?: string[];
+};
+
 // Enrich a felled boss with the fight detail from bossKillEvents[] (emitted by
 // BOTH the server and participating clients). Canonical home is bosses.fight_stats
 // (jsonb) — renderable by the /boss "Full Record" surface. Order-independent and
 // idempotent: dedupe on the boss's tsUtc, and prefer the report with the most
-// participants (the server's server-wide view beats any single client's). If the
-// fight_stats column doesn't exist yet (pre-migration), fall back to stashing the
-// detail on the matching boss event row's metadata so nothing is lost.
+// participants (the server's server-wide view beats any single client's).
+//
+// The fight-scoped MVPs (firstBlood + topDamagePlayer) are UNIONED into
+// fight_stats.fighters and players_present — both are inherently a SUBSET of the
+// true fighters (you can't draw first blood or deal the most damage without
+// fighting), so unioning can only add real fighters, never a bystander, and
+// never shrinks the honest war party set at the kill-time flip. We deliberately
+// do NOT re-derive fighters from players[] here: that combat is cumulative per
+// world (and per-career on clients), so applying it on every ~120s re-POST would
+// let later/career damage bleed into an already-felled boss's war party. players[]
+// damage is trusted only once, at the milestone flip (ingestBossMilestones).
+// The online-roster-at-kill (fight_stats.onlineAtKill) is preserved untouched.
+//
+// If the fight_stats column doesn't exist yet (pre-migration), fall back to
+// stashing the detail on the matching boss event row's metadata so nothing is lost.
 async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): Promise<void> {
   const events = parseBossKillEvents(raw);
   if (events.length === 0) return;
@@ -382,27 +432,61 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): 
   const names = [...best.keys()];
   const { data: rows } = await client
     .from('bosses')
-    .select('id, name, fight_stats')
+    .select('id, name, fight_stats, players_present')
     .in('name', names);
 
   for (const row of rows ?? []) {
-    const e = best.get(row.name as string);
+    const bossName = row.name as string;
+    const e = best.get(bossName);
     if (!e) continue;
-    const incoming = {
-      fightSec: e.fightSec,
-      firstBlood: e.firstBlood,
-      topDamagePlayer: e.topDamagePlayer,
-      topDamage: e.topDamage,
-      participants: e.participants,
-      tsUtc: e.tsUtc,
-      source,
-    };
-    const existing = (row as { fight_stats?: { tsUtc?: string; participants?: number } | null }).fight_stats ?? null;
-    // Dedupe / prefer richer: skip when we already hold this fight with at least
-    // as many participants.
-    if (existing && existing.tsUtc === e.tsUtc && (existing.participants ?? 0) >= e.participants) continue;
+    const existing = ((row as { fight_stats?: FightStats | null }).fight_stats ?? null) as FightStats | null;
+    const priorPresent = Array.isArray((row as { players_present?: unknown }).players_present)
+      ? ((row as { players_present: unknown[] }).players_present.filter((n): n is string => typeof n === 'string'))
+      : [];
 
-    const { error } = await client.from('bosses').update({ fight_stats: incoming }).eq('id', row.id);
+    // Union the fighter set (monotonic — grows, never shrinks) with THIS fight's MVPs.
+    const fightersSet = new Set<string>(existing?.fighters ?? []);
+    if (e.firstBlood) fightersSet.add(e.firstBlood);
+    if (e.topDamagePlayer) fightersSet.add(e.topDamagePlayer);
+    const fightersOut = [...fightersSet];
+
+    // Dedupe / prefer richer scalars: keep what we hold when it's this exact fight
+    // with at least as many participants; else take the incoming report.
+    const keepExisting = existing?.tsUtc === e.tsUtc && (existing?.participants ?? 0) >= e.participants;
+    const scalars: FightStats = keepExisting
+      ? {
+          fightSec: existing?.fightSec,
+          firstBlood: existing?.firstBlood ?? null,
+          topDamagePlayer: existing?.topDamagePlayer ?? null,
+          topDamage: existing?.topDamage,
+          participants: existing?.participants,
+          tsUtc: existing?.tsUtc,
+          source: existing?.source ?? source,
+        }
+      : {
+          fightSec: e.fightSec,
+          firstBlood: e.firstBlood,
+          topDamagePlayer: e.topDamagePlayer,
+          topDamage: e.topDamage,
+          participants: e.participants,
+          tsUtc: e.tsUtc,
+          source,
+        };
+
+    const nextFightStats: FightStats = {
+      ...scalars,
+      fighters: fightersOut,
+      onlineAtKill: existing?.onlineAtKill, // preserved (seeded at the milestone flip)
+    };
+
+    // Fold the MVPs into players_present (union — grow only, never blank/shrink).
+    const presentSet = new Set<string>(priorPresent);
+    if (e.firstBlood) presentSet.add(e.firstBlood);
+    if (e.topDamagePlayer) presentSet.add(e.topDamagePlayer);
+    const patch: Record<string, unknown> = { fight_stats: nextFightStats };
+    if (presentSet.size > priorPresent.length) patch.players_present = [...presentSet];
+
+    const { error } = await client.from('bosses').update(patch).eq('id', row.id);
     if (!error) continue;
 
     // Graceful degradation (fight_stats column missing): merge onto the latest
@@ -411,14 +495,14 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): 
       .from('events')
       .select('id, metadata')
       .eq('type', 'boss')
-      .eq('metadata->>boss', e.bossName)
+      .eq('metadata->>boss', bossName)
       .order('created_at', { ascending: false })
       .limit(1);
     const evRow = ev?.[0];
     if (evRow) {
       await client
         .from('events')
-        .update({ metadata: { ...(evRow.metadata as Record<string, unknown>), fight: incoming } })
+        .update({ metadata: { ...(evRow.metadata as Record<string, unknown>), fight: nextFightStats } })
         .eq('id', evRow.id);
     }
   }
@@ -492,8 +576,11 @@ export async function POST(req: Request) {
   await client.from('server_status').update(statusUpdate).eq('id', 1);
 
   // Boss detection: the server payload's milestones flip the bosses row (the
-  // authoritative first-kill trigger); its own bossKillEvents add fight detail.
-  await ingestBossMilestones(body, names ?? []);
+  // authoritative first-kill trigger). players_present is set to the TRUE fighters
+  // derived from THIS payload (players[] damage ∪ bossKillEvents MVPs), degrading
+  // to the reconciled online roster only when no fighter is derivable. Its own
+  // bossKillEvents then add the fight detail + fold the MVPs in.
+  await ingestBossMilestones(body, names ?? [], parseBossFighters(body));
   await ingestBossKillEvents(body.bossKillEvents, 'server');
 
   return Response.json({ status: 'inserted' });

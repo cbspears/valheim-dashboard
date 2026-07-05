@@ -135,13 +135,17 @@ export interface Boss {
    * "Full Record" surface.
    */
   fight_stats?: {
-    fightSec: number;
-    firstBlood: string | null;
-    topDamagePlayer: string | null;
-    topDamage: number;
-    participants: number;
-    tsUtc: string;
-    source: string;
+    fightSec?: number;
+    firstBlood?: string | null;
+    topDamagePlayer?: string | null;
+    topDamage?: number;
+    participants?: number;
+    tsUtc?: string;
+    source?: string;
+    /** The TRUE fighters (dealt damage to / MVP'd this boss) — the honest war party. */
+    fighters?: string[];
+    /** The reconciled online roster at kill time — for the "also in the realm" note. */
+    onlineAtKill?: string[];
   } | null;
   /**
    * Skald-written saga retelling of the fight, generated once per kill by the

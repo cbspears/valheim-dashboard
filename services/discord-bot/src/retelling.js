@@ -114,12 +114,21 @@ async function gatherFacts(db, boss) {
   }
 
   const fs = boss.fight_stats || {};
+  // The war party is the TRUE fighter set when captured; players_present is the
+  // fallback for legacy rows. Never the raw online roster (bystanders don't earn
+  // a verse in the saga).
+  const warParty =
+    Array.isArray(fs.fighters) && fs.fighters.length > 0
+      ? fs.fighters
+      : Array.isArray(boss.players_present)
+        ? boss.players_present
+        : [];
   return {
     name: boss.name,
     biome: boss.biome,
     killedAt,
     worldDay,
-    players: Array.isArray(boss.players_present) ? boss.players_present.filter(Boolean) : [],
+    players: warParty.filter(Boolean),
     fightSec: typeof fs.fightSec === 'number' && Number.isFinite(fs.fightSec) ? fs.fightSec : null,
     firstBlood: typeof fs.firstBlood === 'string' && fs.firstBlood.trim() ? fs.firstBlood.trim() : null,
     topDamagePlayer:
