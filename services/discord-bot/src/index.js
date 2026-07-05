@@ -14,6 +14,7 @@ import { createGalleryIngest } from './gallery.js';
 import { createOathIngest } from './oaths.js';
 import { createIdentityLink } from './identity.js';
 import { createVoiceEngine } from './voice.js';
+import { createTitlesAnnouncer } from './titles.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
 const POLL = parseInt(process.env.POLL_INTERVAL_MS || '15000', 10);
@@ -134,6 +135,24 @@ async function runLive() {
     await voiceLoop();
     timers.push(setInterval(voiceLoop, 60000));
     extra += ', voice engine on';
+  }
+
+  // Living titles: poll the dashboard's /api/titles (the shared epithet engine)
+  // and announce when a viking's title changes. On by default (TITLES_ANNOUNCE=0
+  // to disable); needs the service-role client to write the registry.
+  if (process.env.TITLES_ANNOUNCE !== '0') {
+    const titles = createTitlesAnnouncer({
+      db,
+      post,
+      writeDb,
+      apiUrl: process.env.TITLES_API_URL || 'https://valheim-dashboard.vercel.app/api/titles',
+      dryRun: process.env.TITLES_DRY === '1',
+    });
+    const interval = parseInt(process.env.TITLES_INTERVAL_MS || '600000', 10);
+    const titlesLoop = safe('titles', () => titles.tick());
+    await titlesLoop();
+    timers.push(setInterval(titlesLoop, interval));
+    extra += `, titles every ${interval}ms${process.env.TITLES_DRY === '1' ? ' (dry)' : ''}`;
   }
 
   console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s${extra}.`);

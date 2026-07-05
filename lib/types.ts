@@ -32,6 +32,15 @@ export interface Player {
   discord_user_id?: string | null;
   /** Discord display name captured at link time (display/audit only). */
   discord_username?: string | null;
+  /**
+   * The viking's current living title (db/2026-07-05_titles.sql), maintained by
+   * the Discord bot's titles announcer as standings shift. Optional so rows read
+   * before the migration still type; also the incumbent that feeds the epithet
+   * engine's hysteresis, so a title never flaps on a tiny stat delta.
+   */
+  current_title?: string | null;
+  /** When `current_title` was last changed (announced). */
+  title_updated_at?: string | null;
 }
 
 /** A sworn signature on the Oath page, collected via Discord. */
