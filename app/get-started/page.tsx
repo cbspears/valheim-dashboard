@@ -3,9 +3,12 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   Compass,
-  Package,
-  Download,
   Anchor,
+  Package,
+  Gamepad2,
+  Download,
+  Play,
+  LogIn,
   Monitor,
   Laptop,
   Terminal,
@@ -18,30 +21,30 @@ import {
   Wrench,
   MessageCircle,
   ExternalLink,
-  ListChecks,
   Ship,
   TriangleAlert,
   ScrollText,
-  ArrowRight,
 } from 'lucide-react';
 import { Card, CardBody, SectionHeader, Badge } from '@/components/ui';
+import { CopyChip } from '@/components/get-started/CopyChip';
 import {
   SERVER_NAME,
   SERVER_ADDRESS,
   DISCORD_URL,
+  DISCORD_BOT_HANDLE,
   MODPACK_PROFILE_CODE,
 } from '@/config/server';
-import { CLIENT_MODS } from '@/config/mods';
 
 export const metadata: Metadata = {
   title: 'Get Started',
-  description: `New to ${SERVER_NAME}? Install the mods and join the server — step by step, for Windows, Mac, and Linux.`,
+  description: `New to ${SERVER_NAME}? Log on and install the mods in five steps, then the rituals that put you on the map — for Windows, Mac, and Linux.`,
 };
 
 const R2MODMAN_URL = 'https://thunderstore.io/c/valheim/p/ebkr/r2modman/';
 
 /* ── small presentational helpers ─────────────────────────────────────────── */
 
+/** One big numbered step in a vertical "follow me" list. */
 function Step({
   n,
   title,
@@ -54,22 +57,18 @@ function Step({
   children: ReactNode;
 }) {
   return (
-    <Card className="flex h-full flex-col">
-      <CardBody className="flex flex-1 flex-col gap-3">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-base text-gold-light tabular-nums">
-            {n}
-          </span>
-          <h3 className="flex items-center gap-2 font-display text-base tracking-wide text-ash">
-            <span className="text-gold">{icon}</span>
-            {title}
-          </h3>
-        </div>
-        <div className="flex flex-1 flex-col gap-2 text-sm leading-relaxed text-ash-dim">
-          {children}
-        </div>
-      </CardBody>
-    </Card>
+    <li className="flex gap-4">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-lg text-gold-light tabular-nums">
+        {n}
+      </span>
+      <div className="flex-1 space-y-2 pb-2 pt-1.5">
+        <h3 className="flex items-center gap-2 font-display text-base tracking-wide text-ash">
+          <span className="text-gold">{icon}</span>
+          {title}
+        </h3>
+        <div className="space-y-2 text-sm leading-relaxed text-ash-dim">{children}</div>
+      </div>
+    </li>
   );
 }
 
@@ -152,230 +151,307 @@ function SectionTitle({ icon, children }: { icon: ReactNode; children: ReactNode
 
 export default function GetStartedPage() {
   const discord = DISCORD_URL || null;
+  const bot = DISCORD_BOT_HANDLE; // e.g. "@Eilif"
 
   return (
     <div className="flex flex-col gap-12">
       <SectionHeader
         title="Get Started"
-        subtitle={`New to ${SERVER_NAME}? Three steps to install the mods and join the server — about 15 minutes, no experience needed.`}
+        subtitle={`New to ${SERVER_NAME}? Log on and install the mods in five steps — about 15 minutes, no experience needed. Then the four things to do once you're in.`}
         icon={<Compass size={22} />}
       />
 
-      {/* ── First: the Oath ─────────────────────────────────────────────── */}
-      <Link href="/oath" className="group block gold-ring rounded-lg">
-        <Card glow className="border-l-2 border-l-gold transition-colors group-hover:border-gold">
-          <CardBody className="flex items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <ScrollText size={20} className="mt-0.5 shrink-0 text-gold" />
-              <div>
-                <h3 className="font-display text-base tracking-wide text-ash">
-                  First — swear the Oath
-                </h3>
-                <p className="mt-1 text-sm leading-relaxed text-ash-dim">
-                  Before the mods, before the map: read the charter and add your mark. One line in
-                  Discord with your viking name, and the saga knows you. Every age begins with a
-                  vow.
-                </p>
-              </div>
+      {/* ══════════════ PART ONE — BEFORE YOU SAIL ══════════════ */}
+      <section>
+        <SectionTitle icon={<Ship size={20} />}>Before you sail — log on in 5 steps</SectionTitle>
+
+        {/* Connect at a glance */}
+        <Card className="mb-6 border-l-2 border-l-gold-dim">
+          <CardBody className="grid gap-5 sm:grid-cols-3">
+            <div>
+              <p className="text-xs uppercase tracking-wider text-muted">Server address</p>
+              {SERVER_ADDRESS ? (
+                <div className="mt-1.5">
+                  <CopyChip value={SERVER_ADDRESS} />
+                </div>
+              ) : (
+                <p className="mt-1 text-sm text-ash">shared in Discord</p>
+              )}
             </div>
-            <span className="flex shrink-0 items-center gap-1.5 text-sm font-semibold text-gold-light transition-transform group-hover:translate-x-0.5">
-              Take the Oath <ArrowRight size={15} />
-            </span>
+            <div>
+              <p className="text-xs uppercase tracking-wider text-muted">Password</p>
+              <p className="mt-1 text-sm text-ash">
+                {discord ? (
+                  <Ext href={discord}>ask in Discord</Ext>
+                ) : (
+                  'ask in Discord (kept off this public page)'
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wider text-muted">How to connect</p>
+              <p className="mt-1 text-sm text-ash">
+                Steam PC only — <span className="text-ash-dim">crossplay is off</span>
+              </p>
+            </div>
           </CardBody>
         </Card>
-      </Link>
 
-      {/* ── Connect at a glance ─────────────────────────────────────────── */}
-      <Card className="border-l-2 border-l-gold-dim">
-        <CardBody className="grid gap-5 sm:grid-cols-3">
-          <div>
-            <p className="text-xs uppercase tracking-wider text-muted">Server address</p>
-            <p className="mt-1 font-mono text-sm text-ash">
-              {SERVER_ADDRESS || 'shared in Discord'}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs uppercase tracking-wider text-muted">Password</p>
-            <p className="mt-1 text-sm text-ash">
-              {discord ? (
-                <Ext href={discord}>ask in Discord</Ext>
-              ) : (
-                'ask in Discord (kept off this public page)'
-              )}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs uppercase tracking-wider text-muted">You must install</p>
-            <p className="mt-1 text-sm text-ash">
-              {CLIENT_MODS.length} client mod{CLIENT_MODS.length === 1 ? '' : 's'} (below) — exact
-              versions
-            </p>
-          </div>
-        </CardBody>
-      </Card>
-
-      {/* ── Three-step path ─────────────────────────────────────────────── */}
-      <section>
-        <SectionTitle icon={<Ship size={18} />}>The three steps</SectionTitle>
         <p className="mb-5 max-w-3xl text-sm leading-relaxed text-muted">
-          The trick is to <strong className="text-ash-dim">not install mods by hand</strong>. A free
-          mod manager grabs the loader, every mod, and the exact versions for you, and keeps your
-          modded copy separate from vanilla. Same three steps on Windows, Mac, and Linux —
-          platform-specific notes are further down.
+          Don&apos;t install mods by hand. A free mod manager grabs the loader, every mod, and the
+          exact versions for you — and keeps your modded copy separate from vanilla. The same five
+          steps work on Windows, Mac, and Linux (platform notes are further down).
         </p>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <Step n={1} title="Install a mod manager" icon={<Package size={16} />}>
-            <p>
-              Download <Ext href={R2MODMAN_URL}>r2modman</Ext> (free; Windows, Mac, Linux) — the
-              Thunderstore Mod Manager is the same tool if you prefer it. Open it and choose{' '}
-              <span className="text-ash">Valheim</span> from the game list.
-            </p>
-            <p className="text-xs text-muted">
-              It installs BepInEx (the mod loader) for you — you never set that up by hand.
-            </p>
-          </Step>
-
-          <Step n={2} title="Add the mods" icon={<Download size={16} />}>
-            {MODPACK_PROFILE_CODE ? (
-              <p>
-                In r2modman choose <span className="text-ash">Import / Update → Import code</span>{' '}
-                and paste:
-                <code className="mt-1 block rounded bg-surface-raised px-2 py-1 font-mono text-xs text-gold-light">
-                  {MODPACK_PROFILE_CODE}
-                </code>
-                That installs the whole pack at the right versions in one go. Done.
-              </p>
-            ) : (
-              <>
-                <p>
-                  Inside r2modman, search for and install each of the{' '}
-                  {CLIENT_MODS.length} mods listed in{' '}
-                  <a href="#client-mods" className="text-gold-light hover:underline">
-                    What you install
-                  </a>{' '}
-                  below.
-                </p>
-                <p className="text-xs text-muted">
-                  Soon there&apos;ll be a single shared code that installs them all at once — until
-                  then, add the three individually (the manager keeps the versions right).
-                </p>
-              </>
-            )}
-          </Step>
-
-          <Step n={3} title="Launch & connect" icon={<Anchor size={16} />}>
-            <p>
-              Click <span className="text-ash">Start modded</span> in r2modman (not Steam&apos;s
-              normal Play button). In game:{' '}
-              <span className="text-ash">Start Game → pick your character → Join Game → Join by IP</span>.
-            </p>
-            <p>
-              Enter{' '}
-              <span className="font-mono text-ash">{SERVER_ADDRESS || 'the server address'}</span>{' '}
-              and the password. Welcome to {SERVER_NAME}. 🛡️
-            </p>
-          </Step>
-        </div>
-      </section>
-
-      {/* ── Required client mods ────────────────────────────────────────── */}
-      <section id="client-mods" className="scroll-mt-20">
-        <SectionTitle icon={<Download size={18} />}>What you install (client mods)</SectionTitle>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {CLIENT_MODS.map((m) => (
-            <Card key={m.name}>
-              <CardBody className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="font-display text-sm text-ash">{m.name}</h4>
-                  {m.version && (
-                    <Badge tone="neutral" className="shrink-0 font-mono">
-                      v{m.version}
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs leading-relaxed text-muted">{m.description}</p>
-                {m.url && (
-                  <span className="mt-1">
-                    <Ext href={m.url}>Thunderstore</Ext>
-                  </span>
-                )}
-              </CardBody>
-            </Card>
-          ))}
-        </div>
-        <p className="mt-3 text-sm text-muted">
-          Everything else runs on the server — see{' '}
-          <Link href="/mods" className="gold-ring rounded font-medium text-gold-light hover:underline">
-            the full mod list
-          </Link>
-          . Match versions exactly: a mismatch is the #1 reason a join is refused.
-        </p>
-      </section>
-
-      {/* ── First-login best practices (moved up — the happy path) ──────── */}
-      <section>
-        <SectionTitle icon={<ListChecks size={18} />}>
-          You&apos;re in — your first night
-        </SectionTitle>
         <Card>
           <CardBody>
-            <ul className="grid gap-4 sm:grid-cols-2">
-              <Tip icon={<MapPin size={16} />} title="Turn on your location">
-                Open the map (<span className="font-mono text-xs">M</span>) and enable{' '}
-                <span className="text-ash">Share position</span> (bottom-left) so the warband can
-                see each other and rally.
-              </Tip>
-              <Tip icon={<UserRound size={16} />} title="Use a clear character name">
-                It&apos;s how you show up in the{' '}
-                <Link href="/players" className="text-gold-light hover:underline">
-                  leaderboards
-                </Link>{' '}
-                and Discord recaps. Make it recognizable.
-              </Tip>
-              <Tip icon={<Camera size={16} />} title="Link your name to Eilif">
-                Tell the bot who you are —{' '}
-                <span className="rounded bg-gold/15 px-1 py-0.5 font-mono text-xs text-gold-light">
-                  @Eilif I am &lt;YourViking&gt;
-                </span>{' '}
-                — so the screenshots you post gather on your own saga page.
-              </Tip>
-              <Tip icon={<Bed size={16} />} title="Claim a bed early">
-                Build a bed and sleep in it to set your spawn — dying back at the start is a long row
-                home.
-              </Tip>
-              <Tip icon={<Sailboat size={16} />} title="Don't sail ahead of the longship">
-                Progression is boss-gated — the whole point of the Cozy Canon. Stay with the fleet;
-                don&apos;t rush biomes the group hasn&apos;t unlocked.
-              </Tip>
-              <Tip icon={<RefreshCcw size={16} />} title="Don't auto-update mods">
-                Let the group update together and keep versions pinned. A solo update will lock you
-                out until everyone matches.
-              </Tip>
-              <Tip icon={<MessageCircle size={16} />} title="Live in Discord">
-                Boss raids, base coords, and &quot;is the server up?&quot; all happen there. The
-                server restarts every few hours — a brief drop is normal.
-              </Tip>
-            </ul>
+            <ol className="space-y-6">
+              <Step n={1} title="Install the mod manager" icon={<Package size={16} />}>
+                <p>
+                  Download <Ext href={R2MODMAN_URL}>r2modman</Ext> — it&apos;s free, and runs on
+                  Windows, Mac, and Linux. Open it once it&apos;s installed.
+                </p>
+                <p className="text-xs text-muted">
+                  It sets up BepInEx (the mod loader) for you — you never touch that by hand.
+                </p>
+              </Step>
+
+              <Step n={2} title="Point it at Valheim" icon={<Gamepad2 size={16} />}>
+                <p>
+                  In r2modman, choose <span className="text-ash">Valheim</span> from the game list,
+                  then pick <span className="text-ash">Default</span> to create your profile.
+                </p>
+              </Step>
+
+              <Step n={3} title={`Import the ${SERVER_NAME} modpack`} icon={<Download size={16} />}>
+                {MODPACK_PROFILE_CODE ? (
+                  <>
+                    <p>
+                      Choose{' '}
+                      <span className="text-ash">Import / Update → Import code</span>, paste this
+                      code, and click <span className="text-ash">Import</span>:
+                    </p>
+                    <div className="py-0.5">
+                      <CopyChip value={MODPACK_PROFILE_CODE} />
+                    </div>
+                    <p>
+                      That installs the whole pack at the exact right versions and pre-configures
+                      everything. Nothing to edit — you&apos;re done here.
+                    </p>
+                  </>
+                ) : (
+                  <p>
+                    In r2modman, search for and install each mod listed in{' '}
+                    <Link href="/mods" className="text-gold-light hover:underline">
+                      the mod list
+                    </Link>
+                    . The manager keeps the versions matched — a shared one-click code is coming
+                    soon.
+                  </p>
+                )}
+              </Step>
+
+              <Step n={4} title="Launch the game modded" icon={<Play size={16} />}>
+                <p>
+                  Click <span className="text-ash">Start modded</span> in r2modman —{' '}
+                  <strong className="text-ash-dim">not</strong> Steam&apos;s normal Play button. Let
+                  Valheim load, then pick your character.
+                </p>
+              </Step>
+
+              <Step n={5} title={`Join ${SERVER_NAME}`} icon={<LogIn size={16} />}>
+                <p>
+                  In game: <span className="text-ash">Join Game → Join by IP</span> (or find it in
+                  the server browser) and enter the address:
+                </p>
+                <div className="py-0.5">
+                  {SERVER_ADDRESS ? (
+                    <CopyChip value={SERVER_ADDRESS} />
+                  ) : (
+                    <span className="text-ash">the address shared in Discord</span>
+                  )}
+                </div>
+                <p>
+                  Enter the password{' '}
+                  {discord ? (
+                    <>
+                      (<Ext href={discord}>ask in Discord</Ext>)
+                    </>
+                  ) : (
+                    '(ask in Discord)'
+                  )}
+                  , and welcome to {SERVER_NAME}. 🛡️
+                </p>
+              </Step>
+            </ol>
           </CardBody>
         </Card>
       </section>
 
-      {/* ── Platform notes ──────────────────────────────────────────────── */}
+      {/* ══════════════ VISUAL BREAK ══════════════ */}
+      <div className="flex items-center gap-4" aria-hidden="true">
+        <span className="h-px flex-1 bg-gradient-to-r from-transparent to-gold-dim/50" />
+        <Anchor size={18} className="text-gold-dim" />
+        <span className="h-px flex-1 bg-gradient-to-l from-transparent to-gold-dim/50" />
+      </div>
+
+      {/* ══════════════ PART TWO — NOW THAT YOU'RE ASHORE ══════════════ */}
+      <section>
+        <SectionTitle icon={<ScrollText size={20} />}>
+          Now that you&apos;re ashore — do these four things
+        </SectionTitle>
+        <p className="mb-5 max-w-3xl text-sm leading-relaxed text-muted">
+          You&apos;re in the game. These are the rituals that put you on the map, in the gallery, and
+          into the saga. Each is one line — shout it in-game, or tell the bot in Discord.
+        </p>
+
+        <Card>
+          <CardBody>
+            <ol className="space-y-6">
+              <Step n={1} title="Swear the Oath" icon={<ScrollText size={16} />}>
+                <p>
+                  Every age begins with a vow. In-game you must{' '}
+                  <strong className="text-ash-dim">shout</strong> it — open chat, lead with{' '}
+                  <span className="font-mono text-xs text-ash">/s</span>:
+                </p>
+                <div className="py-0.5">
+                  <CopyChip value="/s /oath " label="/s /oath <your vow, one line>" />
+                </div>
+                <p>Or swear it in Discord instead:</p>
+                <div className="py-0.5">
+                  <CopyChip
+                    value={`${bot} oath — `}
+                    label={`${bot} oath — YourVikingName: your vow`}
+                  />
+                </div>
+                <p className="text-xs text-muted">
+                  Read the charter and see who&apos;s sworn on the{' '}
+                  <Link href="/oath" className="text-gold-light hover:underline">
+                    Oath page
+                  </Link>
+                  .
+                </p>
+              </Step>
+
+              <Step n={2} title="Link your name to the saga" icon={<UserRound size={16} />}>
+                <p>
+                  Tell the bot which viking is you, so the photos you post and your stats gather on
+                  your own saga page. In Discord:
+                </p>
+                <div className="py-0.5">
+                  <CopyChip value={`${bot} I am `} label={`${bot} I am <YourCharacterName>`} />
+                </div>
+                <p className="text-xs text-muted">
+                  Use your <span className="text-ash-dim">in-game name</span>, spelled exactly as it
+                  appears — that&apos;s how the link lands on the right viking.
+                </p>
+              </Step>
+
+              <Step n={3} title="Name your places" icon={<MapPin size={16} />}>
+                <p>
+                  Stand where you want the marker, then <strong className="text-ash-dim">shout</strong>{' '}
+                  it to drop a pin on the live map:
+                </p>
+                <div className="py-0.5">
+                  <CopyChip value="/s /pin " label="/s /pin <name>" />
+                </div>
+                <p>
+                  Lead the name with <span className="font-mono text-xs text-ash">base</span> for a
+                  settlement — e.g.{' '}
+                  <span className="font-mono text-xs text-ash-dim">/s /pin base Odinshold</span>. Your
+                  pins join the{' '}
+                  <Link href="/map" className="text-gold-light hover:underline">
+                    atlas
+                  </Link>{' '}
+                  at the next map update.
+                </p>
+              </Step>
+
+              <Step n={4} title="Share your screenshots" icon={<Camera size={16} />}>
+                <p>
+                  Post a screenshot in Discord and tag the bot in the same message — it gathers into
+                  the{' '}
+                  <Link href="/gallery" className="text-gold-light hover:underline">
+                    gallery
+                  </Link>{' '}
+                  and onto your viking page and the map albums:
+                </p>
+                <div className="py-0.5">
+                  <CopyChip value={`${bot} `} label={`${bot} [attach an image]`} />
+                </div>
+                <p className="text-xs text-muted">
+                  Link your name first (step 2) so your shots land on your own page.
+                </p>
+              </Step>
+            </ol>
+          </CardBody>
+        </Card>
+
+        {/* First-night best practices */}
+        <div className="mt-6">
+          <Card>
+            <CardBody>
+              <p className="mb-4 font-display text-base tracking-wide text-ash">
+                And a few good habits for your first night
+              </p>
+              <ul className="grid gap-4 sm:grid-cols-2">
+                <Tip icon={<MapPin size={16} />} title="Turn on your location">
+                  Open the map (<span className="font-mono text-xs">M</span>) and enable{' '}
+                  <span className="text-ash">Share position</span> (bottom-left) so the warband can
+                  rally.
+                </Tip>
+                <Tip icon={<Bed size={16} />} title="Claim a bed early">
+                  Build a bed and sleep in it to set your spawn — dying back at the start is a long
+                  row home.
+                </Tip>
+                <Tip icon={<Sailboat size={16} />} title="Don't sail ahead of the longship">
+                  Progression is boss-gated — the whole point of the Cozy Canon. Stay with the fleet;
+                  don&apos;t rush biomes the group hasn&apos;t unlocked.
+                </Tip>
+                <Tip icon={<RefreshCcw size={16} />} title="Don't auto-update mods">
+                  Let the group update together and keep versions pinned. A solo update locks you out
+                  until everyone matches.
+                </Tip>
+                <Tip icon={<MessageCircle size={16} />} title="Live in Discord">
+                  Boss raids, base coords, and &quot;is the server up?&quot; all happen there. The
+                  server restarts every few hours — a brief drop is normal.
+                </Tip>
+                <Tip icon={<UserRound size={16} />} title="Use a clear character name">
+                  It&apos;s how you show up in the{' '}
+                  <Link href="/players" className="text-gold-light hover:underline">
+                    leaderboards
+                  </Link>{' '}
+                  and Discord recaps. Make it recognizable.
+                </Tip>
+              </ul>
+            </CardBody>
+          </Card>
+        </div>
+      </section>
+
+      {/* ══════════════ REFERENCE — platform notes, manual, troubleshooting ══════════════ */}
       <section>
         <SectionTitle icon={<Monitor size={18} />}>Notes for your platform</SectionTitle>
         <div className="grid gap-4 lg:grid-cols-3">
           <Platform icon={<Monitor size={17} />} name="Windows" difficulty="Easiest" tone="online">
-            <p>The smooth path. Install r2modman&apos;s Windows app, pick Valheim, add the mods, Start modded.</p>
+            <p>
+              The smooth path. Install r2modman&apos;s Windows app, pick Valheim, import the code,
+              Start modded.
+            </p>
             <p className="text-xs text-muted">
               If Windows SmartScreen warns on the installer, choose <em>More info → Run anyway</em>.
             </p>
           </Platform>
 
-          <Platform icon={<Terminal size={17} />} name="Linux / Steam Deck" difficulty="Doable" tone="gold">
+          <Platform
+            icon={<Terminal size={17} />}
+            name="Linux / Steam Deck"
+            difficulty="Doable"
+            tone="gold"
+          >
             <p>
-              Valheim runs natively. Use the r2modman AppImage, then in Steam set the game&apos;s launch
-              options so the loader hooks in:
+              Valheim runs natively. Use the r2modman AppImage, then in Steam set the game&apos;s
+              launch options so the loader hooks in:
             </p>
             <code className="block rounded bg-surface-raised px-2 py-1 font-mono text-[11px] text-gold-light">
               WINEDLLOVERRIDES=&quot;winhttp=n,b&quot; %command%
@@ -388,22 +464,21 @@ export default function GetStartedPage() {
 
           <Platform icon={<Laptop size={17} />} name="Mac" difficulty="Tricky" tone="raid">
             <p>
-              <strong className="text-ash-dim">Valheim has no native Mac version</strong>, so there&apos;s
-              an extra hop. Run the Windows build through{' '}
+              <strong className="text-ash-dim">Valheim has no native Mac version</strong>, so
+              there&apos;s an extra hop. Run the Windows build through{' '}
               <Ext href="https://www.codeweavers.com/crossover">CrossOver</Ext> or{' '}
-              <Ext href="https://getwhisky.app/">Whisky</Ext> (both wrap Windows games on macOS),
-              then install r2modman inside that environment.
+              <Ext href="https://getwhisky.app/">Whisky</Ext>, then install r2modman inside that
+              environment.
             </p>
             <p className="text-xs text-muted">
-              Cloud streaming (GeForce NOW) <em>can&apos;t</em> run mods. On an Apple-Silicon Mac the
-              easiest answer is often borrowing a Windows/Linux PC — ask in Discord and we&apos;ll
-              help you get set up.
+              Cloud streaming (GeForce NOW) <em>can&apos;t</em> run mods. On Apple Silicon the easiest
+              answer is often borrowing a Windows/Linux PC — ask in Discord and we&apos;ll help.
             </p>
           </Platform>
         </div>
       </section>
 
-      {/* ── Manual install (advanced) ───────────────────────────────────── */}
+      {/* Manual install (advanced) */}
       <Card>
         <CardBody className="flex items-start gap-3.5">
           <span className="mt-0.5 shrink-0 text-gold">
@@ -424,20 +499,26 @@ export default function GetStartedPage() {
         </CardBody>
       </Card>
 
-      {/* ── Troubleshooting ─────────────────────────────────────────────── */}
+      {/* Troubleshooting */}
       <section>
         <SectionTitle icon={<Wrench size={18} />}>When something won&apos;t cooperate</SectionTitle>
         <Card>
           <CardBody>
             <Trouble symptom="“Incompatible version” or the join is refused">
-              Your mods don&apos;t match the server. Make sure every client mod is the{' '}
-              <em>exact</em> version listed above (or re-import the shared modpack code) and that
-              nobody added an extra mod. This is by far the most common issue.
+              Your mods don&apos;t match the server. Re-import the modpack code (step 3) so every
+              version lines up, and make sure nobody added an extra mod. This is by far the most
+              common issue.
             </Trouble>
             <Trouble symptom="Game launches but no mods are loaded">
               You started vanilla. Always launch with <span className="text-ash">Start modded</span>{' '}
               from r2modman. On Linux/Proton, double-check the{' '}
               <span className="font-mono text-xs">WINEDLLOVERRIDES</span> launch option is set.
+            </Trouble>
+            <Trouble symptom="My oath or pin didn't show up">
+              Both must be <span className="text-ash">shouted</span> — lead with{' '}
+              <span className="font-mono text-xs">/s</span> (e.g.{' '}
+              <span className="font-mono text-xs">/s /oath …</span>). A normal chat line gets
+              swallowed. Or use the Discord form instead.
             </Trouble>
             <Trouble symptom="It won't run on my Mac">
               There&apos;s no native Mac client — you need CrossOver or Whisky (see the Mac card
@@ -446,10 +527,6 @@ export default function GetStartedPage() {
             <Trouble symptom="“Failed to connect” / can't reach the server">
               The server may be mid-restart (it cycles every few hours) — wait a minute and retry.
               Otherwise double-check the address and that you&apos;ve got the current password.
-            </Trouble>
-            <Trouble symptom="Crash on launch or a black screen">
-              Usually a stray or mismatched mod. Reset to just the required list (or the shared
-              profile) and relaunch. Still stuck? Drop your r2modman log in Discord.
             </Trouble>
           </CardBody>
         </Card>
