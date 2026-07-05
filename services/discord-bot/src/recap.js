@@ -426,12 +426,15 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
       }
       return postRecap(period);
     };
+    // Hours are env-tunable so pilot testing can move them without a code edit.
+    const morningHour = parseInt(process.env.RECAP_MORNING_HOUR || '8', 10);
+    const eveningHour = parseInt(process.env.RECAP_EVENING_HOUR || '21', 10);
     const jobs = [
-      cron.schedule('0 8 * * *', () => run('morning').catch((e) => console.error('[recap] morning:', e.message)), opts),
-      cron.schedule('0 22 * * *', () => run('evening').catch((e) => console.error('[recap] evening:', e.message)), opts),
+      cron.schedule(`0 ${morningHour} * * *`, () => run('morning').catch((e) => console.error('[recap] morning:', e.message)), opts),
+      cron.schedule(`0 ${eveningHour} * * *`, () => run('evening').catch((e) => console.error('[recap] evening:', e.message)), opts),
     ];
     console.log(
-      `[recap] scheduled 08:00 & 22:00 ${tz}` +
+      `[recap] scheduled ${String(morningHour).padStart(2, '0')}:00 & ${String(eveningHour).padStart(2, '0')}:00 ${tz}` +
         (startsAt ? ` (begins ${startsAt.toISOString().slice(0, 10)})` : '')
     );
     return jobs;
