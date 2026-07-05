@@ -94,5 +94,73 @@ if (!oathOk) ok = false;
   else console.log('CONSOLE OATH OK');
 }
 
+// --- Relog fixture: same Steam connection, different character (real
+// incident 2026-07-04 — Testman -> Testmantwo). Neither the emitter nor the
+// vanilla log emits an explicit "left" event for the old character on an
+// in-session character swap, so the parser must synthesize a leave for the
+// old name when the reconnect resolves to a new one. ---
+{
+  const relogLines = readFileSync(new URL('./fixtures/relog-session.log', import.meta.url), 'utf8').split('\n');
+  const relogParser = new LogParser();
+  const relogEvents = [];
+  let rosterAfterRelog = null;
+  for (const line of relogLines) {
+    for (const ev of relogParser.processLine(line)) relogEvents.push(ev);
+    if (relogEvents.some((e) => e.type === 'join' && e.characterName === 'Testmantwo') && rosterAfterRelog === null) {
+      rosterAfterRelog = relogParser.roster();
+    }
+  }
+  const types = relogEvents.map((e) => `${e.type}:${e.characterName ?? ''}`);
+  console.log('\nRelog fixture events:', types.join(', '));
+
+  const joinNames = relogEvents.filter((e) => e.type === 'join').map((e) => e.characterName);
+  const leaveNames = relogEvents.filter((e) => e.type === 'leave').map((e) => e.characterName);
+
+  const relogChecks = [
+    ['Testman joins once (initial connect), never a 2nd time', joinNames.filter((n) => n === 'Testman').length === 1],
+    ['Testmantwo joins once (the relog)', joinNames.filter((n) => n === 'Testmantwo').length === 1],
+    ['leave sequence is [Testman, Testmantwo] — old character leaves BEFORE the new one joins, socket close leaves the CURRENT owner', leaveNames.length === 2 && leaveNames[0] === 'Testman' && leaveNames[1] === 'Testmantwo'],
+    ['leave Testman is emitted strictly before join Testmantwo', (() => {
+      const leaveIdx = relogEvents.findIndex((e) => e.type === 'leave' && e.characterName === 'Testman');
+      const joinTwoIdx = relogEvents.findIndex((e) => e.type === 'join' && e.characterName === 'Testmantwo');
+      return leaveIdx !== -1 && joinTwoIdx !== -1 && leaveIdx < joinTwoIdx;
+    })()],
+    ['roster right after the relog is Testmantwo only (Testman gone, not double-counted)', rosterAfterRelog !== null && rosterAfterRelog.includes('Testmantwo') && !rosterAfterRelog.includes('Testman') && rosterAfterRelog.length === 1],
+    ['final roster empty after the closing-socket line', relogParser.roster().length === 0],
+  ];
+  let relogOk = true;
+  for (const [label, pass] of relogChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) relogOk = false;
+  }
+  console.log(relogOk ? 'RELOG FIXTURE OK' : 'RELOG FIXTURE FAILED');
+  if (!relogOk) ok = false;
+}
+
+// --- Restart recovery: a process restart persists `online` but (on older
+// state.json files predating this fix) may not carry `connections`/`pending`.
+// A reconnect for an already-online name must still (re)correlate its
+// SteamID instead of leaving a stale entry at the front of
+// pendingConnections — that stale entry is what corrupted FIFO matching for
+// every subsequent, unrelated join in the real incident. ---
+{
+  const recoveryParser = new LogParser({ online: ['Testman'] });
+  recoveryParser.processLine('[Info   : Unity Log] 07/04/2026 21:00:00: Got connection SteamID 76561198012340000');
+  recoveryParser.processLine('[Info   : Unity Log] 07/04/2026 21:00:05: Got character ZDOID from Testman : -1393331323:3');
+  // A second, unrelated player connects+joins right after. If the prior line
+  // hadn't drained pendingConnections, this join would incorrectly steal
+  // Testman's steamId correlation.
+  recoveryParser.processLine('[Info   : Unity Log] 07/04/2026 21:00:10: Got connection SteamID 76561198012340001');
+  const secondJoin = recoveryParser.processLine('[Info   : Unity Log] 07/04/2026 21:00:15: Got character ZDOID from Ivar Hollowleg : 912938345:1');
+  const pass =
+    recoveryParser.pendingConnections.length === 0 &&
+    recoveryParser.steamToName.get('76561198012340000') === 'Testman' &&
+    recoveryParser.steamToName.get('76561198012340001') === 'Ivar Hollowleg' &&
+    secondJoin.some((e) => e.type === 'join' && e.characterName === 'Ivar Hollowleg');
+  console.log(`\n  ${pass ? '✓' : '✗'} restart recovery: reconnect for already-online name re-correlates without corrupting the next join's FIFO match`);
+  console.log(pass ? 'RESTART RECOVERY OK' : 'RESTART RECOVERY FAILED');
+  if (!pass) ok = false;
+}
+
 console.log(ok ? '\nPARSER OK' : '\nPARSER FAILED');
 process.exit(ok ? 0 : 1);

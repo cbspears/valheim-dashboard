@@ -11,80 +11,145 @@ import type { GameEvent } from '@/lib/types';
  */
 const UNRECORDED = '__unrecorded__';
 
-/** Raw death cause → saga-flavored label. Causes we haven't mapped yet also fall to UNRECORDED. */
+// Raw death cause → saga-flavored label. Keyed lowercase (matches lib/episodes.ts'
+// convention of lowercasing the cause before lookup): creature/boss causes arrive
+// Title Case from gs-ingest's humanizeKiller() ("Greyling", "Neck"), while
+// environmental causes arrive as bare, lowercase Valheim HitType words ("fall",
+// "tree", "drowning" — see lib/episodes.ts ENV_DEATHS/ENV_DESC for the full
+// vocabulary). Lowercasing both sides at lookup time means either casing lands
+// on the same row instead of silently splitting into two.
 const CAUSE_LABELS: Record<string, string> = {
-  Tree: 'Betrayed by a tree',
-  Fall: 'Gravity',
-  Drowning: 'The sea',
-  Fire: 'Their own campfire',
-  Neck: 'A neck. A literal neck.',
-  Greyling: 'Greylings',
-  Greydwarf: 'Greydwarfs',
-  GreydwarfBrute: 'Greydwarf brutes',
-  GreydwarfShaman: 'Greydwarf shamans',
-  Boar: 'A boar. Somehow.',
-  Deer: 'A deer. Genuinely.',
-  Troll: 'Trolls',
-  Skeleton: 'Skeletons',
-  Draugr: 'Draugr',
-  Wraith: 'Wraiths',
-  Abomination: 'Abominations',
-  Leech: 'Leeches',
-  Tick: 'Ticks',
-  Bat: 'Cave bats',
-  Surtling: 'Surtlings',
-  Eikthyr: 'Eikthyr',
-  'The Elder': 'The Elder',
-  Bonemass: 'Bonemass',
-  Moder: 'Moder',
-  Yagluth: 'Yagluth',
-  Serpent: 'The Serpent',
+  // --- Creatures / bosses ---
+  neck: 'A neck. A literal neck.',
+  greyling: 'Greylings',
+  greydwarf: 'Greydwarfs',
+  greydwarfbrute: 'Greydwarf brutes',
+  greydwarfshaman: 'Greydwarf shamans',
+  boar: 'A boar. Somehow.',
+  deer: 'A deer. Genuinely.',
+  troll: 'Trolls',
+  skeleton: 'Skeletons',
+  draugr: 'Draugr',
+  wraith: 'Wraiths',
+  abomination: 'Abominations',
+  leech: 'Leeches',
+  tick: 'Ticks',
+  bat: 'Cave bats',
+  surtling: 'Surtlings',
+  eikthyr: 'Eikthyr',
+  'the elder': 'The Elder',
+  bonemass: 'Bonemass',
+  moder: 'Moder',
+  yagluth: 'Yagluth',
+  serpent: 'The Serpent',
+  // --- Environmental (HitType) causes — mirrors lib/episodes.ts ENV_DEATHS/ENV_DESC ---
+  tree: 'Betrayed by a tree',
+  fall: 'Gravity',
+  falling: 'Gravity',
+  drowning: 'The sea',
+  drowned: 'The sea',
+  drown: 'The sea',
+  water: 'The sea',
+  fire: 'Their own campfire',
+  burning: 'Their own campfire',
+  smoke: 'Their own hearth-smoke',
+  freezing: 'The cold itself',
+  cold: 'The cold itself',
+  poison: "The swamp's poison",
+  poisoned: "The swamp's poison",
+  stalagmite: 'Skewered from above',
+  stalagtite: 'Skewered from above',
+  impact: 'A merciless landing',
+  cartcollision: 'Run down by their own cart',
+  structural: 'Falling timber',
+  turret: 'Friendly ballista fire',
+  boat: 'Went down with the ship',
+  self: 'Their own hand',
+  edgeofworld: 'The edge of the world',
+  ashlandsocean: 'The boiling seas of Ashlands',
+  ashlandsoceanfloor: 'The boiling seas of Ashlands',
+  lava: 'Molten rock',
 };
 
-/** One-line saga observation keyed off the deadliest cause. */
+/** One-line saga observation keyed off the deadliest cause (lowercase, same convention as CAUSE_LABELS). */
 const CAUSE_OBSERVATION: Record<string, string> = {
-  Tree: 'More vikings fall to their own axes than to any beast.',
-  Fall: 'The cliffs of Eilif have taken more warriors than any warband.',
-  Drowning: 'The cold sea keeps its dead, and it is never satisfied.',
-  Fire: 'A warrior who cannot master the hearth will not master the North.',
-  Neck: 'Even the shallows of the Meadows are not as safe as they look.',
-  Greyling: 'The little ones swarm, and the swarm adds up.',
-  Greydwarf: 'The forest claims more vikings than any boss.',
-  GreydwarfBrute: 'The forest sends its biggest sons when the little ones fail.',
-  GreydwarfShaman: 'The shamans hit from range — and vikings keep forgetting that.',
-  Boar: 'The mightiest raiders, felled by the humblest of beasts.',
-  Deer: 'The mightiest raiders, felled by the humblest of beasts.',
-  Troll: 'The trolls of the Black Forest exact a heavy toll.',
-  Skeleton: 'The old bones of the crypts still hunger for company.',
-  Draugr: 'The restless dead of the swamps drag the living down with them.',
-  Wraith: 'The dead of the swamp do not stay buried.',
-  Abomination: 'The swamp grows its own monsters, given enough time.',
-  Leech: 'It is not the monsters of the swamp that kill — it is the water.',
-  Tick: 'Small, patient, and everywhere in the plains.',
-  Bat: 'The dark places of the caves are never quite empty.',
-  Surtling: 'Fire finds every viking who gets careless near the forge.',
-  Eikthyr: 'Even the first of the forsaken has claimed a warrior or two.',
-  'The Elder': 'Even the Elder has tasted viking blood, and asks for more.',
-  Bonemass: 'The swamp’s guardian is patient, and heavy-handed.',
-  Moder: 'The mountain queen does not forgive a missed dodge.',
-  Yagluth: 'The plains’ lord takes his due from the reckless.',
-  Serpent: 'The Serpent rules the storm-waters, and the drowned know it well.',
+  neck: 'Even the shallows of the Meadows are not as safe as they look.',
+  greyling: 'The little ones swarm, and the swarm adds up.',
+  greydwarf: 'The forest claims more vikings than any boss.',
+  greydwarfbrute: 'The forest sends its biggest sons when the little ones fail.',
+  greydwarfshaman: 'The shamans hit from range — and vikings keep forgetting that.',
+  boar: 'The mightiest raiders, felled by the humblest of beasts.',
+  deer: 'The mightiest raiders, felled by the humblest of beasts.',
+  troll: 'The trolls of the Black Forest exact a heavy toll.',
+  skeleton: 'The old bones of the crypts still hunger for company.',
+  draugr: 'The restless dead of the swamps drag the living down with them.',
+  wraith: 'The dead of the swamp do not stay buried.',
+  abomination: 'The swamp grows its own monsters, given enough time.',
+  leech: 'It is not the monsters of the swamp that kill — it is the water.',
+  tick: 'Small, patient, and everywhere in the plains.',
+  bat: 'The dark places of the caves are never quite empty.',
+  surtling: 'Fire finds every viking who gets careless near the forge.',
+  eikthyr: 'Even the first of the forsaken has claimed a warrior or two.',
+  'the elder': 'Even the Elder has tasted viking blood, and asks for more.',
+  bonemass: 'The swamp’s guardian is patient, and heavy-handed.',
+  moder: 'The mountain queen does not forgive a missed dodge.',
+  yagluth: 'The plains’ lord takes his due from the reckless.',
+  serpent: 'The Serpent rules the storm-waters, and the drowned know it well.',
+  tree: 'More vikings fall to their own axes than to any beast.',
+  fall: 'The cliffs of Eilif have taken more warriors than any warband.',
+  falling: 'The cliffs of Eilif have taken more warriors than any warband.',
+  drowning: 'The cold sea keeps its dead, and it is never satisfied.',
+  drowned: 'The cold sea keeps its dead, and it is never satisfied.',
+  drown: 'The cold sea keeps its dead, and it is never satisfied.',
+  water: 'The cold sea keeps its dead, and it is never satisfied.',
+  fire: 'A warrior who cannot master the hearth will not master the North.',
+  burning: 'A warrior who cannot master the hearth will not master the North.',
+  smoke: 'Even a warm hall can turn on a careless viking.',
+  freezing: 'The North does not warm for anyone, warrior or not.',
+  cold: 'The North does not warm for anyone, warrior or not.',
+  poison: 'The swamp keeps a slower, patient kind of death.',
+  poisoned: 'The swamp keeps a slower, patient kind of death.',
+  stalagmite: 'The caves strike from above as often as from the dark.',
+  stalagtite: 'The caves strike from above as often as from the dark.',
+  impact: 'Not every death in Eilif comes with a killer worth naming.',
+  cartcollision: 'A viking’s own cart is no less dangerous than a troll.',
+  structural: 'Even a hall raised by viking hands can turn against them.',
+  turret: 'A ballista does not know friend from foe.',
+  boat: 'The sea takes ship and sailor together, when it wants to.',
+  self: 'Some deaths carry no one’s name but the fallen’s own.',
+  edgeofworld: 'The world of Eilif has an edge, and someone always finds it.',
+  ashlandsocean: 'The Ashlands do not cool for anyone.',
+  ashlandsoceanfloor: 'The Ashlands do not cool for anyone.',
+  lava: 'The fire below is patient, and always waiting.',
 };
 
-function labelFor(cause: string): string {
-  return CAUSE_LABELS[cause] ?? 'Unwitnessed';
+/** Title-case fallback label for a cause string we haven't mapped yet — used
+ * so a real, present cause always gets its own honest row instead of
+ * silently vanishing into "Unwitnessed" (that bucket is reserved for a truly
+ * empty/absent cause — see the tally loop below). */
+function capitalize(raw: string): string {
+  return raw.length ? raw.charAt(0).toUpperCase() + raw.slice(1) : raw;
+}
+
+function labelFor(causeKey: string, rawExample: string): string {
+  return CAUSE_LABELS[causeKey] ?? capitalize(rawExample);
 }
 
 export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
-  // Tally raw causes. Anything without a recorded cause — or with a cause
-  // string we haven't mapped to a label — collapses into the UNRECORDED
-  // bucket, since we can't tell those apart from "genuinely unknown."
+  // Tally causes, keyed lowercase so "Fall" and "fall" land on the same row.
+  // ONLY a truly empty/absent cause collapses into UNRECORDED — that bucket
+  // means "no cause was recorded," not "a cause we don't recognize yet." A
+  // present-but-unmapped cause string still gets its own honest row (see
+  // labelFor's capitalize() fallback) so future mod vocabulary is visible
+  // instead of silently vanishing into the unknown bucket.
   const counts = new Map<string, number>();
+  const rawExampleByCause = new Map<string, string>();
   const byViking = new Map<string, number>();
   for (const e of deaths) {
-    const raw = typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : '';
-    const cause = raw && CAUSE_LABELS[raw] ? raw : UNRECORDED;
+    const raw = typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string).trim() : '';
+    const cause = raw ? raw.toLowerCase() : UNRECORDED;
     counts.set(cause, (counts.get(cause) ?? 0) + 1);
+    if (raw && !rawExampleByCause.has(cause)) rawExampleByCause.set(cause, raw);
     if (e.character_name) {
       byViking.set(e.character_name, (byViking.get(e.character_name) ?? 0) + 1);
     }
@@ -95,7 +160,12 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
   // of data, and shouldn't visually compete with real ones.
   const realRows = [...counts.entries()]
     .filter(([cause]) => cause !== UNRECORDED)
-    .map(([cause, count]) => ({ cause, label: labelFor(cause), count, unrecorded: false as const }))
+    .map(([cause, count]) => ({
+      cause,
+      label: labelFor(cause, rawExampleByCause.get(cause) ?? cause),
+      count,
+      unrecorded: false as const,
+    }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 
   const unrecordedCount = counts.get(UNRECORDED) ?? 0;

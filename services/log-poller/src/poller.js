@@ -22,7 +22,7 @@ export class Poller {
       const raw = await readFile(this.cfg.statePath, 'utf8');
       const s = JSON.parse(raw);
       this.offset = Number.isFinite(s.offset) ? s.offset : 0;
-      this.parser = new LogParser({ online: s.online || [] });
+      this.parser = new LogParser({ online: s.online || [], connections: s.connections || [], pending: s.pending || [] });
       this.log.info?.(`[state] resumed at offset ${this.offset}, ${this.parser.online.size} online`);
     } catch {
       this.offset = 0;

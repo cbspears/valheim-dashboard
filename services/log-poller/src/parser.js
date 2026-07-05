@@ -61,14 +61,22 @@ export class LogParser {
   /**
    * @param {object} [initial] persisted state to resume from
    * @param {string[]} [initial.online] character names known online
+   * @param {[string, string][]} [initial.connections] persisted steamId->characterName pairs
+   * @param {string[]} [initial.pending] persisted unresolved-connection steamIds, oldest first
    */
   constructor(initial = {}) {
     // SteamIDs that have connected but not yet resolved to a character name,
     // oldest first. Used to correlate the next ZDOID spawn to a connection.
-    this.pendingConnections = [];
+    // Persisted across restarts (see snapshot()) — without this, a restart
+    // mid-session forgets the correlation for players who were already
+    // online, which corrupts FIFO matching for every connection after them
+    // (this caused a real incident: see the relog handling below).
+    this.pendingConnections = Array.isArray(initial.pending) ? [...initial.pending] : [];
     // steamId -> characterName, and the reverse, for leave correlation.
-    this.steamToName = new Map();
+    // Also persisted across restarts.
+    this.steamToName = new Map(Array.isArray(initial.connections) ? initial.connections : []);
     this.nameToSteam = new Map();
+    for (const [steamId, name] of this.steamToName) this.nameToSteam.set(name, steamId);
     // Authoritative roster of who is currently online (by character name).
     this.online = new Set(Array.isArray(initial.online) ? initial.online : []);
     // Last value seen on a "Connections N" heartbeat (null until first seen).
@@ -143,16 +151,44 @@ export class LogParser {
         // to the log for us to parse, exactly like the /oath path above.
         events.push({ type: 'death', characterName: name, metadata: {} });
       } else {
-        // A spawn. Treat as a join only if this name isn't already online
-        // (otherwise it's a respawn / world-change reload).
-        if (!this.online.has(name)) {
-          this.online.add(name);
+        // A spawn. Three cases:
+        //   1. Not yet online -> genuine new join.
+        //   2. Already online AND already correlated to a connection ->
+        //      plain respawn / world-change reload. Nothing to do.
+        //   3. Already online but with NO known connection (e.g. this
+        //      process restarted mid-session and inherited `online` from
+        //      state.json before connections/pending were persisted, or a
+        //      connect line for this player was otherwise missed) -> this
+        //      ZDOID line is actually a live (re)connect we lost track of.
+        //      We MUST still correlate it, otherwise the stale entry sits
+        //      at the front of pendingConnections and gets FIFO-stolen by
+        //      the next unrelated player's join, corrupting correlation
+        //      for everyone after.
+        const alreadyOnline = this.online.has(name);
+        const alreadyMapped = this.nameToSteam.has(name);
+        if (!alreadyOnline || !alreadyMapped) {
           // Correlate to the oldest unresolved connection, if any.
           const steamId = this.pendingConnections.shift();
           if (steamId) {
+            const prevName = this.steamToName.get(steamId);
+            if (prevName && prevName !== name && this.online.has(prevName)) {
+              // Same Steam connection, different character: the player
+              // relogged to a new character. Valheim's log has no explicit
+              // "character left" event for an in-session character switch
+              // (only a fresh ZDOID line for the new one), so we synthesize
+              // the missing leave for the old character here — otherwise it
+              // stays phantom-online forever (real incident: Testman ->
+              // Testmantwo, 2026-07-04).
+              this.online.delete(prevName);
+              this.nameToSteam.delete(prevName);
+              events.push({ type: 'leave', characterName: prevName, metadata: {} });
+            }
             this.steamToName.set(steamId, name);
             this.nameToSteam.set(name, steamId);
           }
+        }
+        if (!alreadyOnline) {
+          this.online.add(name);
           events.push({ type: 'join', characterName: name, metadata: {} });
         }
       }
@@ -217,7 +253,14 @@ export class LogParser {
 
   /** Serializable state to persist across restarts. */
   snapshot() {
-    return { online: this.roster() };
+    return {
+      online: this.roster(),
+      // steamId->characterName correlation + unresolved-connection queue,
+      // so a restart mid-session doesn't forget who's connected to what
+      // (see the constructor/relog comments for why this matters).
+      connections: [...this.steamToName.entries()],
+      pending: [...this.pendingConnections],
+    };
   }
 }
 

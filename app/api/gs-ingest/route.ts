@@ -46,6 +46,40 @@ function humanizeKiller(raw: unknown): string | null {
   return k || null;
 }
 
+/**
+ * Guard against the Emitter's `onlinePlayers` roster going stale (real
+ * incident 2026-07-04: a player relogged to a different character and the
+ * Emitter kept reporting the OLD character name online for ~1h). The log
+ * poller is a second, independent presence signal — if it has already
+ * recorded a `leave` for a name MORE RECENTLY than any `join`, that name is
+ * not actually online no matter what the Emitter's snapshot says. Everything
+ * else stays Emitter-authoritative.
+ *
+ * One round trip: fetch every join/leave row for the candidate names, newest
+ * first, and keep only the first (= most recent) row per name.
+ */
+async function dropStaleLeavers(
+  client: ReturnType<typeof db>,
+  names: string[],
+): Promise<string[]> {
+  if (names.length === 0) return names;
+  const { data } = await client
+    .from('events')
+    .select('character_name, type, created_at')
+    .in('character_name', names)
+    .in('type', ['join', 'leave'])
+    .order('created_at', { ascending: false });
+
+  const latestTypeByName = new Map<string, string>();
+  for (const row of data ?? []) {
+    const name = row.character_name as string | null;
+    if (!name || latestTypeByName.has(name)) continue; // first hit per name = most recent (desc order)
+    latestTypeByName.set(name, row.type as string);
+  }
+
+  return names.filter((n) => latestTypeByName.get(n) !== 'leave');
+}
+
 /** onlinePlayers arrives as string[] | {name}[] | number — normalize defensively. */
 function parseOnline(v: unknown): { names: string[] | null; count: number | null } {
   if (Array.isArray(v)) {
@@ -433,11 +467,16 @@ export async function POST(req: Request) {
 
   const client = db();
   const now = new Date().toISOString();
-  const { names, count } = parseOnline(body.onlinePlayers);
+  const { names: rawNames, count } = parseOnline(body.onlinePlayers);
   const worldDay = typeof body.worldDay === 'number' ? Math.floor(body.worldDay) : undefined;
 
+  // Reconcile against the log poller's join/leave trail before trusting the
+  // Emitter's roster — see dropStaleLeavers() for why (stale-roster incident,
+  // 2026-07-04). Everything else about the Emitter's snapshot stays authoritative.
+  const names = rawNames ? await dropStaleLeavers(client, rawNames) : rawNames;
+
   if (names) {
-    // The Emitter's roster is the truth: flip everyone else off, listed on.
+    // The Emitter's roster (reconciled) is the truth: flip everyone else off, listed on.
     await client.from('players').update({ is_online: false }).eq('is_online', true)
       .not('character_name', 'in', `(${names.map((n) => `"${n.replace(/"/g, '')}"`).join(',') || '""'})`);
     if (names.length > 0) {
