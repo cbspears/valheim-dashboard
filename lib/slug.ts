@@ -7,6 +7,31 @@ interface NamedRosterEntry {
   character_name: string;
 }
 
+/** A roster entry that may carry an explicit Discord↔character link. */
+interface LinkedRosterEntry extends NamedRosterEntry {
+  discord_user_id?: string | null;
+}
+
+/**
+ * Aggressively normalize a name for tolerant equality: lowercase, strip
+ * diacritics, fold the Norse ligatures a viking is likely to use (æ→ae, ø→o,
+ * ð→d, þ→th, ß→ss), and drop everything that isn't a letter or digit. This is
+ * what makes "Charlie", "Chærlie" and "chaerlie" all compare equal.
+ */
+export function foldName(name: string | null | undefined): string {
+  return (name ?? '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '') // combining marks
+    .toLowerCase()
+    .replace(/æ/g, 'ae')
+    .replace(/œ/g, 'oe')
+    .replace(/ø/g, 'o')
+    .replace(/ð/g, 'd')
+    .replace(/þ/g, 'th')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
 export function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -60,4 +85,26 @@ export function matchVikingName(
     (p) => p.character_name.trim().split(/\s+/)[0]?.toLowerCase() === token
   );
   return hit?.character_name ?? null;
+}
+
+/**
+ * Resolve a photo/depiction credit to a character name, PREFERRING the explicit
+ * Discord↔character identity link over the fuzzy display-name match. A photo
+ * carries the poster's stable `discord_user_id`; if any roster viking has
+ * claimed that Discord id (`@Eilif I am <name>`), the credit links to them
+ * regardless of how their in-game name differs from their Discord display name.
+ * Falls back to `matchVikingName` (so unlinked posters still link when the names
+ * happen to match), and is fully graceful pre-migration: if no roster row has a
+ * `discord_user_id` field, it behaves exactly like `matchVikingName`.
+ */
+export function resolvePhotoViking(
+  photo: { discord_user_id?: string | null; posted_by?: string | null } | null | undefined,
+  roster: LinkedRosterEntry[]
+): string | null {
+  const did = photo?.discord_user_id?.trim();
+  if (did) {
+    const linked = roster.find((p) => p.discord_user_id && p.discord_user_id === did);
+    if (linked) return linked.character_name;
+  }
+  return matchVikingName(photo?.posted_by, roster);
 }

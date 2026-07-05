@@ -3,7 +3,7 @@ import { Images, Camera, MessageSquare, Sparkles } from 'lucide-react';
 import { SectionHeader, Card, CardBody, Badge } from '@/components/ui';
 import { PhotoGrid } from '@/components/gallery/PhotoGrid';
 import { getGalleryPhotos, getAllPlayers } from '@/lib/data';
-import { matchVikingName } from '@/lib/slug';
+import { resolvePhotoViking } from '@/lib/slug';
 import { SERVER_NAME, DISCORD_BOT_HANDLE } from '@/config/server';
 
 export const dynamic = 'force-dynamic';
@@ -15,11 +15,12 @@ export const metadata: Metadata = {
 
 export default async function GalleryPage() {
   const [photos, roster] = await Promise.all([getGalleryPhotos(), getAllPlayers()]);
-  // Credits arrive as a Discord display name — resolve loosely against the
-  // roster so we only link the credit when it's actually one of our vikings.
+  // Credits arrive as a Discord display name. Prefer the explicit Discord↔
+  // character link (`@Eilif I am ...`) so "Charlie"-posted photos link to
+  // Chærlie once claimed; fall back to loose name matching for unlinked posters.
   const photosWithCredit = photos.map((p) => ({
     ...p,
-    matchedViking: matchVikingName(p.posted_by, roster),
+    matchedViking: resolvePhotoViking(p, roster),
   }));
 
   return (

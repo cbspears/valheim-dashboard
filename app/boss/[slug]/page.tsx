@@ -16,7 +16,7 @@ import { Card, CardHeader, CardBody, EmptyState, StatTile, VikingLink } from '@/
 import { BossHero } from '@/components/boss/BossHero';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import { getBosses, getGalleryPhotos, getUpcomingEvents, getAllPlayers } from '@/lib/data';
-import { slugify, vikingPath, matchVikingName } from '@/lib/slug';
+import { slugify, vikingPath, matchVikingName, resolvePhotoViking } from '@/lib/slug';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,7 +59,8 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
     const [photos, roster] = await Promise.all([getGalleryPhotos(), getAllPlayers()]);
     const nameLower = boss.name.toLowerCase();
     const depiction = photos.find((p) => p.caption?.toLowerCase().includes(nameLower)) ?? null;
-    const depictionPoster = matchVikingName(depiction?.posted_by, roster);
+    // Prefer the explicit Discord↔character link, then loose name matching.
+    const depictionPoster = resolvePhotoViking(depiction, roster);
     const onMap = BOSSES_ON_MAP.has(nameLower);
 
     return (

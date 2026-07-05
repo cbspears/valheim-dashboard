@@ -22,7 +22,7 @@ import { AttendanceCalendar } from '@/components/players/AttendanceCalendar';
 import { DeathLog } from '@/components/viking/DeathLog';
 import { FeatsOfArms } from '@/components/viking/FeatsOfArms';
 import { NamedPlaces } from '@/components/viking/NamedPlaces';
-import { PhotoWall } from '@/components/viking/PhotoWall';
+import { PhotoGrid } from '@/components/gallery/PhotoGrid';
 import {
   getPlayersWithStats,
   getSessionsSince,
@@ -30,11 +30,11 @@ import {
   getPotyArchive,
   getGalleryPhotos,
   getBosses,
+  getPins,
   playtimeMinutesByCharacter,
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
 import { epithetFor, generatedBioLine } from '@/lib/epithets';
-import { MAP_DEMO_LABELS } from '@/config/map-demo.generated';
 import {
   formatPlaytime,
   formatNumber,
@@ -45,11 +45,6 @@ import {
 import type { PlayerWithStats, GameEvent } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
-
-/** First name token, lowercased — the loose key we match places / photos on. */
-function firstToken(name: string | null | undefined): string {
-  return (name ?? '').trim().split(/\s+/)[0]?.toLowerCase() ?? '';
-}
 
 /** Raw death-cause strings for one viking (feeds the Treefoe epithet override). */
 function causesFor(name: string, deaths: GameEvent[]): string[] {
@@ -99,13 +94,14 @@ interface Tile {
 export default async function VikingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  const [roster_, sessions, deaths, potyArchive, photos, bosses] = await Promise.all([
+  const [roster_, sessions, deaths, potyArchive, photos, bosses, pins] = await Promise.all([
     getPlayersWithStats(),
     getSessionsSince(70),
     getEventsSince(70, ['death']),
     getPotyArchive(),
     getGalleryPhotos(),
     getBosses(),
+    getPins(),
   ]);
 
   // The `players.total_playtime_minutes` column isn't kept fresh by the real
@@ -123,15 +119,27 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
 
   const name = viking.character_name;
   const first = name.trim().split(/\s+/)[0] || name;
-  const token = firstToken(name);
   const stats = viking.stats;
 
   const epithet = epithetFor(viking, roster, causesFor(name, deaths));
 
   const myDeaths = deaths.filter((e) => e.character_name === name);
   const myCrowns = potyArchive.filter((e) => e.character_name === name);
-  const myPhotos = photos.filter((p) => firstToken(p.posted_by) === token);
-  const myPlaces = MAP_DEMO_LABELS.filter((l) => firstToken(l.by) === token && l.kind !== 'trader');
+
+  // Places: real map pins credited to this exact viking (slug-equal author).
+  const myPlaces = pins
+    .filter((p) => slugify(p.by_character_name ?? '') === slug)
+    .map((p) => ({ id: p.id, name: p.name, kind: p.kind, day: p.day }));
+
+  // Photos: attach via the explicit Discord↔character link. `discord_user_id`
+  // is undefined pre-migration → `linked` false → the "tell Eilif" hint shows.
+  const linkedDiscordId = viking.discord_user_id ?? null;
+  const isLinked = Boolean(linkedDiscordId);
+  const myPhotos = isLinked
+    ? photos
+        .filter((p) => p.discord_user_id && p.discord_user_id === linkedDiscordId)
+        .map((p) => ({ ...p, matchedViking: name }))
+    : [];
 
   const attendanceSessions = sessions.map((s) => ({
     character_name: s.character_name,
@@ -307,7 +315,33 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           subtitle={`Scenes ${first} carried back from the realms.`}
           icon={<Camera size={20} />}
         />
-        <PhotoWall photos={myPhotos} first={first} />
+        {!isLinked ? (
+          <Card>
+            <EmptyState
+              icon={<Camera size={26} />}
+              title="Photos await"
+              message={
+                <>
+                  Tell Eilif who you are in Discord —{' '}
+                  <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs text-gold-light">
+                    @Eilif I am {name}
+                  </span>{' '}
+                  — and every screenshot {first} has shared gathers here.
+                </>
+              }
+            />
+          </Card>
+        ) : myPhotos.length === 0 ? (
+          <Card>
+            <EmptyState
+              icon={<Camera size={26} />}
+              title="No sagas in silver"
+              message={`${first} has shared no images to the hall — yet.`}
+            />
+          </Card>
+        ) : (
+          <PhotoGrid photos={myPhotos} />
+        )}
       </section>
 
       {/* ── Back link ──────────────────────────────────────────── */}

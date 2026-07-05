@@ -24,6 +24,14 @@ export interface Player {
   bio: string | null;
   /** self-described job/role (Cartographer, Shipwright...) — may be null */
   role: string | null;
+  /**
+   * Explicit Discord↔character link (db/2026-07-05_discord_identity.sql), set
+   * via `@Eilif I am <name>`. Optional so rows read before the migration still
+   * type; when set, it attaches this viking's Discord-credited photos to them.
+   */
+  discord_user_id?: string | null;
+  /** Discord display name captured at link time (display/audit only). */
+  discord_username?: string | null;
 }
 
 /** A sworn signature on the Oath page, collected via Discord. */

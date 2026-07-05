@@ -1,20 +1,23 @@
 import Link from 'next/link';
 import { MapPin, Compass } from 'lucide-react';
 import { Card, EmptyState, Badge } from '@/components/ui';
-import type { MapLabel } from '@/config/map-demo.generated';
 
-// NOTE: demo data — a viking's named places come from MAP_DEMO_LABELS. At launch
-// this swaps for the real `map_markers` table (same shape: name / day / kind / by).
+// A viking's named places come from the real `pins` table (in-game /pin,
+// captured server-side and credited to the pinner's exact character name).
+export interface NamedPlace {
+  id: string;
+  name: string;
+  kind: string; // 'base' | 'poi'
+  day: number | null;
+}
 
-const KIND_LABEL: Record<string, string> = {
-  base: 'Settlement',
-  poi: 'Landmark',
-  boss: 'Altar',
-  trader: 'Trader',
-};
+const KIND_LABEL: Record<string, string> = { base: 'Settlement', poi: 'Landmark' };
+// Rune-like glyphs: a hearth for a settlement, a marker lozenge for a landmark.
+const KIND_GLYPH: Record<string, string> = { base: '⌂', poi: '◆' };
 
-export function NamedPlaces({ places, first }: { places: MapLabel[]; first: string }) {
-  const sorted = [...places].sort((a, b) => a.day - b.day);
+export function NamedPlaces({ places, first }: { places: NamedPlace[]; first: string }) {
+  // Newest ground claimed first (highest in-game day), unknown days last.
+  const sorted = [...places].sort((a, b) => (b.day ?? -1) - (a.day ?? -1));
 
   return (
     <Card>
@@ -34,15 +37,23 @@ export function NamedPlaces({ places, first }: { places: MapLabel[]; first: stri
       ) : (
         <ul className="divide-y divide-rune/50">
           {sorted.map((p) => (
-            <li key={`${p.name}-${p.day}`}>
+            <li key={p.id}>
               <Link
                 href="/map"
                 className="gold-ring flex items-baseline gap-3 px-5 py-2.5 transition-colors hover:bg-surface-raised/50"
+                title={`See ${p.name} on the map`}
               >
-                <MapPin size={13} className="translate-y-0.5 shrink-0 text-gold-dim" />
+                <span
+                  aria-hidden
+                  className="w-4 shrink-0 translate-y-0.5 text-center font-display text-gold-dim"
+                >
+                  {KIND_GLYPH[p.kind] ?? '◆'}
+                </span>
                 <span className="flex-1 font-display text-sm text-ash">{p.name}</span>
                 <Badge tone="neutral">{KIND_LABEL[p.kind] ?? p.kind}</Badge>
-                <span className="shrink-0 font-display text-xs text-gold-dim">Day {p.day}</span>
+                {p.day != null && (
+                  <span className="shrink-0 font-display text-xs text-gold-dim">Day {p.day}</span>
+                )}
               </Link>
             </li>
           ))}

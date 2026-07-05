@@ -12,6 +12,7 @@ import { createRecap } from './recap.js';
 import { createEventsSync } from './events.js';
 import { createGalleryIngest } from './gallery.js';
 import { createOathIngest } from './oaths.js';
+import { createIdentityLink } from './identity.js';
 import { createVoiceEngine } from './voice.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
@@ -116,6 +117,13 @@ async function runLive() {
   if (process.env.OATH_INGEST === '1') {
     createOathIngest({ client: poster.client }).attach();
     extra += ', oath ingest on';
+  }
+
+  // Discord↔character identity: `@Eilif I am <name>`. On by default (core to
+  // attaching photos to vikings); disable with IDENTITY_LINK=0.
+  if (process.env.IDENTITY_LINK !== '0') {
+    createIdentityLink({ client: poster.client }).attach();
+    extra += ', identity link on';
   }
 
   // Optional: the Voice of the Hall — ambient cadence + event lines queued to

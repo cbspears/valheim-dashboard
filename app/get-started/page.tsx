@@ -11,6 +11,7 @@ import {
   Terminal,
   MapPin,
   UserRound,
+  Camera,
   Bed,
   Sailboat,
   RefreshCcw,
@@ -331,6 +332,13 @@ export default function GetStartedPage() {
                   leaderboards
                 </Link>{' '}
                 and Discord recaps. Make it recognizable.
+              </Tip>
+              <Tip icon={<Camera size={16} />} title="Link your name to Eilif">
+                Tell the bot who you are —{' '}
+                <span className="rounded bg-gold/15 px-1 py-0.5 font-mono text-xs text-gold-light">
+                  @Eilif I am &lt;YourViking&gt;
+                </span>{' '}
+                — so the screenshots you post gather on your own saga page.
               </Tip>
               <Tip icon={<Bed size={16} />} title="Claim a bed early">
                 Build a bed and sleep in it to set your spawn — dying back at the start is a long row
