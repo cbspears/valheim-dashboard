@@ -27,7 +27,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
         .map((e) => (typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : ''))
         .filter(Boolean)
     : [];
-  const epithet = viking ? epithetFor(viking, roster, causes).title : 'the Unknown';
+  const epithet = viking ? epithetFor(viking, roster, causes, viking.current_title ?? null).title : 'the Unknown';
 
   const pairs = [
     ['Hours', formatPlaytime(viking?.total_playtime_minutes ?? 0)],

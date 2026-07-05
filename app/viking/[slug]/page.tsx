@@ -72,7 +72,7 @@ export async function generateMetadata({
   const viking = findViking(roster, slug);
   if (!viking) return { title: 'Unknown Viking' };
 
-  const epithet = epithetFor(viking, roster, causesFor(viking.character_name, deaths));
+  const epithet = epithetFor(viking, roster, causesFor(viking.character_name, deaths), viking.current_title ?? null);
   const name = viking.character_name;
   const description = `${name} · ${epithet.title} — a viking of the Eilif saga, and the deeds recorded in their name.`;
 
@@ -122,7 +122,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
   const first = name.trim().split(/\s+/)[0] || name;
   const stats = viking.stats;
 
-  const epithet = epithetFor(viking, roster, causesFor(name, deaths));
+  const epithet = epithetFor(viking, roster, causesFor(name, deaths), viking.current_title ?? null);
 
   // Discord↔character link. `discord_user_id` is undefined pre-link (or
   // pre-migration) → `isLinked` false → the header callout + gallery hint

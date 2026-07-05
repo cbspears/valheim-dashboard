@@ -171,7 +171,7 @@ export default async function PlayersPage() {
   for (const p of withStats) {
     epithetByName.set(
       p.character_name,
-      epithetFor(p, withStats, causesByName.get(p.character_name) ?? []).title
+      epithetFor(p, withStats, causesByName.get(p.character_name) ?? [], p.current_title ?? null).title
     );
   }
 
