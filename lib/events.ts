@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { GameEvent, EventType } from './types';
+import { describeDeath } from './episodes';
 
 export interface EventPresentation {
   icon: LucideIcon;
@@ -49,7 +50,7 @@ export function describeEvent(e: GameEvent): EventPresentation {
         icon: Skull,
         accent: 'text-death',
         label: 'Death',
-        description: cause ? `${name} ${cause}` : `${name} has fallen`,
+        description: describeDeath(name, cause ?? ''),
       };
     }
     case 'boss': {

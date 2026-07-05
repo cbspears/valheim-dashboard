@@ -636,5 +636,32 @@ export function phraseDeath(cause: string): string {
   if (ENV_DEATHS[low]) return ENV_DEATHS[low];
   if (BOSSES.has(low) || /^the\s/i.test(c)) return `felled by ${c}`;
   const article = /^[aeiou]/i.test(c) ? 'an' : 'a';
-  return `taken by ${article} ${low}`;
+  // Preserve the creature's own casing (gs-ingest sends Title Case, e.g.
+  // "Neck", "Greyling") — only the lookup above needs lowercasing.
+  return `taken by ${article} ${c}`;
+}
+
+// A handful of ENV_DEATHS entries are already active-voice, past-tense verb
+// phrases ("fell to their death", "choked on hearth-smoke"...) — they read
+// fine straight after a name. The rest are passive participles ("crushed by
+// a falling tree") and need a "was" to form a full sentence. Kept as its own
+// small set here rather than restructuring ENV_DEATHS, since phraseDeath()'s
+// existing consumers (DeathLog, EpisodeList) use its output as a bare
+// fragment (after an em dash, or with the name shown elsewhere) and must
+// keep working unchanged.
+const ACTIVE_VOICE_CAUSES = new Set(['fall', 'falling', 'smoke', 'poison', 'poisoned', 'edgeofworld']);
+
+/**
+ * Full-sentence death line, e.g. "Testman was taken by a Neck" or
+ * "Testmantwo fell to their death" — for surfaces that show name + cause
+ * together as one line (home "Recent Saga", /events full chronicle). Wraps
+ * phraseDeath() rather than duplicating its vocabulary.
+ */
+export function describeDeath(name: string, cause: string): string {
+  const nm = (name ?? '').trim() || 'A viking';
+  const c = (cause ?? '').trim();
+  if (!c) return `${nm} has fallen`;
+  const phrase = phraseDeath(c);
+  const activeVoice = ACTIVE_VOICE_CAUSES.has(c.toLowerCase());
+  return activeVoice ? `${nm} ${phrase}` : `${nm} was ${phrase}`;
 }

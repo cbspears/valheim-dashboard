@@ -16,6 +16,7 @@ import {
   Crown,
   Camera,
   ChevronLeft,
+  AtSign,
 } from 'lucide-react';
 import { Badge, SectionHeader, StatTile, Card, EmptyState } from '@/components/ui';
 import { AttendanceCalendar } from '@/components/players/AttendanceCalendar';
@@ -123,6 +124,13 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
 
   const epithet = epithetFor(viking, roster, causesFor(name, deaths));
 
+  // Discord↔character link. `discord_user_id` is undefined pre-link (or
+  // pre-migration) → `isLinked` false → the header callout + gallery hint
+  // point the viking at the `@Eilif I am <name>` ritual.
+  const linkedDiscordId = viking.discord_user_id ?? null;
+  const isLinked = Boolean(linkedDiscordId);
+  const discordUsername = viking.discord_username ?? null;
+
   const myDeaths = deaths.filter((e) => e.character_name === name);
   const myCrowns = potyArchive.filter((e) => e.character_name === name);
 
@@ -131,10 +139,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
     .filter((p) => slugify(p.by_character_name ?? '') === slug)
     .map((p) => ({ id: p.id, name: p.name, kind: p.kind, day: p.day }));
 
-  // Photos: attach via the explicit Discord↔character link. `discord_user_id`
-  // is undefined pre-migration → `linked` false → the "tell Eilif" hint shows.
-  const linkedDiscordId = viking.discord_user_id ?? null;
-  const isLinked = Boolean(linkedDiscordId);
+  // Photos: attach via the explicit Discord↔character link.
   const myPhotos = isLinked
     ? photos
         .filter((p) => p.discord_user_id && p.discord_user_id === linkedDiscordId)
@@ -220,6 +225,15 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="heading-engraved text-3xl text-ash sm:text-4xl">{name}</h1>
           {viking.role && <Badge tone="gold">{viking.role}</Badge>}
+          {isLinked && discordUsername && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-gold-dim/40 bg-pitch/70 px-2.5 py-0.5 text-xs font-medium text-gold-dim"
+              title={`Linked to Discord as ${discordUsername}`}
+            >
+              <AtSign size={12} />
+              {discordUsername}
+            </span>
+          )}
         </div>
         <p className="mt-1 font-display text-lg text-gold-light">{epithet.title}</p>
 
@@ -230,6 +244,21 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
             <span className="italic text-muted">{generatedBioLine(viking, epithet)}</span>
           )}
         </p>
+
+        {!isLinked && (
+          <div className="mt-5 flex max-w-2xl items-start gap-3 rounded-[var(--radius-card)] border border-gold-dim/30 bg-surface-raised/60 px-4 py-3">
+            <span className="mt-0.5 shrink-0 text-gold-dim">
+              <AtSign size={16} />
+            </span>
+            <p className="text-sm leading-relaxed text-ash-dim">
+              This viking has not yet told Eilif who they are. Type{' '}
+              <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs text-gold-light">
+                @Eilif I am {name}
+              </span>{' '}
+              in Discord to bind this saga to your voice.
+            </p>
+          </div>
+        )}
       </header>
 
       {/* ── Stat tiles ─────────────────────────────────────────── */}
@@ -320,15 +349,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
             <EmptyState
               icon={<Camera size={26} />}
               title="Photos await"
-              message={
-                <>
-                  Tell Eilif who you are in Discord —{' '}
-                  <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs text-gold-light">
-                    @Eilif I am {name}
-                  </span>{' '}
-                  — and every screenshot {first} has shared gathers here.
-                </>
-              }
+              message={`Once ${first} is linked (see the note above), every screenshot they've shared will gather here.`}
             />
           </Card>
         ) : myPhotos.length === 0 ? (
