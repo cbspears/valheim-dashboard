@@ -61,11 +61,11 @@ export function LiveWorld({
         markers={atNow ? pins.map((p) => ({ id: p.id, x: p.x, y: p.y, kind: p.kind, name: p.name, by: p.by_character_name, day: p.day, photos: photosByPin[p.id] ?? [] })) : []}
         corner={
           <div className="absolute right-3 top-3 flex items-center gap-2">
-            <div className="rounded-md border border-rune bg-pitch/75 px-2.5 py-1 font-display text-sm text-gold-light backdrop-blur-sm">
+            <div className="rounded-md border border-rune bg-pitch/85 px-2.5 py-1 font-display text-sm font-semibold tracking-wide text-gold-light backdrop-blur-sm">
               {label}
             </div>
             {atNow && (
-              <div className="flex items-center gap-1.5 rounded-md border border-online/40 bg-pitch/75 px-2.5 py-1 text-xs font-medium text-online-glow backdrop-blur-sm">
+              <div className="flex items-center gap-1.5 rounded-md border border-online/40 bg-pitch/85 px-2.5 py-1 text-xs font-medium text-online-glow backdrop-blur-sm">
                 <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-online" />
                 Live
               </div>

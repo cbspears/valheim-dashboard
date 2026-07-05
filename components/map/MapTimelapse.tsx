@@ -204,14 +204,14 @@ export function MapTimelapse() {
             >
               <div className="flex flex-col items-center gap-0.5">
                 <MarkerGlyph kind={l.kind} />
-                <span className="whitespace-nowrap font-display text-[11px] tracking-wide text-gold-light [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+                <span className="map-label-scrim map-text-halo whitespace-nowrap font-display text-[12px] font-semibold tracking-wide text-gold-light">
                   {l.name}
                 </span>
               </div>
               {/* hover card */}
               <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-rune bg-pitch/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm group-hover:block">
-                <div className="font-display text-xs text-gold-light">{l.name}</div>
-                <div className="mt-0.5 text-[11px] text-ash-dim">
+                <div className="font-display text-xs font-semibold tracking-wide text-gold-light">{l.name}</div>
+                <div className="mt-0.5 text-[11.5px] leading-relaxed text-ash-dim">
                   {KIND_LABEL[l.kind]} · {pinVerb(l.kind)}{' '}
                   <span className="text-ash">{l.by}</span> · Day {l.day}
                 </div>
@@ -227,7 +227,7 @@ export function MapTimelapse() {
         </div>
 
         {/* day readout, engraved into the corner */}
-        <div className="absolute right-3 top-3 rounded-md border border-rune bg-pitch/75 px-2.5 py-1 font-display text-sm text-gold-light backdrop-blur-sm">
+        <div className="absolute right-3 top-3 rounded-md border border-rune bg-pitch/85 px-2.5 py-1 font-display text-sm font-semibold tracking-wide text-gold-light backdrop-blur-sm">
           Day {day}
         </div>
         {/* zoom controls */}
@@ -275,7 +275,7 @@ export function MapTimelapse() {
           )}
         </div>
         {/* marker legend */}
-        <div className="absolute bottom-3 left-3 flex items-center gap-3.5 rounded-md border border-rune bg-pitch/75 px-2.5 py-1.5 backdrop-blur-sm">
+        <div className="absolute bottom-3 left-3 flex items-center gap-3.5 rounded-md border border-rune bg-pitch/85 px-2.5 py-1.5 backdrop-blur-sm">
           {(
             [
               ['base', 'Base'],
@@ -284,7 +284,7 @@ export function MapTimelapse() {
               ['trader', 'Trader'],
             ] as const
           ).map(([kind, label]) => (
-            <span key={kind} className="flex items-center gap-1.5 text-[11px] tracking-wide text-ash-dim">
+            <span key={kind} className="flex items-center gap-1.5 text-[11.5px] font-medium tracking-wide text-ash-dim">
               <MarkerGlyph kind={kind} />
               {label}
             </span>

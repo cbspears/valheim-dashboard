@@ -137,13 +137,13 @@ export function ZoomableMap({
             >
               <div className="flex flex-col items-center gap-0.5">
                 <MarkerGlyph kind={m.kind} />
-                <span className="whitespace-nowrap font-display text-[11px] tracking-wide text-gold-light [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+                <span className="map-label-scrim map-text-halo whitespace-nowrap font-display text-[12px] font-semibold tracking-wide text-gold-light">
                   {m.name}
                 </span>
               </div>
               <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-rune bg-pitch/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm group-hover:block">
-                <div className="font-display text-xs text-gold-light">{m.name}</div>
-                <div className="mt-0.5 text-[11px] text-ash-dim">
+                <div className="font-display text-xs font-semibold tracking-wide text-gold-light">{m.name}</div>
+                <div className="mt-0.5 text-[11.5px] leading-relaxed text-ash-dim">
                   {kindLabel(m.kind)}
                   {m.by ? (
                     <>
