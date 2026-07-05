@@ -71,29 +71,28 @@ namespace EilifPaths
 
         // Owner-chosen defaults. movement = speed multiplier, staminadrain = stamina-cost multiplier.
         // (Path 1.5/0.5 · PavedRoad 1.75/0.25 · Wood/Stone/Iron/HardWood 1.35/0.7)
-        private static readonly Dictionary<PathType, (float move, float stam)> Defaults =
-            new Dictionary<PathType, (float, float)>
-            {
-                { PathType.Path,      (1.5f,  0.5f)  },
-                { PathType.PavedRoad, (1.75f, 0.25f) },
-                { PathType.Wood,      (1.35f, 0.7f)  },
-                { PathType.Stone,     (1.35f, 0.7f)  },
-                { PathType.Iron,      (1.35f, 0.7f)  },
-                { PathType.HardWood,  (1.35f, 0.7f)  },
-            };
+        // NOTE: deliberately NOT a tuple/collection field initializer — the plugin class must not
+        // reference System.ValueTuple (not shipped with the game's net462 runtime; a static field
+        // initializer using it makes the whole class fail to instantiate under BepInEx).
+        private void BindSurface(PathType type, float move, float stam)
+        {
+            string section = type.ToString();
+            Movement[type] = Config.Bind(section, "movement", move,
+                "Speed multiplier while on " + section + " (1.0 = vanilla, >1 = faster).");
+            StaminaDrain[type] = Config.Bind(section, "staminadrain", stam,
+                "Stamina-cost multiplier while on " + section + " (1.0 = vanilla, <1 = drains less).");
+        }
 
         private void Awake()
         {
             Log = Logger;
 
-            foreach (var kv in Defaults)
-            {
-                string section = kv.Key.ToString();
-                Movement[kv.Key] = Config.Bind(section, "movement", kv.Value.move,
-                    "Speed multiplier while on " + section + " (1.0 = vanilla, >1 = faster).");
-                StaminaDrain[kv.Key] = Config.Bind(section, "staminadrain", kv.Value.stam,
-                    "Stamina-cost multiplier while on " + section + " (1.0 = vanilla, <1 = drains less).");
-            }
+            BindSurface(PathType.Path,      1.5f,  0.5f);
+            BindSurface(PathType.PavedRoad, 1.75f, 0.25f);
+            BindSurface(PathType.Wood,      1.35f, 0.7f);
+            BindSurface(PathType.Stone,     1.35f, 0.7f);
+            BindSurface(PathType.Iron,      1.35f, 0.7f);
+            BindSurface(PathType.HardWood,  1.35f, 0.7f);
 
             OldModPresent = Chainloader.PluginInfos != null &&
                             Chainloader.PluginInfos.ContainsKey(OldModGuid);
