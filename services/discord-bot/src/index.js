@@ -7,6 +7,7 @@ import { readClient, serviceClient } from './supabase.js';
 import { createDiscordPoster, createDryRunPoster } from './discord.js';
 import { createRelay } from './relay.js';
 import { createBossWatcher } from './bosses.js';
+import { createSkald } from './retelling.js';
 import { createRecap } from './recap.js';
 import { createEventsSync } from './events.js';
 import { createGalleryIngest } from './gallery.js';
@@ -44,10 +45,14 @@ async function runLive() {
   });
   const post = poster.post;
 
-  const relay = createRelay({ db, post, state, saveState });
-  const bosses = createBossWatcher({ db, post, state, saveState });
   const writeDb = process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceClient() : null;
   if (!writeDb) console.warn('[recap] no SUPABASE_SERVICE_ROLE_KEY — Player-of-the-Day archive disabled');
+
+  const relay = createRelay({ db, post, state, saveState });
+  // The Skald writes a saga retelling once per newly-felled boss (best-effort;
+  // never blocks the boss announcement). Needs the service-role client to persist.
+  const skald = createSkald({ db, writeDb });
+  const bosses = createBossWatcher({ db, post, state, saveState, skald });
 
   // Optional: the Voice of the Hall brain. Off by default (VOICE_ENGINE=1).
   // Created before the recap so the evening POTY crown can hook into it.

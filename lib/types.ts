@@ -143,6 +143,13 @@ export interface Boss {
     tsUtc: string;
     source: string;
   } | null;
+  /**
+   * Skald-written saga retelling of the fight, generated once per kill by the
+   * Discord bot (db/2026-07-05_boss_retelling.sql). Optional so rows read before
+   * the migration still type; the /boss "Retelling" surface renders it verbatim.
+   */
+  retelling?: string | null;
+  retelling_generated_at?: string | null;
 }
 
 export type RoadmapStatus = 'planned' | 'in_progress' | 'completed' | string;
