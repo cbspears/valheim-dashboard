@@ -24,10 +24,25 @@ function required(name) {
   return v;
 }
 
+// Optional allowlist of character names to ingest (comma-separated, in
+// CHARACTERS). A player's `.fch` folder is a lifelong pile of characters —
+// singleplayer alts, dead test vikings, other servers — so when we read a
+// local Steam profile dir we must restrict to the vikings that actually play
+// THIS server. Empty/unset = ingest every named profile (the old behaviour,
+// correct for a dedicated ServerCharacters folder that only holds joiners).
+const characterAllow = new Set(
+  (process.env.CHARACTERS || '')
+    .split(',')
+    .map((n) => n.trim().toLowerCase())
+    .filter(Boolean)
+);
+
 const cfg = {
   source: process.env.STATS_SOURCE || 'sftp', // 'sftp' | 'dir'
   // Remote (sftp) or local (dir) directory holding the .fch profiles.
   charactersPath: process.env.CHARACTERS_PATH || 'ServerCharacters',
+  // Lowercased set of character names to keep; empty = keep all.
+  characterAllow,
   webhookUrl: required('WEBHOOK_URL'),
   webhookSecret: required('WEBHOOK_SECRET'),
   intervalMs: parseInt(process.env.POLL_INTERVAL_MS || '300000', 10), // 5 min
@@ -65,7 +80,14 @@ async function fetchProfiles() {
 }
 
 async function fetchFromDir() {
-  const names = (await readdir(cfg.charactersPath)).filter((n) => n.toLowerCase().endsWith('.fch'));
+  // A player's Steam character folder is littered with Valheim's own rolling
+  // saves — `<name>_backup_*.fch` and `*.fch.old` — alongside the live profile
+  // `<name>.fch`. Ingesting those too would parse the same viking many times
+  // and let a stale backup win the last-write upsert, so keep only the live
+  // profiles. (A clean ServerCharacters mirror has no such files; harmless there.)
+  const names = (await readdir(cfg.charactersPath)).filter(
+    (n) => n.toLowerCase().endsWith('.fch') && !/_backup|\.fch\.old$/i.test(n)
+  );
   const out = [];
   for (const name of names) {
     out.push({ name, buffer: await readFile(join(cfg.charactersPath, name)) });
@@ -119,6 +141,11 @@ async function sweep() {
         log.warn(`[skip] ${name}: no player name (v${profile.version}, ${profile.statCount} stats)`);
         continue;
       }
+      // Restrict to the configured server vikings (if an allowlist is set).
+      if (cfg.characterAllow.size && !cfg.characterAllow.has(profile.playerName.toLowerCase())) {
+        log.info(`[skip] ${name}: "${profile.playerName}" not in CHARACTERS allowlist`);
+        continue;
+      }
       stats = toPlayerStats(profile, cfg.worldUid);
       stats.steamId = steamIdFromFilename(name);
     } catch (err) {
@@ -146,7 +173,11 @@ async function main() {
     await sweep();
     return;
   }
-  log.info(`[stats] starting; interval=${cfg.intervalMs}ms target=${cfg.webhookUrl}`);
+  log.info(
+    `[stats] starting; source=${cfg.source}:${cfg.charactersPath} interval=${cfg.intervalMs}ms ` +
+      `world=${cfg.worldUid ?? 'best'} allow=${cfg.characterAllow.size ? [...cfg.characterAllow].join('/') : 'all'} ` +
+      `target=${cfg.webhookUrl}`
+  );
   let stopped = false;
   for (const sig of ['SIGINT', 'SIGTERM']) {
     process.on(sig, () => {

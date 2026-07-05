@@ -294,7 +294,9 @@ function isPlausibleName(name) {
  * `resources_harvested` is a composite of the deliberate gathering actions
  * (trees felled + ore deposits mined + bees + sap) — Valheim has no single
  * "resources gathered" counter. `map_explored_pct` is the player's best-explored
- * world unless `worldUid` pins a specific one (the live server's world).
+ * world unless `worldUid` pins a specific one (the live server's world) — in
+ * which case it is that world's coverage, or `null` if the profile never
+ * visited it.
  *
  * @param {ReturnType<typeof parseProfile>} profile
  * @param {bigint} [worldUid] restrict exploration % to this world if present
@@ -303,10 +305,16 @@ export function toPlayerStats(profile, worldUid) {
   const s = profile.stats;
   const get = (k) => Math.round(s[k] ?? 0);
 
-  let mapExploredPct = profile.maxExploredPct;
+  // When a world is pinned (the live server), report ONLY that world's
+  // coverage. If this profile has never touched that world, coverage is `null`
+  // — NOT the player's best other world, which would leak singleplayer /
+  // off-server exploration onto the server's Cartographer board.
+  let mapExploredPct;
   if (worldUid != null) {
     const match = profile.worlds.find((w) => w.uid === worldUid);
-    if (match) mapExploredPct = match.exploredPct;
+    mapExploredPct = match ? match.exploredPct : null;
+  } else {
+    mapExploredPct = profile.maxExploredPct;
   }
 
   return {
