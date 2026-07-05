@@ -54,14 +54,14 @@ export const MODS: Mod[] = [
     url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
   },
   {
-    name: 'Useful Paths',
-    author: 'Menthus',
+    name: 'Eilif Paths',
+    author: 'Blockspace (custom-built)',
     description:
-      'Run, jog, and walk faster — and burn less stamina — on paths, paved roads, and leveled ground. Makes the road network actually worth building. Configurable.',
-    version: '1.5.0',
+      'Roads that matter: +75% speed on dirt paths and paved roads, with stamina drain cut 75% on paths and 90% on paved. Built floors (wood, stone, iron) grant +50% speed and half drain. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
+    version: '1.0.0',
     category: 'QoL',
     clientRequired: true,
-    url: 'https://thunderstore.io/c/valheim/p/Menthus/Useful_Paths/',
+    url: 'https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-paths',
   },
 
   // ── Server-only, confirmed (nothing for players to install) ───────────────
@@ -114,12 +114,21 @@ export const MODS: Mod[] = [
     name: 'GsValheimStatsClient',
     author: 'Proudlock_Technology',
     description:
-      'Richer per-viking stats — deaths, biomes explored, playtime — feeding the leaderboards. Optional while it pilots; install it if you want your name on the deeper stats pages.',
+      'Richer per-viking stats — real causes of death, damage dealt, weapon records — feeding the leaderboards and your viking page. Ships in the modpack.',
     version: '0.2.9',
     category: 'Content',
     clientRequired: true,
-    tentative: true,
     url: 'https://thunderstore.io/c/valheim/p/Proudlock_Technology/GsValheimStatsClient/',
+  },
+  {
+    name: 'Eilif Companion Client',
+    author: 'Blockspace (custom-built)',
+    description:
+      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play — no setup, no uploads. Ships in the modpack.',
+    version: '0.1.0',
+    category: 'Content',
+    clientRequired: true,
+    url: 'https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-companion-client',
   },
 ];
 

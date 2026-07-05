@@ -89,10 +89,10 @@ namespace EilifPaths
 
             BindSurface(PathType.Path,      1.75f, 0.25f);
             BindSurface(PathType.PavedRoad, 1.75f, 0.1f);
-            BindSurface(PathType.Wood,      1.35f, 0.7f);
-            BindSurface(PathType.Stone,     1.35f, 0.7f);
-            BindSurface(PathType.Iron,      1.35f, 0.7f);
-            BindSurface(PathType.HardWood,  1.35f, 0.7f);
+            BindSurface(PathType.Wood,       1.5f,  0.5f);
+            BindSurface(PathType.Stone,      1.5f,  0.5f);
+            BindSurface(PathType.Iron,       1.5f,  0.5f);
+            BindSurface(PathType.HardWood,   1.5f,  0.5f);
 
             OldModPresent = Chainloader.PluginInfos != null &&
                             Chainloader.PluginInfos.ContainsKey(OldModGuid);
