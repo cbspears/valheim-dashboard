@@ -1,5 +1,19 @@
 # Remote players — opt-in stats upload (phase 2, design only)
 
+> **SUPERSEDED for map exploration (2026-07-05).** The **Eilif Companion Client**
+> BepInEx plugin (`plugins/eilif-companion-client`) now tracks each player's
+> explored-map % **automatically** — the pinned pack ships the DLL, so playing =
+> tracked, no opt-in and no script to run. It reads the local minimap fog in
+> memory and POSTs `source:'client-map'` to `/api/gs-ingest` (which writes
+> `player_stats.map_explored_pct` with GREATEST). Combat / death / boss stats
+> already arrive via **GsValheimStatsClient** on the same pack.
+>
+> So for **pack players**, the `.fch`-uploader design below is **no longer
+> needed** for the Cartographer board. Keep it only as a **fallback** for
+> non-pack players (or if you ever want the *other* per-player counters —
+> builds / resources / crafts — from a player who isn't running the client mods).
+> The **local** systemd `.fch` parser still runs for Charlie's own characters.
+
 ## The problem
 
 Valheim tracks kills / builds / distance / resources / **map exploration**

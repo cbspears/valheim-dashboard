@@ -197,6 +197,53 @@ async function ingestDeathEvents(rawEvents: unknown): Promise<void> {
   );
 }
 
+// ─── Client-map: automatic cartography (source:'client-map') ─────────────────
+//
+// The EilifCompanionClient BepInEx plugin (plugins/eilif-companion-client) posts
+// the local player's explored-map % every ~5 min while on the server:
+//   { schemaVersion:1, game:'valheim', source:'client-map', playerName, world, exploredPct }
+// We write ONLY player_stats.map_explored_pct, with GREATEST semantics (exploration
+// only ever grows, and a stale/duplicate post must never roll it back). The
+// stats-parser webhook (app/api/webhook) also writes this column for the owner's
+// own .fch profiles — both coexist because this branch touches map_explored_pct
+// and nothing else, and the max() guard means whichever writer sees more wins.
+//
+// World guard uses the SAME GS_EXPECTED_WORLD convention as the client-stats path:
+// if set and the payload world doesn't match, ignore (the caller already gates
+// world mismatches too — this is defence in depth). Unset (pilot) = accept any.
+async function ingestClientMap(body: Obj): Promise<{ ok: boolean; pct: number | null; player: string | null }> {
+  const player = typeof body.playerName === 'string' ? body.playerName.trim() : '';
+  const pctRaw = body.exploredPct;
+  const pct = typeof pctRaw === 'number' && Number.isFinite(pctRaw) ? Math.min(100, Math.max(0, pctRaw)) : null;
+  if (!player || pct === null) return { ok: false, pct: null, player: player || null };
+
+  const client = db();
+  const now = new Date().toISOString();
+
+  // Resolve (or create) the players row for this character (mirrors the deaths/stats paths).
+  const { data: found } = await client.from('players').select('id').eq('character_name', player).limit(1);
+  let pid = (found?.[0]?.id as string | undefined) ?? undefined;
+  if (!pid) {
+    const { data: ins } = await client
+      .from('players')
+      .insert({ character_name: player, first_seen_at: now, last_seen_at: now, is_online: false })
+      .select('id')
+      .single();
+    pid = ins?.id as string | undefined;
+  }
+  if (!pid) return { ok: false, pct, player };
+
+  // GREATEST: never let a lower reading (different world, older snapshot) overwrite a higher one.
+  const { data: prevRows } = await client.from('player_stats').select('map_explored_pct').eq('player_id', pid).limit(1);
+  const prevPct = num((prevRows?.[0] as Obj | undefined)?.map_explored_pct);
+  const nextPct = Math.max(pct, prevPct);
+
+  await client
+    .from('player_stats')
+    .upsert({ player_id: pid, map_explored_pct: nextPct, updated_at: now }, { onConflict: 'player_id' });
+  return { ok: true, pct: nextPct, player };
+}
+
 // ─── Client per-player cumulative stats ──────────────────────────────────────
 //
 // The client mod's Emit() posts players[]: the FIRST element (name === reporter)
@@ -541,6 +588,15 @@ export async function POST(req: Request) {
     if (expected && payloadWorld && payloadWorld !== expected) {
       return Response.json({ status: 'ignored', reason: 'world mismatch' });
     }
+
+    // Automatic cartography from the client plugin: write only map_explored_pct (GREATEST).
+    if (body.source === 'client-map') {
+      const r = await ingestClientMap(body as Record<string, unknown>);
+      return Response.json(
+        r.ok ? { status: 'inserted', map_explored_pct: r.pct, player: r.player } : { status: 'ignored', reason: 'bad client-map payload' },
+      );
+    }
+
     await ingestDeathEvents(body.deathEvents);
     await ingestPlayerStats(body as Record<string, unknown>);
     // Client payloads also carry bossKillEvents (this client's view of a fight)

@@ -48,5 +48,11 @@ plugins/eilif-companion/obj/
 plugins/eilif-companion/bin/
 # NOTE: plugins/eilif-companion/dist/EilifCompanion.dll IS committed (the deployable artifact).
 plugins/eilif-companion/.voice-token
+
+# eilif-companion-client plugin (BepInEx / .NET build) — same convention as above.
+plugins/eilif-companion-client/libs/
+plugins/eilif-companion-client/obj/
+plugins/eilif-companion-client/bin/
+# NOTE: plugins/eilif-companion-client/dist/EilifCompanionClient.dll IS committed (the deployable artifact).
 pilot-staging/
 scripts/.map-snapshot-state.json
