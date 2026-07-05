@@ -54,5 +54,11 @@ plugins/eilif-companion-client/libs/
 plugins/eilif-companion-client/obj/
 plugins/eilif-companion-client/bin/
 # NOTE: plugins/eilif-companion-client/dist/EilifCompanionClient.dll IS committed (the deployable artifact).
+
+# eilif-paths plugin (BepInEx / .NET build) — same convention as above.
+plugins/eilif-paths/libs/
+plugins/eilif-paths/obj/
+plugins/eilif-paths/bin/
+# NOTE: plugins/eilif-paths/dist/EilifPaths.dll IS committed (the deployable artifact).
 pilot-staging/
 scripts/.map-snapshot-state.json
