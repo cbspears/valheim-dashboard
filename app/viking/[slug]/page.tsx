@@ -35,7 +35,7 @@ import {
   playtimeMinutesByCharacter,
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
-import { epithetFor, generatedBioLine } from '@/lib/epithets';
+import { epithetsFor, generatedBioLine } from '@/lib/epithets';
 import {
   formatPlaytime,
   formatNumber,
@@ -47,12 +47,24 @@ import type { PlayerWithStats, GameEvent } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-/** Raw death-cause strings for one viking (feeds the Treefoe epithet override). */
-function causesFor(name: string, deaths: GameEvent[]): string[] {
-  return deaths
-    .filter((e) => e.character_name === name)
-    .map((e) => (typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : ''))
-    .filter(Boolean);
+/**
+ * character_name → raw death-cause strings, for the WHOLE roster. Titles are
+ * assigned roster-globally (every viking a unique epithet), so the engine needs
+ * every viking's causes to resolve the (unique) Treefoe override — not just this
+ * page's viking.
+ */
+function causesByNameFrom(deaths: GameEvent[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const e of deaths) {
+    const name = e.character_name;
+    if (!name) continue;
+    const cause = typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : '';
+    if (!cause) continue;
+    const arr = map.get(name) ?? [];
+    arr.push(cause);
+    map.set(name, arr);
+  }
+  return map;
 }
 
 function findViking(roster: PlayerWithStats[], slug: string): PlayerWithStats | undefined {
@@ -72,7 +84,9 @@ export async function generateMetadata({
   const viking = findViking(roster, slug);
   if (!viking) return { title: 'Unknown Viking' };
 
-  const epithet = epithetFor(viking, roster, causesFor(viking.character_name, deaths), viking.current_title ?? null);
+  const epithet = epithetsFor(roster, { causesByName: causesByNameFrom(deaths) }).get(
+    viking.character_name,
+  )!;
   const name = viking.character_name;
   const description = `${name} · ${epithet.title} — a viking of the Eilif saga, and the deeds recorded in their name.`;
 
@@ -122,7 +136,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
   const first = name.trim().split(/\s+/)[0] || name;
   const stats = viking.stats;
 
-  const epithet = epithetFor(viking, roster, causesFor(name, deaths), viking.current_title ?? null);
+  const epithet = epithetsFor(roster, { causesByName: causesByNameFrom(deaths) }).get(name)!;
 
   // Discord↔character link. `discord_user_id` is undefined pre-link (or
   // pre-migration) → `isLinked` false → the header callout + gallery hint

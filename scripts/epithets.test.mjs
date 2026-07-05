@@ -1,6 +1,6 @@
 // Unit tests for the rank-aware + hysteresis epithet engine. Run:
 //   npx tsx scripts/epithets.test.mjs
-import { epithetFor } from '../lib/epithets.ts';
+import { epithetFor, epithetsFor } from '../lib/epithets.ts';
 import assert from 'node:assert';
 
 // Build a PlayerWithStats with sane zero defaults; override what a test needs.
@@ -166,6 +166,122 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
   const b = epithetFor(roster[0], roster);
   ok(a.source === 'flavor' && a.title === b.title,
     `no standout -> stable flavor, got ${a.source}:${a.title}`);
+}
+
+// ── 7. UNIQUENESS: a 10-player roster (several no-standouts) is all-distinct ──
+{
+  // Everyone logs some hours (positive roster median) so the hours dimension is
+  // live; Eir simply logs far more and claims the superlative.
+  const roster = [
+    mk('Astrid', { hours: 100, kills: 400, resources: 50 }),  // kills crown
+    mk('Bjorn', { hours: 100, resources: 900, kills: 10 }),   // resources crown
+    mk('Cato', { hours: 100, damage: 8000, kills: 12 }),      // damage crown
+    mk('Dagny', { hours: 100, bossDamage: 6000, kills: 8 }),  // boss-damage crown
+    mk('Eir', { hours: 5000, kills: 9 }),                     // hours superlative
+    mk('Frida', { hours: 100, builds: 1200, kills: 7 }),      // builds crown
+    // four no-standout newcomers — everyone must still be unique
+    mk('Gunnar', { hours: 100, kills: 6 }),
+    mk('Hilda', { hours: 100, kills: 6 }),
+    mk('Ivar', { hours: 100, kills: 6 }),
+    mk('Jorunn', { hours: 100, kills: 6 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.size === roster.length, `every viking titled, got ${titles.size}/${roster.length}`);
+  const all = roster.map((p) => titles.get(p.character_name).title);
+  const uniq = new Set(all);
+  ok(uniq.size === all.length, `all titles unique, got dupes in [${all.join(', ')}]`);
+  // The four no-standouts get placeholders (source 'flavor'), all different.
+  const noStandout = ['Gunnar', 'Hilda', 'Ivar', 'Jorunn'].map((n) => titles.get(n));
+  ok(noStandout.every((e) => e.source === 'flavor'),
+    `no-standouts get flavor placeholders, got ${noStandout.map((e) => e.source).join(',')}`);
+  const phSet = new Set(noStandout.map((e) => e.title));
+  ok(phSet.size === 4, `placeholders distinct, got [${noStandout.map((e) => e.title).join(', ')}]`);
+  // The crown holders wear their deed titles.
+  ok(titles.get('Astrid').source === 'kills', `Astrid the kills crown, got ${titles.get('Astrid').source}`);
+  ok(titles.get('Eir').title === 'the Ever-Present', `Eir the hours superlative, got ${titles.get('Eir').title}`);
+}
+
+// ── 8. Contested dimension: the runner-up drops to their next-best deed ──────
+// Two vikings both lead-ish on resources, but W owns it far more (crown). W takes
+// 'the Provider'; V — who also decisively tops builds — must NOT also get resources
+// (uniqueness), and instead wears 'Stonewright'. No sharing.
+{
+  const roster = [
+    mk('W', { resources: 2000, builds: 5 }),
+    mk('V', { resources: 800, builds: 3000 }),
+    mk('C', { resources: 40, builds: 5 }),
+    mk('D', { resources: 30, builds: 4 }),
+    mk('E', { resources: 20, builds: 3 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.get('W').title === 'the Provider', `top resources -> Provider, got ${titles.get('W').title}`);
+  ok(titles.get('V').title === 'Stonewright', `runner-up falls to next-best deed, got ${titles.get('V').title}`);
+  ok(titles.get('W').title !== titles.get('V').title, 'contested dimension not shared');
+}
+
+// ── 9. STABILITY: a tiny stat delta does not reshuffle the roster's titles ───
+{
+  const base = [
+    mk('Astrid', { kills: 400 }),
+    mk('Bjorn', { resources: 900 }),
+    mk('Cato', { damage: 8000 }),
+    mk('Gunnar', { kills: 6 }),
+    mk('Hilda', { kills: 6 }),
+    mk('Ivar', { kills: 6 }),
+  ];
+  const before = epithetsFor(base);
+  // Nudge Astrid's kills by one and re-title, feeding each viking's prior title as
+  // the incumbent (as the live pipeline does via current_title).
+  const inc = new Map(base.map((p) => [p.character_name, before.get(p.character_name).title]));
+  const nudged = base.map((p) =>
+    p.character_name === 'Astrid' ? mk('Astrid', { kills: 401 }) : p,
+  );
+  const after = epithetsFor(nudged, { incumbentByName: inc });
+  for (const p of base) {
+    ok(before.get(p.character_name).title === after.get(p.character_name).title,
+      `stable under tiny delta for ${p.character_name}: ${before.get(p.character_name).title} -> ${after.get(p.character_name).title}`);
+  }
+}
+
+// ── 10. A crown always beats a placeholder (deed > flavor) ───────────────────
+{
+  const roster = [
+    mk('Slayer', { kills: 300 }),
+    mk('Nobody1', { kills: 5 }),
+    mk('Nobody2', { kills: 5 }),
+    mk('Nobody3', { kills: 5 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.get('Slayer').source === 'kills', `crown beats placeholder, got ${titles.get('Slayer').source}`);
+  ok(titles.get('Nobody1').source === 'flavor', `non-standout is flavor, got ${titles.get('Nobody1').source}`);
+}
+
+// ── 11. Treefoe is unique: the most tree-felled claimant wins it ─────────────
+{
+  const roster = [mk('Woodsman', { kills: 5 }), mk('Sapling', { kills: 5 }), mk('Elm', { kills: 5 })];
+  const causes = new Map([
+    ['Woodsman', ['Tree', 'Tree', 'Tree', 'Tree']], // 4 tree deaths
+    ['Sapling', ['Tree', 'Tree', 'Greydwarf']],       // majority tree but fewer
+  ]);
+  const titles = epithetsFor(roster, { causesByName: causes });
+  ok(titles.get('Woodsman').title === 'Treefoe', `most-felled wins Treefoe, got ${titles.get('Woodsman').title}`);
+  ok(titles.get('Sapling').title !== 'Treefoe', `only one Treefoe, Sapling got ${titles.get('Sapling').title}`);
+  const all = roster.map((p) => titles.get(p.character_name).title);
+  ok(new Set(all).size === all.length, `Treefoe roster still all-unique, got [${all.join(', ')}]`);
+}
+
+// ── 12. Incumbent placeholder stays sticky when still free (no churn) ─────────
+{
+  const roster = [mk('Loafer', { kills: 5 }), mk('Idler', { kills: 5 })];
+  const pure = epithetsFor(roster);
+  const loaferPh = pure.get('Loafer').title;
+  // Pin Loafer to a DIFFERENT valid placeholder as incumbent — it must be kept.
+  const otherPh = loaferPh === 'the Unhurried' ? 'Mead-Tested' : 'the Unhurried';
+  const inc = new Map([['Loafer', otherPh]]);
+  const stuck = epithetsFor(roster, { incumbentByName: inc });
+  ok(stuck.get('Loafer').title === otherPh,
+    `incumbent placeholder kept, got ${stuck.get('Loafer').title}`);
+  ok(stuck.get('Idler').title !== otherPh, 'placeholders still unique after sticky');
 }
 
 console.log(`epithets.test: ${passed} assertions passed`);

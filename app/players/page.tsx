@@ -42,7 +42,7 @@ import {
   formatPercent,
 } from '@/lib/format';
 import { vikingPath } from '@/lib/slug';
-import { epithetFor } from '@/lib/epithets';
+import { epithetsFor } from '@/lib/epithets';
 
 export const dynamic = 'force-dynamic';
 
@@ -167,12 +167,12 @@ export default async function PlayersPage() {
     arr.push(cause);
     causesByName.set(nm, arr);
   }
+  // Roster-global assignment: every viking a UNIQUE title, incumbent current_title
+  // as the hysteresis anchor (defaulted inside epithetsFor from the roster rows).
+  const epithets = epithetsFor(withStats, { causesByName });
   const epithetByName = new Map<string, string>();
   for (const p of withStats) {
-    epithetByName.set(
-      p.character_name,
-      epithetFor(p, withStats, causesByName.get(p.character_name) ?? [], p.current_title ?? null).title
-    );
+    epithetByName.set(p.character_name, epithets.get(p.character_name)?.title ?? '');
   }
 
   const boards: Board[] = [

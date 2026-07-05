@@ -4,7 +4,7 @@ import {
   getEventsSince,
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
-import { epithetFor } from '@/lib/epithets';
+import { epithetsFor } from '@/lib/epithets';
 import { formatPlaytime, formatNumber } from '@/lib/format';
 import type { GameEvent } from '@/lib/types';
 
@@ -21,13 +21,21 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   const viking = roster.find((p) => slugify(p.character_name) === slug);
 
   const name = viking?.character_name ?? 'Unknown Viking';
-  const causes = viking
-    ? deaths
-        .filter((e: GameEvent) => e.character_name === name)
-        .map((e) => (typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : ''))
-        .filter(Boolean)
-    : [];
-  const epithet = viking ? epithetFor(viking, roster, causes, viking.current_title ?? null).title : 'the Unknown';
+  // Roster-global unique titles — build every viking's causes (Treefoe is unique)
+  // and pull this viking's entry so the OG card matches the site exactly.
+  const causesByName = new Map<string, string[]>();
+  for (const e of deaths as GameEvent[]) {
+    const nm = e.character_name;
+    if (!nm) continue;
+    const cause = typeof e.metadata?.cause === 'string' ? (e.metadata.cause as string) : '';
+    if (!cause) continue;
+    const arr = causesByName.get(nm) ?? [];
+    arr.push(cause);
+    causesByName.set(nm, arr);
+  }
+  const epithet = viking
+    ? epithetsFor(roster, { causesByName }).get(name)?.title ?? 'the Unknown'
+    : 'the Unknown';
 
   const pairs = [
     ['Hours', formatPlaytime(viking?.total_playtime_minutes ?? 0)],

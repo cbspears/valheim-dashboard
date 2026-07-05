@@ -1,15 +1,27 @@
 // Auto-title engine — the sagas name every viking, and the vikings get no say.
 //
 // THE OWNER'S RULE: titles are ALWAYS generated. A viking cannot choose, buy,
-// or veto their epithet. Same inputs always yield the same title — the function
+// or veto their epithet. Same inputs always yield the same title — the engine
 // is pure and deterministic (the only "randomness" is a stable hash of the name).
+//
+// THE UNIQUENESS RULE: every viking wears a UNIQUE epithet — no two vikings on
+// the roster may share a title at the same time. A title is "a specific, unique
+// thing for each character." Because of that, assignment is ROSTER-GLOBAL, not
+// per-viking-independent: we score every (viking, dimension) pair, then hand each
+// title to whoever owns it MOST (highest score), greedily. The runner-up for a
+// contested dimension falls to their own next-best dimension — or, failing any
+// standout, to a personalized placeholder from a decent-sized pool. So the
+// single-viking `epithetFor(...)` is now a thin view over the whole-roster
+// `epithetsFor(roster, ...)`; both live here and agree by construction.
 //
 // Titles are DEED-DRIVEN and RANK-AWARE: they reflect what a viking is actually
 // doing against the rest of the warband, and they CHANGE as standings shift.
 //
-// How a title is chosen, in priority order:
-//   1. Treefoe override — if a majority of a viking's deaths are to trees, the
-//      forest has clearly marked them, and nothing else matters.
+// How the roster is titled:
+//   1. Treefoe — if a majority of a viking's deaths are to trees, the forest has
+//      clearly marked them. Treefoe is itself unique, so if several vikings qualify
+//      the mark goes to the one the forest has felled MOST (most tree-deaths, then
+//      highest fraction); the rest fall through to the deed scoring below.
 //   2. The most DISTINCTIVE stat dimension, scored so RANK counts:
 //        • gate on ratio-vs-median (a raw lead over the pack, so a 3-vs-2 nudge
 //          never counts) and on z-score (so "high because they simply played a
@@ -24,11 +36,19 @@
 //          non-combat board — unless that other board is dramatically more theirs.
 //        • "the Ever-Present" (hours) stays a pure superlative: only the single
 //          hours-leader may claim it.
-//      HYSTERESIS: when the viking already holds a title (`incumbent`), that
-//      dimension gets a small stickiness bonus, so a challenger must beat it by a
-//      genuine margin before the title flips. In a 4-8 player hall this kills the
+//      These per-(viking,dimension) scores become edges; a GREEDY pass assigns the
+//      highest-scoring edges first, and a title/viking already claimed is skipped —
+//      that is what guarantees uniqueness AND lets each dimension go to its truest
+//      owner.
+//      HYSTERESIS: when a viking already holds a title (`incumbent` / current_title),
+//      that dimension gets a small stickiness bonus, so a challenger must beat it by
+//      a genuine margin before the title flips. In a 4-8 player hall this kills the
 //      churn from 24-vs-23 kill noise while still yielding to a decisive change.
-//   3. No real standout → a flavor epithet, chosen by a stable name-hash.
+//      Uniqueness does NOT churn: assignment is deterministic and stable, and an
+//      incumbent placeholder is kept as long as it stays free.
+//   3. No real standout → a personalized placeholder epithet, chosen from a pool by
+//      a stable name-hash and de-duplicated against the rest of the roster, so even
+//      a full launch hall of no-standout newcomers stays unique.
 //
 // Pure + dependency-free (imports a type only), so it's trivially testable.
 
@@ -121,6 +141,11 @@ const SOURCE_BY_TITLE: ReadonlyMap<string, EpithetSource> = new Map(
   DIMENSIONS.map((d) => [d.epithet, d.source as EpithetSource]),
 );
 
+// Personalized placeholders for vikings with no standout deed. Kept DECENT-SIZED
+// (24) so even a full 20-strong launch hall of newcomers stays unique — a name-hash
+// picks a starting phrase and we probe forward for the first still-free one. All in
+// the same dry Norse hearth-voice as the earned titles; none overlaps a dimension
+// epithet, so a placeholder and a deed-title can never collide.
 const FLAVOR_POOL = [
   'the Quiet Flame',
   'of the Long Watch',
@@ -128,7 +153,28 @@ const FLAVOR_POOL = [
   'the Unhurried',
   'Frost-Patient',
   'the Steady Oar',
+  'the Late-Rising',
+  'Keeper of Embers',
+  'the Soft-Spoken',
+  'of the Second Helping',
+  'the Well-Rested',
+  'Friend to Fog',
+  'the Middle Bench',
+  'the Cheerful Ballast',
+  'the Unbossed',
+  'Warden of the Longfire',
+  'the Slow Hand',
+  'of the Quiet Fjord',
+  'the Half-Heard',
+  'the Contented',
+  'the Bench-Warmer',
+  'Last to Leave the Hall',
+  'the Amiable',
+  'of the Spare Cloak',
 ];
+
+/** Membership test so an incumbent placeholder can be kept sticky (see below). */
+const FLAVOR_SET: ReadonlySet<string> = new Set(FLAVOR_POOL);
 
 /** FNV-1a — a stable, well-spread string hash so name → flavor never drifts. */
 function hashName(name: string): number {
@@ -189,15 +235,213 @@ function isTreefoe(deathCauses: string[]): boolean {
 }
 
 /**
+ * The score a (viking, dimension) pair earns, or null when the pair doesn't clear
+ * the gates. Identical scoring to the original engine — ratio-vs-median + z-score
+ * gates, then z + crown bonus (rank) + combat nudge + incumbent stickiness — but
+ * factored out so the roster-global assignment can rank every pair against each
+ * other. `s` is the dimension's roster-wide distribution (computed once, reused).
+ */
+function scoreDim(
+  player: PlayerWithStats,
+  dim: Dimension,
+  s: DimStats,
+  incumbentSource: EpithetSource | undefined,
+): number | null {
+  const v = dim.value(player);
+  if (v == null || !Number.isFinite(v) || v <= 0) return null;
+  if (s.median <= 0 || s.std <= 0) return null;
+
+  const lead = v / s.median;
+  if (lead < MIN_LEAD) return null;
+
+  const z = (v - s.mean) / s.std;
+  if (z < MIN_Z) return null;
+
+  // "the Ever-Present" belongs to the one who is there more than anyone.
+  if (dim.superlative && v < s.max) return null;
+
+  // A crown: sole roster leader, clearing the runner-up by a real margin
+  // (or the only viking doing it at all).
+  const soleLeader = v >= s.max && s.leaderCount === 1;
+  const crown = soleLeader && (s.secondMax <= 0 || v >= s.secondMax * LEADER_MARGIN);
+
+  let score = z;
+  if (crown) score += LEADER_BONUS;
+  if (crown && dim.combat) score += COMBAT_BONUS;
+  if (incumbentSource && dim.source === incumbentSource) score += HYSTERESIS_BONUS;
+  return score;
+}
+
+/** Stable alphabetical comparison (deterministic tie-breaks, independent of input order). */
+function byName(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** How many of a viking's death causes were trees (for ranking Treefoe claimants). */
+function treeDeathCount(causes: string[]): number {
+  return causes.filter((c) => /tree/i.test(c)).length;
+}
+
+/** Pick a personalized placeholder for `name` that isn't already `used`. */
+function pickPlaceholder(name: string, used: ReadonlySet<string>): string {
+  const n = FLAVOR_POOL.length;
+  const start = hashName(name) % n;
+  for (let i = 0; i < n; i++) {
+    const cand = FLAVOR_POOL[(start + i) % n];
+    if (!used.has(cand)) return cand;
+  }
+  // Pool exhausted (more no-standout vikings than placeholders — only in a hall
+  // larger than the pool). Compound two phrases for a far larger, still-in-voice
+  // space so uniqueness is always guaranteed. Deterministic by the same hash.
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      const cand = `${FLAVOR_POOL[(start + i) % n]}, ${FLAVOR_POOL[(start + j) % n]}`;
+      if (!used.has(cand)) return cand;
+    }
+  }
+  // Unreachable for any realistic roster; keep the return total.
+  return `${FLAVOR_POOL[start]} the Nameless`;
+}
+
+/** Options for the roster-global assignment. */
+export interface EpithetsOptions {
+  /** character_name → raw death-cause strings (feeds the Treefoe override). */
+  causesByName?: ReadonlyMap<string, string[]>;
+  /**
+   * character_name → the title the viking currently holds. When omitted, each
+   * viking's own `current_title` on the roster row is used. This is the hysteresis
+   * incumbent: the held dimension gets a stickiness bonus, and a held placeholder
+   * is kept as long as it stays free — so uniqueness never causes churn.
+   */
+  incumbentByName?: ReadonlyMap<string, string | null>;
+}
+
+/**
+ * Title the WHOLE warband at once, guaranteeing every viking a UNIQUE epithet.
+ *
+ * Returns a map keyed by `character_name`. Every surface (site pages, OG images,
+ * the /api/titles endpoint the bot polls) computes from this one function, so they
+ * can never disagree — and no two vikings ever share a title.
+ *
+ * The algorithm:
+ *   1. Treefoe (unique) to the most tree-felled qualifier; the rest fall through.
+ *   2. Score every remaining (viking, dimension) pair, sort the passing pairs by
+ *      score (desc; deterministic tie-breaks), and greedily assign — a title or a
+ *      viking already taken is skipped, so each deed-title lands on its truest
+ *      owner and its runner-up drops to their next-best deed.
+ *   3. Anyone still untitled gets a personalized placeholder — their incumbent one
+ *      if it's still free (stability), else a name-hash pick de-duplicated against
+ *      the roster.
+ */
+export function epithetsFor(
+  roster: PlayerWithStats[],
+  options: EpithetsOptions = {},
+): Map<string, Epithet> {
+  const causesByName = options.causesByName;
+  const incumbentByName = options.incumbentByName;
+  const incumbentOf = (p: PlayerWithStats): string | null =>
+    incumbentByName ? incumbentByName.get(p.character_name) ?? null : p.current_title ?? null;
+  const causesOf = (p: PlayerWithStats): string[] =>
+    causesByName?.get(p.character_name) ?? [];
+
+  const result = new Map<string, Epithet>();
+  const assigned = new Set<string>(); // character_name
+  const usedTitles = new Set<string>();
+
+  // Precompute each dimension's roster-wide distribution once.
+  const dimStats = new Map<EpithetSource, DimStats>();
+  for (const dim of DIMENSIONS) dimStats.set(dim.source, statsFor(roster, dim));
+
+  // ── 1. Treefoe — unique; goes to the viking the forest has felled most. ──
+  const treeClaimants = roster
+    .map((p) => ({ p, causes: causesOf(p) }))
+    .filter((x) => isTreefoe(x.causes))
+    .map((x) => ({
+      p: x.p,
+      count: treeDeathCount(x.causes),
+      frac: x.causes.length ? treeDeathCount(x.causes) / x.causes.length : 0,
+    }))
+    .sort(
+      (a, b) => b.count - a.count || b.frac - a.frac || byName(a.p.character_name, b.p.character_name),
+    );
+  if (treeClaimants.length > 0) {
+    const winner = treeClaimants[0].p;
+    result.set(winner.character_name, { title: 'Treefoe', source: 'treefoe' });
+    assigned.add(winner.character_name);
+    usedTitles.add('Treefoe');
+  }
+
+  // ── 2. Deed dimensions — score every pair, assign greedily by score. ──
+  const dimOrder = new Map(DIMENSIONS.map((d, i) => [d.source, i]));
+  interface Edge {
+    name: string;
+    dim: Dimension;
+    score: number;
+  }
+  const edges: Edge[] = [];
+  for (const p of roster) {
+    if (assigned.has(p.character_name)) continue;
+    const inc = incumbentOf(p);
+    const incumbentSource = inc ? SOURCE_BY_TITLE.get(inc) : undefined;
+    for (const dim of DIMENSIONS) {
+      const score = scoreDim(p, dim, dimStats.get(dim.source)!, incumbentSource);
+      if (score != null) edges.push({ name: p.character_name, dim, score });
+    }
+  }
+  edges.sort(
+    (a, b) =>
+      b.score - a.score ||
+      byName(a.name, b.name) ||
+      dimOrder.get(a.dim.source)! - dimOrder.get(b.dim.source)!,
+  );
+  for (const e of edges) {
+    if (assigned.has(e.name) || usedTitles.has(e.dim.epithet)) continue;
+    result.set(e.name, { title: e.dim.epithet, source: e.dim.source });
+    assigned.add(e.name);
+    usedTitles.add(e.dim.epithet);
+  }
+
+  // ── 3. Personalized placeholders for the rest (stable, unique). ──
+  const remaining = roster
+    .filter((p) => !assigned.has(p.character_name))
+    .sort((a, b) => byName(a.character_name, b.character_name));
+  // Pass A: keep an incumbent placeholder that's still free — no needless churn.
+  for (const p of remaining) {
+    const inc = incumbentOf(p);
+    if (inc && FLAVOR_SET.has(inc) && !usedTitles.has(inc)) {
+      result.set(p.character_name, { title: inc, source: 'flavor' });
+      assigned.add(p.character_name);
+      usedTitles.add(inc);
+    }
+  }
+  // Pass B: everyone left gets a de-duplicated name-hash pick.
+  for (const p of remaining) {
+    if (assigned.has(p.character_name)) continue;
+    const title = pickPlaceholder(p.character_name, usedTitles);
+    result.set(p.character_name, { title, source: 'flavor' });
+    assigned.add(p.character_name);
+    usedTitles.add(title);
+  }
+
+  return result;
+}
+
+/**
  * The generated epithet for one viking, judged against the whole warband.
  *
- * @param deathCauses raw cause strings from the viking's death events — feeds
- *   only the Treefoe override.
- * @param incumbent the title the viking currently holds (players.current_title).
+ * Backward-compatible thin wrapper over {@link epithetsFor}: it runs the full
+ * roster-global assignment (so the returned title is UNIQUE and consistent with
+ * every other surface) and returns this viking's entry. Prefer `epithetsFor` when
+ * titling more than one viking — it does the work once.
+ *
+ * @param deathCauses raw cause strings from THIS viking's death events — feeds the
+ *   Treefoe override for this viking. (Other vikings' Treefoe status is only seen
+ *   when you pass full causes via `epithetsFor`.)
+ * @param incumbent the title this viking currently holds (players.current_title).
  *   When supplied, hysteresis makes that title sticky: a rival must beat it by a
- *   real margin before it flips. Omit it for the pure best (site pages do this,
- *   so every surface renders the same live-standings title by construction; the
- *   API + bot pass it so announcements don't churn on tiny deltas).
+ *   real margin before it flips. When omitted, each viking's own `current_title`
+ *   on the roster row is used, so the API + bot and the site agree.
  */
 export function epithetFor(
   player: PlayerWithStats,
@@ -205,48 +449,23 @@ export function epithetFor(
   deathCauses: string[] = [],
   incumbent?: string | null,
 ): Epithet {
-  // 1. The forest's mark trumps all.
-  if (isTreefoe(deathCauses)) return { title: 'Treefoe', source: 'treefoe' };
+  const inRoster = roster.some(
+    (r) => r === player || r.character_name === player.character_name,
+  );
+  const list = inRoster ? roster : [...roster, player];
 
-  const incumbentSource = incumbent ? SOURCE_BY_TITLE.get(incumbent) : undefined;
+  const causesByName = new Map<string, string[]>([[player.character_name, deathCauses]]);
+  const incumbentByName = new Map<string, string | null>();
+  for (const p of list) incumbentByName.set(p.character_name, p.current_title ?? null);
+  if (incumbent !== undefined) incumbentByName.set(player.character_name, incumbent);
 
-  // 2. Most distinctive dimension: gate on ratio-vs-median + z-score, then score
-  //    by z-score plus a crown bonus (rank) plus incumbent stickiness (hysteresis).
-  let best: { dim: Dimension; score: number } | null = null;
-  for (const dim of DIMENSIONS) {
-    const v = dim.value(player);
-    if (v == null || !Number.isFinite(v) || v <= 0) continue;
-
-    const s = statsFor(roster, dim);
-    if (s.median <= 0 || s.std <= 0) continue;
-
-    const lead = v / s.median;
-    if (lead < MIN_LEAD) continue;
-
-    const z = (v - s.mean) / s.std;
-    if (z < MIN_Z) continue;
-
-    // "the Ever-Present" belongs to the one who is there more than anyone.
-    if (dim.superlative && v < s.max) continue;
-
-    // A crown: sole roster leader, clearing the runner-up by a real margin
-    // (or the only viking doing it at all).
-    const soleLeader = v >= s.max && s.leaderCount === 1;
-    const crown = soleLeader && (s.secondMax <= 0 || v >= s.secondMax * LEADER_MARGIN);
-
-    let score = z;
-    if (crown) score += LEADER_BONUS;
-    if (crown && dim.combat) score += COMBAT_BONUS;
-    if (incumbentSource && dim.source === incumbentSource) score += HYSTERESIS_BONUS;
-
-    if (!best || score > best.score) best = { dim, score };
-  }
-
-  if (best) return { title: best.dim.epithet, source: best.dim.source };
-
-  // 3. No standout — a flavor title, stable by name.
-  const flavor = FLAVOR_POOL[hashName(player.character_name) % FLAVOR_POOL.length];
-  return { title: flavor, source: 'flavor' };
+  const map = epithetsFor(list, { causesByName, incumbentByName });
+  return (
+    map.get(player.character_name) ?? {
+      title: FLAVOR_POOL[hashName(player.character_name) % FLAVOR_POOL.length],
+      source: 'flavor',
+    }
+  );
 }
 
 const BIO_LINES: ((first: string, title: string) => string)[] = [

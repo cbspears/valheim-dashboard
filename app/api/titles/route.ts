@@ -5,7 +5,7 @@ import {
   getEventsSince,
   playtimeMinutesByCharacter,
 } from '@/lib/data';
-import { epithetFor } from '@/lib/epithets';
+import { epithetsFor } from '@/lib/epithets';
 import type { PlayerWithStats } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -59,14 +59,19 @@ export async function GET() {
     causesByName.set(nm, arr);
   }
 
+  // Title the whole warband at once so every viking's epithet is UNIQUE (no two
+  // share a title) and consistent with the site. Each viking's persisted
+  // current_title is read as the hysteresis incumbent (epithetsFor defaults to the
+  // roster's current_title), so a NEW title only surfaces once a challenger clears a
+  // real margin — exactly the signal the bot announces on.
+  const titles = epithetsFor(roster, { causesByName });
   const players = roster.map((p) => {
-    const ep = epithetFor(
-      p,
-      roster,
-      causesByName.get(p.character_name) ?? [],
-      p.current_title ?? null,
-    );
-    return { name: p.character_name, title: ep.title, source: ep.source };
+    const ep = titles.get(p.character_name);
+    return {
+      name: p.character_name,
+      title: ep?.title ?? '',
+      source: ep?.source ?? 'flavor',
+    };
   });
 
   return Response.json(
