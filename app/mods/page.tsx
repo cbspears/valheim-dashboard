@@ -23,6 +23,8 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { MODS, MOD_CATEGORIES, type Mod, type ModCategory } from '@/config/mods';
+import { MODPACK_PROFILE_CODE } from '@/config/server';
+import { CopyChip } from '@/components/get-started/CopyChip';
 
 // Static page — reads only the curated mod config, no live DB.
 export const metadata: Metadata = {
@@ -164,6 +166,16 @@ export default function ModsPage() {
               <Compass size={13} className="align-middle" />
               New here? Get started →
             </Link>
+            {MODPACK_PROFILE_CODE ? (
+              <>
+                <br />
+                <span className="mt-2 inline-block">
+                  Or skip the list entirely — the one-click Eilif modpack carries every
+                  client rune, pre-configured. r2modman → Import profile → From code:{' '}
+                  <CopyChip value={MODPACK_PROFILE_CODE} />
+                </span>
+              </>
+            ) : null}
           </p>
         </CardBody>
       </Card>
