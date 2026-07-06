@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { Card, CardHeader, CardBody, EmptyState, StatTile, VikingLink } from '@/components/ui';
 import { BossHero } from '@/components/boss/BossHero';
+import { BossPortrait } from '@/components/art/BossPortrait';
+import { ART_ENABLED } from '@/config/art';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import { getBosses, getGalleryPhotos, getUpcomingEvents, getAllPlayers } from '@/lib/data';
 import { slugify, vikingPath, matchVikingName, resolvePhotoViking } from '@/lib/slug';
@@ -65,7 +67,18 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
 
     return (
       <div className="flex flex-col gap-8">
-        <BossHero boss={boss} />
+        {ART_ENABLED ? (
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-stretch">
+            <div className="mx-auto w-32 shrink-0 sm:mx-0 sm:w-44">
+              <BossPortrait name={boss.name} status="defeated" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <BossHero boss={boss} />
+            </div>
+          </div>
+        ) : (
+          <BossHero boss={boss} />
+        )}
 
         {/* The Circle — the TRUE war party (those who actually fought). Prefer the
             honest fighter set; fall back to players_present for rows recorded
@@ -255,7 +268,18 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
 
   return (
     <div className="flex flex-col gap-8">
-      <BossHero boss={boss} />
+      {ART_ENABLED ? (
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-stretch">
+          <div className="mx-auto w-32 shrink-0 sm:mx-0 sm:w-44">
+            <BossPortrait name={boss.name} status="locked" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <BossHero boss={boss} />
+          </div>
+        </div>
+      ) : (
+        <BossHero boss={boss} />
+      )}
 
       <Card className="bg-surface/60">
         <CardBody>

@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { clsx } from 'clsx';
 import { Crown, Lock, Swords, Target, Trophy } from 'lucide-react';
 import { Badge, Card, CardBody, EmptyState, VikingLink } from '@/components/ui';
+import { BossPortrait } from '@/components/art/BossPortrait';
+import { ART_ENABLED } from '@/config/art';
 import { shortDate } from '@/lib/format';
 import { bossPath } from '@/lib/slug';
 import type { Boss } from '@/lib/types';
@@ -151,6 +153,18 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                   status === 'locked' && 'bg-surface/60'
                 )}
               >
+                {/* Boss portrait — only once art has landed (ART_ENABLED),
+                    so the timeline is byte-identical while the manifest is
+                    empty. Floats beside the text; the card copy flows around. */}
+                {ART_ENABLED && (
+                  <div className="float-right ml-4 mb-2 w-16 sm:w-20">
+                    <BossPortrait
+                      name={boss.name}
+                      status={status === 'killed' ? 'defeated' : status}
+                    />
+                  </div>
+                )}
+
                 <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted">
                   Forsaken {ROMAN[i] ?? i + 1}
                 </p>

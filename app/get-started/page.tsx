@@ -26,6 +26,7 @@ import {
   ScrollText,
 } from 'lucide-react';
 import { Card, CardBody, SectionHeader, Badge } from '@/components/ui';
+import { PageHeader } from '@/components/art/PageHeader';
 import { CopyChip } from '@/components/get-started/CopyChip';
 import {
   SERVER_NAME,
@@ -155,11 +156,13 @@ export default function GetStartedPage() {
 
   return (
     <div className="flex flex-col gap-12">
-      <SectionHeader
-        title="Get Started"
-        subtitle={`New to ${SERVER_NAME}? Log on and install the mods in five steps — about 15 minutes, no experience needed. Then the four things to do once you're in.`}
-        icon={<Compass size={22} />}
-      />
+      <PageHeader slot="get-started">
+        <SectionHeader
+          title="Get Started"
+          subtitle={`New to ${SERVER_NAME}? Log on and install the mods in five steps — about 15 minutes, no experience needed. Then the four things to do once you're in.`}
+          icon={<Compass size={22} />}
+        />
+      </PageHeader>
 
       {/* ══════════════ PART ONE — BEFORE YOU SAIL ══════════════ */}
       <section>

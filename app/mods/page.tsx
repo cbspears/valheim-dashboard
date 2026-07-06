@@ -22,6 +22,7 @@ import {
   Badge,
   EmptyState,
 } from '@/components/ui';
+import { PageHeader } from '@/components/art/PageHeader';
 import { MODS, MOD_CATEGORIES, type Mod, type ModCategory } from '@/config/mods';
 import { MODPACK_PROFILE_CODE } from '@/config/server';
 import { CopyChip } from '@/components/get-started/CopyChip';
@@ -127,17 +128,19 @@ export default function ModsPage() {
 
   return (
     <div>
-      <SectionHeader
-        title="The Mods"
-        subtitle="Everything running on this world — install every mod marked Client before you can join."
-        icon={<Scroll size={22} />}
-        action={
-          <div className="hidden items-center gap-2 sm:flex">
-            <Badge tone="gold">{clientCount} client</Badge>
-            <Badge tone="neutral">{MODS.length} total</Badge>
-          </div>
-        }
-      />
+      <PageHeader slot="mods">
+        <SectionHeader
+          title="The Mods"
+          subtitle="Everything running on this world — install every mod marked Client before you can join."
+          icon={<Scroll size={22} />}
+          action={
+            <div className="hidden items-center gap-2 sm:flex">
+              <Badge tone="gold">{clientCount} client</Badge>
+              <Badge tone="neutral">{MODS.length} total</Badge>
+            </div>
+          }
+        />
+      </PageHeader>
 
       {/* Legend / install note */}
       <Card className="mb-9">

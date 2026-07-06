@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Images, Camera, MessageSquare, Sparkles } from 'lucide-react';
 import { SectionHeader, Card, CardBody, Badge } from '@/components/ui';
+import { PageHeader } from '@/components/art/PageHeader';
 import { PhotoGrid } from '@/components/gallery/PhotoGrid';
 import { getGalleryPhotos, getAllPlayers } from '@/lib/data';
 import { resolvePhotoViking } from '@/lib/slug';
@@ -25,16 +26,18 @@ export default async function GalleryPage() {
 
   return (
     <div>
-      <SectionHeader
-        title="The Gallery"
-        subtitle="Screenshots and sagas from the warband."
-        icon={<Images size={22} />}
-        action={
-          <Badge tone="neutral">
-            {photos.length} {photos.length === 1 ? 'photo' : 'photos'}
-          </Badge>
-        }
-      />
+      <PageHeader slot="gallery">
+        <SectionHeader
+          title="The Gallery"
+          subtitle="Screenshots and sagas from the warband."
+          icon={<Images size={22} />}
+          action={
+            <Badge tone="neutral">
+              {photos.length} {photos.length === 1 ? 'photo' : 'photos'}
+            </Badge>
+          }
+        />
+      </PageHeader>
 
       {/* How to add — prominent, gold-accented explainer */}
       <Card className="mb-8 border-l-2 border-l-gold">

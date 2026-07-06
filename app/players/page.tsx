@@ -18,6 +18,7 @@ import {
   FishSymbol,
 } from 'lucide-react';
 import { Card, SectionHeader, Badge, EmptyState, OnlineDot, VikingLink } from '@/components/ui';
+import { PageHeader } from '@/components/art/PageHeader';
 import {
   LeaderboardCard,
   type LeaderboardEntry,
@@ -303,14 +304,16 @@ export default async function PlayersPage() {
   return (
     <div className="flex flex-col gap-12">
       {/* ── Header ─────────────────────────────────────────────── */}
-      <SectionHeader
-        title="The Vikings"
-        subtitle="Every warrior who has set foot on these shores — the warband that carves its saga into the world."
-        icon={<Users size={22} />}
-        action={
-          <Badge tone="neutral">{roster.length} sworn</Badge>
-        }
-      />
+      <PageHeader slot="players">
+        <SectionHeader
+          title="The Vikings"
+          subtitle="Every warrior who has set foot on these shores — the warband that carves its saga into the world."
+          icon={<Users size={22} />}
+          action={
+            <Badge tone="neutral">{roster.length} sworn</Badge>
+          }
+        />
+      </PageHeader>
 
       {/* ── Sailing Now ────────────────────────────────────────── */}
       <section>

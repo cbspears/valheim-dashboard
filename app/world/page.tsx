@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Map as MapIcon, CalendarClock, Trophy } from 'lucide-react';
 import { SectionHeader, Card, CardBody } from '@/components/ui';
+import { PageHeader } from '@/components/art/PageHeader';
 import { BossTimeline } from '@/components/world/BossTimeline';
 import { MilestoneLedger } from '@/components/world/MilestoneLedger';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
@@ -23,11 +24,13 @@ export default async function WorldPage() {
   return (
     <div className="flex flex-col gap-12">
       <section>
-        <SectionHeader
-          title="World Progress"
-          subtitle="Boss-gated progression — each forsaken felled opens the next leg of the journey. No one sails ahead of the longship."
-          icon={<MapIcon size={22} />}
-        />
+        <PageHeader slot="world">
+          <SectionHeader
+            title="World Progress"
+            subtitle="Boss-gated progression — each forsaken felled opens the next leg of the journey. No one sails ahead of the longship."
+            icon={<MapIcon size={22} />}
+          />
+        </PageHeader>
         <BossTimeline bosses={bosses} />
       </section>
 

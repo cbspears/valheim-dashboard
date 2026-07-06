@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Map, Camera, Landmark, History } from 'lucide-react';
 import { SectionHeader, Card, CardBody, Badge, EmptyState } from '@/components/ui';
+import { PageHeader } from '@/components/art/PageHeader';
 import { LiveWorld } from '@/components/map/LiveWorld';
 // NOTE: the demo timelapse (`components/map/MapTimelapse`) + its fixtures
 // (`config/map-demo.generated.ts`, `public/map-demo/`) are intentionally NOT
@@ -27,12 +28,14 @@ export default async function MapPage() {
 
   return (
     <div>
-      <SectionHeader
-        title="The Known World"
-        subtitle="Only what the warband has charted. The rest of the world keeps its secrets."
-        icon={<Map size={22} />}
-        action={liveMap ? <Badge tone="online">Live</Badge> : null}
-      />
+      <PageHeader slot="map">
+        <SectionHeader
+          title="The Known World"
+          subtitle="Only what the warband has charted. The rest of the world keeps its secrets."
+          icon={<Map size={22} />}
+          action={liveMap ? <Badge tone="online">Live</Badge> : null}
+        />
+      </PageHeader>
 
       {/* The LIVE known world — fed by the real server (fog-masked before upload),
           with the real per-in-game-day replay scrubber and real /pin markers. */}

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { ScrollText, PenLine, MessageSquare } from 'lucide-react';
 import { SectionHeader, Card, CardBody } from '@/components/ui';
+import { PageHeader } from '@/components/art/PageHeader';
 import { Charter } from '@/components/oath/Charter';
 import { SignatureWall } from '@/components/oath/SignatureWall';
 import { getOaths } from '@/lib/data';
@@ -26,11 +27,13 @@ export default async function OathPage() {
 
       {/* The signature wall */}
       <section>
-        <SectionHeader
-          title="The Signature Wall"
-          subtitle={`${count} ${count === 1 ? 'viking has' : 'vikings have'} sworn.`}
-          icon={<PenLine size={22} />}
-        />
+        <PageHeader slot="oath" prominent>
+          <SectionHeader
+            title="The Signature Wall"
+            subtitle={`${count} ${count === 1 ? 'viking has' : 'vikings have'} sworn.`}
+            icon={<PenLine size={22} />}
+          />
+        </PageHeader>
 
         {/* How to swear — gold-accented explainer (mirrors the Map/Gallery idiom) */}
         <Card className="mb-6 border-l-2 border-l-gold">

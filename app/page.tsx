@@ -27,6 +27,7 @@ import {
   BossLink,
 } from '@/components/ui';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
+import { HomeHero } from '@/components/art/HomeHero';
 import { Hearth } from '@/components/home/Hearth';
 import { GreatDeedsCard } from '@/components/milestones/GreatDeedsCard';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
@@ -79,42 +80,54 @@ export default async function HomePage() {
   const nextBoss = bosses.find((b) => !b.is_killed) ?? null;
   const bossPercent = totalBosses > 0 ? Math.round((felledCount / totalBosses) * 100) : 0;
 
+  // Live status strip beneath the hero art. Rendered inside both the current
+  // banner hero and the art-backed HomeHero, so it survives either path.
+  const statusStrip = (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-rune bg-pitch/50 px-5 py-3 text-sm backdrop-blur-sm sm:px-7">
+      <Badge tone={isOnline ? 'online' : 'offline'}>
+        <OnlineDot online={isOnline} />
+        {isOnline ? 'Server Online' : 'Server Offline'}
+      </Badge>
+      <span className="flex items-center gap-1.5 text-ash-dim">
+        <Sun size={14} className="text-gold-dim" />
+        Day {worldDay} of the tenth world
+      </span>
+      <span className="flex items-center gap-1.5 text-ash-dim">
+        <Users size={14} className="text-gold-dim" />
+        {playerCount} / {MAX_PLAYERS} sailing
+      </span>
+      {SERVER_ADDRESS && (
+        <span className="inline-flex items-center gap-2 rounded-full border border-rune bg-pitch/70 px-3 py-1">
+          <Signal size={13} className="text-online-glow" />
+          <span className="font-mono text-xs text-ash">{SERVER_ADDRESS}</span>
+        </span>
+      )}
+    </div>
+  );
+
+  // Current banner hero — the graceful fallback rendered verbatim while the
+  // art manifest is empty (zero visual change).
+  const heroFallback = (
+    <div className="overflow-hidden rounded-[var(--radius-card)] border border-gold-dim/40 shadow-[0_0_50px_-14px_rgba(200,149,42,0.45)]">
+      <Image
+        src="/banner-eilif.webp"
+        alt={`${SERVER_NAME} — ${SERVER_TAGLINE}`}
+        width={1983}
+        height={793}
+        priority
+        className="h-auto w-full"
+      />
+      {/* Live status strip beneath the art (keeps the banner pristine) */}
+      {statusStrip}
+    </div>
+  );
+
   return (
     <div className="space-y-10">
       <AutoRefresh />
 
       {/* ───────────────────────── HERO BANNER ───────────────────────── */}
-      <div className="overflow-hidden rounded-[var(--radius-card)] border border-gold-dim/40 shadow-[0_0_50px_-14px_rgba(200,149,42,0.45)]">
-        <Image
-          src="/banner-eilif.webp"
-          alt={`${SERVER_NAME} — ${SERVER_TAGLINE}`}
-          width={1983}
-          height={793}
-          priority
-          className="h-auto w-full"
-        />
-        {/* Live status strip beneath the art (keeps the banner pristine) */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-rune bg-pitch/50 px-5 py-3 text-sm backdrop-blur-sm sm:px-7">
-          <Badge tone={isOnline ? 'online' : 'offline'}>
-            <OnlineDot online={isOnline} />
-            {isOnline ? 'Server Online' : 'Server Offline'}
-          </Badge>
-          <span className="flex items-center gap-1.5 text-ash-dim">
-            <Sun size={14} className="text-gold-dim" />
-            Day {worldDay} of the tenth world
-          </span>
-          <span className="flex items-center gap-1.5 text-ash-dim">
-            <Users size={14} className="text-gold-dim" />
-            {playerCount} / {MAX_PLAYERS} sailing
-          </span>
-          {SERVER_ADDRESS && (
-            <span className="inline-flex items-center gap-2 rounded-full border border-rune bg-pitch/70 px-3 py-1">
-              <Signal size={13} className="text-online-glow" />
-              <span className="font-mono text-xs text-ash">{SERVER_ADDRESS}</span>
-            </span>
-          )}
-        </div>
-      </div>
+      <HomeHero fallback={heroFallback} statusStrip={statusStrip} />
 
       {/* ───────────────────── STAT STRIP ────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
