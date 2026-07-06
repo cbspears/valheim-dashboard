@@ -62,3 +62,4 @@ plugins/eilif-paths/bin/
 # NOTE: plugins/eilif-paths/dist/EilifPaths.dll IS committed (the deployable artifact).
 pilot-staging/
 scripts/.map-snapshot-state.json
+.claude/
