@@ -164,7 +164,32 @@ export const EILIF_ART: Record<string, ArtAsset> = {
  * List ids exactly as they appear as keys of EILIF_ART.
  * ────────────────────────────────────────────────────────────
  */
-export const ART_AVAILABLE: string[] = [];
+export const ART_AVAILABLE: string[] = [
+  '00_reference_style_image',
+  '01_cozy_longhall_fjord_cliff',
+  '02_longhall_doorway_title_card',
+  '03_three_longships_title_card',
+  '04_empty_snowfield_runestone',
+  '05_frozen_fjord_dawn_aurora',
+  '06_frozen_giant_colossus',
+  '07_longhall_snowy_night_text_space',
+  '08_longhall_interior_hearth_v1',
+  '09_illustrated_fantasy_map',
+  '10_longhall_interior_hearth_v2',
+  '11_overworld_vista',
+  '12_skald_storytelling',
+  '13_craftsman_workbench_forge',
+  '14_hall_of_deeds',
+  '15_viking_oath_scene',
+  '16_new_frontier_longship',
+  '17_eikthyr_boss_portrait',
+  '18_the_elder_boss_portrait',
+  '19_bonemass_boss_portrait',
+  '20_moder_boss_portrait',
+  '21_yagluth_boss_portrait',
+  '22_seeker_queen_boss_portrait',
+  '23_fader_boss_portrait',
+];
 
 const AVAILABLE = new Set(ART_AVAILABLE);
 
