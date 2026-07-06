@@ -56,9 +56,21 @@ journalctl -u valheim-log-poller -f
 | `WEBHOOK_SECRET` | — | must match the dashboard |
 | `POLL_INTERVAL_MS` | `20000` | log fetch cadence |
 | `SYNC_EVERY_MS` | `120000` | roster reconciliation cadence |
+| `EMIT_DEATHS` | `true` | `false` once gs-ingest owns deaths (avoids double-count) |
+| `CHAT_DISCORD_WEBHOOK` | — | optional channel webhook for the chat mirror (posts AS the player) |
+| `DISCORD_TOKEN` + `CHAT_CHANNEL_ID` | — | chat-mirror fallback: bot-token post (`🗨️ **Name:** text`) |
+
+## Chat mirror (in-game → Discord, one-way)
+Shouted chat is mirrored to Discord (only shouts reach a dedicated server —
+proximity "say"/whisper never do, so shout = the server's global chat).
+Two capture paths, deduped (plugin preferred for its original casing):
+1. `[EILIF_CHAT] name | text` from Eilif Companion ≥0.1.2 (raw casing);
+2. the mod-free console shout echo (text arrives UPPERCASED).
+Slash-command shouts (`/oath`, `/pin`, …) are never mirrored as chat. Chat is
+posted straight to Discord — it never touches the dashboard webhook/events
+table (the site is public; chat is not). Mentions are hard-disabled.
 
 ## Notes / future
 - Boss kills are **not** in the log — tracked manually for now (no parser rule).
-- Chat relay needs the DiscordConnector client mod — out of scope for v1.
 - The `Connections N` server heartbeat is only emitted ~every 10 min; join/leave events are
   real-time, so presence still updates within one poll interval.

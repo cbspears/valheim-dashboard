@@ -15,6 +15,9 @@ export class Poller {
     this.parser = new LogParser();
     this.lastSyncAt = 0;
     this.stopped = false;
+    // Recently-mirrored chat, key -> posted-at ms. The same shout can surface
+    // twice (plugin [EILIF_CHAT] line + console echo); this suppresses the twin.
+    this.recentChat = new Map();
   }
 
   async loadState() {
@@ -105,11 +108,23 @@ export class Poller {
       const lines = combined.split('\n');
       this.partial = lines.pop() ?? ''; // last (possibly partial) line held over
 
+      // Collect the whole batch first so chat dedupe can prefer the plugin's
+      // raw-case [EILIF_CHAT] line over the UPPERCASED console echo of the
+      // same shout (the two lines land milliseconds apart, i.e. same batch).
+      const batch = [];
       for (const line of lines) {
-        const events = this.parser.processLine(line);
-        for (const ev of events) {
-          await this.dispatch(ev);
+        batch.push(...this.parser.processLine(line));
+      }
+      const pluginChatKeys = new Set(
+        batch
+          .filter((e) => e.type === 'chat' && e.metadata.source === 'plugin')
+          .map((e) => this.chatKey(e))
+      );
+      for (const ev of batch) {
+        if (ev.type === 'chat' && ev.metadata.source === 'echo' && pluginChatKeys.has(this.chatKey(ev))) {
+          continue; // twin of a plugin-captured shout in this same batch
         }
+        await this.dispatch(ev);
       }
     }
 
@@ -124,7 +139,78 @@ export class Poller {
     await this.saveState();
   }
 
+  // Case-insensitive identity of one shout (echo text arrives uppercased).
+  chatKey(ev) {
+    return `${ev.characterName}|${ev.metadata.text.toUpperCase()}`;
+  }
+
+  // --- Mirror one in-game shout to Discord (plain channel webhook) ---
+  // Not routed through the dashboard webhook on purpose: chat is Discord-only
+  // (the site is public), so it never touches the events table.
+  async postChat(ev) {
+    const key = this.chatKey(ev);
+    const now = Date.now();
+    // Cross-batch twin suppression (plugin line + console echo split across
+    // two polls, or a re-read after a log rotation glitch).
+    for (const [k, t] of this.recentChat) {
+      if (now - t > 60000) this.recentChat.delete(k);
+    }
+    if (this.recentChat.has(key)) {
+      this.log.info?.(`[chat] duplicate suppressed: ${key.slice(0, 60)}`);
+      return;
+    }
+    this.recentChat.set(key, now);
+
+    const name = ev.characterName;
+    const text = ev.metadata.text.slice(0, 1900);
+
+    if (this.cfg.chatWebhookUrl) {
+      // Channel webhook: post AS the player (username override). Discord
+      // rejects a few reserved/invalid usernames — fall back to bolded-name.
+      const send = (body) =>
+        fetch(this.cfg.chatWebhookUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...body, allowed_mentions: { parse: [] } }),
+        });
+      let res = await send({ username: name.slice(0, 80), content: text });
+      if (res.status === 400) {
+        res = await send({ content: `**${name}:** ${text}` });
+      }
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`chat webhook ${res.status}: ${detail.slice(0, 120)}`);
+      }
+      return;
+    }
+
+    // Bot-token path (the bot lacks MANAGE_WEBHOOKS as of 2026-07-05, so no
+    // channel webhook exists yet): plain message in the configured channel.
+    const res = await fetch(`https://discord.com/api/v10/channels/${this.cfg.chatChannelId}/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bot ${this.cfg.discordToken}`,
+      },
+      body: JSON.stringify({
+        content: `🗨️ **${name}:** ${text}`,
+        allowed_mentions: { parse: [] },
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`chat post ${res.status}: ${detail.slice(0, 120)}`);
+    }
+  }
+
   async dispatch(ev) {
+    if (ev.type === 'chat') {
+      const configured = this.cfg.chatWebhookUrl || (this.cfg.discordToken && this.cfg.chatChannelId);
+      if (!configured) return; // mirroring not configured
+      this.log.info?.(`[event] chat ${ev.characterName} (${ev.metadata.source})`);
+      await this.postChat(ev).catch((e) => this.log.warn?.(`[chat] ${e.message}`));
+      return;
+    }
     if (ev.type === 'heartbeat') {
       // Heartbeat → authoritative roster sync (no feed event).
       this.log.info?.(`[heartbeat] ${ev.count} online: [${ev.metadata.online.join(', ')}]`);

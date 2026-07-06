@@ -21,6 +21,14 @@ const config = {
   // Emit log-derived `death` events? Default true. Flip to false once
   // GsValheimStatsClient feeds real causes via /api/gs-ingest (avoids double-count).
   emitDeaths: (process.env.EMIT_DEATHS || 'true').toLowerCase() !== 'false',
+  // In-game shout chat → Discord mirror. Optional — with neither configured,
+  // chat mirroring is off. Chat goes straight to Discord and never through
+  // the dashboard webhook (the site is public; chat is not). Preferred:
+  // CHAT_DISCORD_WEBHOOK (channel webhook; posts AS the player). Fallback:
+  // DISCORD_TOKEN + CHAT_CHANNEL_ID (bot-token post, "🗨️ **Name:** text").
+  chatWebhookUrl: process.env.CHAT_DISCORD_WEBHOOK || '',
+  discordToken: process.env.DISCORD_TOKEN || '',
+  chatChannelId: process.env.CHAT_CHANNEL_ID || '',
   statePath: process.env.STATE_PATH || new URL('../state.json', import.meta.url).pathname,
   sftp: {
     host: process.env.SFTP_HOST,

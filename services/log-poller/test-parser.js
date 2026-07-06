@@ -90,8 +90,41 @@ if (!oathOk) ok = false;
   const p2 = new LogParser();
   const ev = p2.processLine('[Info   : Unity Log] 07/04/2026 01:02:49: Console: <color=orange>Testman</color>: <color=#FFEB04FF>/OATH I SWEAR TO HAVE A GOOD TIME</color>');
   if (!(ev.length === 1 && ev[0].type === 'oath' && ev[0].characterName === 'Testman' && ev[0].metadata.text === 'I SWEAR TO HAVE A GOOD TIME')) { console.log('console-echo oath FAILED'); ok = false; }
-  else if (p2.processLine('[Info   : Unity Log] Console: <color=orange>T</color>: <color=#FFEB04FF>JUST A SHOUT</color>').length !== 0) { console.log('plain shout matched FAILED'); ok = false; }
-  else console.log('CONSOLE OATH OK');
+  else {
+    // A plain shout is no longer silent — it's mirrorable chat (echo source).
+    const shout = p2.processLine('[Info   : Unity Log] Console: <color=orange>T</color>: <color=#FFEB04FF>JUST A SHOUT</color>');
+    if (!(shout.length === 1 && shout[0].type === 'chat' && shout[0].characterName === 'T' && shout[0].metadata.text === 'JUST A SHOUT' && shout[0].metadata.source === 'echo')) { console.log('plain shout -> chat FAILED'); ok = false; }
+    else console.log('CONSOLE OATH OK');
+  }
+}
+
+// --- shout-chat mirroring (plugin line + console echo) ---
+{
+  const p3 = new LogParser();
+  const checks = [
+    // Plugin capture: raw casing, text may contain " | ".
+    ['plugin chat', '[Info   :Eilif Companion] [EILIF_CHAT] Testman | hello there | all', { characterName: 'Testman', text: 'hello there | all', source: 'plugin' }],
+    // Console echo: uppercased by the game.
+    ['echo chat', '[Info   : Unity Log] 07/05/2026 20:11:03: Console: <color=orange>Ivar Hollowleg</color>: <color=#FFEB04FF>ANYONE SEEN MY CART</color>', { characterName: 'Ivar Hollowleg', text: 'ANYONE SEEN MY CART', source: 'echo' }],
+    // Slash-commands are never chat (neither path).
+    ['plugin /pin not chat', '[Info   :Eilif Companion] [EILIF_CHAT] Testman | /pin base Odinshold', null],
+    ['echo /pin not chat', '[Info   : Unity Log] Console: <color=orange>Testman</color>: <color=#FFEB04FF>/PIN BASE ODINSHOLD</color>', null],
+  ];
+  let chatOk = true;
+  for (const [label, line, expect] of checks) {
+    const evs = p3.processLine(line).filter((e) => e.type === 'chat');
+    let pass;
+    if (expect === null) pass = evs.length === 0;
+    else pass = evs.length === 1 && evs[0].characterName === expect.characterName && evs[0].metadata.text === expect.text && evs[0].metadata.source === expect.source;
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) chatOk = false;
+  }
+  // Oath shouts must still resolve to oath (not chat) via the earlier check.
+  const oathEv = p3.processLine('[Info   : Unity Log] Console: <color=orange>Testman</color>: <color=#FFEB04FF>/OATH I SWEAR</color>');
+  if (!(oathEv.length === 1 && oathEv[0].type === 'oath')) { console.log('  ✗ oath shout stays oath'); chatOk = false; }
+  else console.log('  ✓ oath shout stays oath');
+  console.log(chatOk ? 'CHAT PARSING OK' : 'CHAT PARSING FAILED');
+  if (!chatOk) ok = false;
 }
 
 // --- Relog fixture: same Steam connection, different character (real

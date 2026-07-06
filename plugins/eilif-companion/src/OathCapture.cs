@@ -5,7 +5,8 @@ using UnityEngine;
 namespace EilifCompanion
 {
     /// <summary>
-    /// EARS: capture in-game "/oath &lt;text&gt;" chat on the dedicated server.
+    /// EARS: capture in-game "/oath &lt;text&gt;" chat — and mirrorable shout chat — on the
+    /// dedicated server.
     ///
     /// Hooked directly onto Chat.RPC_ChatMessage — proven to execute on this very server for
     /// shouted messages (observed in LogOutput.log with this exact signature via a ValheimPlus
@@ -27,9 +28,22 @@ namespace EilifCompanion
             {
                 if (type == (int)Talker.Type.Ping) return; // pings carry no chat text
                 string t = (text ?? "").Trim();
-                if (t.Length <= OathPrefix.Length) return;
-                if (!t.StartsWith(OathPrefix, StringComparison.OrdinalIgnoreCase)) return;
+                if (t.Length == 0) return;
 
+                if (!t.StartsWith(OathPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Not an oath. Any other SHOUTED, non-command text is mirrorable chat:
+                    // emit it with its ORIGINAL casing (the console echo the poller also
+                    // sees is display-uppercased, so this line is the pretty source; the
+                    // poller dedupes the echo twin). Slash-commands (/pin etc.) are never
+                    // chat.
+                    if (type != (int)Talker.Type.Shout) return;
+                    if (t.StartsWith("/", StringComparison.Ordinal)) return;
+                    EilifCompanionPlugin.Log.LogInfo($"[EILIF_CHAT] {userInfo.Name ?? ""} | {t}");
+                    return;
+                }
+
+                if (t.Length <= OathPrefix.Length) return; // "/oath" with no text
                 string oath = t.Substring(OathPrefix.Length).Trim();
                 if (oath.Length == 0) return;
 

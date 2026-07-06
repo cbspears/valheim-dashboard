@@ -55,6 +55,15 @@ const RE = {
   // world position isn't available from the console echo alone).
   //   [EILIF_PIN] Testman | poi | The Dark Chapel | 123.4 | -567.8
   pin: /\[EILIF_PIN\]\s*(.+?)\s*\|\s*(base|poi)\s*\|\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*$/,
+  // The Eilif companion plugin's shout-chat capture (raw casing, name/text
+  // split on the FIRST " | " like [EILIF_OATH]):
+  //   [EILIF_CHAT] Testman | hello there
+  chat: /\[EILIF_CHAT\]\s*(.+)$/,
+  // Any shouted chat as echoed by the server console — the mod-free capture
+  // path (text arrives display-UPPERCASED). Command shouts (/oath, /pin, …)
+  // are filtered out in processLine, and the consoleOath check runs first.
+  //   Console: <color=orange>Testman</color>: <color=#FFEB04FF>HELLO THERE</color>
+  consoleShout: /Console:\s*<color=orange>(.+?)<\/color>:\s*<color=[^>]*>(.+?)<\/color>/,
 };
 
 export class LogParser {
@@ -119,6 +128,34 @@ export class LogParser {
       const text = co[2].trim();
       if (name && text) {
         events.push({ type: 'oath', characterName: name, metadata: { text } });
+      }
+      return events;
+    }
+
+    // --- Any other shouted chat (console echo, mod-free but UPPERCASED) ---
+    const cs = line.match(RE.consoleShout);
+    if (cs) {
+      const name = cs[1].trim();
+      const text = cs[2].trim();
+      // '/'-prefixed shouts are commands (/oath handled above, /pin via the
+      // plugin, anything else is noise) — never mirror them as chat.
+      if (name && text && !text.startsWith('/')) {
+        events.push({ type: 'chat', characterName: name, metadata: { text, source: 'echo' } });
+      }
+      return events;
+    }
+
+    // --- Shout chat (raw casing, via the Eilif companion plugin) ---
+    const ch = line.match(RE.chat);
+    if (ch) {
+      const rest = ch[1];
+      const sep = rest.indexOf(' | ');
+      if (sep !== -1) {
+        const name = rest.slice(0, sep).trim();
+        const text = rest.slice(sep + ' | '.length).trim();
+        if (name && text && !text.startsWith('/')) {
+          events.push({ type: 'chat', characterName: name, metadata: { text, source: 'plugin' } });
+        }
       }
       return events;
     }
