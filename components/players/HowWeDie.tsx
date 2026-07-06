@@ -171,7 +171,7 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
   const unrecordedCount = counts.get(UNRECORDED) ?? 0;
   const unrecordedRow =
     unrecordedCount > 0
-      ? { cause: UNRECORDED, label: 'Unwitnessed', count: unrecordedCount, unrecorded: true as const }
+      ? { cause: UNRECORDED, label: 'Cause unknown', count: unrecordedCount, unrecorded: true as const }
       : null;
 
   const rows = unrecordedRow ? [...realRows, unrecordedRow] : realRows;
@@ -258,8 +258,8 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
 
           {unrecordedRow && (
             <p className="text-xs italic text-muted">
-              {unrecordedRow.count} unwitnessed — before the ravens kept watch, these falls went
-              unrecorded. The count is true; the cause is lost to time.
+              {unrecordedRow.count} with no known cause — recorded before the player was running the
+              stats mod, so only the death itself was logged, not what caused it.
             </p>
           )}
 

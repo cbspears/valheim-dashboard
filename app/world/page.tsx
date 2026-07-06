@@ -16,7 +16,7 @@ export default async function WorldPage() {
       <section>
         <SectionHeader
           title="World Progress"
-          subtitle="The forsaken gate the realm. None sail ahead of the longship."
+          subtitle="Boss-gated progression — each forsaken felled opens the next leg of the journey. No one sails ahead of the longship."
           icon={<MapIcon size={22} />}
         />
         <BossTimeline bosses={bosses} />

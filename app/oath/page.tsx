@@ -54,6 +54,13 @@ export default async function OathPage() {
               viking&apos;s page. Spell it as it appears in-game. Swear again anytime to change your
               words; your latest oath replaces the last.
             </p>
+            <p className="mt-3 text-sm leading-relaxed text-ash-dim">
+              You can also swear without leaving the game — shout it:{' '}
+              <span className="rounded bg-gold/15 px-2 py-1 font-mono text-xs font-semibold text-gold-light">
+                /s /oath your vow, one line
+              </span>
+              {'. '}It must be a shout — plain chat never leaves the campfire.
+            </p>
           </CardBody>
         </Card>
 

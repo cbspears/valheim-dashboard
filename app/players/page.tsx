@@ -186,7 +186,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'kills',
-      title: 'Greatest Slayer',
+      title: 'Most Kills',
       icon: <Swords size={16} />,
       accent: 'text-gold',
       empty: 'No blood has been spilled across the realms.',
@@ -194,7 +194,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'damage',
-      title: 'Deadliest Blade',
+      title: 'Damage Dealt',
       icon: <Flame size={16} />,
       accent: 'text-gold',
       empty: 'No wounds dealt. Every blade still rests in its sheath.',
@@ -218,7 +218,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'crafted',
-      title: 'Master Crafter',
+      title: 'Items Crafted',
       icon: <Hammer size={16} />,
       accent: 'text-gold',
       empty: 'The forges are cold. Nothing has been wrought.',
@@ -226,7 +226,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'distance',
-      title: 'Farthest Wandered',
+      title: 'Distance Traveled',
       icon: <Footprints size={16} />,
       accent: 'text-gold',
       emptyTitle: 'No trails blazed yet',
@@ -241,7 +241,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'built',
-      title: 'Master Builder',
+      title: 'Structures Built',
       icon: <Castle size={16} />,
       accent: 'text-gold',
       empty: 'Not a single nail driven. The longhouses are yet to rise.',
@@ -249,10 +249,10 @@ export default async function PlayersPage() {
     },
     {
       key: 'explored',
-      title: 'Cartographer',
+      title: 'Map Explored',
       icon: <MapIcon size={16} />,
       accent: 'text-gold',
-      subtitle: "Awaiting the mapmakers' ledgers — coverage arrives once vikings opt in to the map uploader.",
+      subtitle: 'Fills in as players run the companion map-share mod (in the modpack).',
       emptyTitle: 'No frontier charted',
       empty: 'The fog hangs thick over every shore. No mapmaker has yet turned in their ledger.',
       entries: topBy(withStats, (p) => p.stats?.map_explored_pct ?? 0, formatPercent),
@@ -275,7 +275,7 @@ export default async function PlayersPage() {
       <section>
         <SectionHeader
           title="Sailing Now"
-          subtitle="Vikings currently braving the realms."
+          subtitle="Who's online right now."
           icon={<Sailboat size={20} />}
           action={
             online.length > 0 ? (
@@ -322,7 +322,7 @@ export default async function PlayersPage() {
       <section>
         <SectionHeader
           title="The Warband"
-          subtitle="The full muster, ranked by time spent in the realms."
+          subtitle="Everyone who has played, ranked by hours in the world."
           icon={<Users size={20} />}
         />
 
@@ -398,8 +398,8 @@ export default async function PlayersPage() {
       {/* ── Attendance Constellation ───────────────────────────── */}
       <section>
         <SectionHeader
-          title="Nights at the Hearth"
-          subtitle="Ten weeks of gathering — every night the longhouse fires were lit, and by whom."
+          title="Attendance"
+          subtitle="The last ten weeks — every night the longhouse fires were lit, and by whom."
           icon={<CalendarDays size={20} />}
         />
         <AttendanceCalendar sessions={attendanceSessions} />
@@ -408,7 +408,7 @@ export default async function PlayersPage() {
       {/* ── Leaderboards ───────────────────────────────────────── */}
       <section>
         <SectionHeader
-          title="Sagas & Records"
+          title="Leaderboards"
           subtitle="The deeds — and misdeeds — that will be sung of in the mead halls."
           icon={<Swords size={20} />}
         />

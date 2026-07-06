@@ -37,7 +37,7 @@ export default async function EventsPage() {
       <section className="flex flex-col gap-6">
         <SectionHeader
           title="The Full Chronicle"
-          subtitle="Every deed, death, and triumph — as it was recorded."
+          subtitle="The complete event log — every deed, death, and triumph as it was recorded."
           icon={<ScrollText size={22} />}
         />
         <EventFeed events={events} />

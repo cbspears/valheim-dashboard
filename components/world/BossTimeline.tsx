@@ -19,8 +19,8 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
       <Card>
         <EmptyState
           icon={<Swords size={28} />}
-          title="The forsaken slumber unrecorded"
-          message="No bosses have been etched into the saga yet. The map awaits its first marker."
+          title="No bosses felled yet"
+          message="The timeline lights up when the first forsaken falls."
         />
       </Card>
     );

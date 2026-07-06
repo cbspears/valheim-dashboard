@@ -109,8 +109,8 @@ export default async function HomePage() {
 
       {/* ───────────────────── STAT STRIP ────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatTile label="Online Now" value={playerCount} icon={<Users size={16} />} hint="vikings sailing" />
-        <StatTile label="World Day" value={worldDay} icon={<Sun size={16} />} hint="of the tenth world" />
+        <StatTile label="Online Now" value={playerCount} icon={<Users size={16} />} hint="in the world right now" />
+        <StatTile label="World Day" value={worldDay} icon={<Sun size={16} />} hint="in-game days since landfall" />
         <StatTile
           label="Total Vikings"
           value={allPlayers.length}

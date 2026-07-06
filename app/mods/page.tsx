@@ -28,8 +28,8 @@ import { CopyChip } from '@/components/get-started/CopyChip';
 
 // Static page — reads only the curated mod config, no live DB.
 export const metadata: Metadata = {
-  title: 'The Runestones',
-  description: 'The mods that augment The Fractured Realms.',
+  title: 'Mods',
+  description: 'Every mod running on The Fractured Realms — and which ones you must install to join.',
 };
 
 const CATEGORY_META: Record<
@@ -38,7 +38,7 @@ const CATEGORY_META: Record<
 > = {
   Core: {
     icon: Boxes,
-    blurb: 'The foundation every other rune is carved upon — required to walk this world.',
+    blurb: 'The core stack — required to join the server.',
   },
   QoL: {
     icon: Wrench,
@@ -128,8 +128,8 @@ export default function ModsPage() {
   return (
     <div>
       <SectionHeader
-        title="The Runestones"
-        subtitle="The runes carved into this world — install every Client rune before you may set foot in the realm."
+        title="The Mods"
+        subtitle="Everything running on this world — install every mod marked Client before you can join."
         icon={<Scroll size={22} />}
         action={
           <div className="hidden items-center gap-2 sm:flex">
@@ -146,19 +146,18 @@ export default function ModsPage() {
             <ShieldAlert size={20} />
           </span>
           <p className="text-sm leading-relaxed text-ash-dim">
-            Runes marked{' '}
+            Mods marked{' '}
             <Badge tone="gold" className="mx-0.5 align-middle">
               <Download size={11} />
               Client
             </Badge>{' '}
-            must be installed on your own machine before the gate will open — match
-            the versions below, ideally through a mod manager like Thunderstore or
-            r2modman. Runes marked{' '}
+            must be installed on your own machine, matching the versions below — ideally
+            through a mod manager like r2modman. Mods marked{' '}
             <Badge tone="neutral" className="mx-0.5 align-middle">
               <Server size={11} />
               Server-only
             </Badge>{' '}
-            are woven into the host already; there is nothing for you to do.{' '}
+            run on the server itself — nothing for you to install.{' '}
             <Link
               href="/get-started"
               className="gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light hover:underline"
@@ -170,8 +169,8 @@ export default function ModsPage() {
               <>
                 <br />
                 <span className="mt-2 inline-block">
-                  Or skip the list entirely — the one-click Eilif modpack carries every
-                  client rune, pre-configured. r2modman → Import profile → From code:{' '}
+                  Or skip the list entirely — the one-click Eilif modpack installs every
+                  client mod, pre-configured. r2modman → Import profile → From code:{' '}
                   <CopyChip value={MODPACK_PROFILE_CODE} />
                 </span>
               </>
@@ -183,7 +182,7 @@ export default function ModsPage() {
       {MODS.length === 0 ? (
         <EmptyState
           icon={<Scroll size={28} />}
-          title="No runes carved yet"
+          title="No mods listed yet"
           message="The realm runs vanilla for now. Mods will appear here once the jarl installs them."
         />
       ) : (
@@ -204,7 +203,7 @@ export default function ModsPage() {
                     {category}
                   </h3>
                   <span className="text-xs text-muted">
-                    {mods.length} {mods.length === 1 ? 'rune' : 'runes'}
+                    {mods.length} {mods.length === 1 ? 'mod' : 'mods'}
                   </span>
                   <span className="ml-auto hidden text-xs text-muted sm:block">
                     {blurb}

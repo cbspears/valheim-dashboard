@@ -299,7 +299,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
       {/* ── Attendance ─────────────────────────────────────────── */}
       <section>
         <SectionHeader
-          title="Nights at the Hearth"
+          title="Attendance"
           subtitle={`Every night ${first} lit the longhouse fires, across ten weeks.`}
           icon={<CalendarDays size={20} />}
         />
@@ -309,7 +309,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
       {/* ── Crowns + Death-roll ────────────────────────────────── */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div>
-          <SectionHeader title="Crowns Worn" icon={<Crown size={20} />} />
+          <SectionHeader title="Crowns Worn" subtitle="Player of the Day awards." icon={<Crown size={20} />} />
           {myCrowns.length === 0 ? (
             <Card>
               <EmptyState
@@ -336,7 +336,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
         </div>
 
         <div>
-          <SectionHeader title="The Death-Roll" icon={<Skull size={20} />} />
+          <SectionHeader title="Deaths" icon={<Skull size={20} />} />
           <DeathLog deaths={myDeaths} first={first} />
         </div>
       </section>
@@ -354,7 +354,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
       {/* ── Gallery ────────────────────────────────────────────── */}
       <section>
         <SectionHeader
-          title="Sagas in Silver"
+          title="Screenshots"
           subtitle={`Scenes ${first} carried back from the realms.`}
           icon={<Camera size={20} />}
         />
@@ -362,7 +362,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           <Card>
             <EmptyState
               icon={<Camera size={26} />}
-              title="Photos await"
+              title="No screenshots yet"
               message={`Once ${first} is linked (see the note above), every screenshot they've shared will gather here.`}
             />
           </Card>
@@ -370,7 +370,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           <Card>
             <EmptyState
               icon={<Camera size={26} />}
-              title="No sagas in silver"
+              title="No screenshots yet"
               message={`${first} has shared no images to the hall — yet.`}
             />
           </Card>

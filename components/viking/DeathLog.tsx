@@ -43,7 +43,7 @@ export function DeathLog({ deaths, first }: { deaths: GameEvent[]; first: string
         <span className="text-death">
           <Skull size={16} />
         </span>
-        <h3 className="font-display text-sm uppercase tracking-wide text-ash">The Death-Roll</h3>
+        <h3 className="font-display text-sm uppercase tracking-wide text-ash">Deaths</h3>
       </div>
 
       {sorted.length === 0 ? (

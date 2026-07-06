@@ -59,7 +59,7 @@ export function FeatsOfArms({
       show: !!gs.records.topWeapon,
     },
     {
-      label: 'Hardest Blow',
+      label: 'Hardest Hit',
       value: formatNumber(Math.round(gs.records.hardestHit)),
       icon: <Zap size={14} />,
       show: gs.records.hardestHit > 0,

@@ -83,7 +83,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
 
           return (
             <Card>
-              <CardHeader title="The Circle" icon={<Users size={16} />} />
+              <CardHeader title="The War Party" icon={<Users size={16} />} />
               <CardBody>
                 {fighters.length > 0 ? (
                   <>
@@ -114,7 +114,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
 
         {/* The Retelling */}
         <Card>
-          <CardHeader title="The Retelling" icon={<ScrollText size={16} />} />
+          <CardHeader title="The Skald's Retelling" icon={<ScrollText size={16} />} />
           <CardBody>
             {boss.retelling?.trim() ? (
               <figure>
@@ -137,7 +137,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
 
         {/* The Depiction */}
         <Card>
-          <CardHeader title="The Depiction" icon={<Camera size={16} />} />
+          <CardHeader title="Screenshots" icon={<Camera size={16} />} />
           {depiction ? (
             <CardBody>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -161,7 +161,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
           ) : (
             <EmptyState
               icon={<Camera size={28} />}
-              title="No depiction yet"
+              title="No screenshots yet"
               message="No depiction yet — post one in Discord and name the beast."
             />
           )}
@@ -186,7 +186,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
 
           return (
             <Card className={hasRecord ? undefined : 'bg-surface/60'}>
-              <CardHeader title="The Full Record" icon={<Swords size={16} />} />
+              <CardHeader title="Fight Record" icon={<Swords size={16} />} />
               <CardBody>
                 {hasRecord ? (
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -206,7 +206,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
                     )}
                     {topPlayer && (
                       <StatTile
-                        label="Hardest hitter"
+                        label="Top damage"
                         icon={<Flame size={14} />}
                         value={
                           <VikingLink name={matchVikingName(topPlayer, roster)}>
@@ -218,7 +218,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
                     )}
                     {warriors && (
                       <StatTile
-                        label="Warriors in the fray"
+                        label="Fighters"
                         value={warriors}
                         icon={<Users size={14} />}
                       />

@@ -34,12 +34,12 @@ export function Hearth({
       title: 'The fire is banked',
       body:
         typeof worldDay === 'number'
-          ? `Day ${worldDay} — the hall stands ready, embers waiting for footsteps.`
-          : 'The hall stands ready, embers waiting for footsteps.',
+          ? `Day ${worldDay} — the server is up, but no one is online.`
+          : 'The server is up, but no one is online.',
     },
     sleeping: {
       title: 'The hall sleeps',
-      body: 'No fire burns tonight. The gates await the next saga.',
+      body: 'The server is offline.',
     },
   }[state];
 

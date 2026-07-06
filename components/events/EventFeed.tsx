@@ -120,8 +120,8 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
         {filtered.length === 0 ? (
           <EmptyState
             icon={<ScrollText size={28} />}
-            title="No tales of this kind…"
-            message="The skalds have recorded no such deeds. Choose another thread of the saga."
+            title="Nothing here yet"
+            message="No events of this type have been recorded yet — try another filter."
           />
         ) : (
           <div className="max-h-[72vh] overflow-y-auto">
