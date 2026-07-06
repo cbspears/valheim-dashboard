@@ -15,6 +15,7 @@ import {
   Map as MapIcon,
   Crown,
   CalendarDays,
+  FishSymbol,
 } from 'lucide-react';
 import { Card, SectionHeader, Badge, EmptyState, OnlineDot, VikingLink } from '@/components/ui';
 import {
@@ -104,6 +105,36 @@ function travelSubtitle(p: PlayerWithStats): string | undefined {
   shares.sort((a, b) => b[1] - a[1]);
   const [label, top] = shares[0];
   return top / total >= 0.5 ? label : undefined;
+}
+
+/** Fishing skill level from `gs_stats.skills`, 0 if absent. */
+function fishingLevel(p: PlayerWithStats): number {
+  const skills = p.stats?.gs_stats?.skills ?? [];
+  return skills.find((sk) => sk.skill === 'Fishing')?.level ?? 0;
+}
+
+/** Total catches (sum of `gs_stats.fish[].count`), 0 if absent. */
+function totalCatches(p: PlayerWithStats): number {
+  const fish = p.stats?.gs_stats?.fish ?? [];
+  return fish.reduce((sum, f) => sum + f.count, 0);
+}
+
+/**
+ * Anglers board: ranked by Fishing skill level, ties broken by total catches —
+ * distinct enough from the single-metric `topBy` helper to warrant its own
+ * sort (two numbers, not one).
+ */
+function anglerEntries(players: PlayerWithStats[], n = 5): LeaderboardEntry[] {
+  return players
+    .map((p) => ({ id: p.id, name: p.character_name, level: fishingLevel(p), catches: totalCatches(p) }))
+    .filter((e) => e.level > 0 || e.catches > 0)
+    .sort((a, b) => b.level - a.level || b.catches - a.catches)
+    .slice(0, n)
+    .map((e) => ({
+      id: e.id,
+      name: e.name,
+      value: `L${e.level} · ${formatNumber(e.catches)} catches`,
+    }));
 }
 
 interface Board {
@@ -256,6 +287,16 @@ export default async function PlayersPage() {
       emptyTitle: 'No frontier charted',
       empty: 'The fog hangs thick over every shore. No mapmaker has yet turned in their ledger.',
       entries: topBy(withStats, (p) => p.stats?.map_explored_pct ?? 0, formatPercent),
+    },
+    {
+      key: 'anglers',
+      title: 'Anglers',
+      icon: <FishSymbol size={16} />,
+      accent: 'text-gold',
+      subtitle: 'Fishing skill — ties broken by total catches.',
+      emptyTitle: 'No catches yet',
+      empty: 'No viking has yet pulled a fish from the water.',
+      entries: anglerEntries(withStats),
     },
   ];
 

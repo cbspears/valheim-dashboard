@@ -15,8 +15,17 @@
 // combat only) and are ignored here.
 
 import type { GsClientStats } from './types';
+import { FISH } from '../config/fish';
 
 type Obj = Record<string, unknown>;
+
+// Fish are ordinary pickup items — their per-species counts ride along in the
+// same `pickups[]` breakdown as wood/stone/etc. `config/fish.ts` is the single
+// source of truth for known ids; ⚠️ re-verify against a live payload the first
+// time someone fishes on the test world (expected shape: `Fish1`…`Fish12`).
+const FISH_ITEM_IDS = new Set(Object.keys(FISH));
+/** Any pickup id shaped like a fish prefab, known or not — used to self-report gaps. */
+const FISH_SHAPED = /^Fish\d/i;
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
@@ -89,24 +98,51 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
     .filter((s) => s.level > 0)
     .sort((a, b) => b.level - a.level);
 
+  // Fish are items — species counts ride along in the same pickups[] breakdown
+  // as every other resource. No cap (≤12 known species); unknown Fish*-shaped
+  // ids are logged so the config/fish.ts map self-reports gaps.
+  const pickups = arr(self.pickups);
+  const fish = pickups
+    .map((p) => ({ item: str(p.item) ?? '?', count: num(p.count) }))
+    .filter((p) => FISH_ITEM_IDS.has(p.item) && p.count > 0)
+    .sort((a, b) => b.count - a.count);
+  for (const p of pickups) {
+    const item = str(p.item);
+    if (item && FISH_SHAPED.test(item) && !FISH_ITEM_IDS.has(item)) {
+      console.info(`[gs-client] unrecognized fish-shaped pickup id: ${item} (add to config/fish.ts)`);
+    }
+  }
+
   const materials = arr(self.materials)
     .map((m) => ({ material: str(m.material) ?? '?', amount: num(m.amount) }))
     .filter((m) => m.amount > 0)
     .sort((a, b) => b.amount - a.amount);
 
   const damageDealt = Math.round(sumBy(weapons, 'damageDealt'));
-  const resourcesHarvested = sumBy(arr(self.pickups), 'count');
+  // Fish are pickups too — counted here same as every other resource, no
+  // double-subtract; the fish[] breakdown above is purely additive detail.
+  const resourcesHarvested = sumBy(pickups, 'count');
   // Prefer the authoritative profile counter; fall back to the per-item breakdown.
   const itemsCrafted = statNum('vh_Crafts') || sumBy(arr(self.crafts), 'count');
   const structuresBuilt = statNum('vh_Builds');
+
+  // Top-12 skills by level, but never silently drop Fishing if it fell outside
+  // (a viking with 12 better skills would otherwise lose their Angler entry).
+  const top12Skills = skills.slice(0, 12);
+  const fishingSkill = skills.find((sk) => sk.skill === 'Fishing');
+  const skillsOut =
+    fishingSkill && !top12Skills.some((sk) => sk.skill === 'Fishing')
+      ? [...top12Skills, fishingSkill]
+      : top12Skills;
 
   const top = weapons[0];
   const gsStats: GsClientStats = {
     weapons: weapons.slice(0, 12),
     creatureKills: creatureKills.slice(0, 15),
     bossDamage,
-    skills: skills.slice(0, 12),
+    skills: skillsOut,
     materials: materials.slice(0, 12),
+    fish,
     records: {
       topWeapon: top?.weapon ?? null,
       topWeaponDamage: top?.damageDealt ?? 0,

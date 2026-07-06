@@ -64,6 +64,8 @@ export interface GsClientStats {
   bossDamage: { boss: string; damageDealt: number; fightSec: number }[];
   skills: { skill: string; level: number }[];
   materials: { material: string; amount: number }[];
+  /** Per-species catch counts (pickups filtered to config/fish.ts ids), sorted desc. */
+  fish: { item: string; count: number }[];
   records: {
     topWeapon: string | null;
     topWeaponDamage: number;
@@ -244,6 +246,29 @@ export interface PotyHistoryEntry {
   world_day: number | null;
   awarded_at: string;
   created_at: string | null;
+}
+
+/**
+ * A Collective Milestone ("Great Deed") — a server-wide aggregate threshold
+ * (db/2026-07-05_milestones.sql). Definitions are seeded; achieved/announced
+ * state lives on the row (evaluator: lib/milestones.ts).
+ */
+export interface Milestone {
+  id: string;
+  /** evaluator key summed across all vikings (see METRICS in lib/milestones.ts). */
+  metric: string;
+  threshold: number;
+  title: string;
+  /** ceremonial voice/TTS line; {value} is interpolated with the achieved total. */
+  line: string;
+  equivalence: string | null;
+  sort: number;
+  /** set once the aggregate first crosses the threshold (idempotency guard). */
+  achieved_at: string | null;
+  achieved_value: number | null;
+  /** set by the Discord bot when the deed was cross-posted (oaths pattern). */
+  announced_at: string | null;
+  meta: Record<string, unknown> | null;
 }
 
 export interface ServerStatus {

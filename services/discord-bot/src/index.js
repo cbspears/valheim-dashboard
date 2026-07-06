@@ -15,6 +15,7 @@ import { createOathIngest } from './oaths.js';
 import { createIdentityLink } from './identity.js';
 import { createVoiceEngine } from './voice.js';
 import { createTitlesAnnouncer } from './titles.js';
+import { createMilestonesAnnouncer } from './milestones.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
 const POLL = parseInt(process.env.POLL_INTERVAL_MS || '15000', 10);
@@ -153,6 +154,24 @@ async function runLive() {
     await titlesLoop();
     timers.push(setInterval(titlesLoop, interval));
     extra += `, titles every ${interval}ms${process.env.TITLES_DRY === '1' ? ' (dry)' : ''}`;
+  }
+
+  // Collective Milestones ("Great Deeds"): announce achieved-but-unannounced
+  // deeds to #valheim, one per tick. On by default (MILESTONES_ANNOUNCE=0 to
+  // disable); needs the service-role client to write announced_at. Tolerates the
+  // milestones table not existing yet (logs once, skips).
+  if (process.env.MILESTONES_ANNOUNCE !== '0') {
+    const milestones = createMilestonesAnnouncer({
+      db,
+      writeDb,
+      post,
+      channel: process.env.MILESTONE_CHANNEL || 'valheim',
+    });
+    const interval = parseInt(process.env.MILESTONES_INTERVAL_MS || '120000', 10);
+    const milestonesLoop = safe('milestones', () => milestones.tick());
+    await milestonesLoop();
+    timers.push(setInterval(milestonesLoop, interval));
+    extra += `, milestones every ${interval}ms`;
   }
 
   console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s${extra}.`);

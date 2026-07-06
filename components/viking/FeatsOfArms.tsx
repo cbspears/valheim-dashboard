@@ -1,7 +1,8 @@
-import { Swords, Sword, Zap, Timer, Crosshair, Crown } from 'lucide-react';
+import { Swords, Sword, Zap, Timer, Crosshair, Crown, FishSymbol } from 'lucide-react';
 import { Card, EmptyState, BossLink } from '@/components/ui';
 import { formatNumber } from '@/lib/format';
 import { matchBossName } from '@/lib/slug';
+import { FISH, fishName } from '@/config/fish';
 import type { PlayerStats, Boss } from '@/lib/types';
 
 /** Seconds -> "1h 4m" / "12m 30s" / "45s". */
@@ -51,6 +52,10 @@ export function FeatsOfArms({
   const gs = stats?.gs_stats ?? null;
   if (!gs) return null;
 
+  const fishingLevel = (gs.skills ?? []).find((sk) => sk.skill === 'Fishing')?.level ?? 0;
+  const catches = gs.fish ?? [];
+  const totalCatches = catches.reduce((sum, c) => sum + c.count, 0);
+
   const records: Rec[] = [
     {
       label: 'Favored Weapon',
@@ -82,13 +87,31 @@ export function FeatsOfArms({
       icon: <Crosshair size={14} />,
       show: (stats?.best_kills_before_death ?? 0) > 0,
     },
+    {
+      label: 'Fishing',
+      value: `L${fishingLevel} · ${formatNumber(totalCatches)} catches`,
+      icon: <FishSymbol size={14} />,
+      show: fishingLevel > 0 || totalCatches > 0,
+    },
   ].filter((r) => r.show);
 
   const beasts = (gs.creatureKills ?? []).filter((c) => c.kills > 0).slice(0, 8);
   const bosses = (gs.bossDamage ?? []).filter((b) => b.damageDealt > 0).slice(0, 8);
 
+  // Personal fishing log: every known species (config/fish.ts), caught species
+  // showing their tally, uncaught ones greyed — doubles as a compact "log" of
+  // what's left to catch. Only shown once the viking has actually gone fishing
+  // (otherwise it's just clutter on every profile).
+  const catchByItem = new Map(catches.map((c) => [c.item, c.count]));
+  const fishingLog = Object.keys(FISH).map((item) => ({
+    item,
+    name: fishName(item),
+    count: catchByItem.get(item) ?? 0,
+  }));
+  const showFishingLog = fishingLevel > 0 || totalCatches > 0;
+
   // Nothing worth showing yet.
-  if (records.length === 0 && beasts.length === 0 && bosses.length === 0) return null;
+  if (records.length === 0 && beasts.length === 0 && bosses.length === 0 && !showFishingLog) return null;
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -168,6 +191,31 @@ export function FeatsOfArms({
                 </li>
               );
             })}
+          </ol>
+        </Card>
+      )}
+
+      {/* Personal fishing log */}
+      {showFishingLog && (
+        <Card className="flex flex-col">
+          <div className="flex items-center gap-2.5 border-b border-rune px-5 py-3.5">
+            <span className="text-gold">
+              <FishSymbol size={16} />
+            </span>
+            <h3 className="font-display text-sm uppercase tracking-wide text-ash">The Catch</h3>
+          </div>
+          <ol className="flex-1 divide-y divide-rune/50">
+            {fishingLog.map((f) => (
+              <li
+                key={f.item}
+                className={`flex items-center gap-3 px-5 py-2.5 ${f.count === 0 ? 'opacity-40' : ''}`}
+              >
+                <span className="flex-1 truncate text-sm text-ash">{f.name}</span>
+                <span className="shrink-0 text-sm tabular-nums text-ash-dim">
+                  {f.count > 0 ? formatNumber(f.count) : '—'}
+                </span>
+              </li>
+            ))}
           </ol>
         </Card>
       )}

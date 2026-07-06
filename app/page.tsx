@@ -28,6 +28,7 @@ import {
 } from '@/components/ui';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
 import { Hearth } from '@/components/home/Hearth';
+import { GreatDeedsCard } from '@/components/milestones/GreatDeedsCard';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import {
   getServerStatus,
@@ -37,7 +38,10 @@ import {
   getRecentEvents,
   getUpcomingEvents,
   getOaths,
+  getMilestones,
+  getMilestoneAggregates,
 } from '@/lib/data';
+import { summarizeMilestones } from '@/lib/milestones';
 import { describeEvent } from '@/lib/events';
 import { timeAgo } from '@/lib/format';
 import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/config/server';
@@ -45,15 +49,20 @@ import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/conf
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const [status, online, allPlayers, bosses, events, upcoming, oaths] = await Promise.all([
-    getServerStatus(),
-    getOnlinePlayers(),
-    getAllPlayers(),
-    getBosses(),
-    getRecentEvents(8),
-    getUpcomingEvents(3),
-    getOaths(),
-  ]);
+  const [status, online, allPlayers, bosses, events, upcoming, oaths, milestones, milestoneAgg] =
+    await Promise.all([
+      getServerStatus(),
+      getOnlinePlayers(),
+      getAllPlayers(),
+      getBosses(),
+      getRecentEvents(8),
+      getUpcomingEvents(3),
+      getOaths(),
+      getMilestones(),
+      getMilestoneAggregates(),
+    ]);
+
+  const milestoneSummary = summarizeMilestones(milestones, milestoneAgg);
 
   const oathCount = oaths.length;
   const latestOath = oathCount > 0 ? oaths[oathCount - 1] : null;
@@ -137,7 +146,12 @@ export default async function HomePage() {
           {/* The Hearth — server pulse + who's online */}
           <Hearth status={status} online={online} />
 
-          {/* Recent Saga */}
+          {/* Great Deeds — the collective-milestone counterpart to the Hearth */}
+          <GreatDeedsCard summary={milestoneSummary} />
+        </div>
+
+        {/* Recent Saga — full width beneath the pulse cards */}
+        <div className="mt-5">
           <Card>
             <CardHeader
               title="Recent Saga"

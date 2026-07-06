@@ -21,7 +21,9 @@ import type {
   GalleryPhoto,
   PotyHistoryEntry,
   Oath,
+  Milestone,
 } from './types';
+import { computeAggregates, type Aggregates } from './milestones';
 
 function db() {
   return createClient(
@@ -371,6 +373,34 @@ export async function getPotyArchive(limit = 120): Promise<PotyHistoryEntry[]> {
     .order('awarded_at', { ascending: false })
     .limit(limit);
   return (data as PotyHistoryEntry[]) ?? [];
+}
+
+/**
+ * Collective Milestones ("Great Deeds"), ordered for display. Returns [] when
+ * the table isn't live yet (db/2026-07-05_milestones.sql not applied) so the
+ * Hall + World surfaces render an empty state instead of crashing.
+ */
+export async function getMilestones(): Promise<Milestone[]> {
+  const { data, error } = await db().from('milestones').select('*').order('sort', { ascending: true });
+  if (error) return []; // pre-migration (missing table) — degrade to empty
+  return (data as Milestone[]) ?? [];
+}
+
+/**
+ * The live server-wide aggregate for every milestone metric, computed with the
+ * SAME pure maths as the evaluator (lib/milestones), so the dashboard's progress
+ * bars match what the evaluator will fire. One batch of reads: all player_stats,
+ * a wide window of sessions (for the playtime derivation), and the online roster.
+ */
+export async function getMilestoneAggregates(): Promise<Aggregates> {
+  const [statsRes, sessions, online] = await Promise.all([
+    db().from('player_stats').select('*'),
+    getSessionsSince(400),
+    getOnlinePlayers(),
+  ]);
+  const stats = (statsRes.data as Record<string, unknown>[] | null) ?? [];
+  const onlineNames = new Set(online.map((p) => p.character_name));
+  return computeAggregates({ stats, sessions, onlineNames });
 }
 
 export async function getRoadmap(): Promise<RoadmapItem[]> {

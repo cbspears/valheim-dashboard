@@ -77,6 +77,17 @@ export function describeEvent(e: GameEvent): EventPresentation {
       const msg = str(meta, 'message') ?? '';
       return { icon: MessageSquare, accent: 'text-frost', label: 'Chat', description: `${name}: ${msg}` };
     }
+    case 'milestone': {
+      // Collective milestone ("Great Deed") — server-wide, no character attached.
+      const title = str(meta, 'title') ?? 'A great deed';
+      const line = str(meta, 'line');
+      return {
+        icon: Crown,
+        accent: 'text-gold-light',
+        label: 'Great Deed',
+        description: line ? `${title} — ${line}` : `${title} — a great deed achieved together.`,
+      };
+    }
     case 'craft': {
       const item = str(meta, 'item') ?? 'something';
       return { icon: Hammer, accent: 'text-ash-dim', label: 'Craft', description: `${name} crafted ${item}` };

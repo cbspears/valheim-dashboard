@@ -24,9 +24,23 @@ const payload = {
       bestKillsBeforeDeath: 88,
       currentLifeStartedUtc: '2026-07-04T16:30:00.0000000Z',
       stats: { vh_Deaths: 7, vh_Builds: 214, vh_Crafts: 96, vh_EnemyKills: 342 },
+      // 13 skills, ranked by level — Fishing sits at rank 13 (just outside the
+      // top-12 cap), proving the parser retains it explicitly rather than
+      // dropping it silently.
       skills: [
         { skill: 'Swords', level: 42 },
         { skill: 'Run', level: 30 },
+        { skill: 'Bows', level: 28 },
+        { skill: 'Axes', level: 27 },
+        { skill: 'Blocking', level: 26 },
+        { skill: 'Jump', level: 25 },
+        { skill: 'Sneak', level: 24 },
+        { skill: 'Swim', level: 23 },
+        { skill: 'Knives', level: 22 },
+        { skill: 'Pickaxes', level: 21 },
+        { skill: 'Polearms', level: 20 },
+        { skill: 'Spears', level: 19 },
+        { skill: 'Fishing', level: 5 },
         { skill: 'None', level: 0 },
       ],
       creatureKills: [
@@ -41,7 +55,9 @@ const payload = {
         { weapon: 'Bows', damageDealt: 6000, kills: 90, hardestHit: 140, biggestSwing: 140 },
       ],
       weaponItems: [ { item: 'Iron sword', damageDealt: 18000, kills: 200, hardestHit: 220 } ],
-      pickups: [ { item: 'Wood', count: 800 }, { item: 'Stone', count: 420 } ],
+      // Fish3 (Tuna) rides along in pickups like any other resource — the parser
+      // must both surface it in gsStats.fish AND keep it inside resourcesHarvested.
+      pickups: [ { item: 'Wood', count: 800 }, { item: 'Stone', count: 420 }, { item: 'Fish3', count: 4 } ],
       boss: [ { boss: 'Eikthyr', damageDealt: 2400, fightSec: 120 } ],
     },
     // An OBSERVED other (partial, no cumulative counters) — must be ignored.
@@ -70,8 +86,8 @@ assert.equal(s.deaths, 7);
 assert.equal(s.bossKills, 3);
 assert.equal(s.longestLifeSec, 5400);
 assert.equal(s.bestKillsBeforeDeath, 88);
-// resources = sum(pickups.count) = 800 + 420
-assert.equal(s.resourcesHarvested, 1220);
+// resources = sum(pickups.count) = 800 + 420 + 4 (Fish3 rides along, no double-subtract)
+assert.equal(s.resourcesHarvested, 1224);
 // crafted prefers vh_Crafts (96) over crafts[] sum (96 too, but proves precedence)
 assert.equal(s.itemsCrafted, 96);
 // structures = vh_Builds
@@ -83,9 +99,22 @@ assert.equal(s.gsStats.records.hardestHit, 220);
 assert.equal(s.gsStats.records.biggestSwing, 260);
 // zero-kill creatures + level-0 skills dropped
 assert.equal(s.gsStats.creatureKills.length, 2);
-assert.equal(s.gsStats.skills.length, 2);
 assert.equal(s.gsStats.bossDamage[0].boss, 'Eikthyr');
 assert.equal(s.gsStats.platformId, 'Steam_76561198000000000');
+
+// Skills: 13 have level > 0 (None/level-0 dropped). Fishing (level 5) ranks
+// 13th by level — outside the top-12 cap — but must be retained explicitly,
+// not silently dropped.
+assert.equal(s.gsStats.skills.length, 13);
+assert.ok(
+  s.gsStats.skills.some((sk) => sk.skill === 'Fishing' && sk.level === 5),
+  'Fishing retained even when ranked outside top-12'
+);
+
+// Fish: Fish3 (Tuna) surfaces in gsStats.fish with its pickup count.
+assert.equal(s.gsStats.fish.length, 1);
+assert.equal(s.gsStats.fish[0].item, 'Fish3');
+assert.equal(s.gsStats.fish[0].count, 4);
 
 // Bystander-only payload (no self entry with stats/deaths) -> null.
 const noSelf = parseSelfSnapshot({ reporter: 'Ghost', players: [{ name: 'Other', weapons: [] }] });

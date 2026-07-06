@@ -1,15 +1,24 @@
 import type { Metadata } from 'next';
-import { Map as MapIcon, CalendarClock } from 'lucide-react';
+import { Map as MapIcon, CalendarClock, Trophy } from 'lucide-react';
 import { SectionHeader, Card, CardBody } from '@/components/ui';
 import { BossTimeline } from '@/components/world/BossTimeline';
+import { MilestoneLedger } from '@/components/world/MilestoneLedger';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
-import { getBosses, getUpcomingEvents } from '@/lib/data';
+import { getBosses, getUpcomingEvents, getMilestones, getMilestoneAggregates } from '@/lib/data';
+import { summarizeMilestones } from '@/lib/milestones';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'World' };
 
 export default async function WorldPage() {
-  const [bosses, upcoming] = await Promise.all([getBosses(), getUpcomingEvents(20)]);
+  const [bosses, upcoming, milestones, milestoneAgg] = await Promise.all([
+    getBosses(),
+    getUpcomingEvents(20),
+    getMilestones(),
+    getMilestoneAggregates(),
+  ]);
+
+  const milestoneSummary = summarizeMilestones(milestones, milestoneAgg);
 
   return (
     <div className="flex flex-col gap-12">
@@ -20,6 +29,15 @@ export default async function WorldPage() {
           icon={<MapIcon size={22} />}
         />
         <BossTimeline bosses={bosses} />
+      </section>
+
+      <section>
+        <SectionHeader
+          title="Great Deeds"
+          subtitle="Server-wide milestones — what the warband has done together, tallied across every viking. Earned deeds and the ones still ahead."
+          icon={<Trophy size={22} />}
+        />
+        <MilestoneLedger summary={milestoneSummary} />
       </section>
 
       <section>

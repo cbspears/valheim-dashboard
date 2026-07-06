@@ -7,6 +7,7 @@ import {
   parseBossFighters,
   type ParsedBossKill,
 } from '@/lib/gs-client';
+import { evaluateAndRecord } from '@/lib/milestones';
 
 // GsValheimStats ingest (v0) — the server-side Emitter POSTs here every ~120s
 // (instantly on join/leave): { schemaVersion: 1, game: 'valheim', source: 'server',
@@ -266,10 +267,15 @@ function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
-/** Merge the reporter's cumulative snapshot into player_stats (idempotent, GREATEST). */
-async function ingestPlayerStats(body: Obj): Promise<void> {
+/**
+ * Merge the reporter's cumulative snapshot into player_stats (idempotent,
+ * GREATEST). Returns true when a real stats merge happened (a self snapshot was
+ * present and written) so the caller knows whether it's worth re-evaluating the
+ * collective milestones — false means "nothing changed, skip".
+ */
+async function ingestPlayerStats(body: Obj): Promise<boolean> {
   const s = parseSelfSnapshot(body);
-  if (!s) return;
+  if (!s) return false;
 
   const client = db();
   const now = new Date().toISOString();
@@ -289,7 +295,7 @@ async function ingestPlayerStats(body: Obj): Promise<void> {
       .single();
     pid = ins?.id as string | undefined;
   }
-  if (!pid) return;
+  if (!pid) return false;
 
   // Read the current row so we can GREATEST cumulative counters and avoid a
   // reset/rollback writing lower numbers (only-writer-per-row makes this safe).
@@ -332,7 +338,7 @@ async function ingestPlayerStats(body: Obj): Promise<void> {
   };
 
   const { error } = await client.from('player_stats').upsert(full, { onConflict: 'player_id' });
-  if (!error) return;
+  if (!error) return true;
 
   // Graceful degradation: if the 2026-07-04 migration hasn't been applied yet,
   // the gs_* columns don't exist — retry with only the pre-existing base columns
@@ -348,6 +354,7 @@ async function ingestPlayerStats(body: Obj): Promise<void> {
     updated_at: now,
   };
   await client.from('player_stats').upsert(base, { onConflict: 'player_id' });
+  return true;
 }
 
 // ─── Boss detection ──────────────────────────────────────────────────────────
@@ -598,10 +605,22 @@ export async function POST(req: Request) {
     }
 
     await ingestDeathEvents(body.deathEvents);
-    await ingestPlayerStats(body as Record<string, unknown>);
+    const merged = await ingestPlayerStats(body as Record<string, unknown>);
     // Client payloads also carry bossKillEvents (this client's view of a fight)
     // — enrich, but never flip a boss from a client (the server milestone owns that).
     await ingestBossKillEvents(body.bossKillEvents, 'client');
+
+    // Collective Milestones: re-evaluate the server-wide "Great Deeds" now the
+    // per-player totals just advanced. Best-effort only — a milestone failure
+    // (or a missing milestones table pre-migration) must NEVER fail the ingest.
+    // Skipped entirely when nothing merged (no self snapshot this cycle).
+    if (merged) {
+      try {
+        await evaluateAndRecord(db());
+      } catch (e) {
+        console.error('[milestones]', e instanceof Error ? e.message : e);
+      }
+    }
     return Response.json({ status: 'inserted' });
   }
 
