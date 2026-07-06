@@ -101,6 +101,36 @@ alter table public.milestones enable row level security;
 
 (Thresholds are guesses at good pacing for 15–20 players — expect to tune after a few weeks of real data. Distances are metres, matching `vh_Distance*`.)
 
+### Rebalance — 2026-07-06 (`db/2026-07-06_milestones_rebalance.sql`)
+
+The starter table above (15 deeds) was **lopsided**: 6 of 15 (40%) were "distance
+travelled" (4 `sail_total` + 2 `walk_run_total`), while `boss_kills_total` and
+`crafts_total` had **zero** deeds and `damage`/`resources`/`builds`/`playtime`/
+`explored` had only one each — Charlie's note: "way too many just running
+milestones." Rebalanced to **28 deeds, ~2–3 per category, none over 3**:
+
+- **Distance → 3** (was 6): kept the most evocative early/mid/late equivalences —
+  *The First Marathon* (foot), *The Length of Norway* + *The Road to Vinland*
+  (sea). Dropped *Crossing the Skagerrak*, *The Iceland Crossing*, *The Pilgrims' Way*.
+- **NEW Boss Slaying** (`boss_kills_total`, 3): first boss → half the roster → all 8,
+  matching the real `bosses` table (Eikthyr … Yagluth … the Queen … Fader … the
+  Bog Witch of the Deep North; 8 total, the last lands post-launch).
+- **NEW Crafting** (`crafts_total`, 3): 500 / 2,500 / 10,000 — least-certain
+  thresholds (observed craft counts run low; watch and tune).
+- **`deaths_total` / `kills_total`** unchanged (2 tiers each).
+- **`damage` / `resources` / `builds` / `playtime` / `explored`** each 1 → 3 (added an
+  "achievable soon" tier + a harder endgame tier; `explored_avg_pct` kept inside
+  0–100 at 10 / 25 / 50).
+
+The migration deletes all 15 old rows (pilot achieved/announced state was slated
+for the pre-launch wipe anyway) and re-seeds the 28. Applied to prod
+(`syuwavxpmtdmxupxjzje`) 2026-07-06; `lib/milestones.ts` untouched (nothing
+hardcodes milestone ids — pure data change). Thresholds calibrated against the
+live pilot's real testers (Testmantwo/Psifour/Steve/Testman), **not** the stale
+`Chærlie` junk `player_stats` row (kills 1526 / structures_built 27207 /
+`gs_updated_at` NULL) — recurring junk (a near-identical row was deleted once in
+commit `4ff40f1`); it needs cleaning again before it skews live aggregates.
+
 ### Effort
 Angler: **S** (parser + tests + two dashboard surfaces). Milestones: **M** (migration + evaluator + bot loop + 2 dashboard surfaces + seed content). No client-mod work; nothing at risk from Valheim 1.0.
 

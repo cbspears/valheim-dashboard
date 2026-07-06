@@ -1,11 +1,9 @@
 // The Oath — Session Zero charter for the Eilif warband.
 //
-// This is the doctrine every viking swears to before launch. It is content,
-// not code: edit the wording here and the /oath page re-renders.
-//
-// ⚠️ CHARLIE: this is a first draft of the doctrine — FINALIZE THE WORDING
-// before launch (tone, exact rules, the "Benson model" phrasing). The page
-// reads this file directly; nothing else needs to change.
+// The doctrine every viking swears to before launch. This is content, not
+// code: edit the wording here and the /oath page re-renders. Clause titles
+// state each rule plainly (clarity-first copy doctrine); the saga voice lives
+// in the supporting text below them. Tune freely as the group's customs grow.
 
 export interface OathClause {
   /** short carved-in-stone heading */
@@ -22,35 +20,35 @@ export const OATH_CHARTER: {
 } = {
   title: 'The Oath of Eilif',
   preamble:
-    'Before the first tree falls, we swear it together. These are not rules imposed from a high seat — they are the promises we make to one another, so that the tenth world is a saga we write as one warband, not ten lone wanderers. Read them. Mean them. Then set your mark below.',
+    'Before the first tree falls, we swear this together. These are not rules handed down from a high seat — they are the promises we make to each other, so the tenth world becomes one warband’s saga and not ten wanderers each going their own way. Read them, mean them, then set your mark below.',
 
   clauses: [
     {
-      title: 'No forsaken one falls alone',
-      text: 'No boss is hunted without the warband. We gather, we prepare, we sail together — every viking who wants to be there is there when a forsaken one goes down. Glory is shared or it is not glory.',
+      title: 'No boss falls without the warband',
+      text: 'The Forsaken are hunted as a crew, never alone. We gather, we prepare, and we sail together, so every viking who wants to stand there when one falls can. The glory of a kill belongs to everyone who earned it.',
     },
     {
-      title: 'The Sacred Night',
-      text: 'Saturday is the Sacred Night — the one evening the whole warband keeps for the longship. Bosses, great builds, and the big pushes wait for it. Guard the night; the saga is written on it.',
+      title: 'Saturday is the warband’s night',
+      text: 'Saturday is our Sacred Night — the one evening the whole crew keeps for the longship. The bosses, the great builds, and the big pushes happen then, so guard it when you can.',
     },
     {
-      title: 'Equal shares — the Benson model',
-      text: 'Loot is split fairly among those who sailed for it. What the raid earns, the raid divides — no hoarding the rare drop, no one viking walking off richer than the crew. Everyone leaves the deck equipped.',
+      title: 'Equal shares',
+      text: 'What the raid earns, the raid divides — fairly, among everyone who sailed for it. No hoarding the rare drop, no one viking walking off richer than the crew. We call it the Benson model: everyone leaves the deck equipped.',
     },
     {
-      title: 'Never sail ahead of the longship',
-      text: 'Bosses gate the frontier. We do not rush the next biome, farm the metal, or wake the next threat before the warband is ready together. Progress is a tide the whole crew rides — not a race.',
+      title: 'Nobody rushes ahead',
+      text: 'The bosses gate the world, and we cross each threshold together. Don’t rush the next biome, farm the next metal, or wake the next threat before the warband is ready for it. We move at the pace of the whole crew.',
     },
     {
-      title: 'The community chest gives and receives',
-      text: 'The shared chest is the heart of the hall: take what you need, leave what you can spare. It is stocked in good faith and drawn from in good faith. A well-fed warband is a bold one.',
+      title: 'The community chest',
+      text: 'The shared chest is the heart of the hall: take what you need, leave what you can spare. It runs on good faith in both directions — a warband that pools its stores is a bolder one.',
     },
     {
       title: 'Name what you find',
-      text: 'Chart the world for those who come after. Pin the places worth remembering, name your discoveries, and record the tale — a saga unwritten is a saga lost.',
+      text: 'Chart the world for the vikings who come after you. Pin the places worth remembering, name what you discover, and record the tale while it is fresh — the map and the saga are only as good as what we bother to write down.',
     },
   ],
 
   closing:
-    'By this oath I sail with the warband of Eilif, and by this oath I am bound to it.',
+    'By this oath I sail with the warband of Eilif, and to it I am bound.',
 };
