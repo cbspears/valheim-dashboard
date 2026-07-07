@@ -6,7 +6,20 @@ import type { LivePin } from '@/lib/data';
  * the interactive /map version) — just the current snapshot plus the real
  * player-placed /pin markers, sized to read from across the room. Reuses the
  * `.map-text-halo` legibility utility from globals.css.
+ *
+ * TV-ONLY: `players` are the live positions of currently-online vikings. Per
+ * Charlie's display decree these render on /tv exclusively and never on the
+ * public /map atlas — keep this prop out of any shared map component.
  */
+
+// A live player as the map draws it: fractional (0..1) map coordinates already
+// converted from world coords by the caller, plus display fields.
+export interface TvPlayerDot {
+  name: string;
+  x: number;
+  y: number;
+  biome: string | null;
+}
 
 function MarkerGlyph({ kind }: { kind: LivePin['kind'] }) {
   const glow = 'shadow-[0_0_8px_rgba(200,149,42,0.9)]';
@@ -20,10 +33,12 @@ function MarkerGlyph({ kind }: { kind: LivePin['kind'] }) {
 export function TvMap({
   src,
   pins = [],
+  players = [],
   updatedLabel,
 }: {
   src: string;
   pins?: LivePin[];
+  players?: TvPlayerDot[];
   updatedLabel?: string | null;
 }) {
   return (
@@ -46,6 +61,30 @@ export function TvMap({
           <span className="map-text-halo whitespace-nowrap font-display text-sm font-semibold tracking-wide text-gold-light">
             {p.name}
           </span>
+        </div>
+      ))}
+
+      {/* Live players — distinct from the static gold pin markers: a bright,
+          pulsing dot that reads as ALIVE, with the name (and current biome)
+          labelled beneath it. TV-only per the display decree. */}
+      {players.map((p) => (
+        <div
+          key={`player-${p.name}`}
+          className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1"
+          style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
+        >
+          <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-online/70" />
+            <span className="relative inline-flex h-3.5 w-3.5 rounded-full border border-online-glow bg-online shadow-[0_0_12px_rgba(111,220,134,0.95)]" />
+          </span>
+          <span className="map-text-halo whitespace-nowrap font-display text-sm font-semibold tracking-wide text-online-glow">
+            {p.name}
+          </span>
+          {p.biome && (
+            <span className="map-text-halo -mt-0.5 whitespace-nowrap text-xs text-ash-dim">
+              {p.biome}
+            </span>
+          )}
         </div>
       ))}
 

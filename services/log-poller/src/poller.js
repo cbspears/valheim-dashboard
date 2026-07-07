@@ -164,6 +164,14 @@ export class Poller {
     const name = ev.characterName;
     const text = ev.metadata.text.slice(0, 1900);
 
+    // Past every dedup gate (same-batch plugin-preferred + cross-batch twin):
+    // this is the single point where a shout is committed to the Discord
+    // mirror, so mirror the exact same line to the dashboard webhook for the
+    // /tv chat rail — never a superset. Best-effort and fire-and-forget: a
+    // webhook failure must NEVER block the Discord post below.
+    this.postEvent({ type: 'chat', characterName: name, message: ev.metadata.text })
+      .catch((e) => this.log.warn?.(`[chat->webhook] ${e.message}`));
+
     if (this.cfg.chatWebhookUrl) {
       // Channel webhook: post AS the player (username override). Discord
       // rejects a few reserved/invalid usernames — fall back to bolded-name.
@@ -227,6 +235,21 @@ export class Poller {
     if (ev.type === 'pin') {
       this.log.info?.(`[event] pin ${ev.characterName} -> ${ev.metadata.name} (${ev.metadata.kind})`);
       await this.postEvent({ type: 'pin', characterName: ev.characterName, metadata: ev.metadata });
+      return;
+    }
+    if (ev.type === 'pos') {
+      // Live position → webhook only (never Discord). Best-effort: a webhook
+      // failure must not spam the tick loop. Cadence is already ~60s/player
+      // server-side, so we forward every parsed line as-is (raw world coords;
+      // the /tv display does the world→fraction conversion).
+      this.log.info?.(`[event] pos ${ev.characterName} (${ev.metadata.biome})`);
+      await this.postEvent({
+        type: 'pos',
+        characterName: ev.characterName,
+        x: ev.metadata.x,
+        z: ev.metadata.z,
+        biome: ev.metadata.biome,
+      }).catch((e) => this.log.warn?.(`[pos] ${e.message}`));
       return;
     }
     const { type, characterName, metadata } = ev;

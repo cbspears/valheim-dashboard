@@ -22,7 +22,7 @@ namespace EilifCompanion
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
         public const string PluginName = "Eilif Companion";
-        public const string PluginVersion = "0.1.2";
+        public const string PluginVersion = "0.2.0";
 
         internal static ManualLogSource Log;
 
@@ -72,7 +72,7 @@ namespace EilifCompanion
                 Log.LogInfo($"[Eilif] Voice half active. Polling {_voiceUrl.Value} every {_pollSeconds.Value}s while players online.");
 
             new Harmony(PluginGuid).PatchAll();
-            Log.LogInfo($"[Eilif] {PluginName} v{PluginVersion} loaded. /oath capture armed, /pin capture armed.");
+            Log.LogInfo($"[Eilif] {PluginName} v{PluginVersion} loaded. /oath capture armed, /pin capture armed, position emitter armed ({PositionEmitter.EmitIntervalSeconds:0}s).");
         }
 
         // Main-thread pump: poll timer + drain the outbound line queue.
@@ -84,6 +84,9 @@ namespace EilifCompanion
                 try { Speak(line); }
                 catch (Exception ex) { Log.LogWarning($"[Eilif] Failed to speak line {line?.id}: {ex.Message}"); }
             }
+
+            // Live player-position emitter (independent of the voice half; own 60s timer).
+            PositionEmitter.Tick(Time.unscaledDeltaTime);
 
             if (_voiceDormant) return;
 

@@ -59,6 +59,12 @@ const RE = {
   // split on the FIRST " | " like [EILIF_OATH]):
   //   [EILIF_CHAT] Testman | hello there
   chat: /\[EILIF_CHAT\]\s*(.+)$/,
+  // The Eilif companion plugin's live position + biome (emitted ~60s per online
+  // player). Explicit "|"-separated fields like [EILIF_PIN]; x/z are world
+  // coords ("-184.9" style) and biome is a plain enum word (Meadows, BlackForest,
+  // …, or None) — matched leniently as a run of non-space chars.
+  //   [EILIF_POS] Bjorn | -184.9 | -2.1 | BlackForest
+  pos: /\[EILIF_POS\]\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(\S+)\s*$/,
   // Any shouted chat as echoed by the server console — the mod-free capture
   // path (text arrives display-UPPERCASED). Command shouts (/oath, /pin, …)
   // are filtered out in processLine, and the consoleOath check runs first.
@@ -169,6 +175,20 @@ export class LogParser {
           type: 'pin',
           characterName: name.trim(),
           metadata: { kind, name: place.trim(), worldX: parseFloat(worldX), worldZ: parseFloat(worldZ) },
+        });
+      }
+      return events;
+    }
+
+    // --- Live position + biome (via the Eilif companion plugin, ~60s) ---
+    const pos = line.match(RE.pos);
+    if (pos) {
+      const [, name, worldX, worldZ, biome] = pos;
+      if (name) {
+        events.push({
+          type: 'pos',
+          characterName: name.trim(),
+          metadata: { x: parseFloat(worldX), z: parseFloat(worldZ), biome: biome.trim() },
         });
       }
       return events;

@@ -2,14 +2,16 @@
 
 A deliberately tiny, **server-side-only** BepInEx 5 plugin for the Eilif Valheim server
 (BepInEx 5.4.2333 + ValheimPlus). No client installs, no gameplay changes — purely additive.
-Two halves:
+Three halves:
 
-- **EARS** — captures in-game `/oath <text>` chat commands and writes a marker line to the
-  BepInEx log (our SFTP poller tails it).
-- **VOICE** — periodically pulls queued lines from the dashboard and speaks them in global chat
-  as an NPC ("Eilif").
+- **EARS** — captures in-game `/oath <text>` and `/pin <name>` chat commands and writes marker
+  lines to the BepInEx log (our SFTP poller tails it).
+- **VOICE** — periodically pulls queued lines from the dashboard and speaks them center-screen /
+  in global chat as an NPC ("Eilif").
+- **POSITION** — every 60s, if any players are online, emits one `[EILIF_POS]` marker line per
+  connected player (name, world x/z, biome) for the live map layer.
 
-`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.1.0`.
+`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.2.0`.
 
 ---
 
@@ -52,6 +54,26 @@ ZRoutedRpc.instance.InvokeRoutedRPC(
 i.e. exactly how the game's own `Chat`/`Talker` emits chat. `userInfo` is a server-built `UserInfo`
 with `Name = <speaker>` and a synthetic (non-null) `PlatformUserID` so serialization can't NRE.
 All HTTP is off-thread; all `ZRoutedRpc` sends are on the main thread.
+
+### POSITION — live player-position emitter
+The plugin's `Update()` (main thread) also drives a fixed **60s** timer (`PositionEmitter`). When it
+fires **and ≥1 player is connected** (`ZNet.instance.GetPeers().Count > 0`), it logs one line per
+fully-in-world player at Info level:
+
+```
+[EILIF_POS] <name> | <x> | <z> | <biome>
+```
+
+- `name` = `ZNetPeer.m_playerName`.
+- `x` / `z` = world coords, formatted `F1` with **InvariantCulture** (no locale commas).
+- `biome` = `Heightmap.Biome` word from `WorldGenerator.instance.GetBiome(x, z)` (e.g. `Meadows`);
+  `None` if the world generator isn't ready or the lookup throws.
+
+Position source is the peer's character ZDO (`ZDOMan.instance.GetZDO(peer.m_characterID).GetPosition()`),
+falling back to `peer.m_refPos`. Peers whose `m_characterID` is `ZDOID.None` (connected but not yet
+spawned in-world) are skipped. Every dereference is null-guarded and each peer is wrapped in its own
+try/catch, so on a headless server one bad peer never kills the sweep. Nothing is broadcast to
+clients — this is log-only, tailed by the SFTP poller.
 
 ---
 

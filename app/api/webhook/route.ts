@@ -34,6 +34,12 @@ interface WebhookPayload {
   // `oath` only — the sworn text, forwarded verbatim from the /oath chat
   // command via the log poller.
   text?: string;
+  // `chat` only — a mirrored in-game shout for the /tv chat rail.
+  message?: string;
+  // `pos` only — raw WORLD coordinates + biome for a live player position.
+  x?: number;
+  z?: number;
+  biome?: string;
 }
 
 // A privileged client bound to the service role key. Created per request so we
@@ -399,7 +405,66 @@ export async function POST(request: Request) {
       return Response.json({ ok: true }, { status: 200 });
     }
 
-    // ---- 2g. Death dedupe (defense in depth) --------------------------------
+    // ---- 2g. In-game shout mirrored to the TV chat rail (`chat`) ------------
+    // Forwarded by the log poller at its single deduped Discord-mirror point
+    // (only the shouts the mirror itself posts land here — never a superset).
+    // Stored solely for the /tv chat rail: chat never creates a players row and
+    // never enters the `events` feed. Best-effort — a bad line is a 400, not a
+    // pipeline stall.
+    if (type === 'chat') {
+      const chatCharacterName = characterName;
+      const chatMessage =
+        typeof body.message === 'string' ? body.message.trim().slice(0, 300) : '';
+      if (!chatCharacterName || !chatMessage) {
+        return Response.json(
+          { error: "'chat' requires non-empty characterName and message" },
+          { status: 400 }
+        );
+      }
+
+      await db.from('chat_lines').insert({
+        character_name: chatCharacterName,
+        message: chatMessage,
+        created_at: occurredIso,
+      });
+
+      return Response.json({ ok: true }, { status: 200 });
+    }
+
+    // ---- 2h. Live player position (`pos`) -----------------------------------
+    // Forwarded by the log poller from the Eilif companion plugin's [EILIF_POS]
+    // line (~60s per online player). One upserted row per character carrying the
+    // RAW world coordinates (no fraction conversion here — the /tv display
+    // converts, replicating the pin math). DISPLAY DECREE: these render on /tv
+    // only, never on the public atlas.
+    if (type === 'pos') {
+      const posCharacterName = characterName;
+      const posX = typeof body.x === 'number' && Number.isFinite(body.x) ? body.x : null;
+      const posZ = typeof body.z === 'number' && Number.isFinite(body.z) ? body.z : null;
+      const posBiome =
+        typeof body.biome === 'string' && body.biome.trim() ? body.biome.trim() : null;
+      if (!posCharacterName || posX === null || posZ === null) {
+        return Response.json(
+          { error: "'pos' requires non-empty characterName and finite x, z" },
+          { status: 400 }
+        );
+      }
+
+      await db.from('player_positions').upsert(
+        {
+          character_name: posCharacterName,
+          x: posX,
+          z: posZ,
+          biome: posBiome,
+          updated_at: occurredIso,
+        },
+        { onConflict: 'character_name' }
+      );
+
+      return Response.json({ ok: true }, { status: 200 });
+    }
+
+    // ---- 2i. Death dedupe (defense in depth) --------------------------------
     // Two producers can both report the same death: the canonical
     // GsValheimStatsClient path (metadata.source === 'gs', carries a real
     // cause) and the legacy SFTP log-poller path (parses "ZDOID ... 0:0" log

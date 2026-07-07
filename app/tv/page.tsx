@@ -1,4 +1,4 @@
-import { Flame, Sun, Users, ScrollText, CalendarClock, Map as MapIcon } from 'lucide-react';
+import { Flame, Sun, Users, ScrollText, CalendarClock, Map as MapIcon, MessageSquare } from 'lucide-react';
 import {
   getServerStatus,
   getOnlinePlayers,
@@ -7,11 +7,25 @@ import {
   getRecentEvents,
   getUpcomingEvents,
 } from '@/lib/data';
+import { getRecentChat, getFreshPositions } from './data';
 import { describeEvent } from '@/lib/events';
 import { timeAgo, eventCountdown, formatEventWhen } from '@/lib/format';
 import { SERVER_NAME } from '@/config/server';
-import { TvMap } from '@/components/tv/TvMap';
+import { TvMap, type TvPlayerDot } from '@/components/tv/TvMap';
 import { TvRefresh } from '@/components/tv/TvRefresh';
+
+// Live positions are stored as RAW world coords; the map draws in fractional
+// (0..1) coordinates. Replicate the EXACT pin projection from
+// app/api/webhook/route.ts (the pin branch) so player dots and pins share one
+// coordinate space: same 10000m world radius, same y-axis flip (world +Z is up
+// in-game → smaller fraction / higher on the image).
+const WORLD_RADIUS = 10000;
+function worldToFraction(worldX: number, worldZ: number): { x: number; y: number } {
+  return {
+    x: Math.min(1, Math.max(0, (worldX + WORLD_RADIUS) / (2 * WORLD_RADIUS))),
+    y: Math.min(1, Math.max(0, (WORLD_RADIUS - worldZ) / (2 * WORLD_RADIUS))),
+  };
+}
 
 // Live values (roster, pulse, map snapshot) must be fresh on every request;
 // TvRefresh re-runs this on a 60s interval client-side.
@@ -20,19 +34,32 @@ export const dynamic = 'force-dynamic';
 type HallState = 'lively' | 'banked' | 'sleeping';
 
 export default async function TvPage() {
-  const [status, online, liveMap, pins, events, upcoming] = await Promise.all([
+  const [status, online, liveMap, pins, events, upcoming, chat, positions] = await Promise.all([
     getServerStatus(),
     getOnlinePlayers(),
     getLiveMap(),
     getPins(),
     getRecentEvents(8),
     getUpcomingEvents(1),
+    getRecentChat(6),
+    getFreshPositions(),
   ]);
 
   const isOnline = status?.is_online ?? false;
   const playerCount = status?.player_count ?? online.length;
   const worldDay = status?.world_day ?? 0;
   const nextUp = upcoming[0] ?? null;
+
+  // Live player dots: a fresh position renders ONLY if that character is
+  // currently online (the fetcher already enforced the ~3-minute freshness).
+  // Projected into map fractions with the same math the pins use.
+  const onlineNames = new Set(online.map((p) => p.character_name));
+  const playerDots: TvPlayerDot[] = positions
+    .filter((p) => onlineNames.has(p.character_name))
+    .map((p) => {
+      const { x, y } = worldToFraction(p.x, p.z);
+      return { name: p.character_name, x, y, biome: p.biome };
+    });
 
   // Mirror the Hearth's three states.
   const hall: HallState = !isOnline ? 'sleeping' : playerCount > 0 ? 'lively' : 'banked';
@@ -62,7 +89,12 @@ export default async function TvPage() {
         {/* Map — the dominant element */}
         <section className="flex min-h-0 items-center justify-center">
           {liveMap ? (
-            <TvMap src={`${liveMap.url}?t=${liveMap.updatedAt ?? 'now'}`} pins={pins} updatedLabel={liveMap.updatedAt} />
+            <TvMap
+              src={`${liveMap.url}?t=${liveMap.updatedAt ?? 'now'}`}
+              pins={pins}
+              players={playerDots}
+              updatedLabel={liveMap.updatedAt}
+            />
           ) : (
             <div className="flex aspect-square h-full max-h-full w-full flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-rune bg-pitch/60 p-10 text-center">
               <MapIcon size={44} className="text-gold-dim" />
@@ -102,7 +134,30 @@ export default async function TvPage() {
             </div>
           </div>
 
-          {/* 3 — The chronicle ticker */}
+          {/* 3 — In-game chat (mirrored shouts) */}
+          <div className="shrink-0 rounded-2xl border border-rune bg-surface/70 p-6">
+            <div className="mb-4 flex items-center gap-3">
+              <MessageSquare size={22} className="text-gold" />
+              <h2 className="font-display text-2xl tracking-wide text-ash">In-game chat</h2>
+            </div>
+            {chat.length === 0 ? (
+              <p className="text-base text-ash-dim">The hall is quiet — shouts echo here.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {chat.slice(0, 5).map((c) => (
+                  <li key={c.id} className="flex items-baseline gap-2 leading-snug">
+                    <span className="shrink-0 font-display text-lg text-gold-light">
+                      {c.character_name}:
+                    </span>
+                    <span className="min-w-0 flex-1 text-lg text-ash">{c.message}</span>
+                    <span className="shrink-0 text-sm text-muted">{timeAgo(c.created_at)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* 4 — The chronicle ticker */}
           <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-rune bg-surface/70 p-6">
             <div className="mb-4 flex shrink-0 items-center gap-3">
               <ScrollText size={22} className="text-gold" />
@@ -114,7 +169,7 @@ export default async function TvPage() {
               </p>
             ) : (
               <ul className="min-h-0 flex-1 space-y-3 overflow-hidden">
-                {events.map((e) => {
+                {events.slice(0, 6).map((e) => {
                   const { icon: Icon, accent, description } = describeEvent(e);
                   return (
                     <li key={e.id} className="flex items-start gap-3">
@@ -132,7 +187,7 @@ export default async function TvPage() {
             )}
           </div>
 
-          {/* 4 — Coming up (next gathering), small */}
+          {/* 5 — Coming up (next gathering), small */}
           {nextUp && (
             <div className="shrink-0 rounded-2xl border border-rune bg-surface/70 px-6 py-4">
               <div className="flex items-center gap-2 text-sm uppercase tracking-wider text-muted">
