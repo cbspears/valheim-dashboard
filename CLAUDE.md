@@ -11,7 +11,9 @@
 3. `git log --oneline -20`
 4. Auto-memory `project-valheim-dashboard` (loads automatically)
 
-**🆕 2026-07-06 session (chat mirror → copy pass → angler/milestones → ART OVERHAUL, all LIVE in prod through `a740bcf`):**
+**🆕 2026-07-07 session (recap v2 → milestones ledger v2 → gallery↔map live → /tv, prod `3a3daba`):** recaps = trailing-24h per-name day boards (cumulative board gone) + stale-open-session guard; /world Great Deeds grouped into per-metric tracker chains (plain labels first); **gallery↔map photo linking is LIVE** (migration finally applied — code was already complete); experimental **/tv** TV Mode (unlinked, noindexed, delete `app/tv`+`components/tv` to remove). Server restart verified: Companion v0.1.2 + Emitter token armed, **crossplay STILL ON** (launch param not removed); **Bearer enforcement deferred** until pack v3 pre-fills the client Token (`plugins/eilif-companion/.voice-token`). Full detail: tracker "Recently done" 2026-07-07.
+
+**2026-07-06 session (chat mirror → copy pass → angler/milestones → ART OVERHAUL, all LIVE in prod through `a740bcf`):**
 - **Visual overhaul SHIPPED:** 24 painterly EILIF images in `public/images/eilif/` — hero (02) on the Hall, header bands on all 8 pages, 7 boss portraits (defeated/next/locked states) on the World timeline + war-rooms, Deep North = "???" mystery card, og:image = 00. All gated by `config/art.ts ART_AVAILABLE` (to add/swap art: drop a jpg + edit the manifest). Full-res source archives in Charlie's Drive folder.
 - **Copy doctrine (Charlie, MANDATORY for all new copy):** titles/labels say plainly WHAT is shown; Norse flavor lives in subtitles + empty states. Get Started is the model register.
 - **Angler:** fish → `gs_stats.fish` via `config/fish.ts` (⚠️ prefab ids UNVERIFIED vs live — watch Vercel logs for the "unknown Fish*" info line on the first real catch). Anglers board on /players, The Catch log on viking pages.
