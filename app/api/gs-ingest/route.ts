@@ -772,14 +772,25 @@ export async function POST(req: Request) {
     // mismatch early-return above: on positive offline evidence we ack with 200
     // and drop the payload, so the mod never retry-storms. One-sided: no reporter
     // name, or no positive offline evidence, always falls through and ingests.
+    //
+    // Emergency kill switch (default enabled, matches the poller's EMIT_DEATHS
+    // convention): this check is only as good as the log poller's own uptime, and
+    // this project has had real SFTP/poller outages before (see vault
+    // Server-Setup-Runbook) — during one, every online player's last-known event
+    // can go stale, and confirmOnThisServer would start wrongly rejecting real
+    // stats. Set PRESENCE_CHECK_ENABLED=false in Vercel's env vars to bypass this
+    // check instantly (no redeploy of logic needed) if an outage is suspected of
+    // causing false rejections; flip it back once the poller's confirmed healthy.
+    const presenceCheckEnabled = (process.env.PRESENCE_CHECK_ENABLED || 'true').toLowerCase() !== 'false';
     const reporter = typeof body.reporter === 'string' ? body.reporter.trim() : '';
-    if (reporter) {
+    if (presenceCheckEnabled && reporter) {
       const presence = await confirmOnThisServer(reporter);
       if (!presence.onServer) {
         console.warn(
           `[gs-ingest] PRESENCE REJECT: "${reporter}" — ${presence.reason}. ` +
             `Ignoring this client payload (deaths, per-player stats, boss-kill events) ` +
-            `to protect Eilif stats from a mod profile reused on a different server.`,
+            `to protect Eilif stats from a mod profile reused on a different server. ` +
+            `(Set PRESENCE_CHECK_ENABLED=false in Vercel if this looks like a false positive.)`,
         );
         return Response.json({ status: 'ignored', reason: 'not connected to this server' });
       }
