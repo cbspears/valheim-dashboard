@@ -168,6 +168,90 @@ export function formatMetricValue(metric: string, value: number): string {
   return formatNumber(Math.round(value));
 }
 
+// ── plain-language metric labels (copy doctrine) ────────────────────────────
+//
+// Deed titles ("The Length of Norway") are ceremonial flavor; a viewer can't
+// tell WHAT is being tracked from the title alone. These labels/descriptions
+// say plainly what each metric counts, so the UI can put the plain label up
+// front and keep the flavor title as a subtitle/quote (per the repo-wide copy
+// doctrine: titles say what, Norse flavor lives in subtitles).
+
+export interface MetricInfo {
+  /** plain label for the tracker, e.g. "Distance sailed". */
+  label: string;
+  /** short "what counts" clause, lowercase, no leading article — e.g. "every viking's sailing combined". */
+  description: string;
+}
+
+export const METRIC_INFO: Record<string, MetricInfo> = {
+  sail_total: { label: 'Distance sailed', description: "every viking's sailing combined" },
+  walk_run_total: { label: 'Distance on foot', description: 'walking and running, all vikings' },
+  deaths_total: { label: 'Deaths', description: 'every viking who has fallen' },
+  kills_total: { label: 'Foes slain', description: 'every kill, all vikings' },
+  boss_kills_total: { label: 'Bosses slain', description: 'the Forsaken felled, one by one' },
+  damage_total: { label: 'Damage dealt', description: 'every point of damage dealt, all vikings' },
+  resources_total: { label: 'Resources gathered', description: 'everything harvested by the crew' },
+  crafts_total: { label: 'Items crafted', description: "everything shaped by the crew's own hands" },
+  builds_total: { label: 'Pieces built', description: 'every piece placed, all vikings' },
+  playtime_total_hours: { label: 'Hours lived in the world', description: 'combined time played' },
+  explored_avg_pct: { label: 'Map explored', description: "clan average across every viking's map" },
+};
+
+/** Plain label + description for a metric key; falls back to the raw key if unmapped. */
+export function metricInfo(metric: string): MetricInfo {
+  return METRIC_INFO[metric] ?? { label: metric, description: '' };
+}
+
+// ── per-metric "chains" (tiered deeds grouped under one tracker) ───────────
+//
+// Several deeds share a metric and differ only by threshold (e.g. 3 sail
+// tiers). To the viewer that's one tracker with multiple tiers, not 3
+// unrelated deeds — group upcoming progress by metric so the UI can render
+// one row per tracker: the nearest unearned tier as the "next" deed, and any
+// further tiers as a short "then:" list.
+
+export interface MilestoneChain {
+  metric: string;
+  label: string;
+  description: string;
+  /** current aggregate value for this metric. */
+  value: number;
+  /** the nearest unearned tier in this chain (highest pct). */
+  next: MilestoneProgress;
+  /** further unearned tiers beyond `next`, ascending by threshold. */
+  laterTiers: Milestone[];
+}
+
+/**
+ * Group a MilestoneSummary's `upcoming` list into per-metric chains, sorted by
+ * the chain's next-tier progress (closest to earning first) — same ordering
+ * principle as `upcoming` itself, just collapsed to one row per tracker.
+ */
+export function groupUpcomingChains(upcoming: MilestoneProgress[]): MilestoneChain[] {
+  const byMetric = new Map<string, MilestoneProgress[]>();
+  for (const p of upcoming) {
+    const arr = byMetric.get(p.milestone.metric) ?? [];
+    arr.push(p);
+    byMetric.set(p.milestone.metric, arr);
+  }
+
+  const chains: MilestoneChain[] = [];
+  for (const [metric, progresses] of byMetric) {
+    const [next, ...rest] = [...progresses].sort((a, b) => b.pct - a.pct);
+    const info = metricInfo(metric);
+    chains.push({
+      metric,
+      label: info.label,
+      description: info.description,
+      value: next.value,
+      next,
+      laterTiers: rest.sort((a, b) => a.milestone.threshold - b.milestone.threshold).map((p) => p.milestone),
+    });
+  }
+
+  return chains.sort((a, b) => b.next.pct - a.next.pct);
+}
+
 // ── dashboard summary (pure) ─────────────────────────────────────────────────
 
 export interface MilestoneProgress {

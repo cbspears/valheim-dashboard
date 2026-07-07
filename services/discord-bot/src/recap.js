@@ -199,7 +199,17 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     const activeNames = new Set();
     const hoursMs = {};
     let totalMs = 0;
+    const staleOpen = [];
     for (const s of sessions || []) {
+      // Guard: an OPEN session that began before the 24h window is a missed
+      // leave event (the server pauses when empty — nobody truly plays 24h+).
+      // Counting it would put a phantom flat-24.0h on the day boards forever,
+      // so skip it and warn so the row gets closed. (Seen 2026-07-07: six
+      // pilot-night sessions with left_at NULL.)
+      if (!s.left_at && new Date(s.joined_at).getTime() < startMs) {
+        staleOpen.push(s.character_name || '?');
+        continue;
+      }
       const start = Math.max(new Date(s.joined_at).getTime(), startMs);
       const end = Math.min(s.left_at ? new Date(s.left_at).getTime() : now, now);
       if (end > start) {
@@ -213,6 +223,11 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     }
     const hours = {};
     for (const [nm, ms] of Object.entries(hoursMs)) hours[nm] = ms / 3600000;
+    if (staleOpen.length) {
+      console.warn(
+        `[recap] ignored ${staleOpen.length} stale open session(s) (left_at NULL, joined >24h ago) — close these rows: ${staleOpen.join(', ')}`
+      );
+    }
 
     // --- Deaths in the window: serves the day board, the recap death count,
     // and the reckless-cause flavor. .limit(10000) is a defensive ceiling —

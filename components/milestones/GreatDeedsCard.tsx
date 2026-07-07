@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Trophy, ArrowRight } from 'lucide-react';
 import { Card, CardHeader, CardBody, EmptyState } from '@/components/ui';
 import { timeAgo } from '@/lib/format';
-import { renderLine, formatMetricValue, type MilestoneSummary } from '@/lib/milestones';
+import { renderLine, formatMetricValue, metricInfo, type MilestoneSummary } from '@/lib/milestones';
 
 /**
  * The Hall's "Great Deeds" card — the collective-milestone counterpart to the
@@ -80,6 +80,7 @@ export function GreatDeedsCard({ summary }: { summary: MilestoneSummary }) {
                     />
                   </div>
                   <p className="mt-1.5 text-xs text-muted">
+                    {metricInfo(next.milestone.metric).label} —{' '}
                     {formatMetricValue(next.milestone.metric, next.value)} of{' '}
                     {formatMetricValue(next.milestone.metric, next.milestone.threshold)}
                   </p>

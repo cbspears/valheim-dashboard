@@ -11,10 +11,8 @@
 -- unlinks the affected photos; the retro-match pass then re-links them to the
 -- new pin. Purely additive + idempotent — safe to apply live.
 --
--- STATUS: NOT yet applied to prod. Coordinator applies, then the Discord bot
--- can be restarted. The app + bot code both tolerate this column being absent
--- (they fall back to inserting/reading without pin_id), so nothing crashes in
--- the window before it is applied.
+-- STATUS: APPLIED to prod 2026-07-07 (via Supabase MCP, migration
+-- `gallery_pin_link`); bot restarted same day — the gallery ↔ map link is live.
 
 alter table public.gallery_photos
   add column if not exists pin_id uuid references public.pins(id) on delete set null;
