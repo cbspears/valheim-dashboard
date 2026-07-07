@@ -1,10 +1,10 @@
 // Daily recaps: two cron jobs (08:00 and 22:00 America/Chicago) post an
-// activity summary embed to #valheim. Stats cover the window since the last
-// recap (default 12h).
+// activity summary embed to #valheim. Every recap covers the TRAILING 24
+// HOURS (the two daily posts overlap by design — each answers "what happened
+// in the last day?", not "since the last post").
 //
-// Two leaderboard extras ride on top of the base stats:
-//   • a cumulative "Hall of the Fallen" deaths board (BOTH recaps), and
-//   • an evening-only "🏆 Player of the Day" (POTY) crown.
+// On top of the base stats ride the per-name day boards (who was online, who
+// fell) and an evening-only "🏆 Player of the Day" (POTY) crown.
 // All scoring lives here; rendering (incl. the Norse blurb templates) lives in
 // format.js, which stays pure — buildStats hands it a fully-resolved stats obj.
 import cron from 'node-cron';
@@ -180,9 +180,9 @@ export function selectPlayerOfDay(ctx = {}) {
 export function createRecap({ db, post, state, saveState, writeDb = null, tz = 'America/Chicago', startsAt = null, onPotyCrowned = null, channel = 'valheim' }) {
   async function buildStats(period) {
     const now = Date.now();
-    const windowStart = new Date(
-      state.lastRecapAt ? new Date(state.lastRecapAt).getTime() : now - 12 * 3600 * 1000
-    );
+    // Fixed trailing-24h window — every recap answers "the last day", so the
+    // morning and evening posts intentionally overlap.
+    const windowStart = new Date(now - 24 * 3600 * 1000);
     const startMs = windowStart.getTime();
     const startIso = windowStart.toISOString();
 
@@ -214,44 +214,43 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     const hours = {};
     for (const [nm, ms] of Object.entries(hoursMs)) hours[nm] = ms / 3600000;
 
-    // --- Deaths: ONE cumulative fetch serves the board totals, the window
-    // deltas, the recap death count, and the reckless-cause flavor. .limit(10000)
-    // is mandatory — death rows can exceed the 1000-row default and a truncated
-    // read would undercount the board.
+    // --- Deaths in the window: serves the day board, the recap death count,
+    // and the reckless-cause flavor. .limit(10000) is a defensive ceiling —
+    // a truncated read would undercount the board.
     const { data: deathRows } = await db
       .from('events')
       .select('character_name, created_at, metadata')
       .eq('type', 'death')
+      .gte('created_at', startIso)
       .limit(10000);
 
-    const deathTotal = {};
     const windowDeaths = {};
     const lastCause = {};
     const lastCauseAt = {};
     for (const r of deathRows || []) {
       const nm = (r.character_name || '').trim();
       if (!nm) continue;
-      deathTotal[nm] = (deathTotal[nm] || 0) + 1;
       const t = new Date(r.created_at).getTime();
-      if (t >= startMs) {
-        windowDeaths[nm] = (windowDeaths[nm] || 0) + 1;
-        if (lastCauseAt[nm] === undefined || t >= lastCauseAt[nm]) {
-          lastCauseAt[nm] = t;
-          const c = r.metadata?.cause;
-          lastCause[nm] = typeof c === 'string' && c.trim() ? c.trim() : undefined;
-        }
+      windowDeaths[nm] = (windowDeaths[nm] || 0) + 1;
+      if (lastCauseAt[nm] === undefined || t >= lastCauseAt[nm]) {
+        lastCauseAt[nm] = t;
+        const c = r.metadata?.cause;
+        lastCause[nm] = typeof c === 'string' && c.trim() ? c.trim() : undefined;
       }
     }
     const deaths = Object.values(windowDeaths).reduce((a, b) => a + b, 0);
 
-    // Deaths board: total DESC -> delta DESC (fresh blood floats up) -> name ASC.
-    const deathsBoard = Object.keys(deathTotal)
-      .map((name) => ({ name, total: deathTotal[name], delta: windowDeaths[name] || 0 }))
+    // Day boards (per-name, window-only): who played and who fell.
+    // Online: hours DESC -> name ASC. Fallen: deaths DESC -> name ASC.
+    const onlineToday = Object.keys(hours)
+      .map((name) => ({ name, hours: hours[name] }))
       .sort(
-        (a, b) =>
-          b.total - a.total ||
-          b.delta - a.delta ||
-          a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+        (a, b) => b.hours - a.hours || a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+      );
+    const fallenToday = Object.keys(windowDeaths)
+      .map((name) => ({ name, count: windowDeaths[name] }))
+      .sort(
+        (a, b) => b.count - a.count || a.name.toLowerCase().localeCompare(b.name.toLowerCase())
       );
 
     // --- Bosses felled in window (+ POTY candidates from the TRUE fighters).
@@ -366,7 +365,8 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
       onlineNow: status?.player_count ?? 0,
       worldDay,
       quiet,
-      deathsBoard,
+      onlineToday,
+      fallenToday,
       poty,
       // transient: persisted by postRecap as next window's baseline; format ignores it.
       _statsSnapshotNext: statsSnapshotNext,
@@ -420,7 +420,6 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
         console.error('[recap] poty voice hook failed:', e.message);
       }
     }
-    state.lastRecapAt = new Date().toISOString();
     await saveState();
     return stats;
   }

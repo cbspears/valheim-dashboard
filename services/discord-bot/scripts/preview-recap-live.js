@@ -33,10 +33,12 @@ const potyA = selectPlayerOfDay({
 await post(formatRecap({
   period: 'evening', playersActive: 4, hoursPlayed: 13.9, deaths: 8, bossKills: [],
   onlineNow: 2, worldDay: 18, quiet: false,
-  deathsBoard: [
-    { name: 'Bjorn', total: 14, delta: 2 }, { name: 'Knut', total: 11, delta: 5 },
-    { name: 'Sigrid', total: 7, delta: 1 }, { name: 'Astrid', total: 3, delta: 0 },
-    { name: 'Leif', total: 2, delta: 0 },
+  onlineToday: [
+    { name: 'Sigrid', hours: 5.0 }, { name: 'Bjorn', hours: 4.2 },
+    { name: 'Knut', hours: 3.5 }, { name: 'Astrid', hours: 1.2 },
+  ],
+  fallenToday: [
+    { name: 'Knut', count: 5 }, { name: 'Bjorn', count: 2 }, { name: 'Sigrid', count: 1 },
   ],
   poty: potyA,
 }));
@@ -50,9 +52,12 @@ const potyB = selectPlayerOfDay({
 await post(formatRecap({
   period: 'evening', playersActive: 4, hoursPlayed: 11.3, deaths: 5, bossKills: [],
   onlineNow: 1, worldDay: 19, quiet: false,
-  deathsBoard: [
-    { name: 'Bjorn', total: 17, delta: 3 }, { name: 'Knut', total: 13, delta: 2 },
-    { name: 'Sigrid', total: 7, delta: 0 }, { name: 'Astrid', total: 3, delta: 0 },
+  onlineToday: [
+    { name: 'Bjorn', hours: 5.0 }, { name: 'Knut', hours: 3.2 },
+    { name: 'Sigrid', hours: 2.4 }, { name: 'Astrid', hours: 0.7 },
+  ],
+  fallenToday: [
+    { name: 'Bjorn', count: 3 }, { name: 'Knut', count: 2 },
   ],
   poty: potyB,
 }));

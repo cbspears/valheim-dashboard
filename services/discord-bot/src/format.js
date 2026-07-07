@@ -82,17 +82,23 @@ function hashString(s) {
   return h >>> 0;
 }
 
-// "☠️/💀 **Name** — **TOTAL** (+N)" lines, top 5. Returns '' when empty.
-function renderDeathsBoard(board) {
-  const rows = (board || []).slice(0, 5);
-  if (!rows.length) return '';
-  return rows
-    .map((row, i) => {
-      const marker = i === 0 ? '☠️' : '💀';
-      const suffix = row.delta > 0 ? ` (+${row.delta})` : '';
-      return `${marker} **${nameMd(row.name)}** — **${row.total}**${suffix}`;
-    })
-    .join('\n');
+// Shared day-board renderer: one line per name, capped so a big roster can't
+// blow the 1024-char embed field limit. Returns '' when empty.
+function renderBoard(rows, line, cap = 10) {
+  if (!rows || !rows.length) return '';
+  const shown = rows.slice(0, cap).map(line);
+  if (rows.length > cap) shown.push(`…and ${rows.length - cap} more`);
+  return shown.join('\n');
+}
+
+// "🛡️ **Name** — 2.3h" lines: everyone who played in the window.
+function renderOnlineToday(board) {
+  return renderBoard(board, (row) => `🛡️ **${nameMd(row.name)}** — ${Number(row.hours).toFixed(1)}h`);
+}
+
+// "💀 **Name** — 3" lines: everyone who died in the window.
+function renderFallenToday(board) {
+  return renderBoard(board, (row) => `💀 **${nameMd(row.name)}** — ${row.count}`);
 }
 
 // Deterministically pick + fill a POTY blurb from poty.{key,name,fields,seed}.
@@ -294,12 +300,14 @@ export function formatBossKill(boss) {
 }
 
 /**
- * Daily recap embed for #valheim (no ping).
+ * Daily recap embed for #valheim (no ping). Every number/name covers the
+ * TRAILING 24 HOURS.
  * stats = { period:'morning'|'evening', playersActive, hoursPlayed, deaths,
  *           bossKills:string[], onlineNow, worldDay, quiet:boolean,
- *           deathsBoard:{name,total,delta}[], poty:{key,label,name,fields,seed}|null }
- * The deaths board renders in BOTH recaps; POTY only in the evening when present.
- * Both extras live in the non-quiet branch only.
+ *           onlineToday:{name,hours}[], fallenToday:{name,count}[],
+ *           poty:{key,label,name,fields,seed}|null }
+ * The day boards render in BOTH recaps; POTY only in the evening when present.
+ * All extras live in the non-quiet branch only.
  */
 export function formatRecap(stats) {
   const morning = stats.period === 'morning';
@@ -321,7 +329,7 @@ export function formatRecap(stats) {
   }
 
   const fields = [
-    { name: 'Vikings active', value: `${stats.playersActive}`, inline: true },
+    { name: 'Vikings on today', value: `${stats.playersActive}`, inline: true },
     { name: 'Hours logged', value: `${stats.hoursPlayed.toFixed(1)}h`, inline: true },
     { name: 'Deaths', value: `${stats.deaths}`, inline: true },
     {
@@ -333,9 +341,12 @@ export function formatRecap(stats) {
     { name: 'World day', value: `${stats.worldDay}`, inline: true },
   ];
 
-  // Cumulative deaths leaderboard — both recaps. Omitted when nobody's fallen.
-  const board = renderDeathsBoard(stats.deathsBoard);
-  if (board) fields.push({ name: '💀 Hall of the Fallen', value: board, inline: false });
+  // Day boards — who played and who fell in the last 24h. Either is omitted
+  // when empty (nobody on / nobody died).
+  const online = renderOnlineToday(stats.onlineToday);
+  if (online) fields.push({ name: '🛡️ Online today', value: online, inline: false });
+  const fallen = renderFallenToday(stats.fallenToday);
+  if (fallen) fields.push({ name: '💀 Fallen today', value: fallen, inline: false });
 
   // Player of the Day — evening only, when a crown was earned. The blurb already
   // leads with the (bolded) name, so the value is just the blurb; the award
@@ -353,7 +364,7 @@ export function formatRecap(stats) {
       {
         title,
         description: morning
-          ? 'Deeds from the long night:'
+          ? 'The last day’s deeds, told at sunrise:'
           : 'The day’s saga, before the fires dim:',
         color: GOLD,
         fields,
