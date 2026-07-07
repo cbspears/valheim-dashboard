@@ -8,6 +8,7 @@ import {
   type ParsedBossKill,
 } from '@/lib/gs-client';
 import { evaluateAndRecord } from '@/lib/milestones';
+import type { GsClientStats } from '@/lib/types';
 
 // GsValheimStats ingest (v0) — the server-side Emitter POSTs here every ~120s
 // (instantly on join/leave): { schemaVersion: 1, game: 'valheim', source: 'server',
@@ -80,6 +81,80 @@ async function dropStaleLeavers(
   }
 
   return names.filter((n) => latestTypeByName.get(n) !== 'leave');
+}
+
+/**
+ * Presence cross-check: is this REPORTING character actually connected to THIS
+ * server right now? Gates ALL client-payload ingestion (deaths, the per-player
+ * stats merge, and boss-kill enrichment).
+ *
+ * WHY this exists, and why it is SEPARATE from warnOnWeaponCollision above:
+ * warnOnWeaponCollision catches a character SWITCH on this same game client
+ * poisoning the world-scoped weapons cache — a same-server problem, and only the
+ * weapon breakdown. THIS guard catches a bigger, different threat. The third-party
+ * GsValheimStatsClient mod self-reports which `World =` it tracks and which `Url =`
+ * it POSTs to from LOCAL config it has NO way to verify against reality. If a
+ * player takes their character (or their whole r2modman profile) onto a totally
+ * DIFFERENT, unrelated Valheim server while that config still points at this
+ * dashboard, everything they do over THERE — kills, deaths, builds, distance,
+ * every stat column, because a Valheim character save travels with the player and
+ * isn't server-locked — would faithfully merge into their Eilif player_stats row
+ * as if it happened here. The existing GS_EXPECTED_WORLD check can't stop it: the
+ * mod lies about the world name too (it's the same unverifiable local config).
+ *
+ * The one truth the client mod can't spoof is the `events` table's join/leave
+ * rows, written by the log poller parsing THIS server's own LogOutput.log over
+ * SFTP — completely decoupled from anything the mod self-reports. So we look the
+ * reporter up there (same query shape as dropStaleLeavers).
+ *
+ * DELIBERATELY ONE-SIDED — it only ever acts on POSITIVE evidence of being
+ * offline, never on absence of evidence:
+ *   • No join/leave history at all → inconclusive → ACCEPT (a brand-new player,
+ *     or the poller simply hasn't caught up, must never be wrongly blocked).
+ *   • Most recent event is a `join` → ACCEPT (connected here now).
+ *   • Most recent event is a `leave` within GRACE_MS of now → ACCEPT (covers the
+ *     client's own ~120s emit cycle plus the poller's polling lag, so a genuinely
+ *     online player's very last snapshot on their way out is never flagged).
+ *   • Most recent event is a `leave` older than GRACE_MS → REJECT (this is real,
+ *     independent proof they are not on this server right now).
+ */
+async function confirmOnThisServer(name: string): Promise<{ onServer: boolean; reason: string }> {
+  const trimmed = name.trim();
+  if (!trimmed) return { onServer: true, reason: 'no reporter name to check' };
+
+  const GRACE_MS = 5 * 60_000; // 5 min: client's ~120s emit cycle + log-poller polling lag
+
+  const client = db();
+  const { data } = await client
+    .from('events')
+    .select('type, created_at')
+    .eq('character_name', trimmed)
+    .in('type', ['join', 'leave'])
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  const latest = data?.[0];
+  if (!latest) {
+    // No positive evidence either way — never block on absence of evidence.
+    return { onServer: true, reason: 'no join/leave history (new player or poller not caught up yet)' };
+  }
+  if (latest.type === 'join') {
+    return { onServer: true, reason: 'most recent presence event is a join (connected here)' };
+  }
+
+  // Most recent event is a `leave`: accept inside the grace window, reject beyond it.
+  const leftAt = Date.parse(latest.created_at as string);
+  if (Number.isNaN(leftAt)) {
+    return { onServer: true, reason: 'most recent event is a leave with an unparseable timestamp (inconclusive)' };
+  }
+  const ageMs = Date.now() - leftAt;
+  if (ageMs <= GRACE_MS) {
+    return { onServer: true, reason: `most recent event is a leave ${Math.round(ageMs / 1000)}s ago, within the 5-min grace window` };
+  }
+  return {
+    onServer: false,
+    reason: `most recent presence event is a leave ${Math.round(ageMs / 60_000)}m ago, beyond the 5-min grace window (not on this server)`,
+  };
 }
 
 /** onlinePlayers arrives as string[] | {name}[] | number — normalize defensively. */
@@ -268,6 +343,78 @@ function num(v: unknown): number {
 }
 
 /**
+ * Best-effort weapon-collision monitor — LOG-ONLY, never blocks/mutates ingest.
+ *
+ * The third-party GsValheimStatsClient mod (closed-source, GUID
+ * net.cproudlock.gsvalheimstatsclient) caches its per-weapon combat breakdown in
+ * a LOCAL file on each player's PC named
+ * `net.cproudlock.gsvalheimstatsclient.<WorldName>.weapons.tsv`. That cache is
+ * scoped by WORLD NAME, not by Valheim character — so if one game client plays
+ * character A on a world, then rolls a NEW character B on the SAME world without
+ * clearing the file, B's weapon breakdown inherits A's leftover combat. The tell
+ * is a byte-identical weapon tuple showing up under two different characters
+ * (real incident: Testman & Testmantwo both reporting the same Crossbows entry
+ * {kills:2, damageDealt:658, hardestHit:475, biggestSwing:475}). We can't patch
+ * the mod's source; this just surfaces the contamination in the logs so an admin
+ * can run the clear-the-file fix (see vault 05-Server/Server-Setup-Runbook.md).
+ *
+ * We flag when an incoming weapon entry EXACTLY matches an entry already stored
+ * for a DIFFERENT player. damageDealt must clear a small noise floor first: the
+ * degenerate opening of combat is genuinely coincidental across players (e.g.
+ * everyone's very first Unarmed punch can read kills:1/damageDealt:1/
+ * hardestHit:1/biggestSwing:1, or an early thrown rock lands identically), so an
+ * exact tuple match there is not evidence of the cache leak. 10 damage sits
+ * comfortably below any real weapon's first real kill yet far above those
+ * 1/1/1/1-style coincidences, so real inherited entries (hundreds of damage)
+ * always clear it while trivial first-swing collisions are ignored.
+ */
+async function warnOnWeaponCollision(
+  client: ReturnType<typeof db>,
+  pid: string,
+  reporter: string,
+  weapons: GsClientStats['weapons'],
+): Promise<void> {
+  const NOISE_FLOOR_DAMAGE = 10; // see doc comment — below this an identical tuple is plausibly coincidental
+  const candidates = weapons.filter((w) => w.damageDealt > NOISE_FLOOR_DAMAGE);
+  if (candidates.length === 0) return;
+
+  // Cheap at 15-20 players: one scan of every OTHER stored player's breakdown.
+  // gs_reporter carries that row's character name (written alongside gs_stats).
+  const { data: others } = await client
+    .from('player_stats')
+    .select('player_id, gs_reporter, gs_stats')
+    .neq('player_id', pid);
+  if (!others || others.length === 0) return;
+
+  for (const row of others) {
+    const otherName = (row.gs_reporter as string | null) ?? `player ${row.player_id}`;
+    const otherWeapons = ((row.gs_stats as GsClientStats | null)?.weapons ?? []) as GsClientStats['weapons'];
+    if (!Array.isArray(otherWeapons) || otherWeapons.length === 0) continue;
+    for (const mine of candidates) {
+      const twin = otherWeapons.some(
+        (o) =>
+          o &&
+          o.weapon === mine.weapon &&
+          o.kills === mine.kills &&
+          o.damageDealt === mine.damageDealt &&
+          o.hardestHit === mine.hardestHit &&
+          o.biggestSwing === mine.biggestSwing,
+      );
+      if (twin) {
+        console.warn(
+          `[gs-ingest] WEAPON COLLISION: "${reporter}" and "${otherName}" share a byte-identical ` +
+            `${mine.weapon} entry {kills:${mine.kills}, damageDealt:${mine.damageDealt}, ` +
+            `hardestHit:${mine.hardestHit}, biggestSwing:${mine.biggestSwing}}. ` +
+            `Known cause: a character switch on the same game client without clearing the local, ` +
+            `world-scoped net.cproudlock.gsvalheimstatsclient.<World>.weapons.tsv cache (the mod ` +
+            `scopes that file by world, not character). Fix: vault 05-Server/Server-Setup-Runbook.md.`,
+        );
+      }
+    }
+  }
+}
+
+/**
  * Merge the reporter's cumulative snapshot into player_stats (idempotent,
  * GREATEST). Returns true when a real stats merge happened (a self snapshot was
  * present and written) so the caller knows whether it's worth re-evaluating the
@@ -296,6 +443,17 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
     pid = ins?.id as string | undefined;
   }
   if (!pid) return false;
+
+  // Best-effort weapon-collision monitor (LOG-ONLY): flag if this reporter's
+  // weapon breakdown byte-matches another character's — the sign of the
+  // GsValheimStatsClient world-scoped weapons.tsv cache leaking across a
+  // character switch. Wrapped like the evaluateAndRecord call below so a monitor
+  // failure can NEVER fail the ingest, block it, or mutate any data.
+  try {
+    await warnOnWeaponCollision(client, pid, s.reporter, s.gsStats.weapons);
+  } catch (e) {
+    console.error('[gs-ingest] weapon-collision monitor', e instanceof Error ? e.message : e);
+  }
 
   // Read the current row so we can GREATEST cumulative counters and avoid a
   // reset/rollback writing lower numbers (only-writer-per-row makes this safe).
@@ -602,6 +760,29 @@ export async function POST(req: Request) {
       return Response.json(
         r.ok ? { status: 'inserted', map_explored_pct: r.pct, player: r.player } : { status: 'ignored', reason: 'bad client-map payload' },
       );
+    }
+
+    // Server-presence cross-check (see confirmOnThisServer): before merging ANY
+    // client-reported stats, require independent proof — the log poller's
+    // join/leave trail for THIS server — that the reporter is actually connected
+    // here right now. The client mod self-reports its target world + POST URL from
+    // unverifiable local config, so a character/profile carried onto a DIFFERENT
+    // server (config still pointed here) would otherwise pour that other server's
+    // play into this dashboard, polluting every stat column. Mirrors the world-
+    // mismatch early-return above: on positive offline evidence we ack with 200
+    // and drop the payload, so the mod never retry-storms. One-sided: no reporter
+    // name, or no positive offline evidence, always falls through and ingests.
+    const reporter = typeof body.reporter === 'string' ? body.reporter.trim() : '';
+    if (reporter) {
+      const presence = await confirmOnThisServer(reporter);
+      if (!presence.onServer) {
+        console.warn(
+          `[gs-ingest] PRESENCE REJECT: "${reporter}" — ${presence.reason}. ` +
+            `Ignoring this client payload (deaths, per-player stats, boss-kill events) ` +
+            `to protect Eilif stats from a mod profile reused on a different server.`,
+        );
+        return Response.json({ status: 'ignored', reason: 'not connected to this server' });
+      }
     }
 
     await ingestDeathEvents(body.deathEvents);

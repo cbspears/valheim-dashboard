@@ -523,6 +523,13 @@ export default function GetStartedPage() {
               <span className="font-mono text-xs">/s /oath …</span>). A normal chat line gets
               swallowed. Or use the Discord form instead.
             </Trouble>
+            <Trouble symptom="My weapon stats show fights that weren't mine">
+              Starting a brand-new character on the server can make your weapon breakdown
+              (Favored Weapon, Hardest Hit) inherit combat from a character you played before — a
+              quirk of the stats mod. If you ever want to roll a fresh viking mid-campaign, ask in
+              Discord first and an admin will clear one file for you before you log in. It takes a
+              second, and your kills, deaths, and builds are never touched.
+            </Trouble>
             <Trouble symptom="It won't run on my Mac">
               There&apos;s no native Mac client — you need CrossOver or Whisky (see the Mac card
               above), or a Windows/Linux machine. Ask in Discord and we&apos;ll walk you through it.
