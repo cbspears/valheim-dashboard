@@ -187,14 +187,32 @@ export function createIdentityLink({ client, log = console }) {
         return;
       }
 
-      await reply(
-        message,
-        `Carve this rune and shout it in-game: \`/oath ${res.code} — <your oath>\`. ` +
-          `Whatever viking you are playing when you swear it becomes yours, bound to this voice in the Hall. ` +
-          `The rune fades in 20 minutes — ask again if it does.`
-      );
-      await message.react('🪶').catch(() => {});
-      log.info?.(`[identity] ${username} minted claim ${res.code}`);
+      // Deliver the rune PRIVATELY over DM. Anyone who can read the code in a
+      // public channel could shout it in-game first and bind THIS user's
+      // Hall-voice to their own viking — so the code must never appear in the
+      // channel, and there is deliberately NO public fallback that leaks it.
+      const rune =
+        `Carve this rune and shout it in-game:\n\`/oath ${res.code} — <your oath>\`\n\n` +
+        `Whatever viking you are playing when you swear it becomes yours, bound to this voice in the Hall. ` +
+        `The rune fades in 20 minutes — ask again if it does.`;
+      try {
+        await message.author.send(rune);
+        await reply(
+          message,
+          `I have whispered your rune in a private message, **${username}** — swear it in-game to bind your viking.`
+        );
+        await message.react('📜').catch(() => {});
+        log.info?.(`[identity] ${username} minted claim (rune DM'd)`);
+      } catch {
+        // DMs are closed — tell them how to open them; NEVER post the code here.
+        await reply(
+          message,
+          `I could not send you a private message, **${username}**. Open your DMs for this server ` +
+            `(Privacy Settings → Direct Messages), then ask again: \`@Eilif I am <YourViking>\`.`
+        );
+        await message.react('⚠️').catch(() => {});
+        log.warn?.(`[identity] ${username} minted claim but DM failed (DMs closed?)`);
+      }
     } catch (e) {
       log.error?.(`[identity] ${e.message}`);
     }

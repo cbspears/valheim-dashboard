@@ -40,29 +40,68 @@ export default async function OathPage() {
           <CardBody>
             <div className="mb-3 flex items-center gap-2">
               <ScrollText size={18} className="text-gold" />
-              <h2 className="font-display text-base tracking-wide text-ash">Swear your oath</h2>
+              <h2 className="font-display text-base tracking-wide text-ash">Swear your oath &amp; bind your viking</h2>
             </div>
             <p className="text-sm leading-relaxed text-ash-dim">
-              <MessageSquare size={14} className="mr-1.5 inline align-text-bottom text-gold-dim" />
-              Post in Discord and tag the bot, using this format:
+              Your first oath is also how you <span className="font-semibold text-ash">bind your Discord to your viking</span>,
+              so your deeds, photos, and title all gather under your name. Two steps, once.
             </p>
-            <p className="my-3">
-              <span className="rounded bg-gold/15 px-2 py-1 font-mono text-xs font-semibold text-gold-light">
-                {DISCORD_BOT_HANDLE} oath — YourVikingName: your oath, one line
+
+            {/* Step 1 — claim a private rune in Discord */}
+            <div className="mt-4 flex gap-3">
+              <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-gold/20 font-mono text-xs font-bold text-gold-light">
+                1
               </span>
-            </p>
-            <p className="text-sm leading-relaxed text-ash-dim">
-              Give your <span className="font-semibold text-ash">in-game name</span>, not your
-              Discord handle — the two rarely match, and the name is how the mark lands on the right
-              viking&apos;s page. Spell it as it appears in-game. Swear again anytime to change your
-              words; your latest oath replaces the last.
-            </p>
-            <p className="mt-3 text-sm leading-relaxed text-ash-dim">
-              You can also swear without leaving the game — shout it:{' '}
-              <span className="rounded bg-gold/15 px-2 py-1 font-mono text-xs font-semibold text-gold-light">
-                /s /oath your vow, one line
+              <div className="text-sm leading-relaxed text-ash-dim">
+                <p>
+                  <MessageSquare size={14} className="mr-1.5 inline align-text-bottom text-gold-dim" />
+                  In Discord, tag the bot to claim your viking:
+                </p>
+                <p className="my-2">
+                  <span className="rounded bg-gold/15 px-2 py-1 font-mono text-xs font-semibold text-gold-light">
+                    {DISCORD_BOT_HANDLE} I am YourVikingName
+                  </span>
+                </p>
+                <p>
+                  The bot replies in a <span className="font-semibold text-ash">private message</span> with a
+                  one-time rune. Keep it to yourself — anyone who has it could bind your name to their viking.
+                  (No message arrives? Open direct messages for this server, then ask again.)
+                </p>
+              </div>
+            </div>
+
+            {/* Step 2 — shout the rune in-game */}
+            <div className="mt-4 flex gap-3">
+              <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-gold/20 font-mono text-xs font-bold text-gold-light">
+                2
               </span>
-              {'. '}It must be a shout — plain chat never leaves the campfire.
+              <div className="text-sm leading-relaxed text-ash-dim">
+                <p>
+                  Log in, then <span className="font-semibold text-ash">shout</span> the rune with your vow:
+                </p>
+                <p className="my-2">
+                  <span className="rounded bg-gold/15 px-2 py-1 font-mono text-xs font-semibold text-gold-light">
+                    /s /oath YOURRUNE — your vow, one line
+                  </span>
+                </p>
+                <p>
+                  Whatever viking you are playing becomes yours. It must be a{' '}
+                  <span className="font-semibold text-ash">shout</span> (<span className="font-mono text-xs">/s</span>) —
+                  plain chat never leaves the campfire.
+                </p>
+              </div>
+            </div>
+
+            <p className="mt-4 text-sm leading-relaxed text-ash-dim">
+              Already bound? Change your words anytime — shout{' '}
+              <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                /s /oath your new vow
+              </span>{' '}
+              in-game, or from Discord just{' '}
+              <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                {DISCORD_BOT_HANDLE} oath — your new vow
+              </span>
+              {' '}— no name needed, it lands on your bound viking. Your latest oath replaces the last.
             </p>
           </CardBody>
         </Card>
