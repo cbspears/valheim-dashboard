@@ -16,10 +16,14 @@ import { createIdentityLink, createIdentityConfirmations } from './identity.js';
 import { createVoiceEngine } from './voice.js';
 import { createTitlesAnnouncer } from './titles.js';
 import { createMilestonesAnnouncer } from './milestones.js';
+import { recordLoopResult, loopsSnapshot, createHeartbeatSender } from './heartbeat.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
 const POLL = parseInt(process.env.POLL_INTERVAL_MS || '15000', 10);
 const TZ = process.env.TZ || 'America/Chicago';
+// Server launch date — also used to flag a pilot RECAPS_START pulled forward
+// of it in the ops cockpit (see the heartbeat loop below).
+const LAUNCH_DATE = new Date('2026-09-09T00:00:00');
 // Recaps stay silent until this date (server launch). Invalid/unset => no gate.
 const recapsStart = (() => {
   if (!process.env.RECAPS_START) return null;
@@ -78,8 +82,10 @@ async function runLive() {
     if (stopped) return;
     try {
       await fn();
+      recordLoopResult(label, true);
     } catch (e) {
       console.error(`[${label}]`, e.message);
+      recordLoopResult(label, false, e.message);
     }
   };
 
@@ -182,6 +188,45 @@ async function runLive() {
     timers.push(setInterval(milestonesLoop, interval));
     extra += `, milestones every ${interval}ms`;
   }
+
+  // Ops cockpit heartbeat: reports this bot's liveness + its gated sub-loops'
+  // last-run/last-error/enabled state, plus non-secret pilot-flag booleans the
+  // cockpit needs to flag before launch. Best-effort — sendHeartbeat never
+  // throws (see heartbeat.js), and skips entirely if OPS_HEARTBEAT_TOKEN unset.
+  const sendHeartbeat = createHeartbeatSender('discord-bot');
+  const heartbeatTick = async () => {
+    if (stopped) return;
+    const snapshot = loopsSnapshot();
+    const subLoopEnabled = {
+      relay: true,
+      bosses: true,
+      'events-sync': process.env.EVENTS_SYNC === '1',
+      'gallery-ingest': process.env.GALLERY_INGEST === '1',
+      'oath-ingest': process.env.OATH_INGEST === '1',
+      'identity-link': process.env.IDENTITY_LINK !== '0',
+      'identity-confirm': process.env.IDENTITY_LINK !== '0',
+      'voice-queue': Boolean(voice),
+      'title-evaluator': process.env.TITLES_ANNOUNCE !== '0',
+      'milestone-evaluator': process.env.MILESTONES_ANNOUNCE !== '0',
+    };
+    const subLoops = {};
+    for (const [key, enabled] of Object.entries(subLoopEnabled)) {
+      subLoops[key] = { enabled, ...(snapshot[key] || {}) };
+    }
+    await sendHeartbeat({
+      status: 'ok',
+      metrics: {
+        subLoops,
+        // Non-secret pilot flags the cockpit warns about before launch.
+        recapChannelIsServer: (process.env.RECAP_CHANNEL || 'valheim') === 'server',
+        milestoneChannelIsServer: (process.env.MILESTONE_CHANNEL || 'valheim') === 'server',
+        recapsStartPulledForward: recapsStart ? recapsStart.getTime() < LAUNCH_DATE.getTime() : false,
+        timerCount: timers.length,
+      },
+    });
+  };
+  await heartbeatTick();
+  timers.push(setInterval(heartbeatTick, 60000));
 
   console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s${extra}.`);
 

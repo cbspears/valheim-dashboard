@@ -5,6 +5,7 @@
 import SftpClient from 'ssh2-sftp-client';
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { LogParser } from './parser.js';
+import { createHeartbeatSender } from './heartbeat.js';
 
 export class Poller {
   constructor(config, logger = console) {
@@ -18,6 +19,12 @@ export class Poller {
     // Recently-mirrored chat, key -> posted-at ms. The same shout can surface
     // twice (plugin [EILIF_CHAT] line + console echo); this suppresses the twin.
     this.recentChat = new Map();
+    // Ops-cockpit bookkeeping: last tick outcome + last time a new log line
+    // was actually seen (as opposed to just an empty poll).
+    this.lastTickAt = 0;
+    this.lastTickOk = null;
+    this.lastTickError = null;
+    this.lastNewLineAt = 0;
   }
 
   async loadState() {
@@ -104,6 +111,7 @@ export class Poller {
   async tick() {
     const text = await this.fetchNewBytes();
     if (text) {
+      this.lastNewLineAt = Date.now();
       const combined = this.partial + text;
       const lines = combined.split('\n');
       this.partial = lines.pop() ?? ''; // last (possibly partial) line held over
@@ -274,16 +282,44 @@ export class Poller {
       if (this.stopped) return;
       try {
         await this.tick();
+        this.lastTickOk = true;
+        this.lastTickError = null;
       } catch (err) {
         this.log.error?.(`[tick] ${err.message}`);
+        this.lastTickOk = false;
+        this.lastTickError = err.message;
       }
+      this.lastTickAt = Date.now();
       if (!this.stopped) this.timer = setTimeout(loop, this.cfg.intervalMs);
     };
     await loop();
+
+    // Ops cockpit heartbeat: reports roster size + log freshness + the last
+    // poll/SFTP outcome every ~60s. Best-effort — sendHeartbeat never throws
+    // (see heartbeat.js), and skips entirely if OPS_HEARTBEAT_TOKEN unset.
+    const sendHeartbeat = createHeartbeatSender('log-poller', this.log);
+    const heartbeatTick = async () => {
+      if (this.stopped) return;
+      const now = Date.now();
+      await sendHeartbeat({
+        status: this.lastTickOk === false ? 'error' : 'ok',
+        error: this.lastTickOk === false ? this.lastTickError : undefined,
+        metrics: {
+          onlineCount: this.parser.roster().length,
+          lastNewLineAgeSec: this.lastNewLineAt ? Math.round((now - this.lastNewLineAt) / 1000) : null,
+          lastTickAgeSec: this.lastTickAt ? Math.round((now - this.lastTickAt) / 1000) : null,
+          source: this.cfg.source,
+          chatMirrorConfigured: Boolean(this.cfg.chatWebhookUrl || (this.cfg.discordToken && this.cfg.chatChannelId)),
+        },
+      });
+    };
+    await heartbeatTick();
+    this.heartbeatTimer = setInterval(heartbeatTick, 60000);
   }
 
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
   }
 }

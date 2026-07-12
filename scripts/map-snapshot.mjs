@@ -24,6 +24,45 @@ const SIZE = 2048;
 const STATE_FILE = join(ROOT, 'scripts', '.map-snapshot-state.json');
 const fs = rootRequire('fs');
 
+// --- Ops cockpit heartbeat (best-effort; never blocks or crashes this script) ---
+// Uses OPS_HEARTBEAT_TOKEN + the dashboard base URL derived from OPS_HEARTBEAT_URL
+// or WEBHOOK_URL (both loaded above from services/log-poller/.env / .env.local).
+function sanitizeForHeartbeat(input, max = 200) {
+  if (!input) return null;
+  let s = String(input);
+  s = s.replace(/(token|key|secret|bearer|password)\s*[:=]?\s*\S+/gi, '$1=[redacted]');
+  s = s.replace(/[A-Za-z0-9+/_-]{32,}/g, '[redacted]');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+function resolveHeartbeatUrl() {
+  if (process.env.OPS_HEARTBEAT_URL) return process.env.OPS_HEARTBEAT_URL;
+  if (process.env.WEBHOOK_URL) return `${process.env.WEBHOOK_URL.replace(/\/api\/webhook\/?$/, '')}/api/ops/heartbeat`;
+  return null;
+}
+let heartbeatWarned = false;
+async function sendHeartbeat({ status = 'ok', error, metrics } = {}) {
+  const token = process.env.OPS_HEARTBEAT_TOKEN;
+  const url = resolveHeartbeatUrl();
+  if (!token || !url) {
+    if (!heartbeatWarned) {
+      heartbeatWarned = true;
+      console.warn(`[map-snapshot] heartbeats disabled (${!token ? 'OPS_HEARTBEAT_TOKEN unset' : 'no dashboard URL — set OPS_HEARTBEAT_URL or WEBHOOK_URL'})`);
+    }
+    return;
+  }
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ component: 'map-snapshot', status, error: sanitizeForHeartbeat(error), metrics }),
+    });
+    if (!res.ok) console.warn(`[map-snapshot] heartbeat POST HTTP ${res.status}`);
+  } catch (e) {
+    console.warn(`[map-snapshot] heartbeat POST failed: ${e.message}`);
+  }
+}
+
 function loadState() {
   try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return { days: [] }; }
 }
@@ -107,6 +146,7 @@ async function snapshot() {
   // at its final state, which makes each frame the day's end-of-day picture.
   const day = await currentWorldDay();
   let dayNote = 'day unknown (frame skipped)';
+  let manifestOk = null; // null = day unknown so no manifest attempt was made
   if (day !== null) {
     const dayPath = `frames-by-day/day-${String(day).padStart(4, '0')}.webp`;
     const rd = await put(dayPath);
@@ -124,19 +164,35 @@ async function snapshot() {
         headers: { ...auth, 'Content-Type': 'application/json', 'x-upsert': 'true' },
         body: manifest,
       });
+      manifestOk = rm.ok;
       dayNote = `day ${day} framed${rm.ok ? '' : ' (manifest failed HTTP ' + rm.status + ')'}`;
     } else {
+      manifestOk = false;
       dayNote = `day frame failed HTTP ${rd.status}`;
     }
   }
 
   console.log(`[map-snapshot] ${new Date().toISOString()} uploaded (${(webp.length / 1024).toFixed(0)}KB, revealed ${revealedPct}%, ${dayNote})`);
+  return { worldDay: day, revealedPct, manifestOk };
 }
 
 const loop = process.argv.includes('--loop');
-await snapshot().catch((e) => { console.error('[map-snapshot] failed:', e.message); if (!loop) process.exit(1); });
 if (loop) {
   // 5-minute cadence: an in-game day is ~30 real minutes, so each day gets
   // several upserts and its frozen frame lands within minutes of rollover.
-  setInterval(() => snapshot().catch((e) => console.error('[map-snapshot] failed:', e.message)), 5 * 60 * 1000);
+  // Ops cockpit heartbeat after every attempt (ok on success, error on
+  // failure) — best-effort, sendHeartbeat never throws.
+  const runAndHeartbeat = async () => {
+    try {
+      const result = await snapshot();
+      await sendHeartbeat({ status: 'ok', metrics: result });
+    } catch (e) {
+      console.error('[map-snapshot] failed:', e.message);
+      await sendHeartbeat({ status: 'error', error: e.message });
+    }
+  };
+  await runAndHeartbeat();
+  setInterval(runAndHeartbeat, 5 * 60 * 1000);
+} else {
+  await snapshot().catch((e) => { console.error('[map-snapshot] failed:', e.message); process.exit(1); });
 }
