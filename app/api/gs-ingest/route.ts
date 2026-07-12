@@ -765,6 +765,11 @@ export async function POST(req: Request) {
   if (body?.schemaVersion !== 1 || body?.game !== 'valheim') {
     return Response.json({ error: 'unexpected payload' }, { status: 400 });
   }
+  // Allowlist the three recognized producers; an unknown `source` never falls
+  // through to the client branch (default-deny, not default-client).
+  if (body.source !== 'server' && body.source !== 'client' && body.source !== 'client-map') {
+    return Response.json({ error: 'unknown source' }, { status: 400 });
+  }
 
   // Auth split: the server-side Emitter (source:'server') is the only privileged
   // producer — REQUIRE its Bearer token. Client payloads carry no secret (they run
@@ -791,24 +796,22 @@ export async function POST(req: Request) {
       return Response.json({ status: 'ignored', reason: 'world mismatch' });
     }
 
-    // Automatic cartography from the client plugin: write only map_explored_pct (GREATEST).
-    if (body.source === 'client-map') {
-      const r = await ingestClientMap(body as Record<string, unknown>);
-      return Response.json(
-        r.ok ? { status: 'inserted', map_explored_pct: r.pct, player: r.player } : { status: 'ignored', reason: 'bad client-map payload' },
-      );
-    }
-
-    // Server-presence cross-check (see confirmOnThisServer): before merging ANY
-    // client-reported stats, require independent proof — the log poller's
-    // join/leave trail for THIS server — that the reporter is actually connected
-    // here right now. The client mod self-reports its target world + POST URL from
-    // unverifiable local config, so a character/profile carried onto a DIFFERENT
-    // server (config still pointed here) would otherwise pour that other server's
-    // play into this dashboard, polluting every stat column. Mirrors the world-
-    // mismatch early-return above: on positive offline evidence we ack with 200
-    // and drop the payload, so the mod never retry-storms. One-sided: no reporter
-    // name, or no positive offline evidence, always falls through and ingests.
+    // Server-presence cross-check (see confirmOnThisServer): before ANY client
+    // write — cartography (map_explored_pct), deaths, or the per-player stats
+    // merge — require independent proof (the log poller's join/leave trail for
+    // THIS server) that the character the payload writes for is actually
+    // connected here right now. The client mod self-reports its target world +
+    // POST URL from unverifiable local config, so a character/profile carried
+    // onto a DIFFERENT server (config still pointed here) would otherwise pour
+    // that other server's play into this dashboard, polluting every stat column.
+    // On positive offline evidence we ack with 200 and drop the payload, so the
+    // mod never retry-storms. One-sided: no name, or no positive offline
+    // evidence, always falls through and ingests.
+    //
+    // The verified identity is the character the payload writes for: the map
+    // plugin reports `playerName`, the stats/deaths client reports `reporter`.
+    // (client-map used to run BEFORE this check — moved it under the guard so a
+    // caller can't inflate an existing player's exploration % without proof.)
     //
     // Emergency kill switch (default enabled, matches the poller's EMIT_DEATHS
     // convention): this check is only as good as the log poller's own uptime, and
@@ -820,17 +823,29 @@ export async function POST(req: Request) {
     // causing false rejections; flip it back once the poller's confirmed healthy.
     const presenceCheckEnabled = (process.env.PRESENCE_CHECK_ENABLED || 'true').toLowerCase() !== 'false';
     const reporter = typeof body.reporter === 'string' ? body.reporter.trim() : '';
-    if (presenceCheckEnabled && reporter) {
-      const presence = await confirmOnThisServer(reporter);
+    const presenceName =
+      body.source === 'client-map'
+        ? (typeof body.playerName === 'string' ? body.playerName.trim() : '')
+        : reporter;
+    if (presenceCheckEnabled && presenceName) {
+      const presence = await confirmOnThisServer(presenceName);
       if (!presence.onServer) {
         console.warn(
-          `[gs-ingest] PRESENCE REJECT: "${reporter}" — ${presence.reason}. ` +
-            `Ignoring this client payload (deaths, per-player stats, boss-kill events) ` +
+          `[gs-ingest] PRESENCE REJECT: "${presenceName}" — ${presence.reason}. ` +
+            `Ignoring this client payload (map %, deaths, per-player stats, boss-kill events) ` +
             `to protect Eilif stats from a mod profile reused on a different server. ` +
             `(Set PRESENCE_CHECK_ENABLED=false in Vercel if this looks like a false positive.)`,
         );
         return Response.json({ status: 'ignored', reason: 'not connected to this server' });
       }
+    }
+
+    // Automatic cartography from the client plugin: write only map_explored_pct (GREATEST).
+    if (body.source === 'client-map') {
+      const r = await ingestClientMap(body as Record<string, unknown>);
+      return Response.json(
+        r.ok ? { status: 'inserted', map_explored_pct: r.pct, player: r.player } : { status: 'ignored', reason: 'bad client-map payload' },
+      );
     }
 
     await ingestDeathEvents(body.deathEvents, reporter);

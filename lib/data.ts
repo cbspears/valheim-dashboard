@@ -33,6 +33,14 @@ function db() {
   );
 }
 
+// Explicit column list for public player reads — every players column EXCEPT
+// `steam_id`, which is a real external Steam account id the public site never
+// uses. Paired with a REVOKE SELECT (steam_id) ... FROM anon migration so a
+// direct PostgREST call with the (public) anon key can't harvest it either.
+// (discord_user_id/discord_username stay readable — the viking page needs them.)
+const PLAYERS_PUBLIC_COLS =
+  'id, character_name, discord_id, first_seen_at, last_seen_at, total_playtime_minutes, is_online, bio, role, discord_user_id, discord_username, current_title, title_updated_at';
+
 export async function getServerStatus(): Promise<ServerStatus | null> {
   const { data } = await db().from('server_status').select('*').eq('id', 1).single();
   return (data as ServerStatus) ?? null;
@@ -41,7 +49,7 @@ export async function getServerStatus(): Promise<ServerStatus | null> {
 export async function getOnlinePlayers(): Promise<Player[]> {
   const { data } = await db()
     .from('players')
-    .select('*')
+    .select(PLAYERS_PUBLIC_COLS)
     .eq('is_online', true)
     .order('character_name');
   return (data as Player[]) ?? [];
@@ -50,7 +58,7 @@ export async function getOnlinePlayers(): Promise<Player[]> {
 export async function getAllPlayers(): Promise<Player[]> {
   const { data } = await db()
     .from('players')
-    .select('*')
+    .select(PLAYERS_PUBLIC_COLS)
     .order('total_playtime_minutes', { ascending: false });
   return (data as Player[]) ?? [];
 }

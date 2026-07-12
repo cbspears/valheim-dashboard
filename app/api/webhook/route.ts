@@ -316,21 +316,27 @@ export async function POST(request: Request) {
       const firstToken = oathText.split(/\s+/)[0] ?? '';
       if (/^[A-HJ-NP-Z2-9]{6}$/.test(firstToken)) {
         try {
-          const { data: claim } = await db
+          // ATOMICALLY claim the code: a single UPDATE ... WHERE consumed_at IS
+          // NULL AND expires_at > now() RETURNING is the whole check-and-consume,
+          // so two simultaneous shouts of the same code can't both win — the
+          // second finds it already consumed and gets no row back. (Only the
+          // requester ever sees the code — it's DM'd — but this closes the
+          // check-then-consume race regardless.) The reassignment below is
+          // idempotent; if it ever failed mid-way the claim is spent and the
+          // player just requests a fresh code.
+          const nowIso = new Date().toISOString();
+          const { data: claimed } = await db
             .from('identity_claims')
-            .select('code, discord_user_id, discord_username, consumed_at, expires_at')
+            .update({ consumed_at: nowIso, linked_character: oathCharacterName })
             .eq('code', firstToken)
+            .is('consumed_at', null)
+            .gt('expires_at', nowIso)
+            .select('discord_user_id, discord_username')
             .maybeSingle();
 
-          const live =
-            claim &&
-            !claim.consumed_at &&
-            typeof claim.expires_at === 'string' &&
-            Date.parse(claim.expires_at as string) > Date.now();
-
-          if (live) {
-            const discordUserId = claim!.discord_user_id as string;
-            const discordUsername = (claim!.discord_username as string | null) ?? null;
+          if (claimed) {
+            const discordUserId = claimed.discord_user_id as string;
+            const discordUsername = (claimed.discord_username as string | null) ?? null;
 
             // (a) Release this Discord id from any character it was previously on.
             await db
@@ -362,13 +368,7 @@ export async function POST(request: Request) {
               });
             }
 
-            // (c) Consume the claim.
-            await db
-              .from('identity_claims')
-              .update({ consumed_at: new Date().toISOString(), linked_character: oathCharacterName })
-              .eq('code', firstToken);
-
-            // (d) Strip the code token — the remainder is the real oath.
+            // (c) Strip the code token — the remainder is the real oath.
             oathText = oathText.slice(firstToken.length).trim();
           }
         } catch (e) {
