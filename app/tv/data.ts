@@ -2,8 +2,13 @@
 //
 // The /tv feature owns its own fetchers so the two live feeds it introduces
 // (in-game chat + live player positions) never leak into the shared data layer
-// (lib/data.ts) or the public /map atlas. Same read pattern as lib/data.ts:
-// the public anon key against the tables' "public read" RLS policies.
+// (lib/data.ts) or the public /map atlas.
+//
+// SECURITY: player_positions + chat_lines no longer carry a public RLS read
+// policy — live player locations are sensitive (griefing risk). These fetchers
+// run SERVER-SIDE only (the /tv Server Component) with the SERVICE-ROLE key, and
+// the page gates the positions read behind TV_ACCESS_KEY (see app/tv/page.tsx),
+// so positions are never returned to an unauthenticated caller.
 //
 // DISPLAY DECREE (Charlie, db/2026-07-07_chat_and_positions.sql): live
 // positions render on /tv ONLY. The page filters them to characters that are
@@ -14,7 +19,7 @@ import { createClient } from '@supabase/supabase-js';
 function db() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }
   );
 }

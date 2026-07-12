@@ -8,6 +8,7 @@ import {
   type ParsedBossKill,
 } from '@/lib/gs-client';
 import { evaluateAndRecord } from '@/lib/milestones';
+import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import type { GsClientStats } from '@/lib/types';
 
 // GsValheimStats ingest (v0) — the server-side Emitter POSTs here every ~120s
@@ -17,9 +18,12 @@ import type { GsClientStats } from '@/lib/types';
 // client payloads with a 200 so the mod never retries (per-player stats land
 // in a later iteration).
 //
-// Auth (v0): the Emitter's Token is currently blank on the server (config only
-// reloads at restart). If an Authorization header IS sent it must match
-// VOICE_API_TOKEN; hardening to REQUIRED happens at the next server restart.
+// Auth (split by source): server-side Emitter payloads (source:'server') MUST
+// present a Bearer token equal to GS_EMITTER_TOKEN — a header-less or wrong-token
+// server payload is rejected 401. Client payloads ('client'/'client-map') run on
+// players' PCs and carry NO secret; they are instead gated by the world + server-
+// presence cross-checks below. The server-side Emitter config Token must equal
+// GS_EMITTER_TOKEN.
 
 export const dynamic = 'force-dynamic';
 
@@ -175,16 +179,22 @@ function parseOnline(v: unknown): { names: string[] | null; count: number | null
  * ~120s, so each death is deduped on (playerName + tsUtc) — a natural unique key
  * (a player can't die twice in the same instant) — stored as `metadata.gsDeathId`.
  */
-async function ingestDeathEvents(rawEvents: unknown): Promise<void> {
+async function ingestDeathEvents(rawEvents: unknown, reporter: string): Promise<void> {
   if (!Array.isArray(rawEvents) || rawEvents.length === 0) return;
 
-  // Normalize + drop anything without the two fields we key on.
+  // A client may only report its OWN deaths (a client mod can't witness the true
+  // cause of anyone else's death). Drop anything not authored by the reporting
+  // character — with no reporter name to trust, drop everything.
+  const owner = reporter.trim();
+
+  // Normalize + drop anything without the two fields we key on (and anything the
+  // reporter didn't author).
   const parsed = rawEvents
     .map((e) => {
       const d = e as Record<string, unknown>;
       const name = typeof d.playerName === 'string' ? d.playerName.trim() : '';
       const tsUtc = typeof d.tsUtc === 'string' ? d.tsUtc : '';
-      if (!name || !tsUtc || Number.isNaN(Date.parse(tsUtc))) return null;
+      if (!name || name !== owner || !tsUtc || Number.isNaN(Date.parse(tsUtc))) return null;
       const metadata: Record<string, unknown> = {
         gsDeathId: `${name}|${tsUtc}`,
         source: 'gs',
@@ -226,25 +236,20 @@ async function ingestDeathEvents(rawEvents: unknown): Promise<void> {
   }
   if (fresh.length === 0) return;
 
-  // Resolve (or create) a players row per name, mirroring the webhook.
+  // Resolve EXISTING players only — never auto-create a row from a client payload.
+  // A brand-new player gets their row from the poller's join path first; until then
+  // we skip their death writes (self-heals on the next cycle).
   const names = [...new Set(fresh.map((p) => p.name))];
   const { data: players } = await client.from('players').select('id, character_name').in('character_name', names);
   const idByName = new Map<string, string>((players ?? []).map((p) => [p.character_name as string, p.id as string]));
-  for (const name of names) {
-    if (idByName.has(name)) continue;
-    const first = fresh.find((p) => p.name === name)!;
-    const { data: ins } = await client
-      .from('players')
-      .insert({ character_name: name, first_seen_at: first.occurredIso, last_seen_at: first.occurredIso, is_online: false })
-      .select('id')
-      .single();
-    if (ins?.id) idByName.set(name, ins.id as string);
-  }
+
+  const writable = fresh.filter((p) => idByName.has(p.name));
+  if (writable.length === 0) return;
 
   await client.from('events').insert(
-    fresh.map((p) => ({
+    writable.map((p) => ({
       type: 'death',
-      player_id: idByName.get(p.name) ?? null,
+      player_id: idByName.get(p.name)!,
       character_name: p.name,
       metadata: p.metadata,
       created_at: p.occurredIso,
@@ -256,7 +261,7 @@ async function ingestDeathEvents(rawEvents: unknown): Promise<void> {
   // that we have the authoritative cause row, drop any causeless poller-derived
   // death for the same character within ±3 minutes so it isn't double-counted.
   await Promise.all(
-    fresh.map(async (p) => {
+    writable.map(async (p) => {
       const t = Date.parse(p.occurredIso);
       const lo = new Date(t - 3 * 60_000).toISOString();
       const hi = new Date(t + 3 * 60_000).toISOString();
@@ -296,17 +301,10 @@ async function ingestClientMap(body: Obj): Promise<{ ok: boolean; pct: number | 
   const client = db();
   const now = new Date().toISOString();
 
-  // Resolve (or create) the players row for this character (mirrors the deaths/stats paths).
+  // Resolve an EXISTING players row only — never auto-create from a client payload.
+  // A new player's row lands via the poller join path first; until then, skip.
   const { data: found } = await client.from('players').select('id').eq('character_name', player).limit(1);
-  let pid = (found?.[0]?.id as string | undefined) ?? undefined;
-  if (!pid) {
-    const { data: ins } = await client
-      .from('players')
-      .insert({ character_name: player, first_seen_at: now, last_seen_at: now, is_online: false })
-      .select('id')
-      .single();
-    pid = ins?.id as string | undefined;
-  }
+  const pid = (found?.[0]?.id as string | undefined) ?? undefined;
   if (!pid) return { ok: false, pct, player };
 
   // GREATEST: never let a lower reading (different world, older snapshot) overwrite a higher one.
@@ -427,21 +425,14 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
   const client = db();
   const now = new Date().toISOString();
 
-  // Resolve (or create) the players row for the reporter (mirrors the deaths path).
+  // Resolve an EXISTING players row only — never auto-create from a client payload.
+  // A new reporter's row lands via the poller join path first; until then, skip.
   const { data: found } = await client
     .from('players')
     .select('id')
     .eq('character_name', s.reporter)
     .limit(1);
-  let pid = (found?.[0]?.id as string | undefined) ?? undefined;
-  if (!pid) {
-    const { data: ins } = await client
-      .from('players')
-      .insert({ character_name: s.reporter, first_seen_at: now, last_seen_at: now, is_online: false })
-      .select('id')
-      .single();
-    pid = ins?.id as string | undefined;
-  }
+  const pid = (found?.[0]?.id as string | undefined) ?? undefined;
   if (!pid) return false;
 
   // Best-effort weapon-collision monitor (LOG-ONLY): flag if this reporter's
@@ -474,6 +465,45 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
   if (dist) {
     gsStats.distances = { total: dist.distanceTraveled, walk: dist.walk, run: dist.run, sail: dist.sail, air: dist.air };
     gsStats.distancesRaw = dist.raw;
+  }
+
+  // Stat-poison detector (DETECT, DON'T BLOCK): a cumulative counter that leaps by
+  // an implausible amount in a single ~120s cycle is the signature of a spoofed or
+  // poisoned snapshot. We never block the merge (GREATEST still applies), but we
+  // console.warn AND stamp a reversible marker into gs_stats._flags so the jump is
+  // findable and undoable later. The FIRST snapshot (no prev row) is never flagged —
+  // there is no baseline to jump from.
+  if (prev) {
+    const POISON_CAPS: Record<string, number> = {
+      kills: 5000,
+      deaths: 5000,
+      damage_dealt: 5_000_000,
+      distance_traveled: 2_000_000,
+      structures_built: 20_000,
+    };
+    const incoming: Array<[string, number]> = [
+      ['kills', s.kills],
+      ['deaths', s.deaths],
+      ['damage_dealt', s.damageDealt],
+      ['distance_traveled', dist?.distanceTraveled ?? 0],
+      ['structures_built', s.structuresBuilt],
+    ];
+    const flags: Array<{ field: string; prev: number; next: number; at: string }> = [];
+    for (const [field, nextVal] of incoming) {
+      const prevVal = prevNum(field);
+      if (nextVal - prevVal > POISON_CAPS[field]) {
+        console.warn(
+          `[gs-ingest] STAT POISON? "${s.reporter}" ${field} jumped ${prevVal} → ${nextVal} ` +
+            `(+${nextVal - prevVal}) in one cycle, beyond the +${POISON_CAPS[field]} sanity cap. ` +
+            `Merged anyway (GREATEST) but flagged in gs_stats._flags for review.`,
+        );
+        flags.push({ field, prev: prevVal, next: nextVal, at: now });
+      }
+    }
+    if (flags.length > 0) {
+      const priorFlags = Array.isArray(gsStats._flags) ? (gsStats._flags as unknown[]) : [];
+      gsStats._flags = [...priorFlags, ...flags];
+    }
   }
 
   const full: Obj = {
@@ -721,12 +751,9 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): 
 }
 
 export async function POST(req: Request) {
-  const authHeader = req.headers.get('authorization');
-  if (authHeader) {
-    const token = authHeader.replace(/^Bearer\s+/i, '');
-    if (!process.env.VOICE_API_TOKEN || token !== process.env.VOICE_API_TOKEN) {
-      return Response.json({ error: 'bad token' }, { status: 401 });
-    }
+  // Best-effort per-IP rate limit (see lib/rate-limit.ts) — first line of defence.
+  if (!rateLimit(ipFromRequest(req))) {
+    return Response.json({ error: 'rate limited' }, { status: 429 });
   }
 
   let body: Record<string, unknown>;
@@ -737,6 +764,16 @@ export async function POST(req: Request) {
   }
   if (body?.schemaVersion !== 1 || body?.game !== 'valheim') {
     return Response.json({ error: 'unexpected payload' }, { status: 400 });
+  }
+
+  // Auth split: the server-side Emitter (source:'server') is the only privileged
+  // producer — REQUIRE its Bearer token. Client payloads carry no secret (they run
+  // on players' PCs) and fall through to the world + presence cross-checks.
+  if (body.source === 'server') {
+    const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+    if (!process.env.GS_EMITTER_TOKEN || token !== process.env.GS_EMITTER_TOKEN) {
+      return Response.json({ error: 'bad token' }, { status: 401 });
+    }
   }
 
   // Client payloads (per-player stats): consume `deathEvents` (real cause of
@@ -796,7 +833,7 @@ export async function POST(req: Request) {
       }
     }
 
-    await ingestDeathEvents(body.deathEvents);
+    await ingestDeathEvents(body.deathEvents, reporter);
     const merged = await ingestPlayerStats(body as Record<string, unknown>);
     // Client payloads also carry bossKillEvents (this client's view of a fight)
     // — enrich, but never flip a boss from a client (the server milestone owns that).
@@ -828,8 +865,19 @@ export async function POST(req: Request) {
 
   if (names) {
     // The Emitter's roster (reconciled) is the truth: flip everyone else off, listed on.
-    await client.from('players').update({ is_online: false }).eq('is_online', true)
-      .not('character_name', 'in', `(${names.map((n) => `"${n.replace(/"/g, '')}"`).join(',') || '""'})`);
+    // Compute the offline set by ID in JS — never interpolate a character name (which
+    // originates from a client-controlled roster) into a PostgREST filter string.
+    const nameSet = new Set(names);
+    const { data: onlineRows } = await client
+      .from('players')
+      .select('id, character_name')
+      .eq('is_online', true);
+    const goneIds = (onlineRows ?? [])
+      .filter((r) => !nameSet.has(r.character_name as string))
+      .map((r) => r.id as string);
+    if (goneIds.length > 0) {
+      await client.from('players').update({ is_online: false }).in('id', goneIds);
+    }
     if (names.length > 0) {
       await client.from('players').update({ is_online: true, last_seen_at: now })
         .in('character_name', names);

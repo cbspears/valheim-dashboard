@@ -2,17 +2,32 @@
 // the bot, copy the attachment into Supabase Storage (Discord CDN URLs expire)
 // and record it in `gallery_photos` for the dashboard's Gallery page.
 //
+// Gated to a single channel via CHANNEL_GALLERY (contract C) — messages from
+// any other channel are ignored. If unset, ingest stays ungated (any channel)
+// like before, with a once-only warning.
+//
+// An admin (guild permission MANAGE_MESSAGES) can trash a gallery photo by
+// reacting 🗑️ on the bot-reacted photo message: this deletes the
+// gallery_photos row(s) + storage object(s) for that message.
+//
 // No privileged Message Content intent needed: Discord delivers full content +
-// attachments for messages that mention the app. We only need GuildMessages.
+// attachments for messages that mention the app. We only need GuildMessages
+// (+ GuildMessageReactions for the trash react — see discord.js).
 //
 // Gated behind GALLERY_INGEST=1 (see index.js).
 
+import { PermissionFlagsBits } from 'discord.js';
 import { serviceClient } from './supabase.js';
 import { matchPinInCaption } from './pinMatch.js';
 
 const IMAGE_TYPE = /^image\//;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
 const BUCKET = 'gallery';
+const TRASH_EMOJI = '🗑️';
+
+// Skip attachments over this size — a cap against OOM/storage abuse from a
+// single huge "photo" (the bot buffers the whole file in memory to upload it).
+const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024; // 12 MB
 
 // A best-effort insert error that just means the pin_id column isn't there yet
 // (migration db/2026-07-04_gallery_pin_link.sql not applied). We retry without it.
@@ -20,6 +35,8 @@ const MISSING_PIN_COLUMN = /pin_id|column .* does not exist|schema cache/i;
 
 export function createGalleryIngest({ client, log = console }) {
   const db = serviceClient();
+  const galleryChannelId = process.env.CHANNEL_GALLERY;
+  let warnedUngated = false;
 
   // The caption is the message text with the bot mention stripped out.
   function captionFrom(message) {
@@ -38,9 +55,18 @@ export function createGalleryIngest({ client, log = console }) {
       .maybeSingle();
     if (existing) return false;
 
+    if (typeof att.size === 'number' && att.size > MAX_ATTACHMENT_BYTES) {
+      log.warn?.(`[gallery] skipped ${att.name || att.id} — ${att.size} bytes over the ${MAX_ATTACHMENT_BYTES} cap`);
+      return false;
+    }
+
     const res = await fetch(att.url);
     if (!res.ok) throw new Error(`download ${res.status}`);
     const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length > MAX_ATTACHMENT_BYTES) {
+      log.warn?.(`[gallery] skipped ${att.name || att.id} — ${bytes.length} bytes over the ${MAX_ATTACHMENT_BYTES} cap`);
+      return false;
+    }
 
     const ext = ((att.name?.split('.').pop() || 'png').toLowerCase().match(/[a-z0-9]+/)?.[0]) || 'png';
     const path = `${att.id}.${ext}`;
@@ -93,6 +119,13 @@ export function createGalleryIngest({ client, log = console }) {
       if (message.author?.bot) return;
       if (!message.mentions?.has(client.user)) return;
 
+      if (galleryChannelId) {
+        if (message.channelId !== galleryChannelId) return;
+      } else if (!warnedUngated) {
+        log.warn?.('[gallery] CHANNEL_GALLERY not set — gallery ingest is ungated (any channel accepted)');
+        warnedUngated = true;
+      }
+
       const images = [...message.attachments.values()].filter(
         (a) => IMAGE_TYPE.test(a.contentType ?? '') || IMAGE_EXT.test(a.name ?? '')
       );
@@ -119,10 +152,47 @@ export function createGalleryIngest({ client, log = console }) {
     }
   }
 
+  // Admin cleanup: a MANAGE_MESSAGES react of 🗑️ on a gallery photo message
+  // deletes that message's gallery_photos row(s) + storage object(s).
+  async function handleReaction(reaction, user) {
+    try {
+      if (user.bot) return;
+      if (reaction.emoji.name !== TRASH_EMOJI) return;
+      if (reaction.partial) reaction = await reaction.fetch().catch(() => reaction);
+
+      const message = reaction.message.partial ? await reaction.message.fetch().catch(() => null) : reaction.message;
+      if (!message?.guild) return;
+      if (galleryChannelId && message.channelId !== galleryChannelId) return;
+
+      const member = await message.guild.members.fetch(user.id).catch(() => null);
+      if (!member?.permissions?.has(PermissionFlagsBits.ManageMessages)) return;
+
+      const { data: photos, error } = await db
+        .from('gallery_photos')
+        .select('id, storage_path')
+        .eq('source_message_id', message.id);
+      if (error) throw new Error(`lookup: ${error.message}`);
+      if (!photos?.length) return;
+
+      for (const photo of photos) {
+        if (photo.storage_path) {
+          const { error: rmErr } = await db.storage.from(BUCKET).remove([photo.storage_path]);
+          if (rmErr) log.error?.(`[gallery] storage remove failed for ${photo.storage_path}: ${rmErr.message}`);
+        }
+        const { error: delErr } = await db.from('gallery_photos').delete().eq('id', photo.id);
+        if (delErr) log.error?.(`[gallery] delete failed for ${photo.id}: ${delErr.message}`);
+      }
+      log.info?.(`[gallery] ${member.user.username} trashed ${photos.length} photo(s) from message ${message.id}`);
+    } catch (e) {
+      log.error?.(`[gallery] trash react: ${e.message}`);
+    }
+  }
+
   function attach() {
     client.on('messageCreate', handleMessage);
+    client.on('messageReactionAdd', handleReaction);
     log.info?.('[gallery] ingest active — tag the bot with an image to add it');
   }
 
-  return { attach, handleMessage };
+  return { attach, handleMessage, handleReaction };
 }

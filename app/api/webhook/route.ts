@@ -15,6 +15,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { matchPinInCaption } from '@/lib/pin-match';
+import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 
 // Always run on the Node.js runtime (we need the service role key + full SDK)
 // and never cache — every webhook mutates state and must execute on request.
@@ -54,6 +55,11 @@ function serviceClient() {
 }
 
 export async function POST(request: Request) {
+  // ---- 0. Rate limit (best-effort, per-IP) --------------------------------
+  if (!rateLimit(ipFromRequest(request))) {
+    return Response.json({ error: 'rate limited' }, { status: 429 });
+  }
+
   // ---- 1. Authenticate -----------------------------------------------------
   const provided = request.headers.get('x-webhook-secret');
   const expected = process.env.WEBHOOK_SECRET;
@@ -138,15 +144,19 @@ export async function POST(request: Request) {
         }
       }
 
-      // Everyone not in the online set is offline.
-      if (onlineNames.length > 0) {
-        await db
-          .from('players')
-          .update({ is_online: false })
-          .eq('is_online', true)
-          .not('character_name', 'in', `(${onlineNames.map((n) => `"${n.replace(/"/g, '')}"`).join(',')})`);
-      } else {
-        await db.from('players').update({ is_online: false }).eq('is_online', true);
+      // Everyone not in the online set is offline. Compute the offline set by ID
+      // in JS — never interpolate a character name (client-controlled) into a
+      // PostgREST filter string.
+      const onlineSet = new Set(onlineNames);
+      const { data: currentlyOnline } = await db
+        .from('players')
+        .select('id, character_name')
+        .eq('is_online', true);
+      const goneIds = (currentlyOnline ?? [])
+        .filter((r) => !onlineSet.has(r.character_name as string))
+        .map((r) => r.id as string);
+      if (goneIds.length > 0) {
+        await db.from('players').update({ is_online: false }).in('id', goneIds);
       }
 
       const statusUpdate: Record<string, unknown> = {
@@ -288,12 +298,87 @@ export async function POST(request: Request) {
     // match a known player we still insert it, unmatched, for a manual fix.
     if (type === 'oath') {
       const oathCharacterName = characterName;
-      const oathText = typeof body.text === 'string' ? body.text.trim() : '';
+      let oathText = typeof body.text === 'string' ? body.text.trim() : '';
       if (!oathCharacterName || !oathText) {
         return Response.json(
           { error: "'oath' requires non-empty characterName and text" },
           { status: 400 }
         );
+      }
+
+      // ---- Identity link (one-time claim code) -----------------------------
+      // The FIRST whitespace-delimited token of the oath may be a one-time code
+      // the Discord bot minted into identity_claims. If it matches the code
+      // alphabet AND a live claim exists (unconsumed, unexpired), this is the
+      // single place a code is consumed: we bind the SHOUTER's character to that
+      // Discord identity and strip the code so the remainder is the real oath.
+      // Fully isolated in try/catch — a linking failure must NEVER fail the oath.
+      const firstToken = oathText.split(/\s+/)[0] ?? '';
+      if (/^[A-HJ-NP-Z2-9]{6}$/.test(firstToken)) {
+        try {
+          const { data: claim } = await db
+            .from('identity_claims')
+            .select('code, discord_user_id, discord_username, consumed_at, expires_at')
+            .eq('code', firstToken)
+            .maybeSingle();
+
+          const live =
+            claim &&
+            !claim.consumed_at &&
+            typeof claim.expires_at === 'string' &&
+            Date.parse(claim.expires_at as string) > Date.now();
+
+          if (live) {
+            const discordUserId = claim!.discord_user_id as string;
+            const discordUsername = (claim!.discord_username as string | null) ?? null;
+
+            // (a) Release this Discord id from any character it was previously on.
+            await db
+              .from('players')
+              .update({ discord_user_id: null, discord_username: null })
+              .eq('discord_user_id', discordUserId);
+
+            // (b) Bind it to the shouter's character row (create it if missing —
+            // the shouter is provably in-game right now).
+            const escapedShouter = oathCharacterName.replace(/[%_]/g, (c) => `\\${c}`);
+            const { data: shouter } = await db
+              .from('players')
+              .select('id')
+              .ilike('character_name', escapedShouter)
+              .maybeSingle();
+            if (shouter?.id) {
+              await db
+                .from('players')
+                .update({ discord_user_id: discordUserId, discord_username: discordUsername })
+                .eq('id', shouter.id);
+            } else {
+              await db.from('players').insert({
+                character_name: oathCharacterName,
+                discord_user_id: discordUserId,
+                discord_username: discordUsername,
+                first_seen_at: occurredIso,
+                last_seen_at: occurredIso,
+                is_online: false,
+              });
+            }
+
+            // (c) Consume the claim.
+            await db
+              .from('identity_claims')
+              .update({ consumed_at: new Date().toISOString(), linked_character: oathCharacterName })
+              .eq('code', firstToken);
+
+            // (d) Strip the code token — the remainder is the real oath.
+            oathText = oathText.slice(firstToken.length).trim();
+          }
+        } catch (e) {
+          console.error('[webhook] identity link skipped:', e instanceof Error ? e.message : 'error');
+        }
+      }
+
+      // Link-only swear: if stripping the code left no oath text, we're done.
+      if (!oathText) {
+        return Response.json({ ok: true, linked: true }, { status: 200 });
       }
 
       // Escape ilike wildcards (% _) so the character name is matched literally.

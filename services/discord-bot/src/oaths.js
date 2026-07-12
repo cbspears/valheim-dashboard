@@ -1,11 +1,14 @@
-// The Oath ingest. When a viking @mentions the bot with an `oath` message,
-// record their sworn line on the dashboard's Signature Wall. Because Discord
-// names ≠ in-game names, the message carries the IN-GAME name; we match it to
-// a roster viking (exact → fuzzy → unmatched) so the mark lands on the right
-// person — and an unmatched oath is NEVER lost.
+// The Oath ingest. When a viking @mentions the bot with an `oath` (or `bio` /
+// `role`) message, record it on the dashboard — but ONLY for the sender's own
+// linked viking (players.discord_user_id === message.author.id), resolved via
+// the Discord identity link (identity.js), never from a typed in-game name.
+// This closes the old "type anyone's name, overwrite their bio/oath" hole: a
+// Discord message no longer names its target, the sender's identity link
+// does. A sender who isn't linked yet is told to link first (`@Eilif I am
+// <name>` / `@Eilif join`, then shout the code in-game) — nothing is written.
 //
-// The same module also accepts `bio` and `role` messages, updating that
-// viking's profile fields via the same name matching.
+// The in-game `/oath <CODE> — <text>` webhook path (app/api/webhook/route.ts)
+// is untouched: it consumes claim codes and links identities directly there.
 //
 // No privileged Message Content intent needed: Discord delivers full content
 // for messages that mention the app. We only need GuildMessages.
@@ -16,6 +19,7 @@ import { serviceClient } from './supabase.js';
 
 const KINDS = ['oath', 'bio', 'role'];
 const FUZZY_THRESHOLD = 0.75;
+const MISSING_COLUMN = /discord_user_id|discord_username|column .* does not exist|schema cache/i;
 
 // ── name matching ─────────────────────────────────────────────────────────
 const norm = (s) => (s ?? '').toLowerCase().normalize('NFKC').replace(/\s+/g, ' ').trim();
@@ -127,21 +131,32 @@ function parse(content, botId) {
 export function createOathIngest({ client, log = console }) {
   const db = serviceClient();
 
-  async function fetchPlayers() {
-    const { data, error } = await db.from('players').select('id, character_name');
-    if (error) throw new Error(`players: ${error.message}`);
-    return data ?? [];
+  // The SOLE source of truth for which viking a Discord oath/bio/role message
+  // applies to: the sender's own identity link, not any name typed in the
+  // message. Pre-migration (discord_user_id column absent) reports notReady
+  // rather than throwing, matching identity.js's degradation style.
+  async function resolveSenderPlayer(discordId) {
+    const { data, error } = await db
+      .from('players')
+      .select('id, character_name')
+      .eq('discord_user_id', discordId)
+      .maybeSingle();
+    if (error) {
+      if (MISSING_COLUMN.test(error.message)) return { notReady: true, player: null };
+      throw new Error(`players: ${error.message}`);
+    }
+    return { notReady: false, player: data ?? null };
   }
 
   // Re-swearing replaces the viking's previous mark (one oath per Discord user).
-  async function recordOath({ parsed, match, message }) {
+  async function recordOath({ parsed, player, message }) {
     const row = {
-      character_name: parsed.name,
-      player_id: match.player?.id ?? null,
+      character_name: player.character_name,
+      player_id: player.id,
       discord_id: message.author.id,
       discord_name: message.member?.displayName ?? message.author.username,
       oath_text: parsed.text,
-      match_status: match.status,
+      match_status: 'exact', // resolved via the sender's confirmed identity link
       sworn_at: new Date(message.createdTimestamp).toISOString(),
     };
     await db.from('oaths').delete().eq('discord_id', message.author.id);
@@ -149,13 +164,14 @@ export function createOathIngest({ client, log = console }) {
     if (error) throw new Error(`insert oath: ${error.message}`);
   }
 
-  async function recordProfile({ parsed, match }) {
-    if (!match.player) return false; // nothing to attach to
+  async function recordProfile({ parsed, player }) {
     const patch = parsed.kind === 'bio' ? { bio: parsed.text } : { role: parsed.text };
-    const { error } = await db.from('players').update(patch).eq('id', match.player.id);
+    const { error } = await db.from('players').update(patch).eq('id', player.id);
     if (error) throw new Error(`update ${parsed.kind}: ${error.message}`);
-    return true;
   }
+
+  const reply = (message, content) =>
+    message.reply({ content, allowedMentions: { repliedUser: false } }).catch(() => {});
 
   async function handleMessage(message) {
     try {
@@ -165,25 +181,28 @@ export function createOathIngest({ client, log = console }) {
       const parsed = parse(message.content, client.user.id);
       if (!parsed) return;
 
-      const players = await fetchPlayers();
-      const match = matchPlayer(parsed.name, players);
+      const { notReady, player } = await resolveSenderPlayer(message.author.id);
+      if (notReady) {
+        await reply(message, 'The Hall’s ledgers are still being carved. Ask again shortly.');
+        return;
+      }
+      if (!player) {
+        await reply(
+          message,
+          'The Hall does not yet know you. Link your viking first — `@Eilif I am <YourViking>` (or `@Eilif join`) — then shout the rune it gives you in-game.'
+        );
+        await message.react('❓').catch(() => {});
+        return;
+      }
 
       if (parsed.kind === 'oath') {
-        await recordOath({ parsed, match, message });
+        await recordOath({ parsed, player, message });
         await message.react('📜').catch(() => {});
-        if (match.status === 'unmatched') await message.react('❓').catch(() => {});
-        log.info?.(
-          `[oath] ${parsed.name} (${match.status}) swore: ${parsed.text.slice(0, 60)}`
-        );
+        log.info?.(`[oath] ${player.character_name} swore: ${parsed.text.slice(0, 60)}`);
       } else {
-        const ok = await recordProfile({ parsed, match });
-        if (ok) {
-          await message.react('📝').catch(() => {});
-          log.info?.(`[oath] updated ${parsed.kind} for ${match.player.character_name}`);
-        } else {
-          await message.react('❓').catch(() => {}); // couldn't find the viking
-          log.info?.(`[oath] ${parsed.kind} for "${parsed.name}" — no matching viking`);
-        }
+        await recordProfile({ parsed, player });
+        await message.react('📝').catch(() => {});
+        log.info?.(`[oath] updated ${parsed.kind} for ${player.character_name}`);
       }
     } catch (e) {
       log.error?.(`[oath] ${e.message}`);

@@ -12,7 +12,7 @@ import { createRecap } from './recap.js';
 import { createEventsSync } from './events.js';
 import { createGalleryIngest } from './gallery.js';
 import { createOathIngest } from './oaths.js';
-import { createIdentityLink } from './identity.js';
+import { createIdentityLink, createIdentityConfirmations } from './identity.js';
 import { createVoiceEngine } from './voice.js';
 import { createTitlesAnnouncer } from './titles.js';
 import { createMilestonesAnnouncer } from './milestones.js';
@@ -121,11 +121,20 @@ async function runLive() {
     extra += ', oath ingest on';
   }
 
-  // Discord↔character identity: `@Eilif I am <name>`. On by default (core to
-  // attaching photos to vikings); disable with IDENTITY_LINK=0.
+  // Discord↔character identity: `@Eilif I am <name>` mints a claim code (the
+  // in-game `/oath <CODE>` webhook is what actually links it). On by default
+  // (core to attaching photos to vikings); disable with IDENTITY_LINK=0.
   if (process.env.IDENTITY_LINK !== '0') {
     createIdentityLink({ client: poster.client }).attach();
     extra += ', identity link on';
+
+    // Confirms claims once the webhook has consumed them (DMs the player,
+    // marks announced_at). Same on/off gate as the mint side above.
+    const identityConfirm = createIdentityConfirmations({ client: poster.client });
+    const identityConfirmLoop = safe('identity-confirm', () => identityConfirm.tick());
+    await identityConfirmLoop();
+    timers.push(setInterval(identityConfirmLoop, 30000));
+    extra += ', identity confirmations on';
   }
 
   // Optional: the Voice of the Hall — ambient cadence + event lines queued to

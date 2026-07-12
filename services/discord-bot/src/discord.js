@@ -1,6 +1,6 @@
 // Discord connection + a uniform `post(channelKey, payload)` interface.
 // Two implementations: the real gateway client, and a dry-run console printer.
-import { Client, GatewayIntentBits, Events } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Partials } from 'discord.js';
 
 /**
  * Connect to Discord and resolve the target channels.
@@ -13,12 +13,18 @@ export async function createDiscordPoster({ token, channels }) {
   //  - GuildScheduledEvents: read the server's scheduled events ("Coming Up").
   //  - GuildMessages: receive messages so the gallery can ingest photos that
   //    @mention the bot (mentions exempt us from the Message Content intent).
+  //  - GuildMessageReactions: receive reactions so an admin can trash a
+  //    gallery photo with a 🗑️ react (gallery.js).
+  // Partials for Message/Reaction/User so those reaction events still resolve
+  // when the message isn't in the cache (e.g. after a restart).
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildScheduledEvents,
       GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildMessageReactions,
     ],
+    partials: [Partials.Message, Partials.Reaction, Partials.User],
   });
 
   const ready = new Promise((resolve, reject) => {

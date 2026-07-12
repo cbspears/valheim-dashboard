@@ -1,30 +1,49 @@
 // Discord ↔ character identity link.
 //
-//   @Eilif I am <CharacterName>   — claim a viking. Case/diacritic-tolerant
-//                                   (chaerlie == Chærlie). One Discord user maps
-//                                   to one character at a time; re-declaring is
-//                                   how you switch mains.
+//   @Eilif I am <CharacterName>   — mint a one-time code to link a viking.
+//   @Eilif join                   — same, without naming a character up front.
 //   @Eilif who am I               — report the current link (handy for testing).
 //
-// On a successful claim we write players.discord_user_id + discord_username on
-// the matched row, clearing that Discord id from any other row first. Old
-// gallery photos re-attach automatically: they already store discord_user_id,
-// and the viking page joins photos on it — so no gallery rewrite is needed.
+// This does NOT link anything directly. It mints a 6-char code (contract B)
+// and inserts an `identity_claims` row (code, discord_user_id, discord_username,
+// requested_name, expires_at = now + 20min). The player then shouts
+// `/oath <CODE> — <their oath>` in-game; the webhook oath handler
+// (app/api/webhook/route.ts) is the SOLE place that consumes a code and links
+// `players.discord_user_id` — whatever viking they're playing when they swear
+// it becomes theirs. This module only confirms the result back on Discord (see
+// createIdentityConfirmations below) once that consumption has happened.
 //
 // No privileged Message Content intent needed: Discord delivers full content for
 // messages that mention the app. Follows the oath/gallery ingest pattern.
 //
 // Gated behind IDENTITY_LINK (on unless IDENTITY_LINK=0). Degrades gracefully
-// before db/2026-07-05_discord_identity.sql is applied (missing-column error →
-// an in-tone "not ready yet" reply, nothing crashes).
+// before the identity_claims table / db/2026-07-05_discord_identity.sql are
+// applied (missing-table/missing-column error → an in-tone "not ready yet"
+// reply, nothing crashes).
 
+import { randomInt } from 'node:crypto';
 import { serviceClient } from './supabase.js';
 
 const MISSING_COLUMN = /discord_user_id|discord_username|column .* does not exist|schema cache/i;
+const MISSING_TABLE = /identity_claims|relation .* does not exist|could not find the table|schema cache/i;
+
+// Contract (B): 6 chars, no I/O/0/1, uppercase.
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CODE_LEN = 6;
+export const CLAIM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
+const CLAIM_TTL_MS = 20 * 60 * 1000;
+
+function generateCode() {
+  let code = '';
+  for (let i = 0; i < CODE_LEN; i++) code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
+  return code;
+}
 
 // ── name folding (mirrors lib/slug.ts foldName) ─────────────────────────────
 // Lowercase, strip diacritics, fold Norse ligatures, drop non-alphanumerics —
-// so "Charlie", "Chærlie" and "chaerlie" all fold to the same key.
+// so "Charlie", "Chærlie" and "chaerlie" all fold to the same key. Kept here
+// for parity with the dashboard's matching helpers even though the mint path
+// below no longer needs to match a typed name against the roster.
 export function foldName(name) {
   return (name ?? '')
     .normalize('NFKD')
@@ -55,24 +74,9 @@ function levenshtein(a, b) {
   return prev[b.length];
 }
 
-// Parse the mention into a command, or null if it isn't one of ours.
-//   { kind: 'claim', name } | { kind: 'whoami' }
-export function parseIdentity(content, botId) {
-  const stripped = (content ?? '')
-    .replace(new RegExp(`<@!?${botId}>`, 'g'), '')
-    .trim();
-  if (/^who\s*(is|am)\s*i\b\??$/i.test(stripped)) return { kind: 'whoami' };
-  const m = stripped.match(/^i\s*['’]?\s*am\b\s*[:\-—–]?\s*([\s\S]+)$/i);
-  if (m) {
-    const name = m[1].trim().replace(/^["“]|["”.!]+$/g, '').trim();
-    if (name) return { kind: 'claim', name };
-  }
-  return null;
-}
-
-// Resolve a typed name to a roster viking.
-//   exact : identical fold → confident link
-//   near  : within a small edit distance → offered as a suggestion, NOT linked
+// Rank roster vikings by edit distance on the folded names; offer the closest
+// 1-2 that are actually close. Not used for linking (that's the webhook's job
+// now) — kept as a small utility in case future prompts want a "did you mean".
 export function matchRoster(name, players) {
   const q = foldName(name);
   if (!q) return { player: null, suggestions: [] };
@@ -80,8 +84,6 @@ export function matchRoster(name, players) {
   const exact = players.find((p) => foldName(p.character_name) === q);
   if (exact) return { player: exact, suggestions: [] };
 
-  // Rank the rest by edit distance on the folded names; offer the closest 1-2
-  // that are actually close (≤ 2 edits, or a shared prefix) as "did you mean".
   const scored = players
     .map((p) => ({ p, d: levenshtein(q, foldName(p.character_name)) }))
     .sort((a, b) => a.d - b.d);
@@ -92,43 +94,44 @@ export function matchRoster(name, players) {
   return { player: null, suggestions };
 }
 
+// Parse the mention into a command, or null if it isn't one of ours.
+//   { kind: 'claim', name } | { kind: 'whoami' }
+export function parseIdentity(content, botId) {
+  const stripped = (content ?? '')
+    .replace(new RegExp(`<@!?${botId}>`, 'g'), '')
+    .trim();
+  if (/^who\s*(is|am)\s*i\b\??$/i.test(stripped)) return { kind: 'whoami' };
+  if (/^join\b\??$/i.test(stripped)) return { kind: 'claim', name: null };
+  const m = stripped.match(/^i\s*['’]?\s*am\b\s*[:\-—–]?\s*([\s\S]+)$/i);
+  if (m) {
+    const name = m[1].trim().replace(/^["“]|["”.!]+$/g, '').trim();
+    if (name) return { kind: 'claim', name };
+  }
+  return null;
+}
+
 export function createIdentityLink({ client, log = console }) {
   const db = serviceClient();
 
-  async function fetchPlayers() {
-    const { data, error } = await db.from('players').select('id, character_name, discord_user_id');
-    if (error) {
-      // Pre-migration: discord_user_id column absent → retry without it.
-      if (MISSING_COLUMN.test(error.message)) {
-        const { data: d2, error: e2 } = await db.from('players').select('id, character_name');
-        if (e2) throw new Error(`players: ${e2.message}`);
-        return { players: d2 ?? [], ready: false };
-      }
-      throw new Error(`players: ${error.message}`);
+  // Mint a one-time claim code for this Discord user. Retries on the
+  // vanishingly rare PK collision with a fresh code.
+  async function mintClaim({ discordId, username, requestedName }) {
+    const expiresAt = new Date(Date.now() + CLAIM_TTL_MS).toISOString();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = generateCode();
+      const { error } = await db.from('identity_claims').insert({
+        code,
+        discord_user_id: discordId,
+        discord_username: username,
+        requested_name: requestedName,
+        expires_at: expiresAt,
+      });
+      if (!error) return { ok: true, code };
+      if (MISSING_TABLE.test(error.message)) return { ok: false, notReady: true };
+      if (error.code === '23505') continue; // code collision — try again
+      throw new Error(`insert claim: ${error.message}`);
     }
-    return { players: data ?? [], ready: true };
-  }
-
-  // Link this Discord user to `player`, moving the mapping off any other row.
-  async function linkPlayer(player, message) {
-    const discordId = message.author.id;
-    const username = message.member?.displayName ?? message.author.username;
-
-    const clear = await db
-      .from('players')
-      .update({ discord_user_id: null, discord_username: null })
-      .eq('discord_user_id', discordId)
-      .neq('id', player.id);
-    if (clear.error && MISSING_COLUMN.test(clear.error.message)) return { ok: false, notReady: true };
-    if (clear.error) throw new Error(`clear: ${clear.error.message}`);
-
-    const set = await db
-      .from('players')
-      .update({ discord_user_id: discordId, discord_username: username })
-      .eq('id', player.id);
-    if (set.error && MISSING_COLUMN.test(set.error.message)) return { ok: false, notReady: true };
-    if (set.error) throw new Error(`set: ${set.error.message}`);
-    return { ok: true };
+    throw new Error('insert claim: exhausted retries generating a unique code');
   }
 
   async function currentLink(message) {
@@ -171,27 +174,27 @@ export function createIdentityLink({ client, log = console }) {
       }
 
       // kind === 'claim'
-      const { players } = await fetchPlayers();
-      const { player, suggestions } = matchRoster(cmd.name, players);
+      const username = message.member?.displayName ?? message.author.username;
+      const res = await mintClaim({
+        discordId: message.author.id,
+        username,
+        requestedName: cmd.name,
+      });
 
-      if (!player) {
-        const hint = suggestions.length
-          ? ` Did you mean ${suggestions.map((s) => `**${s}**`).join(' or ')}?`
-          : ' No viking by that name stands in the mead-hall.';
-        await reply(message, `I find no **${cmd.name}** among the warband.${hint}`);
-        await message.react('❓').catch(() => {});
-        return;
-      }
-
-      const res = await linkPlayer(player, message);
       if (res.notReady) {
         await reply(message, 'The Hall’s ledgers are still being carved. Ask again shortly.');
         await message.react('⏳').catch(() => {});
         return;
       }
-      await reply(message, `The Hall knows you now, **${player.character_name}**. Your deeds gather beneath your name.`);
+
+      await reply(
+        message,
+        `Carve this rune and shout it in-game: \`/oath ${res.code} — <your oath>\`. ` +
+          `Whatever viking you are playing when you swear it becomes yours, bound to this voice in the Hall. ` +
+          `The rune fades in 20 minutes — ask again if it does.`
+      );
       await message.react('🪶').catch(() => {});
-      log.info?.(`[identity] ${message.author.username} -> ${player.character_name}`);
+      log.info?.(`[identity] ${username} minted claim ${res.code}`);
     } catch (e) {
       log.error?.(`[identity] ${e.message}`);
     }
@@ -199,8 +202,65 @@ export function createIdentityLink({ client, log = console }) {
 
   function attach() {
     client.on('messageCreate', handleMessage);
-    log.info?.('[identity] link active — `@Eilif I am <name>` / `@Eilif who am I`');
+    log.info?.('[identity] link active — `@Eilif I am <name>` / `@Eilif join` / `@Eilif who am I`');
   }
 
   return { attach, handleMessage };
+}
+
+// Confirms claims the webhook oath handler has already consumed: DMs the
+// Discord user once (consumed_at set, announced_at still null), then marks
+// announced_at so it never re-fires. DM failures are swallowed (the claim is
+// still marked announced — no point retrying a DM Discord won't deliver).
+export function createIdentityConfirmations({ client, log = console }) {
+  const db = serviceClient();
+  let warnedMissing = false;
+
+  async function tick() {
+    const { data, error } = await db
+      .from('identity_claims')
+      .select('code, discord_user_id, linked_character')
+      .not('consumed_at', 'is', null)
+      .is('announced_at', null);
+
+    if (error) {
+      if (MISSING_TABLE.test(error.message)) {
+        if (!warnedMissing) {
+          log.info?.('[identity] identity_claims not migrated yet — skipping confirmations');
+          warnedMissing = true;
+        }
+        return 0;
+      }
+      log.error?.(`[identity] confirmations poll failed: ${error.message}`);
+      return 0;
+    }
+    warnedMissing = false;
+
+    let confirmed = 0;
+    for (const claim of data ?? []) {
+      try {
+        const user = await client.users.fetch(claim.discord_user_id);
+        await user.send(
+          `Your oath is sworn, your saga is linked — the Hall now knows you as **${claim.linked_character}**.`
+        );
+      } catch (e) {
+        log.warn?.(`[identity] DM failed for ${claim.discord_user_id}: ${e.message}`);
+      }
+
+      const { error: upErr } = await db
+        .from('identity_claims')
+        .update({ announced_at: new Date().toISOString() })
+        .eq('code', claim.code)
+        .is('announced_at', null);
+      if (upErr) {
+        log.error?.(`[identity] mark announced failed for ${claim.code}: ${upErr.message}`);
+        continue;
+      }
+      confirmed++;
+    }
+    if (confirmed) log.info?.(`[identity] confirmed ${confirmed} linked oath(s)`);
+    return confirmed;
+  }
+
+  return { tick };
 }

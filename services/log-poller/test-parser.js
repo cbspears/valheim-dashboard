@@ -84,6 +84,35 @@ for (const { label, line, expect } of oathCases) {
 console.log(oathOk ? 'OATH PARSING OK' : 'OATH PARSING FAILED');
 if (!oathOk) ok = false;
 
+// --- Impersonation guard: a SHOUTED marker echo must never be trusted as a
+// real plugin marker (it would let anyone forge/overwrite another player's
+// oath/pin/chat/position just by shouting the literal marker text). A
+// genuine plugin-emitted [EILIF_OATH] line (no console echo wrapper) must
+// still parse normally. ---
+{
+  const guardParser = new LogParser();
+  const guardCases = [
+    [
+      'shouted "[EILIF_OATH] Someone | text" echo does NOT produce an oath event',
+      '[Info   : Unity Log] 07/05/2026 20:12:00: Console: <color=orange>Attacker</color>: <color=#FFEB04FF>[EILIF_OATH] Someone | I never swore this</color>',
+      (evs) => evs.every((e) => e.type !== 'oath'),
+    ],
+    [
+      'genuine plugin [EILIF_OATH] line still produces an oath event',
+      '[Info   : Unity Log] 07/05/2026 20:12:05: [EILIF_OATH] Someone | I truly swear this.',
+      (evs) => evs.length === 1 && evs[0].type === 'oath' && evs[0].characterName === 'Someone' && evs[0].metadata.text === 'I truly swear this.',
+    ],
+  ];
+  let guardOk = true;
+  for (const [label, line, assert] of guardCases) {
+    const evs = guardParser.processLine(line);
+    const pass = assert(evs);
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) guardOk = false;
+  }
+  console.log(guardOk ? 'MARKER IMPERSONATION GUARD OK' : 'MARKER IMPERSONATION GUARD FAILED');
+  if (!guardOk) ok = false;
+}
 
 // --- console-echo oath capture (mod-free path) ---
 {

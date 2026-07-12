@@ -44,6 +44,12 @@ const RE = {
   // The Eilif companion plugin's /oath chat command. Marker can be embedded
   // anywhere in the standard BepInEx log prefix; name/text split on the FIRST
   // " | " so a text containing " | " itself stays intact.
+  // NOT anchored to line-start on its own — this marker (and pin/chat/pos
+  // below) is ONLY trusted because processLine tests RE.consoleShout FIRST
+  // and never lets a console-echoed line reach this check. A shout of the
+  // literal text "[EILIF_OATH] Victim | ..." would otherwise match here too
+  // and impersonate Victim (see the console-echo guard at the top of
+  // processLine before touching this).
   oath: /\[EILIF_OATH\]\s*(.+)$/,
   // Shouted /oath as echoed by the server console — the mod-free capture path.
   // Shout text arrives display-uppercased; the oath keyword is matched case-
@@ -52,22 +58,29 @@ const RE = {
   consoleOath: /Console:\s*<color=orange>(.+?)<\/color>:\s*<color=[^>]*>\/oath\s+(.+?)<\/color>/i,
   // The Eilif companion plugin's /pin capture (Harmony patch on
   // Chat.OnNewChatMessage — unlike /oath this NEEDS the plugin, since a
-  // world position isn't available from the console echo alone).
+  // world position isn't available from the console echo alone). Same
+  // console-echo-guard caveat as `oath` above applies here too.
   //   [EILIF_PIN] Testman | poi | The Dark Chapel | 123.4 | -567.8
   pin: /\[EILIF_PIN\]\s*(.+?)\s*\|\s*(base|poi)\s*\|\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*$/,
   // The Eilif companion plugin's shout-chat capture (raw casing, name/text
-  // split on the FIRST " | " like [EILIF_OATH]):
+  // split on the FIRST " | " like [EILIF_OATH]). Same console-echo-guard
+  // caveat as `oath` above applies here too.
   //   [EILIF_CHAT] Testman | hello there
   chat: /\[EILIF_CHAT\]\s*(.+)$/,
   // The Eilif companion plugin's live position + biome (emitted ~60s per online
   // player). Explicit "|"-separated fields like [EILIF_PIN]; x/z are world
   // coords ("-184.9" style) and biome is a plain enum word (Meadows, BlackForest,
-  // …, or None) — matched leniently as a run of non-space chars.
+  // …, or None) — matched leniently as a run of non-space chars. Same
+  // console-echo-guard caveat as `oath` above applies here too.
   //   [EILIF_POS] Bjorn | -184.9 | -2.1 | BlackForest
   pos: /\[EILIF_POS\]\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(\S+)\s*$/,
   // Any shouted chat as echoed by the server console — the mod-free capture
   // path (text arrives display-UPPERCASED). Command shouts (/oath, /pin, …)
   // are filtered out in processLine, and the consoleOath check runs first.
+  // processLine tests THIS pattern before any [EILIF_*] marker regex, so a
+  // shout containing a literal marker (e.g. "[EILIF_OATH] Victim | ...") is
+  // always captured here as echoed oath/chat, never trusted as the real
+  // plugin-emitted marker (see processLine's console-echo guard).
   //   Console: <color=orange>Testman</color>: <color=#FFEB04FF>HELLO THERE</color>
   consoleShout: /Console:\s*<color=orange>(.+?)<\/color>:\s*<color=[^>]*>(.+?)<\/color>/,
 };
@@ -112,6 +125,43 @@ export class LogParser {
     const events = [];
     if (!line) return events;
 
+    // --- Console-echoed shout (checked BEFORE any [EILIF_*] marker) ---
+    // A player can SHOUT the literal text "[EILIF_OATH] Victim | fake text"
+    // (or [EILIF_PIN]/[EILIF_POS]/[EILIF_CHAT]) and the server console echoes
+    // it back verbatim as "Console: <color=orange>Attacker</color>: <color=
+    // ...>[EILIF_OATH] Victim | fake text</color>". None of the marker regexes
+    // below are anchored to line-start, so if they ran over an echo line
+    // first they'd trust the embedded marker as if the plugin emitted it —
+    // impersonating (and overwriting) another player's real oath/pin/chat/
+    // position. So: any line matching the console-echo shape is handled ONLY
+    // as an echoed oath/chat, and is NEVER allowed to fall through to a
+    // marker check, no matter what marker text the shouter embedded.
+    if (RE.consoleShout.test(line)) {
+      // --- In-game sworn oath (shouted, via the server's console echo) ---
+      const co = line.match(RE.consoleOath);
+      if (co) {
+        const name = co[1].trim();
+        const text = co[2].trim();
+        if (name && text) {
+          events.push({ type: 'oath', characterName: name, metadata: { text } });
+        }
+        return events;
+      }
+
+      // --- Any other shouted chat (console echo, mod-free but UPPERCASED) ---
+      const cs = line.match(RE.consoleShout);
+      if (cs) {
+        const name = cs[1].trim();
+        const text = cs[2].trim();
+        // '/'-prefixed shouts are commands (/oath handled above, /pin via the
+        // plugin, anything else is noise) — never mirror them as chat.
+        if (name && text && !text.startsWith('/')) {
+          events.push({ type: 'chat', characterName: name, metadata: { text, source: 'echo' } });
+        }
+      }
+      return events;
+    }
+
     // --- In-game sworn oath (/oath) ---
     const o = line.match(RE.oath);
     if (o) {
@@ -123,30 +173,6 @@ export class LogParser {
         if (name && text) {
           events.push({ type: 'oath', characterName: name, metadata: { text } });
         }
-      }
-      return events;
-    }
-
-    // --- In-game sworn oath (shouted, via the server's console echo) ---
-    const co = line.match(RE.consoleOath);
-    if (co) {
-      const name = co[1].trim();
-      const text = co[2].trim();
-      if (name && text) {
-        events.push({ type: 'oath', characterName: name, metadata: { text } });
-      }
-      return events;
-    }
-
-    // --- Any other shouted chat (console echo, mod-free but UPPERCASED) ---
-    const cs = line.match(RE.consoleShout);
-    if (cs) {
-      const name = cs[1].trim();
-      const text = cs[2].trim();
-      // '/'-prefixed shouts are commands (/oath handled above, /pin via the
-      // plugin, anything else is noise) — never mirror them as chat.
-      if (name && text && !text.startsWith('/')) {
-        events.push({ type: 'chat', characterName: name, metadata: { text, source: 'echo' } });
       }
       return events;
     }

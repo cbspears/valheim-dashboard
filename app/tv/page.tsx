@@ -33,7 +33,25 @@ export const dynamic = 'force-dynamic';
 
 type HallState = 'lively' | 'banked' | 'sleeping';
 
-export default async function TvPage() {
+export default async function TvPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  // Positions are sensitive (live player locations) and player_positions no longer
+  // has a public RLS read. /tv reads them server-side with the service-role client
+  // (app/tv/data.ts), but ONLY for an authorized viewer: TV_ACCESS_KEY must match
+  // the `key` query param (?key=...). When TV_ACCESS_KEY is unset (pilot default,
+  // mirrors the GS_EXPECTED_WORLD convention) positions are shown — the key becomes
+  // required the moment it is configured. router.refresh() preserves the query
+  // string, so the game-night TV keeps its dots live. An unauthorized caller simply
+  // gets no positions (empty map dots); everything else renders identically.
+  const params = await searchParams;
+  const keyParam =
+    typeof params.key === 'string' ? params.key : Array.isArray(params.key) ? params.key[0] : undefined;
+  const tvKey = process.env.TV_ACCESS_KEY;
+  const positionsAuthorized = !tvKey || keyParam === tvKey;
+
   const [status, online, liveMap, pins, events, upcoming, chat, positions] = await Promise.all([
     getServerStatus(),
     getOnlinePlayers(),
@@ -42,7 +60,9 @@ export default async function TvPage() {
     getRecentEvents(8),
     getUpcomingEvents(1),
     getRecentChat(6),
-    getFreshPositions(),
+    positionsAuthorized
+      ? getFreshPositions()
+      : Promise.resolve([] as Awaited<ReturnType<typeof getFreshPositions>>),
   ]);
 
   const isOnline = status?.is_online ?? false;
