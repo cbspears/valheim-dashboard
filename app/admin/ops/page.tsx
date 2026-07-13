@@ -1,6 +1,7 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
-import { Activity, ListChecks, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Activity, ListChecks, ShieldAlert, CheckCircle2, Network, BookOpen, ChevronRight, ExternalLink } from 'lucide-react';
 import { Card, CardBody } from '@/components/ui';
 import { StateChip, SeverityChip } from '@/components/ops/StateChip';
 import { OpsControls } from '@/components/ops/OpsControls';
@@ -78,7 +79,16 @@ export default async function OpsPage() {
             </p>
           </div>
         </div>
-        <OpsControls renderedAtIso={renderedAt} />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/admin/ops/architecture"
+            className="inline-flex items-center gap-1.5 rounded-md border border-rune bg-surface-raised px-3 py-1.5 text-xs font-medium text-ash-dim transition hover:border-gold-dim hover:text-ash"
+          >
+            <Network size={14} />
+            Architecture
+          </Link>
+          <OpsControls renderedAtIso={renderedAt} />
+        </div>
       </header>
 
       {/* Roll-up ribbon */}
@@ -167,6 +177,62 @@ export default async function OpsPage() {
           ? 'Data read live with the service role at render time.'
           : 'Database unreachable or unconfigured — most signals below show as unknown.'}
       </p>
+
+      {/* Resources — reference material, not live signals. */}
+      <section>
+        <div className="mb-3 flex items-center gap-2.5">
+          <BookOpen size={18} className="text-gold" />
+          <h2 className="font-display text-sm uppercase tracking-wide text-ash">Resources</h2>
+        </div>
+        <Card>
+          <CardBody className="py-1">
+            <ul className="divide-y divide-rune/50 text-sm">
+              <li>
+                <Link
+                  href="/admin/ops/architecture"
+                  className="group flex items-center justify-between gap-3 py-2.5 text-ash-dim transition hover:text-ash"
+                >
+                  <span>System architecture</span>
+                  <ChevronRight size={15} className="text-muted transition group-hover:text-gold" />
+                </Link>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/cbspears/valheim-dashboard/blob/main/docs/OPS-COCKPIT.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group flex items-center justify-between gap-3 py-2.5 text-ash-dim transition hover:text-ash"
+                >
+                  <span>Ops runbook</span>
+                  <ExternalLink size={14} className="text-muted transition group-hover:text-gold" />
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/cbspears/valheim-dashboard"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group flex items-center justify-between gap-3 py-2.5 text-ash-dim transition hover:text-ash"
+                >
+                  <span>Source repository</span>
+                  <ExternalLink size={14} className="text-muted transition group-hover:text-gold" />
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://claude.ai/code/artifact/3182f247-c9bf-442a-bbf7-3163ea1e176d"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group flex items-center justify-between gap-3 py-2.5 text-ash-dim transition hover:text-ash"
+                >
+                  <span>Full-screen architecture diagram</span>
+                  <ExternalLink size={14} className="text-muted transition group-hover:text-gold" />
+                </a>
+              </li>
+            </ul>
+          </CardBody>
+        </Card>
+      </section>
     </div>
   );
 }
