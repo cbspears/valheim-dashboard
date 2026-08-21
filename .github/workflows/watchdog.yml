@@ -1,0 +1,37 @@
+# External pinger for the ops watchdog.
+#
+# Every producer this project watches runs on Charlie's PC, and /admin/ops is
+# pull-only — so when the PC is off, nothing notices. This job lives on GitHub's
+# infrastructure, hits the Vercel-hosted watchdog on a schedule, and the route
+# does the evaluating + Discord alerting. Non-2xx fails the run, which GitHub
+# emails about — so a broken watchdog is itself noticed.
+#
+# Requires ONE repository secret: WATCHDOG_TOKEN (must equal the Vercel env var
+# of the same name). GitHub disables scheduled workflows after 60 days with no
+# repo activity — re-enable from the Actions tab if that ever happens.
+
+name: ops watchdog
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/ops/watchdog
+        env:
+          WATCHDOG_TOKEN: ${{ secrets.WATCHDOG_TOKEN }}
+        run: |
+          code=$(curl -sS -m 60 -o response.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${WATCHDOG_TOKEN}" \
+            https://valheim-dashboard.vercel.app/api/ops/watchdog)
+          echo "HTTP $code"
+          cat response.json
+          echo
+          case "$code" in
+            2*) exit 0 ;;
+            *) echo "::error::watchdog returned HTTP $code"; exit 1 ;;
+          esac

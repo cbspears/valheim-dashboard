@@ -89,6 +89,15 @@ export const COMPONENTS: ComponentDef[] = [
     staleAfterSec: 900,
     subtitle: 'Redraws the known world from the fog.',
   },
+  {
+    key: 'stats-parser',
+    label: 'Stats parser',
+    group: 'pipeline',
+    source: 'ops_heartbeats',
+    expectedCadenceSec: 300,
+    staleAfterSec: 900,
+    subtitle: 'Reads each viking’s tally from the save.',
+  },
 ];
 
 // Bot sub-loops — state derived from the discord-bot heartbeat's metrics.loops,

@@ -222,3 +222,83 @@ this page cannot tell you that directly — you still need to check the host
 `LogOutput.log`. The cockpit's job is to make the *downstream symptoms* of
 those failures visible in one place fast, not to replace checking the
 source.
+
+---
+
+## 7. The off-PC watchdog (`GET /api/ops/watchdog`)
+
+Everything above is **pull-only**: it tells you the truth, but only when a
+human opens the page. And every producer it watches runs on Charlie's PC.
+Those two facts together are how a ~7h outage on 2026-08-17 and a 6-day
+game-server outage both went unnoticed. The watchdog is the **push** half,
+and deliberately shares none of that fate-sharing:
+
+```
+GitHub Actions (every 15 min)  →  Vercel /api/ops/watchdog  →  Supabase
+                                          │                     (read)
+                                          └→ Discord (bot-token REST)
+```
+
+Nothing in that chain touches the PC, so "the PC is off" is exactly the
+case it still reports.
+
+**Auth.** `Authorization: Bearer $WATCHDOG_TOKEN`, fail-closed in the same
+style as the heartbeat route: unset env → `503` for everyone, wrong token →
+`401`. Reads use the service-role client (both `ops_heartbeats` and
+`ops_alerts` are service-role-only); the key is never returned or logged.
+
+**What it evaluates** (`lib/ops/watchdog.ts`, pure + unit-tested in
+`lib/ops/watchdog.test.mjs`) — it reuses `computeState()` from
+`lib/ops/health.ts`, so "stale" means the same thing here as on the cockpit;
+only the thresholds differ:
+
+| Check | Cadence | Watchdog alerts after |
+|---|---|---|
+| discord-bot | 60s | 20 min |
+| log-poller | 60s | 20 min |
+| map-snapshot | 300s | 45 min |
+| stats-parser | 300s | 45 min |
+| game-server (`server_status` freshness + `is_online`) | 120s | 20 min |
+
+These are **looser than the cockpit's** on purpose. The cockpit's 180s bot
+threshold is right for a human staring at the page; this path is polled
+every 15 minutes by GitHub's best-effort scheduler, so any threshold at or
+below the poll interval would fire on scheduler jitter alone — and a
+watchdog that cries wolf gets muted, which puts us back where we started.
+Worst-case detection latency is threshold + one ping interval (~35–60 min).
+
+`is_online` is a secondary signal here: the ingest paths only ever set it
+*true*, so freshness is what actually catches a dead server.
+
+**Never-reported is never an alert.** A component with no heartbeat row (or
+a row with no `last_success`) is `unknown`, exactly as on the cockpit —
+with zero data we cannot tell "not deployed yet" from "down". Once it has
+reported successfully once, later silence is `stale` and does alert. The
+response lists these under `neverReported` so they are visible, not hidden.
+
+**Anti-spam (`ops_alerts`, `db/2026-08-21_ops_alerts.sql`).** One row, key
+`watchdog`, holds `state`, the unhealthy-set `signature`, `since`,
+`last_alert_at`, `alert_count`. 96 pings a day must not become 96 messages,
+so it posts only on: the ok→unhealthy transition, a change in *which*
+components are unhealthy, or a re-alert at most every 6h while it stays
+unhealthy — plus exactly one all-clear on the way back to healthy.
+
+**A broken watchdog alerts on itself.** If Supabase is unreachable, the
+`ops_alerts` row can't be read/written (usually: migration not applied), or
+Discord rejects the post, the route answers `5xx` and does **not** persist
+state — the GitHub job fails on any non-2xx and GitHub emails, and the next
+run retries the same alert. Silent no-op is the one failure mode this
+feature exists to eliminate.
+
+**Manual use.** `curl -H "Authorization: Bearer $WATCHDOG_TOKEN"
+https://valheim-dashboard.vercel.app/api/ops/watchdog` returns the full
+evaluation (every check, its state, age, and a plain-English `detail`) plus
+the alert decision. Add `?dry=1` to evaluate **without** posting to Discord
+or touching the state row — use that when tuning thresholds.
+
+**Env / secrets.** Vercel (Production): `WATCHDOG_TOKEN`, `DISCORD_TOKEN`,
+`WATCHDOG_CHANNEL_ID`, optional `WATCHDOG_MENTION` (a `<@id>`/`<@&id>`
+prefix — without it, mentions are suppressed entirely). GitHub repository
+secret: `WATCHDOG_TOKEN`, the same value. Note GitHub disables scheduled
+workflows after 60 days of repo inactivity — re-enable from the Actions tab
+if that ever happens.

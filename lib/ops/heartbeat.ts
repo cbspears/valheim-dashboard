@@ -7,7 +7,7 @@
 import { sanitize, sanitizeMetrics } from './redact';
 
 /** Only these components may heartbeat. Anything else is a 400. */
-export const HEARTBEAT_ALLOWLIST = ['discord-bot', 'log-poller', 'map-snapshot'] as const;
+export const HEARTBEAT_ALLOWLIST = ['discord-bot', 'log-poller', 'map-snapshot', 'stats-parser'] as const;
 export type HeartbeatComponent = (typeof HEARTBEAT_ALLOWLIST)[number];
 
 export type HeartbeatStatus = 'ok' | 'degraded' | 'error';
