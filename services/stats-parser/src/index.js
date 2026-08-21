@@ -12,6 +12,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import SftpClient from 'ssh2-sftp-client';
 import { parseProfile, toPlayerStats } from './fch.js';
+import { createHeartbeatSender } from './heartbeat.js';
 
 const log = console;
 
@@ -127,6 +128,13 @@ async function postStats(payload) {
   return res.json().catch(() => ({}));
 }
 
+// Ops cockpit heartbeat: reports the last sweep's scan/push counts + world
+// pin every ~60s of runtime (sent right after each sweep completes, success
+// or failure). Best-effort — sendHeartbeat never throws (see heartbeat.js),
+// and skips entirely if OPS_HEARTBEAT_TOKEN unset.
+const sendHeartbeat = createHeartbeatSender('stats-parser', log);
+let lastSweepAt = 0;
+
 // One full sweep: parse every profile and push its stats.
 async function sweep() {
   const profiles = await fetchProfiles();
@@ -164,13 +172,45 @@ async function sweep() {
     }
   }
   log.info(`[stats] sweep complete — ${pushed}/${profiles.length} pushed`);
+  lastSweepAt = Date.now();
+  return { scanned: profiles.length, pushed };
+}
+
+// Run one sweep and report its outcome to the ops cockpit. Heartbeat failures
+// never throw (see heartbeat.js); a sweep failure IS reported (status=error)
+// but is otherwise handled the same as before by the caller.
+async function sweepAndReportHeartbeat() {
+  try {
+    const { scanned, pushed } = await sweep();
+    await sendHeartbeat({
+      status: 'ok',
+      metrics: {
+        profilesScanned: scanned,
+        profilesPushed: pushed,
+        lastSweepAt: new Date(lastSweepAt).toISOString(),
+        worldUid: cfg.worldUid != null ? cfg.worldUid.toString() : null,
+        source: cfg.source,
+      },
+    });
+  } catch (err) {
+    await sendHeartbeat({
+      status: 'error',
+      error: err.message,
+      metrics: {
+        lastSweepAt: lastSweepAt ? new Date(lastSweepAt).toISOString() : null,
+        worldUid: cfg.worldUid != null ? cfg.worldUid.toString() : null,
+        source: cfg.source,
+      },
+    });
+    throw err;
+  }
 }
 
 const once = process.argv.includes('--once');
 
 async function main() {
   if (once) {
-    await sweep();
+    await sweepAndReportHeartbeat();
     return;
   }
   log.info(
@@ -188,7 +228,7 @@ async function main() {
   }
   while (!stopped) {
     try {
-      await sweep();
+      await sweepAndReportHeartbeat();
     } catch (err) {
       log.error(`[sweep] ${err.message}`);
     }
