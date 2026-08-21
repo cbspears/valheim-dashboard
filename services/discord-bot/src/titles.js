@@ -121,9 +121,16 @@ export function createTitlesAnnouncer({
     let announced = 0;
     let unchanged = 0;
 
+    // One proclamation per NAME per pass — duplicate players rows (the 2026-07-25
+    // Testman incident: 325 dups → 325 announcements) must never multiply the
+    // announcement, whatever upstream let them in.
+    const handled = new Set();
+
     for (const row of data || []) {
       const name = (row.character_name || '').trim();
       if (!name) continue;
+      if (handled.has(name)) continue;
+      handled.add(name);
       const title = computed.get(name);
       if (!title) continue; // no computed title for this viking this pass
       const current = row.current_title;

@@ -195,12 +195,22 @@ export async function POST(request: Request) {
       })();
       const steamId = typeof m.steamId === 'string' && m.steamId.trim() ? m.steamId.trim() : null;
 
-      // Find or create the player so stats have a row to hang off.
-      const { data: existing } = await db
+      // Find or create the player so stats have a row to hang off. A lookup
+      // ERROR must not be read as "player missing" — that once turned a
+      // duplicated row into a new duplicate every sweep.
+      const { data: existing, error: lookupErr } = await db
         .from('players')
         .select('id, steam_id')
         .eq('character_name', characterName)
+        .order('first_seen_at', { ascending: true })
+        .limit(1)
         .maybeSingle();
+      if (lookupErr) {
+        return Response.json(
+          { error: `player lookup failed: ${lookupErr.message}` },
+          { status: 500 }
+        );
+      }
 
       let playerId: string;
       if (existing?.id) {
@@ -209,7 +219,7 @@ export async function POST(request: Request) {
           await db.from('players').update({ steam_id: steamId }).eq('id', playerId);
         }
       } else {
-        const { data: inserted } = await db
+        const { data: inserted, error: insertErr } = await db
           .from('players')
           .insert({
             character_name: characterName,
@@ -220,7 +230,24 @@ export async function POST(request: Request) {
           })
           .select('id')
           .single();
-        playerId = inserted!.id as string;
+        if (insertErr || !inserted) {
+          // Unique index on character_name: a concurrent request may have won
+          // the insert race — re-read instead of failing (or duplicating).
+          const { data: raced } = await db
+            .from('players')
+            .select('id')
+            .eq('character_name', characterName)
+            .maybeSingle();
+          if (!raced?.id) {
+            return Response.json(
+              { error: `player insert failed: ${insertErr?.message ?? 'no row returned'}` },
+              { status: 500 }
+            );
+          }
+          playerId = raced.id as string;
+        } else {
+          playerId = inserted.id as string;
+        }
       }
 
       await db.from('player_stats').upsert(
