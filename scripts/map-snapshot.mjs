@@ -19,7 +19,26 @@ const SftpClient = pollerRequire('ssh2-sftp-client');
 pollerRequire('dotenv').config({ path: join(ROOT, 'services/log-poller/.env') });
 pollerRequire('dotenv').config({ path: join(ROOT, '.env.local') });
 
-const REMOTE = '/194.50.234.131_5914/BepInEx/plugins/WebMap/map_data/Dedicated';
+// The WebMap plugin's map_data dir is namespaced by WORLD NAME (not save
+// file) under a fixed GTXGaming instance path. "Dedicated" is the pre-launch
+// TEST world's name — the real 1.0 launch world will be named something else,
+// so this MUST be overridden (via the host's systemd env, or
+// services/log-poller/.env / .env.local, both loaded above) before/at launch,
+// or the pipeline will silently keep polling the old (frozen) test world.
+//   MAP_REMOTE_DIR = full override of the remote directory (wins if set)
+//   MAP_WORLD      = just the world-name path segment (default: "Dedicated")
+const MAP_DATA_BASE = '/194.50.234.131_5914/BepInEx/plugins/WebMap/map_data';
+const MAP_WORLD_DEFAULT = 'Dedicated';
+const REMOTE = process.env.MAP_REMOTE_DIR
+  || `${MAP_DATA_BASE}/${process.env.MAP_WORLD || MAP_WORLD_DEFAULT}`;
+console.log(
+  `[map-snapshot] remote map dir: ${REMOTE}` +
+    (process.env.MAP_REMOTE_DIR
+      ? ' (MAP_REMOTE_DIR override)'
+      : process.env.MAP_WORLD
+        ? ` (MAP_WORLD=${process.env.MAP_WORLD})`
+        : ` (default "${MAP_WORLD_DEFAULT}" — set MAP_WORLD or MAP_REMOTE_DIR when the world changes)`)
+);
 const SIZE = 2048;
 const STATE_FILE = join(ROOT, 'scripts', '.map-snapshot-state.json');
 const fs = rootRequire('fs');
@@ -80,19 +99,66 @@ async function currentWorldDay() {
   } catch { return null; }
 }
 
-async function snapshot() {
+// --- SFTP fetch, hardened against a known ssh2-sftp-client failure mode ---
+// 2026-08-17: a transient SFTP read (ETIMEDOUT) fired as a raw EventEmitter
+// 'error' event that reached no listener anywhere in the library's or our own
+// stack. Node treats that as an uncaught exception and kills the process on
+// the spot — it is NOT a rejected promise, so no try/catch around an `await`
+// can ever intercept it, no matter how tightly the SFTP calls are wrapped.
+//
+// Mitigation: (1) attach our own defensive 'error' listener on the client as
+// belt-and-suspenders in case the library's own internal listener bookkeeping
+// misses a source; (2) scope a temporary `uncaughtException` trap tightly
+// around just this fetch, converting that failure mode into an ordinary
+// rejection the caller can catch, log, and skip the cycle for; (3) race
+// against a timeout so a connection that neither errors nor completes (also
+// consistent with ETIMEDOUT) can't wedge the 5-minute loop forever. The trap
+// is installed/removed immediately around this one bounded unit of work —
+// each cycle builds a fresh SftpClient with no shared state to corrupt, so
+// resuming the loop afterward is safe.
+const SFTP_TIMEOUT_MS = 30000;
+async function fetchMapData() {
   const sftp = new SftpClient();
-  await sftp.connect({
-    host: process.env.SFTP_HOST,
-    port: +process.env.SFTP_PORT,
-    username: process.env.SFTP_USER,
-    password: process.env.SFTP_PASSWORD,
+  sftp.on('error', (err) => console.warn(`[map-snapshot] sftp client error event: ${err.message}`));
+
+  let onTrap;
+  const trapped = new Promise((_, reject) => {
+    onTrap = (err) => reject(err instanceof Error ? err : new Error(String(err)));
+    process.on('uncaughtException', onTrap);
   });
-  const [mapPng, fogPng] = await Promise.all([
-    sftp.get(REMOTE + '/map.png'),
-    sftp.get(REMOTE + '/fog.png'),
-  ]);
-  await sftp.end();
+  trapped.catch(() => {}); // never awaited if the fetch finishes cleanly first — prevent an unhandled rejection
+
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`sftp fetch timed out after ${SFTP_TIMEOUT_MS}ms`)), SFTP_TIMEOUT_MS)
+  );
+
+  try {
+    const work = (async () => {
+      await sftp.connect({
+        host: process.env.SFTP_HOST,
+        port: +process.env.SFTP_PORT,
+        username: process.env.SFTP_USER,
+        password: process.env.SFTP_PASSWORD,
+      });
+      const [mapPng, fogPng] = await Promise.all([
+        sftp.get(REMOTE + '/map.png'),
+        sftp.get(REMOTE + '/fog.png'),
+      ]);
+      return { mapPng, fogPng };
+    })();
+    return await Promise.race([work, trapped, timeout]);
+  } finally {
+    process.removeListener('uncaughtException', onTrap);
+    try {
+      await sftp.end();
+    } catch (e) {
+      console.warn(`[map-snapshot] sftp.end() failed (ignored): ${e.message}`);
+    }
+  }
+}
+
+async function snapshot() {
+  const { mapPng, fogPng } = await fetchMapData();
 
   const map = await sharp(mapPng).removeAlpha().raw().toBuffer();
   // sharp may expand the 1-channel fog PNG to 3 channels on raw() — honor the
