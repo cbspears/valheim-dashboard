@@ -14,6 +14,8 @@ webhook. Runs forever on the Linux PC under systemd.
   doesn't get stuck "online".
 - Byte offset + roster are persisted to `state.json`, so restarts resume where they left off; if the
   log shrinks (server restart/rotation) it re-reads from the top.
+- **Server-liveness detection** (see below): a log that stops growing means the game server process
+  is down, so the dashboard gets flipped offline and Discord gets an alert.
 
 ## Setup
 ```bash
@@ -25,7 +27,9 @@ cp .env.example .env   # then fill in SFTP creds + WEBHOOK_SECRET
 
 ## Test (no server activity needed)
 ```bash
+npm test              # both offline suites (parser + liveness)
 npm run test:parser   # offline: validates parsing against fixtures/sample-session.log
+npm run test:liveness # offline: drives the server-liveness state machine on a fake clock
 npm run test:sftp     # connects to the real SFTP, shows log tail + matched patterns
 ```
 
@@ -59,6 +63,31 @@ journalctl -u valheim-log-poller -f
 | `EMIT_DEATHS` | `true` | `false` once gs-ingest owns deaths (avoids double-count) |
 | `CHAT_DISCORD_WEBHOOK` | — | optional channel webhook for the chat mirror (posts AS the player) |
 | `DISCORD_TOKEN` + `CHAT_CHANNEL_ID` | — | chat-mirror fallback: bot-token post (`🗨️ **Name:** text`) |
+| `STALE_LOG_THRESHOLD_MS` | `1800000` (30 min) | log silent this long ⇒ game server treated as DOWN |
+| `SERVER_DOWN_REALERT_MS` | `21600000` (6 h) | while down, repeat the Discord alert at most this often |
+| `ALERT_CHANNEL_ID` | falls back to `CHAT_CHANNEL_ID` | where down/up alerts are posted |
+| `ALERT_DISCORD_WEBHOOK` | falls back to `CHAT_DISCORD_WEBHOOK` | webhook alert target if no bot token |
+
+## Server-liveness detection
+The failure this fixes: when the game server process stops, the log simply stops growing. The poller
+sits at EOF forever and the dashboard keeps saying **online** — that went unnoticed for two multi-day
+outages (2026-07-15→07-28 and 2026-08-15→08-20).
+
+The live server writes a `Connections N ZDOS:` line roughly every ~10 minutes even with zero players,
+so a log that hasn't grown in `STALE_LOG_THRESHOLD_MS` (default 30 min) means the server is down:
+
+- **Down transition** → `sync` webhook with `serverOnline: false` and an empty roster (dashboard shows
+  offline, 0 players), the local roster is reset, and a `⚠️` alert goes to Discord. Fires **once**;
+  while down it repeats at most every `SERVER_DOWN_REALERT_MS`.
+- **Recovery** (log grows again — including a *shrink*, which is what a restart's truncation looks
+  like) → `sync` with `serverOnline: true` and a `✅` alert.
+- **A failed SFTP connect is not server-down.** That's a network/host/credential failure and is
+  handled exactly as before: the staleness clock freezes rather than advancing on unobserved ticks.
+- The clock (`liveness` in `state.json`, seeded from the remote log's mtime on a cold start) survives
+  a poller restart, so restarting the poller can't reset a running outage timer.
+- The ops heartbeat carries `serverLive`, `logAgeSec`, and `downSinceIso` in its metrics.
+
+State machine lives in `src/liveness.js` (pure functions) and is covered by `npm run test:liveness`.
 
 ## Chat mirror (in-game → Discord, one-way)
 Shouted chat is mirrored to Discord (only shouts reach a dedicated server —

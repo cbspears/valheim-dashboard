@@ -6,6 +6,13 @@ import SftpClient from 'ssh2-sftp-client';
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { LogParser } from './parser.js';
 import { createHeartbeatSender } from './heartbeat.js';
+import {
+  evaluateLiveness,
+  normalizeLiveness,
+  logAgeSec,
+  formatWhen,
+  formatDuration,
+} from './liveness.js';
 
 export class Poller {
   constructor(config, logger = console) {
@@ -25,6 +32,9 @@ export class Poller {
     this.lastTickOk = null;
     this.lastTickError = null;
     this.lastNewLineAt = 0;
+    // Server-liveness state machine (see liveness.js). Persisted in state.json
+    // so a poller restart never resets the staleness clock.
+    this.liveness = normalizeLiveness(null);
   }
 
   async loadState() {
@@ -33,7 +43,11 @@ export class Poller {
       const s = JSON.parse(raw);
       this.offset = Number.isFinite(s.offset) ? s.offset : 0;
       this.parser = new LogParser({ online: s.online || [], connections: s.connections || [], pending: s.pending || [] });
-      this.log.info?.(`[state] resumed at offset ${this.offset}, ${this.parser.online.size} online`);
+      this.liveness = normalizeLiveness(s.liveness);
+      this.log.info?.(
+        `[state] resumed at offset ${this.offset}, ${this.parser.online.size} online` +
+          (this.liveness.serverDown ? `, server marked DOWN since ${formatWhen(this.liveness.downSince)}` : '')
+      );
     } catch {
       this.offset = 0;
       this.log.info?.('[state] no prior state; starting fresh');
@@ -41,41 +55,46 @@ export class Poller {
   }
 
   async saveState() {
-    const s = { offset: this.offset, ...this.parser.snapshot() };
+    const s = { offset: this.offset, ...this.parser.snapshot(), liveness: this.liveness };
     await writeFile(this.cfg.statePath, JSON.stringify(s), 'utf8');
   }
 
   // --- Fetch new bytes [offset, size) from the configured source ---
+  // Returns { text, size, mtimeMs }: the new bytes plus the observed file
+  // metrics, which feed the liveness state machine (a log that stops growing
+  // means the game server process is gone). Throws on transport failure — the
+  // caller treats that as "unobserved", NOT as server-down.
   async fetchNewBytes() {
     if (this.cfg.source === 'file') return this.fetchFromFile();
     return this.fetchFromSftp();
   }
 
   async fetchFromFile() {
-    const { size } = await stat(this.cfg.logPath);
+    const { size, mtimeMs } = await stat(this.cfg.logPath);
     if (size < this.offset) {
       this.log.warn?.(`[log] file shrank (${size} < ${this.offset}) — restart/rotation, re-reading from 0`);
       this.offset = 0;
       this.partial = '';
     }
-    if (size === this.offset) return '';
+    if (size === this.offset) return { text: '', size, mtimeMs };
     const buf = await readFile(this.cfg.logPath);
     const slice = buf.subarray(this.offset, size);
     this.offset = size;
-    return slice.toString('utf8');
+    return { text: slice.toString('utf8'), size, mtimeMs };
   }
 
   async fetchFromSftp() {
     const sftp = new SftpClient();
     try {
       await sftp.connect(this.cfg.sftp);
-      const { size } = await sftp.stat(this.cfg.logPath);
+      const { size, modifyTime } = await sftp.stat(this.cfg.logPath);
+      const mtimeMs = Number.isFinite(modifyTime) ? modifyTime : null;
       if (size < this.offset) {
         this.log.warn?.(`[log] file shrank (${size} < ${this.offset}) — restart/rotation, re-reading from 0`);
         this.offset = 0;
         this.partial = '';
       }
-      if (size === this.offset) return '';
+      if (size === this.offset) return { text: '', size, mtimeMs };
 
       // Read only the new bytes [offset, size). ssh2's read stream takes an
       // inclusive `end`, so end = size - 1. get() with no destination returns
@@ -84,7 +103,7 @@ export class Poller {
         readStreamOptions: { start: this.offset, end: size - 1 },
       });
       this.offset = size;
-      return buf.toString('utf8');
+      return { text: buf.toString('utf8'), size, mtimeMs };
     } finally {
       await sftp.end();
     }
@@ -109,7 +128,12 @@ export class Poller {
 
   // --- One poll cycle: fetch, parse, dispatch ---
   async tick() {
-    const text = await this.fetchNewBytes();
+    const { text, size, mtimeMs } = await this.fetchNewBytes();
+
+    // Liveness first: if the log just came back to life we want the recovery
+    // alert out before the replayed join lines it brought with it.
+    await this.updateLiveness({ size, mtimeMs });
+
     if (text) {
       this.lastNewLineAt = Date.now();
       const combined = this.partial + text;
@@ -137,14 +161,115 @@ export class Poller {
     }
 
     // Periodic roster reconciliation, even with no new lines, to self-heal.
+    // While the server is known down this keeps re-asserting offline/0 players
+    // rather than re-publishing a roster that can no longer be connected.
     const now = Date.now();
     if (now - this.lastSyncAt >= (this.cfg.syncEveryMs || 120000)) {
       this.lastSyncAt = now;
-      await this.dispatch({ type: 'sync', metadata: { online: this.parser.roster(), serverOnline: true } })
-        .catch((e) => this.log.warn?.(`[sync] ${e.message}`));
+      const down = this.liveness.serverDown;
+      await this.dispatch({
+        type: 'sync',
+        metadata: { online: down ? [] : this.parser.roster(), serverOnline: !down },
+      }).catch((e) => this.log.warn?.(`[sync] ${e.message}`));
     }
 
     await this.saveState();
+  }
+
+  // --- Server liveness: has the remote log grown recently? ---------------
+  // The log carries a "Connections N ZDOS:" heartbeat every ~10 minutes even
+  // with zero players, so a static log past the threshold means the game
+  // server process is down — while SFTP itself still answers (a failed
+  // connect throws before we ever get here, and is deliberately NOT treated
+  // as server-down: that is a network/host failure, handled as before).
+  async updateLiveness(obs) {
+    const { state, action } = evaluateLiveness(
+      this.liveness,
+      { now: Date.now(), ok: true, size: obs.size, mtimeMs: obs.mtimeMs },
+      { staleLogThresholdMs: this.cfg.staleLogThresholdMs, downReAlertMs: this.cfg.downReAlertMs }
+    );
+    this.liveness = state;
+    if (!action) return;
+
+    const since = formatWhen(action.downSince);
+    const forStr = formatDuration(action.downForSec);
+
+    if (action.kind === 'down') {
+      this.log.error?.(`[liveness] server DOWN — log static for ${forStr} (since ${since})`);
+      // The host is gone: nobody is connected, and none of the parser's
+      // in-flight connection correlations survive a server restart. Reset so
+      // the replayed (truncated) log rebuilds the roster from scratch.
+      this.parser = new LogParser();
+      await this.dispatch({ type: 'sync', metadata: { online: [], serverOnline: false } })
+        .catch((e) => this.log.warn?.(`[liveness sync] ${e.message}`));
+      this.lastSyncAt = Date.now();
+      await this.postAlert(
+        `⚠️ **Eilif server appears DOWN** — log silent since ${since} (${forStr} ago). ` +
+          `SFTP still answers, so the game server process looks stopped, not the host.`
+      );
+      return;
+    }
+
+    if (action.kind === 'still-down') {
+      this.log.warn?.(`[liveness] server STILL down — log static for ${forStr}`);
+      await this.dispatch({ type: 'sync', metadata: { online: [], serverOnline: false } })
+        .catch((e) => this.log.warn?.(`[liveness sync] ${e.message}`));
+      this.lastSyncAt = Date.now();
+      await this.postAlert(`⚠️ **Eilif server still DOWN** — log silent since ${since} (${forStr} ago).`);
+      return;
+    }
+
+    // recovered
+    this.log.info?.(`[liveness] server BACK UP — log growing again after ${forStr}`);
+    await this.dispatch({ type: 'sync', metadata: { online: this.parser.roster(), serverOnline: true } })
+      .catch((e) => this.log.warn?.(`[liveness sync] ${e.message}`));
+    this.lastSyncAt = Date.now();
+    await this.postAlert(`✅ **Eilif server is BACK UP** — the log is growing again after ${forStr} of silence.`);
+  }
+
+  /** Age of the newest log write, in seconds (null before the first poll). */
+  logAgeSec(now = Date.now()) {
+    return logAgeSec(this.liveness, now);
+  }
+
+  // --- Ops alert to Discord (bot token, same credentials as the chat mirror) ---
+  // Best-effort: never throws, so an alert failure cannot break the tick loop.
+  async postAlert(content) {
+    try {
+      if (this.cfg.discordToken && this.cfg.alertChannelId) {
+        const res = await fetch(
+          `https://discord.com/api/v10/channels/${this.cfg.alertChannelId}/messages`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bot ${this.cfg.discordToken}`,
+            },
+            body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+          }
+        );
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '');
+          this.log.warn?.(`[alert] discord ${res.status}: ${detail.slice(0, 120)}`);
+        }
+        return;
+      }
+      if (this.cfg.alertWebhookUrl) {
+        const res = await fetch(this.cfg.alertWebhookUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+        });
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '');
+          this.log.warn?.(`[alert] discord webhook ${res.status}: ${detail.slice(0, 120)}`);
+        }
+        return;
+      }
+      this.log.warn?.(`[alert] no Discord target configured; alert not sent: ${content}`);
+    } catch (e) {
+      this.log.warn?.(`[alert] ${e.message}`);
+    }
   }
 
   // Case-insensitive identity of one shout (echo text arrives uppercased).
@@ -306,10 +431,18 @@ export class Poller {
         error: this.lastTickOk === false ? this.lastTickError : undefined,
         metrics: {
           onlineCount: this.parser.roster().length,
+          // Game-server liveness, distinct from this poller's own liveness:
+          // serverLive=false means the log has gone static past the threshold.
+          serverLive: !this.liveness.serverDown,
+          logAgeSec: this.logAgeSec(now),
+          downSinceIso: this.liveness.downSince ? new Date(this.liveness.downSince).toISOString() : null,
           lastNewLineAgeSec: this.lastNewLineAt ? Math.round((now - this.lastNewLineAt) / 1000) : null,
           lastTickAgeSec: this.lastTickAt ? Math.round((now - this.lastTickAt) / 1000) : null,
           source: this.cfg.source,
           chatMirrorConfigured: Boolean(this.cfg.chatWebhookUrl || (this.cfg.discordToken && this.cfg.chatChannelId)),
+          // `flags` is what the ops cockpit renders as labelled chips
+          // (lib/ops/health.ts flagsFromMetrics), so surface liveness there too.
+          flags: { serverLive: !this.liveness.serverDown },
         },
       });
     };

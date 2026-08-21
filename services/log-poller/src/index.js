@@ -29,6 +29,16 @@ const config = {
   chatWebhookUrl: process.env.CHAT_DISCORD_WEBHOOK || '',
   discordToken: process.env.DISCORD_TOKEN || '',
   chatChannelId: process.env.CHAT_CHANNEL_ID || '',
+  // Server-liveness detection: the log gets a "Connections N ZDOS:" heartbeat
+  // roughly every ~10 min even with zero players, so a log that hasn't grown
+  // in STALE_LOG_THRESHOLD_MS means the game server process is down (the SFTP
+  // side being reachable is checked separately — a failed connect never counts).
+  staleLogThresholdMs: parseInt(process.env.STALE_LOG_THRESHOLD_MS || '1800000', 10), // 30m
+  downReAlertMs: parseInt(process.env.SERVER_DOWN_REALERT_MS || '21600000', 10), // 6h
+  // Where down/up alerts go. Defaults to the chat-mirror channel/webhook so no
+  // new credentials are needed; override to route ops alerts elsewhere.
+  alertChannelId: process.env.ALERT_CHANNEL_ID || process.env.CHAT_CHANNEL_ID || '',
+  alertWebhookUrl: process.env.ALERT_DISCORD_WEBHOOK || process.env.CHAT_DISCORD_WEBHOOK || '',
   statePath: process.env.STATE_PATH || new URL('../state.json', import.meta.url).pathname,
   sftp: {
     host: process.env.SFTP_HOST,
