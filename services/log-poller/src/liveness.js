@@ -17,6 +17,10 @@
 
 export const DEFAULT_STALE_LOG_THRESHOLD_MS = 30 * 60 * 1000; // 30m
 export const DEFAULT_DOWN_REALERT_MS = 6 * 60 * 60 * 1000; // 6h
+// After a full day down, the outage is old news — back the reminders off to
+// daily so a known-dead server doesn't ping the channel four times a day.
+export const DEFAULT_DOWN_REALERT_LONG_MS = 24 * 60 * 60 * 1000; // 24h
+export const DOWN_BACKOFF_AFTER_MS = 24 * 60 * 60 * 1000; // downtime that triggers the long interval
 
 /** Coerce a finite number, else the fallback. */
 function num(v, fallback) {
@@ -107,9 +111,14 @@ export function evaluateLiveness(prev, obs, cfg = {}) {
       state.downSince = state.lastGrowthAt;
       state.lastAlertAt = now;
       action = { kind: 'down', downSince: state.downSince, logAgeSec: age, downForSec: age };
-    } else if (state.lastAlertAt === null || now - state.lastAlertAt >= reAlertMs) {
-      state.lastAlertAt = now;
-      action = { kind: 'still-down', downSince: state.downSince, logAgeSec: age, downForSec: age };
+    } else {
+      const downForMs = state.downSince === null ? ageMs : now - state.downSince;
+      const longMs = num(cfg.downReAlertLongMs, DEFAULT_DOWN_REALERT_LONG_MS);
+      const effectiveMs = downForMs >= DOWN_BACKOFF_AFTER_MS ? Math.max(reAlertMs, longMs) : reAlertMs;
+      if (state.lastAlertAt === null || now - state.lastAlertAt >= effectiveMs) {
+        state.lastAlertAt = now;
+        action = { kind: 'still-down', downSince: state.downSince, logAgeSec: age, downForSec: age };
+      }
     }
   } else if (state.serverDown) {
     const downSince = state.downSince;
@@ -134,11 +143,13 @@ export function formatWhen(ms) {
   const utc = d.toISOString().replace('T', ' ').slice(0, 16);
   let ct;
   try {
+    // hourCycle h23, NOT hour12:false — en-US + hour12:false selects the h24
+    // cycle in V8 and renders midnight as "24:20".
     ct = d.toLocaleString('en-US', {
       timeZone: 'America/Chicago',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false,
+      hourCycle: 'h23',
     });
   } catch {
     ct = null;

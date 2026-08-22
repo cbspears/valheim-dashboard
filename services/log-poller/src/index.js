@@ -35,6 +35,7 @@ const config = {
   // side being reachable is checked separately — a failed connect never counts).
   staleLogThresholdMs: parseInt(process.env.STALE_LOG_THRESHOLD_MS || '1800000', 10), // 30m
   downReAlertMs: parseInt(process.env.SERVER_DOWN_REALERT_MS || '21600000', 10), // 6h
+  downReAlertLongMs: parseInt(process.env.SERVER_DOWN_REALERT_LONG_MS || '86400000', 10), // 24h once down >24h
   // Where down/up alerts go. Defaults to the chat-mirror channel/webhook so no
   // new credentials are needed; override to route ops alerts elsewhere.
   alertChannelId: process.env.ALERT_CHANNEL_ID || process.env.CHAT_CHANNEL_ID || '',

@@ -186,7 +186,11 @@ export class Poller {
     const { state, action } = evaluateLiveness(
       this.liveness,
       { now: Date.now(), ok: true, size: obs.size, mtimeMs: obs.mtimeMs },
-      { staleLogThresholdMs: this.cfg.staleLogThresholdMs, downReAlertMs: this.cfg.downReAlertMs }
+      {
+        staleLogThresholdMs: this.cfg.staleLogThresholdMs,
+        downReAlertMs: this.cfg.downReAlertMs,
+        downReAlertLongMs: this.cfg.downReAlertLongMs,
+      }
     );
     this.liveness = state;
     if (!action) return;

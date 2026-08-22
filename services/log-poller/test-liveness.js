@@ -196,6 +196,32 @@ const T0 = Date.parse('2026-08-15T00:00:00Z');
   check('formatWhen: bad input is safe', formatWhen(null) === 'an unknown time');
 }
 
+// --- 12b. Re-alert backoff: 6h cadence for the first day, daily after ------
+{
+  const HOUR = 60 * MIN;
+  const d = driver();
+  d.feed(T0, 1000); // seeds clock; last growth = T0
+  // Walk 3 days of hourly static ticks and count the alerts.
+  for (let h = 1; h <= 72; h++) d.feed(T0 + h * HOUR, 1000);
+  const stillDowns = d.actions.filter((a) => a.kind === 'still-down');
+  const downs = d.actions.filter((a) => a.kind === 'down');
+  check('backoff: exactly one down transition', downs.length === 1);
+  // First 24h: re-alerts on the 6h cadence (~3 after the initial down alert).
+  const firstDay = stillDowns.filter((a) => a.at <= T0 + 24 * HOUR);
+  check('backoff: ~6h cadence in first 24h', firstDay.length === 3);
+  // Days 2-3: daily cadence only (2 re-alerts across 48h, not 8).
+  const later = stillDowns.filter((a) => a.at > T0 + 24 * HOUR);
+  check('backoff: daily cadence after 24h down', later.length === 2);
+}
+
+// --- 12c. formatWhen midnight regression (h24 rendered 00:xx as 24:xx) -----
+{
+  // 2026-08-15 05:20 UTC = 00:20 America/Chicago (CDT) — the real Aug-15
+  // outage timestamp that rendered as "24:20 CT" in the first alerts.
+  const w = formatWhen(Date.parse('2026-08-15T05:20:00Z'));
+  check('formatWhen: midnight CT is 00:xx not 24:xx', w.includes('(00:20 CT)'));
+}
+
 // --- 12. normalizeLiveness tolerates junk ----------------------------------
 {
   const n = normalizeLiveness({ lastSize: 'nope', serverDown: 'yes', downSince: NaN });
