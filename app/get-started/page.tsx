@@ -389,12 +389,13 @@ export default function GetStartedPage() {
               <div className="mb-3 flex items-center gap-2">
                 <RefreshCcw size={18} className="text-gold" />
                 <h2 className="font-display text-base tracking-wide text-ash">
-                  When the mods update
+                  How to update your mods
                 </h2>
               </div>
               <p className="text-sm leading-relaxed text-ash-dim">
-                Every so often we announce a new pack code in Discord. The code on this page is
-                always the current one. Updating takes about a minute:
+                Every so often we announce a mod update in Discord.{' '}
+                <span className="font-semibold text-ash">To update your mods and modpack, do
+                this</span> (takes about a minute):
               </p>
               <ol className="mt-3 space-y-1.5 text-sm leading-relaxed text-ash-dim">
                 <li>
