@@ -57,7 +57,7 @@ export const MODS: Mod[] = [
     name: 'Eilif Paths',
     author: 'Blockspace (custom-built)',
     description:
-      'Roads that matter: +25% speed and zero stamina drain on dirt paths, paved roads, and built floors (wood, stone, iron). Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
+      'Roads that matter: +40% speed and zero stamina drain on dirt paths, paved roads, and built floors (wood, stone, iron). Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
     version: '1.1.0',
     category: 'QoL',
     clientRequired: true,
@@ -113,7 +113,7 @@ export const MODS: Mod[] = [
     author: 'Proudlock_Technology',
     description:
       'Richer per-viking stats — real causes of death, damage dealt, weapon records — feeding the leaderboards and your viking page. Ships in the modpack.',
-    version: '0.2.9',
+    version: '0.2.12',
     category: 'Content',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Proudlock_Technology/GsValheimStatsClient/',
