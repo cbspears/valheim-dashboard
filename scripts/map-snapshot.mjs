@@ -27,7 +27,7 @@ pollerRequire('dotenv').config({ path: join(ROOT, '.env.local') });
 // or the pipeline will silently keep polling the old (frozen) test world.
 //   MAP_REMOTE_DIR = full override of the remote directory (wins if set)
 //   MAP_WORLD      = just the world-name path segment (default: "Dedicated")
-const MAP_DATA_BASE = '/194.50.234.131_5914/BepInEx/plugins/WebMap/map_data';
+const MAP_DATA_BASE = '/191.101.30.229_6028/BepInEx/plugins/WebMap/map_data';
 const MAP_WORLD_DEFAULT = 'Dedicated';
 const REMOTE = process.env.MAP_REMOTE_DIR
   || `${MAP_DATA_BASE}/${process.env.MAP_WORLD || MAP_WORLD_DEFAULT}`;

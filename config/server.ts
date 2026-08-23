@@ -15,7 +15,7 @@ export const DISCORD_URL = '';
 // The bot's @handle in Discord — shown in the Gallery's "how to add" explainer.
 export const DISCORD_BOT_HANDLE = '@Eilif';
 // Public connect address shown on the Hall + Get Started page.
-export const SERVER_ADDRESS = '194.50.234.131:5914';
+export const SERVER_ADDRESS = '191.101.30.229:6028';
 // Join password, shown on Get Started. Charlie's call (2026-08-22): the page is
 // public but that's fine — friends-and-family server. Case-sensitive in Valheim.
 export const SERVER_PASSWORD = 'Leroy';
