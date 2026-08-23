@@ -285,8 +285,8 @@ export default function GetStartedPage() {
               <Step n={4} title="Launch the game modded" icon={<Play size={16} />}>
                 <p>
                   Click <span className="text-ash">Start modded</span> in r2modman,{' '}
-                  <strong className="text-ash-dim">not</strong> Steam&apos;s normal Play button. Let
-                  Valheim load, then pick your character.
+                  <strong className="text-ash-dim">not</strong>
+                  {' '}Steam&apos;s normal Play button. Let Valheim load, then pick your character.
                 </p>
               </Step>
 
