@@ -49,12 +49,12 @@ no persistent marker, so there's no reliable way to detect it. Dropped intention
 
 | Surface   | movement | staminadrain |
 |-----------|----------|--------------|
-| Path      | 1.5      | 0.5          |
-| PavedRoad | 1.75     | 0.25         |
-| Wood      | 1.35     | 0.7          |
-| Stone     | 1.35     | 0.7          |
-| Iron      | 1.35     | 0.7          |
-| HardWood  | 1.35     | 0.7          |
+| Path      | 1.25     | 0            |
+| PavedRoad | 1.75     | 0            |
+| Wood      | 1.5      | 0            |
+| Stone     | 1.5      | 0            |
+| Iron      | 1.5      | 0            |
+| HardWood  | 1.5      | 0            |
 
 ## Coexistence guard
 
@@ -85,9 +85,9 @@ pack as a local mod and removing the old Useful_Paths before the next pack expor
 On boot: `[EilifPaths] Eilif Paths v1.0.0 loaded.` Then each surface change logs once at Info:
 
 ```
-[EilifPaths] terrain: PavedRoad (x1.75 speed, x0.25 stamina)
-[EilifPaths] terrain: Path (x1.5 speed, x0.5 stamina)
-[EilifPaths] terrain: Wood (x1.35 speed, x0.7 stamina)
+[EilifPaths] terrain: PavedRoad (x1.75 speed, x0 stamina)
+[EilifPaths] terrain: Path (x1.5 speed, x0 stamina)
+[EilifPaths] terrain: Wood (x1.35 speed, x0 stamina)
 [EilifPaths] terrain: None (vanilla speed/stamina)
 ```
 

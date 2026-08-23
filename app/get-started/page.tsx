@@ -38,7 +38,7 @@ import {
 
 export const metadata: Metadata = {
   title: 'Get Started',
-  description: `New to ${SERVER_NAME}? Log on and install the mods in five steps, then the rituals that put you on the map — for Windows, Mac, and Linux.`,
+  description: `New to ${SERVER_NAME}? Log on and install the mods in five steps, then the rituals that put you on the map.`,
 };
 
 const R2MODMAN_DOWNLOAD_URL = 'https://github.com/ebkr/r2modmanPlus/releases/latest';
@@ -207,19 +207,13 @@ export default function GetStartedPage() {
           Quick start — install the mods &amp; log on
         </SectionTitle>
 
-        <p className="mb-5 max-w-3xl text-sm leading-relaxed text-muted">
-          Don&apos;t install mods by hand. A free mod manager grabs the loader, every mod, and the
-          exact versions for you — and keeps your modded copy separate from vanilla. The same five
-          steps work on Windows, Mac, and Linux (platform notes are further down).
-        </p>
-
         <Card>
           <CardBody>
             <ol className="space-y-6">
               <Step n={1} title="Install the mod manager" icon={<Package size={16} />}>
                 <p>
-                  r2modman is the free app that installs and manages all the mods for you — Windows,
-                  Mac, and Linux.
+                  r2modman is the free app that installs and manages all the mods for you — Windows
+                  and Linux. There&apos;s no Mac version.
                 </p>
                 <div className="py-1.5">
                   <a
@@ -235,8 +229,8 @@ export default function GetStartedPage() {
                 </div>
                 <p className="text-xs text-muted">
                   On that page: Windows → run <span className="text-ash">r2modman Setup ….exe</span> ·
-                  Linux → the <span className="text-ash">.AppImage</span> · Mac needs extra steps —
-                  see the platform notes below. Then open r2modman once installed.
+                  Linux → the <span className="text-ash">.AppImage</span> · No Mac version — Mac
+                  players see the notes further down. Then open r2modman once installed.
                 </p>
                 <p className="text-xs text-muted">
                   It sets up BepInEx (the mod loader) for you — you never touch that by hand.
@@ -519,8 +513,12 @@ export default function GetStartedPage() {
                 BepInEx pack
               </Ext>{' '}
               into your Valheim folder, then drop each mod&apos;s files into{' '}
-              <span className="font-mono text-xs">BepInEx/plugins</span>. A manager is strongly
-              recommended instead — version-matching by hand is exactly what trips people up.
+              <span className="font-mono text-xs">BepInEx/plugins</span> — the full list is on the{' '}
+              <Link href="/mods" className="text-gold-light hover:underline">
+                Mods page
+              </Link>
+              . A manager is strongly recommended instead — version-matching by hand is exactly what
+              trips people up.
             </p>
           </div>
         </CardBody>

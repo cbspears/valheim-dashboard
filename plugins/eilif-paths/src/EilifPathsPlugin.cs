@@ -43,7 +43,7 @@ namespace EilifPaths
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginVersion = "1.1.0";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -70,7 +70,7 @@ namespace EilifPaths
         internal static bool OldModPresent { get; private set; }
 
         // Owner-chosen defaults. movement = speed multiplier, staminadrain = stamina-cost multiplier.
-        // (Path 1.5/0.5 · PavedRoad 1.75/0.25 · Wood/Stone/Iron/HardWood 1.35/0.7)
+        // (Path 1.25/0 · PavedRoad 1.75/0 · Wood/Stone/Iron/HardWood 1.5/0 — zero drain on every surface)
         // NOTE: deliberately NOT a tuple/collection field initializer — the plugin class must not
         // reference System.ValueTuple (not shipped with the game's net462 runtime; a static field
         // initializer using it makes the whole class fail to instantiate under BepInEx).
@@ -87,12 +87,12 @@ namespace EilifPaths
         {
             Log = Logger;
 
-            BindSurface(PathType.Path,      1.75f, 0.25f);
-            BindSurface(PathType.PavedRoad, 1.75f, 0.1f);
-            BindSurface(PathType.Wood,       1.5f,  0.5f);
-            BindSurface(PathType.Stone,      1.5f,  0.5f);
-            BindSurface(PathType.Iron,       1.5f,  0.5f);
-            BindSurface(PathType.HardWood,   1.5f,  0.5f);
+            BindSurface(PathType.Path,      1.25f, 0f);
+            BindSurface(PathType.PavedRoad, 1.75f, 0f);
+            BindSurface(PathType.Wood,       1.5f, 0f);
+            BindSurface(PathType.Stone,      1.5f, 0f);
+            BindSurface(PathType.Iron,       1.5f, 0f);
+            BindSurface(PathType.HardWood,   1.5f, 0f);
 
             OldModPresent = Chainloader.PluginInfos != null &&
                             Chainloader.PluginInfos.ContainsKey(OldModGuid);

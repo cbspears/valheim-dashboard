@@ -1,7 +1,7 @@
 // The server's mod list. Edit this file to update the Mods page — the dashboard
 // reads it directly (no database needed). Push to redeploy.
 //
-// Source of truth: verified on the live server 2026-07-03 (see Obsidian note
+// Source of truth: verified against the live server boot log 2026-08-22 (see Obsidian note
 // `05-Server/Mods/Selected-Mods.md`). Keep `tentative` in sync with what's
 // actually locked vs. still being piloted.
 
@@ -57,8 +57,8 @@ export const MODS: Mod[] = [
     name: 'Eilif Paths',
     author: 'Blockspace (custom-built)',
     description:
-      'Roads that matter: +75% speed on dirt paths and paved roads, with stamina drain cut 75% on paths and 90% on paved. Built floors (wood, stone, iron) grant +50% speed and half drain. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
-    version: '1.0.0',
+      'Roads that matter: +25% speed on dirt paths, +75% on paved roads, +50% on built floors (wood, stone, iron) — and zero stamina drain on all of them. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
+    version: '1.1.0',
     category: 'QoL',
     clientRequired: true,
     url: 'https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-paths',
@@ -80,36 +80,34 @@ export const MODS: Mod[] = [
     author: 'Blockspace (custom-built)',
     description:
       "The voice of the Hall itself — carries the in-game /oath swearing and speaks as Eilif. Built just for this server; nothing to install.",
-    version: '0.1.0',
+    version: '0.2.0',
     category: 'Core',
     clientRequired: false,
   },
 
-  // ── Server-only, piloting (feeds this dashboard — nothing to install) ─────
+  // ── Server-only, confirmed (feeds this dashboard — nothing to install) ────
   {
     name: 'GsValheimStats Emitter',
     author: 'Proudlock_Technology',
     description:
-      'Server-side eyes and ears — streams live presence and boss-kill data straight into this dashboard. Piloting now; nothing to install.',
+      'Streams live presence and boss-kill data straight into this dashboard — the live roster and boss timeline run on it. Server-side, nothing to install.',
     version: '0.2.4',
     category: 'Content',
     clientRequired: false,
-    tentative: true,
     url: 'https://thunderstore.io/c/valheim/p/Proudlock_Technology/GsValheimStatsEmitter/',
   },
   {
     name: 'WebMap',
     author: 'Zevaryx (repack of h0tw1r3)',
     description:
-      "Renders the living world map that feeds this site's Map page. Piloting now; server-side, nothing to install.",
+      "Renders the living world map that feeds this site's Map page. Server-side, nothing to install.",
     version: '2.7.1',
     category: 'Content',
     clientRequired: false,
-    tentative: true,
     url: 'https://thunderstore.io/c/valheim/p/Zevaryx/WebMap/',
   },
 
-  // ── Client-optional, piloting ──────────────────────────────────────────────
+  // ── Client-side, ships in the modpack ──────────────────────────────────────────────
   {
     name: 'GsValheimStatsClient',
     author: 'Proudlock_Technology',

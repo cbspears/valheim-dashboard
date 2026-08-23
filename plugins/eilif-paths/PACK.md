@@ -21,7 +21,7 @@ Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
 3. Choose `dist/EilifPaths.dll`. When prompted:
    - **Name:** `EilifPaths`
    - **Author:** `BlockspaceMedia` (or any — local mods aren't namespaced on Thunderstore)
-   - **Version:** `1.0.0`
+   - **Version:** `1.1.0`
    The manager copies the DLL into `<profile>/BepInEx/plugins/EilifPaths/`.
 4. **Enable** it, keep BepInEx + the other Eilif mods enabled.
 
@@ -43,12 +43,12 @@ to the old mod to limit the damage), but the correct fix is to turn the old one 
 
 | Surface   | movement | staminadrain |
 |-----------|----------|--------------|
-| Path      | 1.5      | 0.5          |
-| PavedRoad | 1.75     | 0.25         |
-| Wood      | 1.35     | 0.7          |
-| Stone     | 1.35     | 0.7          |
-| Iron      | 1.35     | 0.7          |
-| HardWood  | 1.35     | 0.7          |
+| Path      | 1.25     | 0            |
+| PavedRoad | 1.75     | 0            |
+| Wood      | 1.5      | 0            |
+| Stone     | 1.5      | 0            |
+| Iron      | 1.5      | 0            |
+| HardWood  | 1.5      | 0            |
 
 `movement` = speed multiplier (>1 faster). `staminadrain` = stamina-cost multiplier (<1 cheaper).
 BepInEx writes `net.eilif.paths.cfg` (sections `[Path]`, `[PavedRoad]`, …) on first launch if you
@@ -71,8 +71,8 @@ see `[EilifPaths] Eilif Paths v1.0.0 loaded.`. Then walk onto a hoe path / paved
 floor — each surface change logs exactly once, e.g.:
 
 ```
-[EilifPaths] terrain: PavedRoad (x1.75 speed, x0.25 stamina)
-[EilifPaths] terrain: Path (x1.5 speed, x0.5 stamina)
+[EilifPaths] terrain: PavedRoad (x1.75 speed, x0 stamina)
+[EilifPaths] terrain: Path (x1.5 speed, x0 stamina)
 [EilifPaths] terrain: None (vanilla speed/stamina)
 ```
 
