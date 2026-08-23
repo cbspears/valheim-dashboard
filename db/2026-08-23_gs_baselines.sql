@@ -1,0 +1,188 @@
+-- World baselines for the GsValheimStatsClient stats merge (delta accounting).
+--
+-- ⚠️ APPLY THIS **BEFORE** DEPLOYING THE CODE THAT USES IT. /api/gs-ingest's
+-- client-stats path needs somewhere to store each character's zero-point; if the
+-- code is live and these columns are not, the route logs
+-- "[gs-ingest] BASELINE MIGRATION MISSING" and SKIPS the per-player stats merge
+-- entirely (it will not fall back to crediting lifetime totals). Nothing is
+-- corrupted by getting the order wrong — the merge just stalls until this runs,
+-- and the next ~120s snapshot heals it — but stats stop moving in the meantime.
+--
+-- WHY. A Valheim character file carries LIFETIME totals — kills, deaths, builds,
+-- crafts, resources, distance, every vh_* profile counter — accumulated across
+-- every world and every server that character has ever played on. The client mod
+-- reads them straight out of the local .fch profile and POSTs them here, and the
+-- route GREATEST-merged them into player_stats as if they had been earned on
+-- Eilif. So an imported veteran arrived pre-loaded and flooded the clan totals
+-- (real incident: "Chærlie" landed with 1,526 kills / 163 deaths / 27,207 builds
+-- earned elsewhere). Leaderboards, Living Titles and the 38-deed Great Deeds
+-- ladder all read those columns, so one import distorted the whole dashboard.
+--
+-- WHAT THESE COLUMNS DO. The first client snapshot a character posts from their
+-- OWN players[] entry is stored verbatim in gs_baseline as their zero-point.
+-- Only a BYSTANDER-derived snapshot (or one missing kills/deaths) is deferred:
+-- it credits nothing and writes nothing. From then on the route credits only
+-- what has been earned since:
+--
+--     counters (kills, deaths, builds, crafts, resources, damage, distance,
+--               per-creature kills, per-species catches, per-weapon damage,
+--               boss damage, materials)      ->  max(0, raw - baseline)
+--     records  (longest life, best kills in a life, hardest hit, biggest swing,
+--               skill levels)                ->  raw, but ONLY once it exceeds
+--                                                the baselined record
+--
+-- A fresh character baselines at ~0, so nothing about their experience changes.
+-- A veteran baselines at their lifetime totals and starts from zero like
+-- everyone else. NULL gs_baseline = not yet baselined: the next client post
+-- captures one and contributes zero. Every downstream consumer (lib/milestones,
+-- the leaderboards, Living Titles, the bot) keeps reading the SAME player_stats
+-- columns — they simply now hold server-earned values.
+--
+-- gs_baseline shape (v1, written by lib/gs-baseline.ts captureBaseline):
+--   {
+--     "v": 1,
+--     "capturedAt": "2026-08-23T12:00:00.000Z",
+--     "reporter": "Chaerlie", "world": "Eilif",
+--     "counters":    { "kills":1526, "deaths":163, "bossKills":5,
+--                      "resourcesHarvested":40210, "itemsCrafted":912,
+--                      "structuresBuilt":27207, "damageDealt":3100450,
+--                      "distanceTraveled":1240000 },
+--     "counterMaps": { "weaponDamage":{...}, "weaponKills":{...},
+--                      "creatureKills":{...}, "bossDamage":{...},
+--                      "bossFightSec":{...}, "materials":{...}, "fish":{...},
+--                      "distances":{...}, "distancesRaw":{...} },
+--     "records":     { "longestLifeSec":5400, "bestKillsBeforeDeath":88 },
+--     "recordMaps":  { "weaponHardestHit":{...}, "weaponBiggestSwing":{...},
+--                      "skills":{...} },
+--     -- which parse source itemsCrafted was read from, so capture and delta
+--     -- always difference like against like ('vh_Crafts' | 'crafts'):
+--     "craftsSource": "vh_Crafts",
+--     -- OPTIONAL. Groups this zero-point has NO reading for, because the
+--     -- payload it was captured from did not carry them. See HOLES below:
+--     "holes": ["counterMaps.fish", "recordMaps.skills"],
+--     -- OPTIONAL, only while a profile reset is being confirmed. A reset is
+--     -- believed only after N consecutive collapsed snapshots (a single stale
+--     -- cloud save must not be able to lower the zero-point):
+--     "pendingReset": { "count":1, "since":"...", "signature":15640 },
+--     -- OPTIONAL, present after a re-baseline: a PERMANENT per-counter ceiling
+--     -- built from the zero-point(s) it replaced. See CEILING below:
+--     "superseded":  { ...a v1 baseline, one level deep only, no holes... }
+--   }
+--
+-- All three optional blocks are written by lib/gs-baseline and are self-healing;
+-- clearing them by hand only costs the guard they provide.
+--
+-- ── HOLES (gs_baseline.holes) ────────────────────────────────────────────────
+--
+-- A THIRD STATE, alongside "a real reading" and "not baselined at all". A client
+-- payload does not always carry every group: a viking who has never placed a
+-- build piece has no vh_Builds, the mod's own canonical payload carries no
+-- vh_Distance* keys, and pickups[]/weapons[]/skills[]/materials[] can each be
+-- absent. Storing 0 (or {}) for those is unsafe AND unfixable — 0 and {} are
+-- exactly what a legitimately fresh character's zero-point looks like, so no
+-- later repair can tell them apart, and the next payload that DOES carry the
+-- group has its whole LIFETIME total credited as earned here (Fishing 62 landing
+-- on the Anglers board; 410 km sailed elsewhere landing on the Great Deeds
+-- ladder). Refusing to capture at all was worse still: nothing is written on a
+-- deferred cycle, so gs_reporter / gs_updated_at never advance and the deed
+-- evaluator never runs — a fisher who never builds would post every ~120s and
+-- never appear on the dashboard.
+--
+-- So the group is OMITTED from the blob and its path listed in `holes` instead:
+--   • while holed, the group credits exactly 0 every cycle;
+--   • the first payload that carries it FILLS the hole from that snapshot (that
+--     post credits 0 — it is the zero-point) and drops the path from `holes`;
+--   • everything after that is real growth, credited in full.
+-- Paths are `<section>.<key>` from lib/gs-baseline BASELINE_GROUPS, e.g.
+-- 'counters.structuresBuilt', 'counterMaps.fish', 'recordMaps.skills'. An
+-- unrecognized path is ignored on read. The five per-mode distance keys are a
+-- CLOSED key set: an absent mode inside a present `distances` map is a per-key
+-- hole too, not a zero (only vh_DistanceTraveled reported → walk/run/sail/air
+-- fill on first sighting).
+--
+-- Ops: `holes` shrinking to absent over a player's first few posts is normal and
+-- healthy. A hole that never closes means the mod never emits that group for
+-- them — the counter simply stays at whatever it holds.
+--
+-- ── CEILING (gs_baseline.superseded) ─────────────────────────────────────────
+--
+-- Written on a re-baseline (N consecutive collapsed snapshots) and kept FOREVER
+-- as a per-counter ceiling. For each counter k the zero-point actually used is
+--     max(active_k, min(superseded_k, raw_k))
+-- so a career climbing back UP toward a value this character has already posted
+-- credits nothing — in whole or in part — and only genuine growth PAST it is
+-- credited. Records use the max form: the gate threshold is
+-- max(active_k, superseded_k). On a second re-baseline the ceiling is per-key
+-- GREATEST-merged with the outgoing zero-point, so it stays exactly one level
+-- deep and always holds the highest reading ever posted.
+--
+-- This replaced a 7-day window on the SUMMED career signature, which leaked both
+-- ways: a recovery one count short of the summed signature credited 1,100 kills
+-- and 21,000 builds in full, and a stale save returning EIGHT days later credited
+-- the entire 1,126-kill import. A ceiling has no threshold to fall short of and
+-- no clock to outlast.
+--
+-- THE COST, deliberately accepted: a character genuinely deleted and re-rolled
+-- under the same name earns no credit for re-covering ground the NAME already
+-- covered — which the columns hold anyway (GREATEST), so it is not visible on
+-- the dashboard. Keys the old career never had (a new weapon, a new creature)
+-- have no ceiling and accrue immediately. To forgive a ceiling deliberately,
+-- clear gs_baseline for that player (see the bottom of this file).
+--
+-- No backfill and no legacy migration: a full data wipe follows this ship (the
+-- pre-launch rehearsal), so every row is created fresh under the new regime.
+-- Until the wipe, an existing row simply has no baseline yet — its next client
+-- post captures one and credits nothing, which is the intended behaviour.
+--
+-- Additive + nullable, safe on the live project, reversible (DROP COLUMN).
+-- Idempotent: re-running changes nothing.
+--
+--   psql "$SUPABASE_DB_URL" -f db/2026-08-23_gs_baselines.sql
+-- or paste into the Supabase SQL editor.
+
+alter table public.player_stats
+  add column if not exists gs_baseline jsonb,
+  add column if not exists gs_baselined_at timestamptz;
+
+comment on column public.player_stats.gs_baseline is
+  'World baseline (v1 jsonb): the character''s RAW lifetime GsValheimStatsClient counters at their first snapshot on this server. /api/gs-ingest credits only (raw - baseline) per counter, and a record/max field only once it exceeds the baselined record. Groups the capturing payload did not carry are listed in "holes" instead of being stored as 0/{} — they credit nothing until they first appear, then take their zero-point from that snapshot. "superseded" is a PERMANENT per-counter ceiling kept after a profile re-baseline: no climb back toward a previously posted value is ever credited. NULL = not yet baselined; the next client post captures one and contributes zero. See lib/gs-baseline.ts.';
+comment on column public.player_stats.gs_baselined_at is
+  'When gs_baseline was captured (or re-captured after a profile reset). Mirrors gs_baseline->>capturedAt.';
+
+-- Handy ops view of who is baselined and how big a lifetime import was absorbed:
+--
+--   select p.character_name,
+--          ps.gs_baselined_at,
+--          (ps.gs_baseline->'counters'->>'kills')::bigint  as baseline_kills,
+--          (ps.gs_baseline->'counters'->>'deaths')::bigint as baseline_deaths,
+--          (ps.gs_baseline->'counters'->>'structuresBuilt')::bigint as baseline_builds,
+--          ps.gs_baseline->'holes'                          as open_holes,
+--          (ps.gs_baseline->'superseded'->'counters'->>'kills')::bigint as ceiling_kills,
+--          ps.kills, ps.deaths, ps.structures_built
+--     from public.player_stats ps
+--     join public.players p on p.id = ps.player_id
+--    order by baseline_kills desc nulls last;
+--
+-- Who still has an open hole, and in which group (holes are expected to close on
+-- their own within a few posts):
+--
+--   select p.character_name, h.hole
+--     from public.player_stats ps
+--     join public.players p on p.id = ps.player_id
+--     cross join lateral jsonb_array_elements_text(coalesce(ps.gs_baseline->'holes','[]'::jsonb)) as h(hole)
+--    order by p.character_name;
+--
+-- To forgive a baseline entirely — a character that genuinely started here and
+-- was baselined mid-session, or a real re-roll that the permanent `superseded`
+-- ceiling is holding down — clear it and let the next post re-capture. This
+-- discards the ceiling too, so only do it when the re-roll is verified:
+--
+--   update public.player_stats set gs_baseline = null, gs_baselined_at = null
+--    where player_id = '<uuid>';
+
+-- KNOWN LIMIT (R2, accepted 2026-08-23): a group that was HOLED at capture and is
+-- first filled during a suspected-reset streak (3 consecutive low snapshots) gets
+-- no ceiling entry for that group — a veteran save returning after that narrow
+-- sequence can credit its lifetime for that one group. Exposure requires
+-- holed-at-capture + a 3-dip streak + the return; full fix would be a per-key
+-- high-water mark of raw readings. Revisit if it ever fires in practice.

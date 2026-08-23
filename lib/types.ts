@@ -115,6 +115,22 @@ export interface PlayerStats {
   gs_reporter?: string | null;
   gs_world?: string | null;
   gs_updated_at?: string | null;
+  // ── World baseline (db/2026-08-23_gs_baselines.sql) ──
+  /**
+   * This character's zero-point: their RAW lifetime counters at their first
+   * complete snapshot here. Every column above holds `raw − this`, so the row
+   * shows what was earned on Eilif rather than what the character file carried
+   * in. NULL = not baselined yet (the next complete client post captures one and
+   * credits nothing).
+   *
+   * Typed as raw jsonb on purpose: it round-trips through a third-party mod's
+   * payload, so it must always be read through `readBaseline()`
+   * (lib/gs-baseline), never trusted as a shape. `undefined` rather than `null`
+   * means the COLUMN is missing — i.e. the migration has not been applied.
+   */
+  gs_baseline?: Record<string, unknown> | null;
+  /** When gs_baseline was captured/re-captured (mirrors gs_baseline->>capturedAt). */
+  gs_baselined_at?: string | null;
 }
 
 export interface PlayerWithStats extends Player {

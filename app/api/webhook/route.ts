@@ -176,96 +176,49 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, synced: onlineNames.length }, { status: 200 });
     }
 
-    // ---- 2c. Full stat suite (`stats`) -------------------------------------
-    // Posted by the ServerCharacters .fch parser. metadata carries the parsed
-    // columns; we resolve the player by character name (backfilling steam_id if
-    // the filename provided one) and upsert their single player_stats row.
+    // ---- 2c. Full stat suite (`stats`) — RETIRED, NO-OP ---------------------
+    //
+    // ⛔ DELIBERATELY WRITES NOTHING. This path used to upsert the ServerCharacters
+    // .fch parser's numbers straight into player_stats with a plain SET — no
+    // GREATEST, no world baseline. Those numbers are the character file's LIFETIME
+    // totals, carried across every world and server that character has ever
+    // visited, so every post OVERWROTE the server-earned values that
+    // /api/gs-ingest is at pains to compute: a single stats post could replace a
+    // viking's honest Eilif kills with an imported lifetime figure — or, worse,
+    // silently roll every column BACKWARDS to whatever the .fch happened to say.
+    //
+    // Its only producer, the eilif-stats-parser.service, has been stopped and
+    // permanently disabled (2026-08-23). The route stayed a loaded gun: anything
+    // that could reach /api/webhook with the shared secret could still fire it.
+    // So the branch is now an accepted, logged no-op — a 200 keeps any straggler
+    // client from retry-storming, and the warning names the retired service so
+    // a resurrected copy is obvious in the logs within one cycle.
+    //
+    // The stat columns this used to write are owned end-to-end by /api/gs-ingest
+    // (GsValheimStatsClient snapshots, world-baselined, GREATEST-merged). Do not
+    // revive this branch — reinstate the parser through /api/gs-ingest instead,
+    // so it goes through lib/gs-baseline like every other writer.
+    //
+    // map_explored_pct is the one column with NO single owner, and retiring this
+    // branch is why: /api/gs-ingest's client-map path writes it, but only for
+    // players running the EilifCompanionClient plugin. Everyone else's
+    // exploration % now has no writer at all — it simply stays where it was
+    // (that path is GREATEST-guarded, so nothing regresses; it just stops
+    // advancing). Live with it, or give the column a real server-side source —
+    // do NOT bring back a lifetime-totals SET to fill the gap.
     if (type === 'stats') {
-      if (!characterName) {
-        return Response.json({ error: "'stats' requires characterName" }, { status: 400 });
-      }
-      const m = metadata as Record<string, unknown>;
-      const num = (k: string): number => {
-        const v = m[k];
-        return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-      };
-      const pct = ((): number | null => {
-        const v = m.map_explored_pct;
-        return typeof v === 'number' && Number.isFinite(v) ? v : null;
-      })();
-      const steamId = typeof m.steamId === 'string' && m.steamId.trim() ? m.steamId.trim() : null;
-
-      // Find or create the player so stats have a row to hang off. A lookup
-      // ERROR must not be read as "player missing" — that once turned a
-      // duplicated row into a new duplicate every sweep.
-      const { data: existing, error: lookupErr } = await db
-        .from('players')
-        .select('id, steam_id')
-        .eq('character_name', characterName)
-        .order('first_seen_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (lookupErr) {
-        return Response.json(
-          { error: `player lookup failed: ${lookupErr.message}` },
-          { status: 500 }
-        );
-      }
-
-      let playerId: string;
-      if (existing?.id) {
-        playerId = existing.id as string;
-        if (steamId && !existing.steam_id) {
-          await db.from('players').update({ steam_id: steamId }).eq('id', playerId);
-        }
-      } else {
-        const { data: inserted, error: insertErr } = await db
-          .from('players')
-          .insert({
-            character_name: characterName,
-            steam_id: steamId,
-            first_seen_at: occurredIso,
-            last_seen_at: occurredIso,
-            is_online: false,
-          })
-          .select('id')
-          .single();
-        if (insertErr || !inserted) {
-          // Unique index on character_name: a concurrent request may have won
-          // the insert race — re-read instead of failing (or duplicating).
-          const { data: raced } = await db
-            .from('players')
-            .select('id')
-            .eq('character_name', characterName)
-            .maybeSingle();
-          if (!raced?.id) {
-            return Response.json(
-              { error: `player insert failed: ${insertErr?.message ?? 'no row returned'}` },
-              { status: 500 }
-            );
-          }
-          playerId = raced.id as string;
-        } else {
-          playerId = inserted.id as string;
-        }
-      }
-
-      await db.from('player_stats').upsert(
-        {
-          player_id: playerId,
-          kills: num('kills'),
-          deaths: num('deaths'),
-          resources_harvested: num('resources_harvested'),
-          items_crafted: num('items_crafted'),
-          distance_traveled: num('distance_traveled'),
-          structures_built: num('structures_built'),
-          map_explored_pct: pct,
-          updated_at: occurredIso,
-        },
-        { onConflict: 'player_id' }
+      console.warn(
+        `[webhook] DEPRECATED 'stats' payload ACCEPTED AND IGNORED` +
+          (characterName ? ` for "${characterName}"` : '') +
+          `. Its only producer (eilif-stats-parser.service) was retired on 2026-08-23; this path wrote ` +
+          `lifetime .fch profile totals into player_stats with a plain SET, destroying world-baselined, ` +
+          `server-earned values. Nothing was written. If you are seeing this line, something is still ` +
+          `posting type:'stats' — find it and stop it (see app/api/webhook/route.ts §2c).`
       );
-
-      return Response.json({ ok: true, player: characterName }, { status: 200 });
+      return Response.json(
+        { ok: true, ignored: true, deprecated: "type:'stats' is retired — nothing was written" },
+        { status: 200 }
+      );
     }
 
     // ---- 2d. Discord scheduled-events sync (`events_sync`) ------------------

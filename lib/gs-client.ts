@@ -30,6 +30,10 @@ const FISH_SHAPED = /^Fish\d/i;
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
+/** Is this key GENUINELY present as a usable number (vs absent / null / junk)? */
+function isNum(v: unknown): boolean {
+  return typeof v === 'number' && Number.isFinite(v);
+}
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
@@ -38,6 +42,71 @@ function arr(v: unknown): Obj[] {
 }
 function sumBy(rows: Obj[], key: string): number {
   return rows.reduce((acc, r) => acc + num(r[key]), 0);
+}
+
+/**
+ * WHERE THIS PARSE CAME FROM — the completeness/provenance record that the
+ * world-baseline layer's capture gate runs on (lib/gs-baseline
+ * captureQualification).
+ *
+ * Every number below is derived with `num()`, which turns "absent" and "junk"
+ * alike into 0. That is right for a merge (GREATEST ignores a 0) but CATASTROPHIC
+ * for a capture: baselining a field at 0 because the payload simply didn't carry
+ * it makes the next complete snapshot's LIFETIME total look like it was all
+ * earned here (the Chærlie incident, reproduced straight through the baseline
+ * fix). So the parser records what it actually SAW, and the baseline layer
+ * captures a zero-point ONLY for the groups these flags say were really there,
+ * recording every other group as an explicit HOLE that credits nothing until it
+ * first appears (lib/gs-baseline BASELINE_GROUPS / snapshotHoles).
+ *
+ * Every flag is PRESENCE, never truthiness: a genuine 0 (or an empty list) is a
+ * real zero-point — a brand-new viking must be able to baseline — while absent
+ * or junk is no information at all.
+ */
+export interface SelfProvenance {
+  /**
+   * The players[] entry used was the reporter's OWN (name === reporter), not the
+   * "first entry carrying stats/deaths" fallback. A bystander entry carries only
+   * what the reporter observed of someone else — never a zero-point.
+   */
+  ownEntry: boolean;
+  /** `stats` (the raw .fch profile counter map) was present as an object. */
+  hasStats: boolean;
+  /** kills / deaths present as real numbers on the entry. */
+  hasKills: boolean;
+  hasDeaths: boolean;
+  /** bossKills present as a real number on the entry. */
+  hasBossKills: boolean;
+  /** longestLifeSec / bestKillsBeforeDeath present as real numbers. */
+  hasLongestLifeSec: boolean;
+  hasBestKillsBeforeDeath: boolean;
+  /** vh_Builds present as a real number in `stats`. */
+  hasBuilds: boolean;
+  /**
+   * vh_DistanceTraveled present as a real number in `stats`. Diagnostic only —
+   * the baseline layer gates distance on `parseSelfDistances(body) !== null`
+   * (any usable vh_Distance* reading), never on this one key.
+   */
+  hasDistance: boolean;
+  /** pickups[] present (resourcesHarvested + the fish breakdown come from it). */
+  hasPickups: boolean;
+  /** weapons[] present (damageDealt + every per-weapon counter/record). */
+  hasWeapons: boolean;
+  /** creatureKills[] present (the per-creature kill breakdown). */
+  hasCreatureKills: boolean;
+  /** boss[] present (per-boss damage + fight seconds). */
+  hasBoss: boolean;
+  /** materials[] present (the per-material harvest breakdown). */
+  hasMaterials: boolean;
+  /** skills[] present (per-skill LEVELS — the Anglers board reads Fishing). */
+  hasSkills: boolean;
+  /**
+   * Which source itemsCrafted was read from. The two sources are NOT
+   * interchangeable — differencing a vh_Crafts baseline against a crafts[]-summed
+   * snapshot (or vice versa) compares unlike against unlike, so the baseline
+   * records this and refuses to credit across a source change.
+   */
+  craftsSource: 'vh_Crafts' | 'crafts' | 'none';
 }
 
 export interface ParsedSelf {
@@ -52,21 +121,87 @@ export interface ParsedSelf {
   itemsCrafted: number;
   structuresBuilt: number;
   damageDealt: number;
+  /** The long-tail blob as stored: top-N capped (see capGsStats). */
   gsStats: GsClientStats;
+  /**
+   * The SAME blob before the top-N caps. World-baseline accounting
+   * (lib/gs-baseline) must difference the uncapped lists: a weapon or creature
+   * that only ranks inside the top-N once it has been used HERE would otherwise
+   * be dropped before it could ever be measured against its zero-point.
+   */
+  gsStatsFull: GsClientStats;
+  /** What this payload actually carried — the baseline capture gate reads it. */
+  provenance: SelfProvenance;
+}
+
+/**
+ * Apply the display caps to a long-tail blob: top-12 weapons / materials,
+ * top-15 creatures, top-12 skills — but never silently drop Fishing (a viking
+ * with 12 better skills would otherwise lose their Angler entry). Boss damage
+ * and fish are uncapped (bounded by the game). Split out of parseSelfSnapshot
+ * so the baseline layer can cap AFTER differencing, on the same rules.
+ */
+export function capGsStats(gs: GsClientStats): GsClientStats {
+  const top12Skills = gs.skills.slice(0, 12);
+  const fishingSkill = gs.skills.find((sk) => sk.skill === 'Fishing');
+  return {
+    ...gs,
+    weapons: gs.weapons.slice(0, 12),
+    creatureKills: gs.creatureKills.slice(0, 15),
+    materials: gs.materials.slice(0, 12),
+    skills:
+      fishingSkill && !top12Skills.some((sk) => sk.skill === 'Fishing')
+        ? [...top12Skills, fishingSkill]
+        : top12Skills,
+  };
+}
+
+/**
+ * Identity key for matching a players[] entry against `reporter`.
+ *
+ * CASE- AND WHITESPACE-INSENSITIVE ON PURPOSE. The two strings come from two
+ * different places in the mod — `reporter` from its config/profile name, each
+ * players[] `name` from the live Player object — and a skew of case or a stray
+ * space between them used to be fatal, not cosmetic: no own entry was found, the
+ * parse silently fell through to the BYSTANDER branch, and the baseline layer
+ * (which will never seed a zero-point from a bystander) deferred that character
+ * FOREVER. They would post every ~120s and never appear on the dashboard at all.
+ * Matching on the folded key costs nothing — two DIFFERENT vikings can't share a
+ * name modulo case, because Valheim character names are what the roster keys on —
+ * and bystander semantics are otherwise unchanged.
+ */
+function identityKey(v: unknown): string {
+  return typeof v === 'string' ? v.trim().toLowerCase() : '';
+}
+
+/**
+ * The reporter's OWN players[] entry, or the bystander fallback (first entry
+ * carrying stats/deaths) when they hadn't spawned yet. Shared by
+ * parseSelfSnapshot and parseSelfDistances so the two can never disagree about
+ * WHOSE numbers they are reading.
+ */
+function findSelfEntry(body: Obj): { self: Obj | undefined; own: Obj | undefined } {
+  const key = identityKey(body.reporter);
+  const players = arr(body.players);
+  const own = key
+    ? players.find((p) => identityKey(p.name) === key && (p.stats !== undefined || p.deaths !== undefined))
+    : undefined;
+  // The fallback (first entry carrying stats/deaths) keeps deaths/observed data
+  // flowing when the reporter's own entry is missing — but it is NOT the
+  // reporter's career, so it is marked as such and can never seed a zero-point.
+  const self = own ?? players.find((p) => p.stats !== undefined || p.deaths !== undefined);
+  return { self, own };
 }
 
 /** Parse the reporter's authoritative per-player snapshot; null if malformed. */
 export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   const reporter = str(body.reporter);
   if (!reporter) return null;
-  const players = arr(body.players);
-  const self =
-    players.find(
-      (p) => str(p.name) === reporter && (p.stats !== undefined || p.deaths !== undefined),
-    ) ?? players.find((p) => p.stats !== undefined || p.deaths !== undefined);
+  const { self, own } = findSelfEntry(body);
   if (!self) return null;
 
-  const stats = (self.stats && typeof self.stats === 'object' ? self.stats : {}) as Obj;
+  const hasStats = !!self.stats && typeof self.stats === 'object' && !Array.isArray(self.stats);
+  const stats = (hasStats ? self.stats : {}) as Obj;
   const statNum = (k: string): number => num(stats[k]);
 
   const weapons = arr(self.weapons)
@@ -123,25 +258,28 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   // double-subtract; the fish[] breakdown above is purely additive detail.
   const resourcesHarvested = sumBy(pickups, 'count');
   // Prefer the authoritative profile counter; fall back to the per-item breakdown.
-  const itemsCrafted = statNum('vh_Crafts') || sumBy(arr(self.crafts), 'count');
+  // Chosen by PRESENCE, not by truthiness: `vh_Crafts || sumBy(crafts)` silently
+  // switched source whenever the profile counter read 0, so a baseline captured
+  // from one source could later be differenced against the other (unlike against
+  // unlike). The source is recorded in provenance and the baseline layer refuses
+  // to credit itemsCrafted across a source change.
+  const craftsSource: SelfProvenance['craftsSource'] = isNum(stats.vh_Crafts)
+    ? 'vh_Crafts'
+    : Array.isArray(self.crafts)
+      ? 'crafts'
+      : 'none';
+  const itemsCrafted = craftsSource === 'vh_Crafts' ? statNum('vh_Crafts') : sumBy(arr(self.crafts), 'count');
   const structuresBuilt = statNum('vh_Builds');
 
-  // Top-12 skills by level, but never silently drop Fishing if it fell outside
-  // (a viking with 12 better skills would otherwise lose their Angler entry).
-  const top12Skills = skills.slice(0, 12);
-  const fishingSkill = skills.find((sk) => sk.skill === 'Fishing');
-  const skillsOut =
-    fishingSkill && !top12Skills.some((sk) => sk.skill === 'Fishing')
-      ? [...top12Skills, fishingSkill]
-      : top12Skills;
-
+  // Built UNCAPPED first (records are derived from every weapon), then capped for
+  // storage by capGsStats — the baseline layer needs the uncapped lists.
   const top = weapons[0];
-  const gsStats: GsClientStats = {
-    weapons: weapons.slice(0, 12),
-    creatureKills: creatureKills.slice(0, 15),
+  const gsStatsFull: GsClientStats = {
+    weapons,
+    creatureKills,
     bossDamage,
-    skills: skillsOut,
-    materials: materials.slice(0, 12),
+    skills,
+    materials,
     fish,
     records: {
       topWeapon: top?.weapon ?? null,
@@ -165,7 +303,29 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
     itemsCrafted,
     structuresBuilt,
     damageDealt,
-    gsStats,
+    gsStats: capGsStats(gsStatsFull),
+    gsStatsFull,
+    provenance: {
+      ownEntry: self === own,
+      hasStats,
+      hasKills: isNum(self.kills),
+      hasDeaths: isNum(self.deaths),
+      hasBossKills: isNum(self.bossKills),
+      hasLongestLifeSec: isNum(self.longestLifeSec),
+      hasBestKillsBeforeDeath: isNum(self.bestKillsBeforeDeath),
+      hasBuilds: isNum(stats.vh_Builds),
+      hasDistance: isNum(stats.vh_DistanceTraveled),
+      // Array PRESENCE, not length: an empty list is a real "this character has
+      // none of that yet" (a perfectly good zero-point), while an ABSENT list is
+      // no information at all and must become a baseline hole instead of a 0.
+      hasPickups: Array.isArray(self.pickups),
+      hasWeapons: Array.isArray(self.weapons),
+      hasCreatureKills: Array.isArray(self.creatureKills),
+      hasBoss: Array.isArray(self.boss),
+      hasMaterials: Array.isArray(self.materials),
+      hasSkills: Array.isArray(self.skills),
+      craftsSource,
+    },
   };
 }
 
@@ -334,35 +494,64 @@ export interface ParsedDistances {
   run: number;
   sail: number;
   air: number;
-  /** The raw vh_Distance* subset, verbatim, for future leaderboards. */
+  /**
+   * The raw vh_Distance* subset, verbatim — and the PRESENCE RECORD for the five
+   * modes above. Only keys the payload genuinely carried as finite numbers are
+   * in here, so `'vh_DistanceSail' in raw` is the honest answer to "did this
+   * snapshot say anything about sailing?", where `sail === 0` cannot be
+   * (absent and zero both read 0). lib/gs-baseline baselines only the modes
+   * present here and holes the rest.
+   */
   raw: Record<string, number>;
 }
+
+/** Per-mode distance → the raw `stats` key that carries it. */
+export const DISTANCE_MODE_KEYS = {
+  total: 'vh_DistanceTraveled',
+  walk: 'vh_DistanceWalk',
+  run: 'vh_DistanceRun',
+  sail: 'vh_DistanceSail',
+  air: 'vh_DistanceAir',
+} as const;
+
+export type DistanceMode = keyof typeof DISTANCE_MODE_KEYS;
 
 /**
  * Pull the raw distance counters out of the reporter's `stats` map
  * (keys "vh_<PlayerStatType>": DistanceTraveled/Walk/Run/Sail/Air, metres —
  * enum names verified against services/stats-parser/src/fch.js). Returns null
  * when the self entry / stats map is absent, or when every distance is zero.
+ *
+ * NULL IS THE DISTANCE PRESENCE SIGNAL the baseline layer gates on — deliberately
+ * "any usable reading", never one named key. A payload carrying only
+ * `vh_DistanceWalk` (no total) still yields a snapshot; a payload carrying
+ * nothing usable yields null, and lib/gs-baseline records distance as a HOLE
+ * rather than baselining it at 0 (a 0 there is what put 410 km sailed on another
+ * server onto the Great Deeds ladder).
  */
 export function parseSelfDistances(body: Obj): ParsedDistances | null {
-  const reporter = str(body.reporter);
-  const players = arr(body.players);
-  const self =
-    (reporter ? players.find((p) => str(p.name) === reporter && (p.stats !== undefined || p.deaths !== undefined)) : undefined) ??
-    players.find((p) => p.stats !== undefined || p.deaths !== undefined);
-  const stats = (self?.stats && typeof self.stats === 'object' ? self.stats : {}) as Obj;
-  const g = (k: string): number => Math.round(num(stats[k]));
+  const { self } = findSelfEntry(body);
+  const stats = (self?.stats && typeof self.stats === 'object' && !Array.isArray(self.stats) ? self.stats : {}) as Obj;
 
-  const distanceTraveled = g('vh_DistanceTraveled');
-  const walk = g('vh_DistanceWalk');
-  const run = g('vh_DistanceRun');
-  const sail = g('vh_DistanceSail');
-  const air = g('vh_DistanceAir');
-
+  // PRESENCE, not value. Only vh_Distance* keys that are genuinely finite
+  // numbers go in — junk is as absent as missing (rule 5: fail toward zero).
   const raw: Record<string, number> = {};
   for (const [k, v] of Object.entries(stats)) {
-    if (/^vh_Distance/.test(k)) raw[k] = Math.round(num(v));
+    if (/^vh_Distance/.test(k) && isNum(v)) raw[k] = Math.round(v as number);
   }
-  if (distanceTraveled <= 0 && walk <= 0 && run <= 0 && sail <= 0 && air <= 0) return null;
-  return { distanceTraveled, walk, run, sail, air, raw };
+  // NULL means "this payload said NOTHING usable about distance" — the signal
+  // lib/gs-baseline holes on. It deliberately does NOT mean "every distance
+  // reads zero": a viking who genuinely hasn't moved yet has a perfectly good
+  // zero-point, and treating that as unknown would cost them their first leg.
+  if (Object.keys(raw).length === 0) return null;
+
+  const g = (k: string): number => raw[k] ?? 0;
+  return {
+    distanceTraveled: g(DISTANCE_MODE_KEYS.total),
+    walk: g(DISTANCE_MODE_KEYS.walk),
+    run: g(DISTANCE_MODE_KEYS.run),
+    sail: g(DISTANCE_MODE_KEYS.sail),
+    air: g(DISTANCE_MODE_KEYS.air),
+    raw,
+  };
 }

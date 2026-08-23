@@ -7,6 +7,16 @@ import {
   parseBossFighters,
   type ParsedBossKill,
 } from '@/lib/gs-client';
+import {
+  applyBaseline,
+  reconstructRawWeapons,
+  mergeIntoRow,
+  needsBaselineMigration,
+  isMissingBaselineColumn,
+  baseColumnsOnly,
+  POISON_CAPS,
+  MIGRATION_REQUIRED,
+} from '@/lib/gs-baseline';
 import { evaluateAndRecord } from '@/lib/milestones';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import type { GsClientStats } from '@/lib/types';
@@ -132,7 +142,7 @@ async function confirmOnThisServer(name: string): Promise<{ onServer: boolean; r
   const { data } = await client
     .from('events')
     .select('type, created_at')
-    .eq('character_name', trimmed)
+    .ilike('character_name', trimmed.replace(/[%_]/g, '\\$&'))
     .in('type', ['join', 'leave'])
     .order('created_at', { ascending: false })
     .limit(1);
@@ -333,6 +343,22 @@ async function ingestClientMap(body: Obj): Promise<{ ok: boolean; pct: number | 
 // Snapshots are cumulative and re-posted every ~120s, so the merge is idempotent
 // and uses GREATEST (never let a fresh character / profile reset roll counters
 // backwards). The pure parse lives in lib/gs-client so it stays unit-testable.
+//
+// ⚠️ WORLD BASELINES (2026-08-23). Those cumulative numbers are LIFETIME totals
+// carried inside the character file across every world and server it has ever
+// visited — so an imported veteran used to arrive pre-loaded and flood the clan
+// totals. The first snapshot a character posts is now captured as their
+// zero-point (player_stats.gs_baseline) and everything below merges only
+// `raw − baseline` (records: only values that BEAT the baselined record). See
+// lib/gs-baseline.ts for the field-kind rules and the profile-reset detection.
+// The columns downstream reads are unchanged in name and meaning — they simply
+// now hold what was earned HERE. Requires db/2026-08-23_gs_baselines.sql.
+//
+// A zero-point is captured from the reporter's OWN entry and covers only the
+// groups that entry CARRIED; anything absent is stored as an explicit HOLE that
+// credits nothing until it first appears (gs_baseline.holes). So a payload the
+// mod happens to emit without vh_Builds or without vh_Distance* still baselines
+// and still writes — deferring on those was muting real players outright.
 
 type Obj = Record<string, unknown>;
 
@@ -365,6 +391,13 @@ function num(v: unknown): number {
  * comfortably below any real weapon's first real kill yet far above those
  * 1/1/1/1-style coincidences, so real inherited entries (hundreds of damage)
  * always clear it while trivial first-swing collisions are ignored.
+ *
+ * Both sides of the comparison are RAW (pre-baseline) tuples: the incoming
+ * snapshot as posted, and each stored row re-derived from its own baseline
+ * (reconstructRawWeapons). The leak this hunts for happens in the mod's local
+ * cache file, upstream of anything the dashboard does, so it is only visible in
+ * the raw numbers — two rows with different baselines hold different effective
+ * values for the very same inherited combat.
  */
 async function warnOnWeaponCollision(
   client: ReturnType<typeof db>,
@@ -380,14 +413,14 @@ async function warnOnWeaponCollision(
   // gs_reporter carries that row's character name (written alongside gs_stats).
   const { data: others } = await client
     .from('player_stats')
-    .select('player_id, gs_reporter, gs_stats')
+    .select('player_id, gs_reporter, gs_stats, gs_baseline')
     .neq('player_id', pid);
   if (!others || others.length === 0) return;
 
   for (const row of others) {
     const otherName = (row.gs_reporter as string | null) ?? `player ${row.player_id}`;
-    const otherWeapons = ((row.gs_stats as GsClientStats | null)?.weapons ?? []) as GsClientStats['weapons'];
-    if (!Array.isArray(otherWeapons) || otherWeapons.length === 0) continue;
+    const otherWeapons = reconstructRawWeapons(row.gs_stats, row.gs_baseline);
+    if (otherWeapons.length === 0) continue;
     for (const mine of candidates) {
       const twin = otherWeapons.some(
         (o) =>
@@ -417,6 +450,12 @@ async function warnOnWeaponCollision(
  * GREATEST). Returns true when a real stats merge happened (a self snapshot was
  * present and written) so the caller knows whether it's worth re-evaluating the
  * collective milestones — false means "nothing changed, skip".
+ *
+ * What lands in the columns is the SERVER-EARNED share of the snapshot:
+ * `raw − gs_baseline` per counter, records only when they beat the baselined
+ * record (lib/gs-baseline). The first snapshot from a character captures that
+ * baseline and therefore contributes exactly zero — which is the point: a
+ * veteran import starts level with everyone else.
  */
 async function ingestPlayerStats(body: Obj): Promise<boolean> {
   const s = parseSelfSnapshot(body);
@@ -427,121 +466,125 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
 
   // Resolve an EXISTING players row only — never auto-create from a client payload.
   // A new reporter's row lands via the poller join path first; until then, skip.
+  // Case-insensitive (escaped ilike, same as the webhook): a case/whitespace-skewed
+  // reporter name must not silently drop the payload forever (R3).
+  const escapedReporter = s.reporter.trim().replace(/[%_]/g, '\\$&');
   const { data: found } = await client
     .from('players')
     .select('id')
-    .eq('character_name', s.reporter)
+    .ilike('character_name', escapedReporter)
     .limit(1);
   const pid = (found?.[0]?.id as string | undefined) ?? undefined;
-  if (!pid) return false;
+  if (!pid) {
+    console.warn(`[gs-ingest] no players row for reporter "${s.reporter}" — payload skipped (row lands via poller join first)`);
+    return false;
+  }
 
   // Best-effort weapon-collision monitor (LOG-ONLY): flag if this reporter's
   // weapon breakdown byte-matches another character's — the sign of the
   // GsValheimStatsClient world-scoped weapons.tsv cache leaking across a
-  // character switch. Wrapped like the evaluateAndRecord call below so a monitor
-  // failure can NEVER fail the ingest, block it, or mutate any data.
+  // character switch. Compares RAW tuples on both sides (see the doc comment).
+  // Wrapped like the evaluateAndRecord call below so a monitor failure can NEVER
+  // fail the ingest, block it, or mutate any data. Skipped when the snapshot did
+  // not come from the reporter's OWN players[] entry: a bystander entry holds the
+  // reporter's observations OF OTHER PLAYERS, so matching it against those same
+  // players' stored rows would flag the leak that isn't there.
   try {
-    await warnOnWeaponCollision(client, pid, s.reporter, s.gsStats.weapons);
+    if (s.provenance.ownEntry) {
+      await warnOnWeaponCollision(client, pid, s.reporter, s.gsStatsFull.weapons);
+    }
   } catch (e) {
     console.error('[gs-ingest] weapon-collision monitor', e instanceof Error ? e.message : e);
   }
 
-  // Read the current row so we can GREATEST cumulative counters and avoid a
-  // reset/rollback writing lower numbers (only-writer-per-row makes this safe).
+  // Read the current row: it carries this character's stored zero-point AND the
+  // values to GREATEST against (only-writer-per-row makes the RMW safe).
   const { data: prevRows } = await client.from('player_stats').select('*').eq('player_id', pid).limit(1);
   const prev = (prevRows?.[0] ?? null) as Obj | null;
-  const prevNum = (k: string): number => num(prev?.[k]);
+
+  // Hard prerequisite. An existing row that has no gs_baseline COLUMN (rather
+  // than a null value) means the migration hasn't run — bail loudly instead of
+  // writing numbers we can't account for.
+  if (needsBaselineMigration(prev)) {
+    console.error(MIGRATION_REQUIRED);
+    return false;
+  }
 
   // Distances (metres) from the .fch profile counters: total goes to the
   // dedicated distance_traveled column; the per-mode breakdown + raw vh_ subset
   // are folded into gs_stats so future leaderboards need no further ingest
-  // change. Same GREATEST guard so a profile reset can't roll it backwards.
+  // change. Baselined like every other counter, then GREATEST-guarded below.
   const dist = parseSelfDistances(body);
 
-  // Keep the richer gs_stats blob unless this snapshot advances (guards resets).
-  const advancing = s.damageDealt >= prevNum('damage_dealt');
-  const baseGs = advancing ? s.gsStats : ((prev?.gs_stats as Obj | undefined) ?? s.gsStats);
-  const gsStats: Obj = { ...(baseGs as Obj) };
-  if (dist) {
-    gsStats.distances = { total: dist.distanceTraveled, walk: dist.walk, run: dist.run, sail: dist.sail, air: dist.air };
-    gsStats.distancesRaw = dist.raw;
+  // ── world baseline: raw lifetime snapshot → what was earned HERE ───────────
+  const { effective, nextBaseline, change, reason, deferred } = applyBaseline(s, dist, prev?.gs_baseline, now);
+
+  // An incomplete / bystander-derived snapshot is not trusted to seed a
+  // zero-point OR to be credited from — writing nothing is the whole point, so
+  // return before touching the row (see lib/gs-baseline captureQualification).
+  if (deferred) {
+    console.warn(`[gs-ingest] SNAPSHOT DEFERRED for "${s.reporter}" — ${reason}`);
+    return false;
   }
 
-  // Stat-poison detector (DETECT, DON'T BLOCK): a cumulative counter that leaps by
-  // an implausible amount in a single ~120s cycle is the signature of a spoofed or
-  // poisoned snapshot. We never block the merge (GREATEST still applies), but we
-  // console.warn AND stamp a reversible marker into gs_stats._flags so the jump is
-  // findable and undoable later. The FIRST snapshot (no prev row) is never flagged —
-  // there is no baseline to jump from.
-  if (prev) {
-    const POISON_CAPS: Record<string, number> = {
-      kills: 5000,
-      deaths: 5000,
-      damage_dealt: 5_000_000,
-      distance_traveled: 2_000_000,
-      structures_built: 20_000,
-    };
-    const incoming: Array<[string, number]> = [
-      ['kills', s.kills],
-      ['deaths', s.deaths],
-      ['damage_dealt', s.damageDealt],
-      ['distance_traveled', dist?.distanceTraveled ?? 0],
-      ['structures_built', s.structuresBuilt],
-    ];
-    const flags: Array<{ field: string; prev: number; next: number; at: string }> = [];
-    for (const [field, nextVal] of incoming) {
-      const prevVal = prevNum(field);
-      if (nextVal - prevVal > POISON_CAPS[field]) {
-        console.warn(
-          `[gs-ingest] STAT POISON? "${s.reporter}" ${field} jumped ${prevVal} → ${nextVal} ` +
-            `(+${nextVal - prevVal}) in one cycle, beyond the +${POISON_CAPS[field]} sanity cap. ` +
-            `Merged anyway (GREATEST) but flagged in gs_stats._flags for review.`,
-        );
-        flags.push({ field, prev: prevVal, next: nextVal, at: now });
-      }
-    }
-    if (flags.length > 0) {
-      const priorFlags = Array.isArray(gsStats._flags) ? (gsStats._flags as unknown[]) : [];
-      gsStats._flags = [...priorFlags, ...flags];
-    }
+  if (change === 'capture') {
+    console.info(
+      `[gs-ingest] BASELINE CAPTURED for "${s.reporter}" — ${reason}. ` +
+        `Zero-point: kills ${s.kills}, deaths ${s.deaths}, builds ${s.structuresBuilt}, ` +
+        `crafts ${s.itemsCrafted}, damage ${s.damageDealt}.`,
+    );
+  } else if (change === 'rebaseline') {
+    console.warn(
+      `[gs-ingest] RE-BASELINED "${s.reporter}" — ${reason}. Reads as a fresh/reset profile reusing the ` +
+        `name, so the zero-point was re-taken from this snapshot (kills ${s.kills}, deaths ${s.deaths}, ` +
+        `builds ${s.structuresBuilt}). Already-earned column values are KEPT (GREATEST); this post credits nothing. ` +
+        `The superseded zero-point is retained as a PERMANENT per-counter ceiling: any climb back toward it ` +
+        `credits nothing, at any distance in time.`,
+    );
+  } else if (change === 'reset-pending') {
+    console.warn(`[gs-ingest] PROFILE RESET? "${s.reporter}" — ${reason}.`);
+  } else if (change === 'reset-cleared') {
+    console.info(`[gs-ingest] reset streak cleared for "${s.reporter}" — ${reason}.`);
+  } else if (change === 'repair') {
+    console.warn(`[gs-ingest] BASELINE REPAIRED for "${s.reporter}" — ${reason}. Those fields credit nothing this cycle.`);
   }
 
-  const full: Obj = {
-    player_id: pid,
-    kills: Math.max(s.kills, prevNum('kills')),
-    deaths: Math.max(s.deaths, prevNum('deaths')),
-    resources_harvested: Math.max(s.resourcesHarvested, prevNum('resources_harvested')),
-    items_crafted: Math.max(s.itemsCrafted, prevNum('items_crafted')),
-    structures_built: Math.max(s.structuresBuilt, prevNum('structures_built')),
-    distance_traveled: Math.max(dist?.distanceTraveled ?? 0, prevNum('distance_traveled')),
-    damage_dealt: Math.max(s.damageDealt, prevNum('damage_dealt')),
-    boss_kills: Math.max(s.bossKills, prevNum('boss_kills')),
-    longest_life_sec: Math.max(s.longestLifeSec, prevNum('longest_life_sec')),
-    best_kills_before_death: Math.max(s.bestKillsBeforeDeath, prevNum('best_kills_before_death')),
-    gs_stats: gsStats,
-    gs_reporter: s.reporter,
-    gs_world: s.world,
-    gs_updated_at: now,
-    updated_at: now,
-  };
+  // Build the row: GREATEST on every column, per-key GREATEST inside gs_stats,
+  // poison markers, and the zero-point when it changed. Shared with the tests —
+  // there is exactly ONE implementation of this merge (lib/gs-baseline).
+  const { row: full, flags } = mergeIntoRow(prev, effective, {
+    playerId: pid,
+    reporter: s.reporter,
+    world: s.world,
+    now,
+    nextBaseline,
+  });
+
+  // Stat poison (DETECT, DON'T BLOCK): an implausible one-cycle leap is the
+  // signature of a spoofed or poisoned snapshot. The merge still happens; the
+  // jump is warned about here and stamped reversibly into gs_stats._flags.
+  for (const f of flags) {
+    console.warn(
+      `[gs-ingest] STAT POISON? "${s.reporter}" ${f.field} jumped ${f.prev} → ${f.next} ` +
+        `(+${f.next - f.prev}) in one cycle, beyond the +${POISON_CAPS[f.field]} sanity cap. ` +
+        `Merged anyway (GREATEST) but flagged in gs_stats._flags for review.`,
+    );
+  }
 
   const { error } = await client.from('player_stats').upsert(full, { onConflict: 'player_id' });
   if (!error) return true;
+  if (isMissingBaselineColumn(error)) {
+    console.error(MIGRATION_REQUIRED);
+    return false;
+  }
 
   // Graceful degradation: if the 2026-07-04 migration hasn't been applied yet,
   // the gs_* columns don't exist — retry with only the pre-existing base columns
-  // so headline counters still land.
-  const base: Obj = {
-    player_id: full.player_id,
-    kills: full.kills,
-    deaths: full.deaths,
-    resources_harvested: full.resources_harvested,
-    items_crafted: full.items_crafted,
-    structures_built: full.structures_built,
-    distance_traveled: full.distance_traveled,
-    updated_at: now,
-  };
-  await client.from('player_stats').upsert(base, { onConflict: 'player_id' });
+  // so headline counters still land. Safe under baselining: with nowhere to store
+  // a zero-point every snapshot computes an all-zero delta, and Math.max leaves
+  // the existing values untouched. Counters stall rather than inflate — the loud
+  // MIGRATION_REQUIRED line above says how to fix it.
+  await client.from('player_stats').upsert(baseColumnsOnly(full, now), { onConflict: 'player_id' });
   return true;
 }
 
