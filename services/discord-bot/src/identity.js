@@ -192,14 +192,16 @@ export function createIdentityLink({ client, log = console }) {
       // Hall-voice to their own viking — so the code must never appear in the
       // channel, and there is deliberately NO public fallback that leaks it.
       const rune =
-        `Carve this rune and shout it in-game:\n\`/oath ${res.code} — <your oath>\`\n\n` +
+        `Carve this rune and **shout** it in-game. Open chat and type it exactly like this, starting with \`/s\`:\n` +
+        `\`/s /oath ${res.code} — your vow, one line\`\n\n` +
+        `The \`/s\` is what makes it a shout. A plain chat line never leaves the campfire, so the Hall will not hear it.\n` +
         `Whatever viking you are playing when you swear it becomes yours, bound to this voice in the Hall. ` +
-        `The rune fades in 20 minutes — ask again if it does.`;
+        `The rune fades in 20 minutes. Ask again if it does.`;
       try {
         await message.author.send(rune);
         await reply(
           message,
-          `I have whispered your rune in a private message, **${username}** — swear it in-game to bind your viking.`
+          `I have whispered your rune in a private message, **${username}**. Shout it in-game to bind your viking.`
         );
         await message.react('📜').catch(() => {});
         log.info?.(`[identity] ${username} minted claim (rune DM'd)`);
@@ -259,7 +261,7 @@ export function createIdentityConfirmations({ client, log = console }) {
       try {
         const user = await client.users.fetch(claim.discord_user_id);
         await user.send(
-          `Your oath is sworn, your saga is linked — the Hall now knows you as **${claim.linked_character}**.`
+          `Your oath is sworn and your saga is linked. The Hall now knows you as **${claim.linked_character}**.`
         );
       } catch (e) {
         log.warn?.(`[identity] DM failed for ${claim.discord_user_id}: ${e.message}`);
