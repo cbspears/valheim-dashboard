@@ -4,7 +4,9 @@
 mod **Menthus-Useful_Paths**. It gives the same speed / stamina bonuses on dirt paths, paved
 roads, and built floors, but detects terrain the way *current* Valheim actually stores it
 (Heightmap paint mask), so paths and roads work again. Since **1.2.0** it also extends the bed's
-"needs a fire nearby" check by 8 m (`[Bed] extraFireRange`, `0` = vanilla).
+"needs a fire nearby" check by 8 m (`[Bed] extraFireRange`, `0` = vanilla), and since **1.3.0** it
+extends the station↔upgrade attachment reach by 10 m at **every** crafting station
+(`[Workstation] extraAttachmentRange`, `0` = vanilla).
 
 Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
 **(B) disable/remove Useful_Paths** so bonuses don't double-apply.
@@ -22,7 +24,7 @@ Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
 3. Choose `dist/EilifPaths.dll`. When prompted:
    - **Name:** `EilifPaths`
    - **Author:** `BlockspaceMedia` (or any — local mods aren't namespaced on Thunderstore)
-   - **Version:** `1.2.0`
+   - **Version:** `1.3.0`
    The manager copies the DLL into `<profile>/BepInEx/plugins/EilifPaths/`.
 4. **Enable** it, keep BepInEx + the other Eilif mods enabled.
 
@@ -55,9 +57,22 @@ to the old mod to limit the damage), but the correct fix is to turn the old one 
 BepInEx writes `net.eilif.paths.cfg` (sections `[Path]`, `[PavedRoad]`, …) on first launch if you
 ever want to tweak per-surface; the defaults above ship with the DLL so the pack needs no pre-fill.
 
-One more section, `[Bed] extraFireRange` (default `8`): metres of extra reach for the bed's "needs a
-fire nearby" check, on top of the fireplace's own heat area. `0` restores vanilla. An existing
-`net.eilif.paths.cfg` picks the new key up with its default at the next launch — no pre-fill needed.
+Two more sections, both optional and both picked up with their defaults by an existing
+`net.eilif.paths.cfg` at the next launch (no pre-fill needed):
+
+- `[Bed] extraFireRange` (default `8`): metres of extra reach for the bed's "needs a fire nearby"
+  check, on top of the fireplace's own heat area. `0` restores vanilla.
+- `[Workstation] extraAttachmentRange` (default `10`): metres of extra reach between a crafting
+  station and its upgrades/attachments, on top of each attachment piece's own built-in distance
+  (5 m for most), so about 15 m in practice. Applies to **every** station — workbench, forge, black
+  forge, galdr table, artisan table — and to both halves of the rule at once (where the game lets
+  you place the piece, and whether the station counts it towards its level). `0` restores vanilla.
+
+  ⚠️ **ValheimPlus interaction:** V+'s equivalent knob is `[Workbench] workbenchAttachmentRange`,
+  and V+ **sets** the field (a Harmony prefix) where EilifPaths **adds** to it (a postfix, so it
+  always runs second). If someone enables V+'s `[Workbench]` section, the effective reach becomes
+  `workbenchAttachmentRange + extraAttachmentRange`. In the pinned Eilif profile that section is
+  `enabled = false`, so today it is just vanilla + 10.
 
 **LevelGround is intentionally not supported.** Hoe "level ground" only edits terrain height — it
 paints nothing and leaves no persistent marker in modern Valheim — so there's no reliable signal to
@@ -72,13 +87,21 @@ detect it. (The old mod's LevelGround config did nothing useful on current Valhe
 ## Sanity check before sharing
 
 Launch Valheim once from the profile, join the server, and watch `LogOutput.log`. On boot you should
-see `[EilifPaths] Eilif Paths v1.2.0 loaded. … Bed fire range: +8m.`. Then walk onto a hoe path / paved road / wooden
-floor — each surface change logs exactly once, e.g.:
+see `[EilifPaths] Eilif Paths v1.3.0 loaded. … Bed fire range: +8m. Workstation attachment range: +10m.`.
+Then walk onto a hoe path / paved road / wooden floor — each surface change logs exactly once, e.g.:
 
 ```
 [EilifPaths] terrain: PavedRoad (x1.75 speed, x0 stamina)
 [EilifPaths] terrain: Path (x1.5 speed, x0 stamina)
 [EilifPaths] terrain: None (vanilla speed/stamina)
+```
+
+Then walk up to a workbench and place an upgrade (chest / anvils / tanning rack) well beyond the
+usual hugging distance — it should turn green and, once placed, raise the station level. The first
+time each attachment prefab spawns it logs its real numbers once:
+
+```
+[EilifPaths] workstation attachment 'piece_workbench_ext1': reach 5m -> 15m.
 ```
 
 If you also see the `OLD 'Useful_Paths' ... is ALSO loaded` warning block, you haven't disabled the

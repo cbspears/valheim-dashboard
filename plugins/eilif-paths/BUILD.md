@@ -28,6 +28,26 @@ after rebuilding confirm the boot line reads `Bed fire range: +8m` and that clai
 metres from a campfire logs `[EilifPaths] bed fire check passed with +8m: …`. Re-verify with
 `DOTNET_ROLL_FORWARD=Major ilspycmd -t Bed libs/assembly_valheim.dll | grep -A10 CheckFire` if not.
 
+**Third 1.0 risk (added 1.3.0):** the workstation patch hooks the *private* Unity message
+`StationExtension.Awake` and mutates the public field `StationExtension.m_maxStationDistance`. Both
+are resolved by name, so a rename (or moving the attachment distance onto `CraftingStation`, or
+replacing the `Vector3.Distance(...) < allExtension.m_maxStationDistance` test in
+`StationExtension.FindExtensions` with something else) is a Harmony *runtime* miss or a silent no-op,
+not a compile error. After rebuilding, confirm the boot line reads
+`Workstation attachment range: +10m` **and** that a station upgrade placed well beyond hugging
+distance both turns green and raises the station level — the boot line alone does not prove the
+field is still the gate. Each attachment prefab logs
+`[EilifPaths] workstation attachment '<prefab>': reach 5m -> 15m.` once. Re-verify with
+`DOTNET_ROLL_FORWARD=Major ilspycmd -t StationExtension libs/assembly_valheim.dll` and
+`... -t CraftingStation ... | grep -n "GetExtensions\|GetLevel\|m_rangeBuild"` if not; the design
+note in `README.md` (Workstation attachment range) explains why one field covers both sides, and
+that reasoning is what a 1.0 rebuild has to re-confirm.
+
+**ValheimPlus ordering (1.3.0):** V+ patches the same `StationExtension.Awake` with a *prefix* that
+**sets** `m_maxStationDistance`; ours is a *postfix* that **adds**. That ordering is what keeps the
+two composable — if this is ever changed to a prefix, or to an absolute assignment, the two mods
+start fighting. Keep it a postfix.
+
 Then re-pack (this plugin ships inside the r2modman pack, not deployed directly to the server):
 1. Open r2modman → **Eilif** profile → **Settings → Import local mod** → pick the freshly-built
    `dist/EilifPaths.dll`, overwriting the previous import (see `PACK.md` for the exact

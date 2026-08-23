@@ -41,13 +41,17 @@ namespace EilifPaths
     /// ALSO (since 1.2.0): a bed's "you need a fire nearby" check gets extra reach, configurable
     /// under [Bed] extraFireRange. See src/BedFirePatch.cs for the decompiled vanilla method and
     /// the reasoning behind the default.
+    ///
+    /// ALSO (since 1.3.0): crafting-station upgrades/attachments may sit further from their station,
+    /// for EVERY station type, configurable under [Workstation] extraAttachmentRange. See
+    /// src/StationRangePatch.cs for the decompile and why one hook covers both sides of the rule.
     /// </summary>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public class EilifPathsPlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.2.1";
+        public const string PluginVersion = "1.3.0";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -101,6 +105,10 @@ namespace EilifPaths
             // [Bed] extraFireRange — widened "bed needs a fire nearby" check (see BedFirePatch.cs).
             BedFire.Bind(Config);
 
+            // [Workstation] extraAttachmentRange — widened station<->upgrade reach for every
+            // crafting station (see StationRangePatch.cs).
+            StationRange.Bind(Config);
+
             OldModPresent = Chainloader.PluginInfos != null &&
                             Chainloader.PluginInfos.ContainsKey(OldModGuid);
             if (OldModPresent)
@@ -124,7 +132,8 @@ namespace EilifPaths
                         "PavedRoad x" + F(Movement[PathType.PavedRoad]) + "/" + F(StaminaDrain[PathType.PavedRoad]) + ", " +
                         "floors x" + F(Movement[PathType.Wood]) + "/" + F(StaminaDrain[PathType.Wood]) +
                         ". Polling every " + GroundCheckRate.ToString("0.0", CultureInfo.InvariantCulture) + "s. " +
-                        "Bed fire range: " + BedFire.Describe() + ".");
+                        "Bed fire range: " + BedFire.Describe() + ". " +
+                        "Workstation attachment range: " + StationRange.Describe() + ".");
         }
 
         private static string F(ConfigEntry<float> c) => c.Value.ToString("0.##", CultureInfo.InvariantCulture);

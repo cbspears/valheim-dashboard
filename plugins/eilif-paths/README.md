@@ -7,8 +7,10 @@ Players move faster and spend less stamina while on dirt paths, paved roads, and
 exactly like the old mod — but detection uses the terrain API *current* Valheim actually uses, so
 paths and roads work again.
 
-Since **1.2.0** it also carries one unrelated quality-of-life patch: beds accept a fire much
-further away (see [Bed fire range](#bed-fire-range-120)).
+It also carries two unrelated quality-of-life patches: beds accept a fire much further away
+(**1.2.0**, see [Bed fire range](#bed-fire-range-120)) and crafting-station upgrades attach from
+much further out at *every* station (**1.3.0**, see
+[Workstation attachment range](#workstation-attachment-range-130)).
 
 ## Why the old mod broke
 
@@ -47,6 +49,8 @@ no persistent marker, so there's no reliable way to detect it. Dropped intention
   walking today). State is never permanently mutated and reverts cleanly off-path.
 - `Bed.CheckFire` prefix (1.2.0) — re-runs the vanilla heat lookup with an extra radius; falls
   through to the untouched original on no-match or any error. See below.
+- `StationExtension.Awake` postfix (1.3.0) — widens that instance's `m_maxStationDistance`, the one
+  field every station-attachment distance check reads. See below.
 
 ## Config (baked-in defaults, no pre-fill needed)
 
@@ -61,7 +65,8 @@ no persistent marker, so there's no reliable way to detect it. Dropped intention
 | Iron      | 1.4      | 0            |
 | HardWood  | 1.4      | 0            |
 
-Plus one non-surface section: `[Bed] extraFireRange` = `8` (see below).
+Plus two non-surface sections: `[Bed] extraFireRange` = `8` and
+`[Workstation] extraAttachmentRange` = `10` (see below).
 
 ## Bed fire range (1.2.0)
 
@@ -127,6 +132,119 @@ The whole prefix is inside a `try/catch` and every non-match / error path return
 untouched vanilla method (which shows its own `$msg_bednofire`), so bed interaction can't break.
 The check is client-side, so it only affects the beds of players running the mod.
 
+## Workstation attachment range (1.3.0)
+
+Vanilla gives a station upgrade roughly 5 m to reach its station, so chests, anvils, tanning racks
+and the rest end up crammed against the bench. ValheimPlus has a knob for this but it lives under
+`[Workbench]`; this patch is generic and covers **every** crafting station.
+
+### Why one hook covers both sides
+
+Decompiled from `libs/assembly_valheim.dll` (game 0.221.12). There is exactly **one** distance value
+in the game that gates station attachments, and it lives on the **extension**, not on the station:
+
+```csharp
+public class StationExtension : MonoBehaviour, Hoverable
+{
+    public CraftingStation m_craftingStation;
+    public float m_maxStationDistance = 5f;
+    ...
+}
+```
+
+**Station side** — the station enumerating/counting its attachments, i.e. what raises its level:
+
+```csharp
+public static void FindExtensions(CraftingStation station, Vector3 pos, List<StationExtension> extensions)
+{
+    foreach (StationExtension allExtension in m_allExtensions)
+    {
+        if (Vector3.Distance(allExtension.transform.position, pos) < allExtension.m_maxStationDistance
+            && allExtension.m_craftingStation.m_name == station.m_name
+            && (allExtension.m_stack || !ExtensionInList(extensions, allExtension)))
+        {
+            extensions.Add(allExtension);
+        }
+    }
+}
+```
+
+reached from `CraftingStation.GetExtensions()` → `GetExtentionCount()` → `GetLevel()`. Note what is
+**not** there: `CraftingStation` has no distance constant of its own for attachments. Its own numbers
+(`m_discoverRange` 4, `m_rangeBuild` 10, `m_useDistance` 2, `m_extraRangePerLevel`) govern discovery,
+the build radius and the interact distance — none of them gate whether an extension attaches. **The
+station side reads the extension's field.** That is why there is no second constant to patch in
+tandem: one field, both sides.
+
+**Extension side** — placement validity, from `Player.UpdatePlacementGhost()`:
+
+```csharp
+StationExtension component2 = component.GetComponent<StationExtension>();
+if (component2 != null)
+{
+    CraftingStation craftingStation = component2.FindClosestStationInRange(point);
+    if ((bool)craftingStation) { component2.StartConnectionEffect(craftingStation); }
+    else { component2.StopConnectionEffect(); m_placementStatus = PlacementStatus.ExtensionMissingStation; }
+    ...
+}
+```
+
+and the instance methods it calls, which read the same field again:
+
+```csharp
+public List<CraftingStation> FindStationsInRange(Vector3 center)
+{
+    List<CraftingStation> list = new List<CraftingStation>();
+    CraftingStation.FindStationsInRange(m_craftingStation.m_name, center, m_maxStationDistance, list);
+    return list;
+}
+
+public CraftingStation FindClosestStationInRange(Vector3 center)
+{
+    return CraftingStation.FindClosestStationInRange(m_craftingStation.m_name, center, m_maxStationDistance);
+}
+```
+
+### The hook
+
+A Harmony **postfix on `StationExtension.Awake`** that *adds* the configured metres to that
+instance's `m_maxStationDistance`. Every consumer above then sees the wider range, so placement
+validity, the station's extension count/level and the connection beam all move together: a piece the
+game lets you place is always a piece the station actually counts.
+
+- **Per instance, never the prefab.** `Awake` runs once per spawned object and never on the shared
+  prefab asset, so the bump cannot accumulate.
+- **Generic.** It keys off `StationExtension`, not off any station name, so workbench, forge, black
+  forge, galdr table, artisan table and anything a future update adds are covered with no list.
+- **The placement ghost is covered.** `Player.SetupPlacementGhost()` does
+  `Instantiate(selectedPrefab)` with `ZNetView.m_forceDisableInit = true`, so the ghost's `Awake`
+  runs (its vanilla body early-returns because `GetZDO()` is null, which does not stop a postfix).
+- **Additive, not absolute.** `m_maxStationDistance` is authored per prefab; a flat assignment would
+  silently *shrink* any extension whose default is larger. Adding can only widen — the same
+  "can only accept more" property the bed patch is built on.
+
+| Section | Key | Default | Meaning |
+|---|---|---|---|
+| `[Workstation]` | `extraAttachmentRange` | `10` | Metres added on top of each attachment piece's own built-in distance (5 m for most). `0` = vanilla. |
+
+Everything is inside a `try/catch`; on any failure the vanilla value is left untouched. Each distinct
+extension prefab logs its real numbers once, so the default can be retuned from evidence:
+
+```
+[EilifPaths] workstation attachment 'piece_workbench_ext1': reach 5m -> 15m.
+```
+
+**ValheimPlus coexistence.** V+ patches the same method with a *prefix*
+(`StationExtension_Awake_Patch`, `public static void Prefix(ref float ___m_maxStationDistance)`) that
+**sets** the field to `Workbench.workbenchAttachmentRange` when its `[Workbench]` section is enabled.
+Ours is a postfix, so it always runs after that assignment and adds on top of whatever V+ decided —
+no ordering fight, no double-set. In the Eilif profile V+'s `[Workbench]` is `enabled = false`, so we
+add to the vanilla per-prefab default.
+
+**Out of scope, deliberately:** `CraftingStation.m_rangeBuild` / `m_extraRangePerLevel`, i.e. how far
+from a workbench you may build at all. That is the separate "workbench range" knob (V+
+`workbenchRange`), not an attachment's reach.
+
 ## Coexistence guard
 
 If the old `Menthus.bepinex.plugins.UsefulPaths` is still loaded, EilifPaths logs a loud warning
@@ -153,8 +271,8 @@ pack as a local mod and removing the old Useful_Paths before the next pack expor
 
 ## Verifying in-game
 
-On boot: `[EilifPaths] Eilif Paths v1.2.0 loaded. … Bed fire range: +8m.` Then each surface change
-logs once at Info:
+On boot: `[EilifPaths] Eilif Paths v1.3.0 loaded. … Bed fire range: +8m. Workstation attachment
+range: +10m.` Then each surface change logs once at Info:
 
 ```
 [EilifPaths] terrain: PavedRoad (x1.75 speed, x0 stamina)
