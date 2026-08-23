@@ -191,12 +191,36 @@ export function createIdentityLink({ client, log = console }) {
       // public channel could shout it in-game first and bind THIS user's
       // Hall-voice to their own viking — so the code must never appear in the
       // channel, and there is deliberately NO public fallback that leaks it.
-      const rune =
-        `Carve this rune and **shout** it in-game. Open chat and type it exactly like this, starting with \`/s\`:\n` +
-        `\`/s /oath ${res.code} — your vow, one line\`\n\n` +
-        `The \`/s\` is what makes it a shout. A plain chat line never leaves the campfire, so the Hall will not hear it.\n` +
-        `Whatever viking you are playing when you swear it becomes yours, bound to this voice in the Hall. ` +
-        `The rune fades in 20 minutes. Ask again if it does.`;
+      //
+      // Two variants: a viking who ALREADY swore an oath must not be pushed
+      // through the whole oath ceremony again (re-swearing deletes + reinserts
+      // the oath row, which re-fires the echo/announcement). The webhook
+      // supports a link-only shout — rune with nothing after it — so point
+      // already-sworn vikings at that instead.
+      let alreadySworn = false;
+      try {
+        const db2 = serviceClient();
+        if (db2) {
+          const { data: existing } = await db2
+            .from('oaths')
+            .select('id')
+            .ilike('character_name', cmd.name.replace(/[%_]/g, (c) => `\\${c}`))
+            .limit(1);
+          alreadySworn = !!(existing && existing.length > 0);
+        }
+      } catch {
+        /* copy nicety only — never block the claim on this lookup */
+      }
+      const rune = alreadySworn
+        ? `You have already sworn your oath, so this is just the binding. **Shout** the rune by itself in-game, starting with \`/s\` and nothing after the code:\n` +
+          `\`/s /oath ${res.code}\`\n\n` +
+          `That links your Discord to your viking and leaves your oath exactly as it stands. No second ceremony. ` +
+          `The rune fades in 20 minutes. Ask again if it does.`
+        : `Carve this rune and **shout** it in-game. Open chat and type it exactly like this, starting with \`/s\`:\n` +
+          `\`/s /oath ${res.code} — your vow, one line\`\n\n` +
+          `The \`/s\` is what makes it a shout. A plain chat line never leaves the campfire, so the Hall will not hear it.\n` +
+          `Whatever viking you are playing when you swear it becomes yours, bound to this voice in the Hall. ` +
+          `The rune fades in 20 minutes. Ask again if it does.`;
       try {
         await message.author.send(rune);
         await reply(
