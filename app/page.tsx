@@ -7,8 +7,6 @@ import {
   Skull,
   Crown,
   ScrollText,
-  Map as MapIcon,
-  Anchor,
   ArrowRight,
   Signal,
   CalendarClock,
@@ -18,12 +16,10 @@ import {
   Card,
   CardHeader,
   CardBody,
-  SectionHeader,
   Badge,
   EmptyState,
   OnlineDot,
   StatTile,
-  VikingLink,
   BossLink,
 } from '@/components/ui';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
@@ -44,7 +40,7 @@ import {
 } from '@/lib/data';
 import { summarizeMilestones } from '@/lib/milestones';
 import { describeEvent } from '@/lib/events';
-import { timeAgo } from '@/lib/format';
+import { timeAgo, formatEventWhen } from '@/lib/format';
 import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/config/server';
 
 export const dynamic = 'force-dynamic';
@@ -80,28 +76,84 @@ export default async function HomePage() {
   const nextBoss = bosses.find((b) => !b.is_killed) ?? null;
   const bossPercent = totalBosses > 0 ? Math.round((felledCount / totalBosses) * 100) : 0;
 
-  // Live status strip beneath the hero art. Rendered inside both the current
-  // banner hero and the art-backed HomeHero, so it survives either path.
-  const statusStrip = (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-rune bg-pitch/50 px-5 py-3 text-sm backdrop-blur-sm sm:px-7">
-      <Badge tone={isOnline ? 'online' : 'offline'}>
-        <OnlineDot online={isOnline} />
-        {isOnline ? 'Server Online' : 'Server Offline'}
-      </Badge>
-      <span className="flex items-center gap-1.5 text-ash-dim">
-        <Sun size={14} className="text-gold-dim" />
-        Day {worldDay} of the tenth world
-      </span>
-      <span className="flex items-center gap-1.5 text-ash-dim">
-        <Users size={14} className="text-gold-dim" />
-        {playerCount} / {MAX_PLAYERS} sailing
-      </span>
-      {SERVER_ADDRESS && (
-        <span className="inline-flex items-center gap-2 rounded-full border border-rune bg-pitch/70 px-3 py-1">
-          <Signal size={13} className="text-online-glow" />
-          <span className="font-mono text-xs text-ash">{SERVER_ADDRESS}</span>
+  // The soonest scheduled Discord event (recurring rows already rolled forward
+  // by getUpcomingEvents). Null when nothing is on the calendar — the hero then
+  // renders no "Up next" line at all rather than an empty placeholder.
+  const nextEvent = upcoming[0] ?? null;
+
+  // Everything beneath the hero art: the live quick-info strip, the next
+  // gathering (when one exists), and world progress. Rendered inside both the
+  // current banner hero and the art-backed HomeHero, so it survives either path.
+  const heroFooter = (
+    <div className="border-t border-rune bg-pitch/50 backdrop-blur-sm">
+      <div className="space-y-2 px-5 py-3 sm:px-7">
+        {/* Quick info — server pulse, world day, who is sailing, address */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          <Badge tone={isOnline ? 'online' : 'offline'}>
+            <OnlineDot online={isOnline} />
+            {isOnline ? 'Server Online' : 'Server Offline'}
+          </Badge>
+          <span className="flex items-center gap-1.5 text-ash-dim">
+            <Sun size={14} className="text-gold-dim" />
+            Day {worldDay} of the tenth world
+          </span>
+          <span className="flex items-center gap-1.5 text-ash-dim">
+            <Users size={14} className="text-gold-dim" />
+            {playerCount} / {MAX_PLAYERS} sailing
+          </span>
+          {SERVER_ADDRESS && (
+            <span className="inline-flex items-center gap-2 rounded-full border border-rune bg-pitch/70 px-3 py-1">
+              <Signal size={13} className="text-online-glow" />
+              <span className="font-mono text-xs text-ash">{SERVER_ADDRESS}</span>
+            </span>
+          )}
+        </div>
+
+        {/* Up next — only when a gathering is actually scheduled */}
+        {nextEvent && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <Badge tone="gold">
+              <CalendarClock size={12} />
+              Up next
+            </Badge>
+            {nextEvent.url ? (
+              <a
+                href={nextEvent.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="gold-ring rounded font-display text-ash transition-colors hover:text-gold-light"
+              >
+                {nextEvent.name}
+              </a>
+            ) : (
+              <span className="font-display text-ash">{nextEvent.name}</span>
+            )}
+            <span className="text-muted">— {formatEventWhen(nextEvent.next_at)}</span>
+          </div>
+        )}
+      </div>
+
+      {/* World progress — the same bar the World page uses, compacted to a row */}
+      <div className="flex items-center gap-3 border-t border-rune/60 px-5 py-2.5 sm:px-7">
+        <span className="shrink-0 text-sm text-ash-dim">
+          <span className="font-display text-ash">{felledCount}</span> of {totalBosses} Forsaken
+          felled
         </span>
-      )}
+        <div
+          className="h-2 min-w-0 flex-1 overflow-hidden rounded-full border border-rune bg-pitch"
+          role="progressbar"
+          aria-valuenow={felledCount}
+          aria-valuemin={0}
+          aria-valuemax={totalBosses}
+          aria-label="Forsaken felled"
+        >
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-gold-dim via-gold to-gold-light shadow-[0_0_12px_-2px_rgba(232,184,75,0.6)] transition-all"
+            style={{ width: `${bossPercent}%` }}
+          />
+        </div>
+        <span className="shrink-0 font-display text-sm text-gold-light">{bossPercent}%</span>
+      </div>
     </div>
   );
 
@@ -117,8 +169,8 @@ export default async function HomePage() {
         priority
         className="h-auto w-full"
       />
-      {/* Live status strip beneath the art (keeps the banner pristine) */}
-      {statusStrip}
+      {/* Live info beneath the art (keeps the banner pristine) */}
+      {heroFooter}
     </div>
   );
 
@@ -127,7 +179,7 @@ export default async function HomePage() {
       <AutoRefresh />
 
       {/* ───────────────────────── HERO BANNER ───────────────────────── */}
-      <HomeHero fallback={heroFallback} statusStrip={statusStrip} />
+      <HomeHero fallback={heroFallback} footer={heroFooter} />
 
       {/* ───────────────────── STAT STRIP ────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
@@ -149,12 +201,6 @@ export default async function HomePage() {
 
       {/* ──────────────────── LIVE FROM THE HALL ─────────────── */}
       <section>
-        <SectionHeader
-          title="Live from the Hall"
-          subtitle="Who is sailing right now, and the latest deeds recorded in the saga"
-          icon={<Anchor size={20} />}
-        />
-
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           {/* The Hearth — server pulse + who's online */}
           <Hearth status={status} online={online} />
@@ -276,11 +322,13 @@ export default async function HomePage() {
         </CardBody>
       </Card>
 
-      {/* ─────────────────── WORLD PROGRESS TEASER ───────────── */}
+      {/* ─────────────────────── THE FORSAKEN ────────────────── */}
+      {/* The count + progress bar now live in the hero; what remains here is
+          what the hero cannot say: which beast is next, and which are down. */}
       <Card>
         <CardHeader
-          title="World Progress"
-          icon={<MapIcon size={16} />}
+          title="The Forsaken"
+          icon={<Skull size={16} />}
           action={
             <Link
               href="/world"
@@ -291,51 +339,6 @@ export default async function HomePage() {
           }
         />
         <CardBody className="space-y-5">
-          {/* Progress bar */}
-          <div>
-            <div className="mb-2 flex items-end justify-between gap-3">
-              <span className="text-sm text-ash-dim">
-                <span className="font-display text-base text-ash">{felledCount}</span>
-                <span className="text-muted"> / {totalBosses} bosses felled</span>
-              </span>
-              <span className="font-display text-sm text-gold-light">{bossPercent}%</span>
-            </div>
-            <div
-              className="h-3 w-full overflow-hidden rounded-full border border-rune bg-pitch"
-              role="progressbar"
-              aria-valuenow={felledCount}
-              aria-valuemin={0}
-              aria-valuemax={totalBosses}
-              aria-label="Bosses felled"
-            >
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-gold-dim via-gold to-gold-light shadow-[0_0_12px_-2px_rgba(232,184,75,0.6)] transition-all"
-                style={{ width: `${bossPercent}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Felled bosses */}
-          <div>
-            <p className="mb-2 text-xs uppercase tracking-wider text-muted">Forsaken ones felled</p>
-            {felledBosses.length === 0 ? (
-              <p className="text-sm text-ash-dim">
-                None yet — Eikthyr awaits at the edge of the Meadows.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {felledBosses.map((b) => (
-                  <Badge key={b.id} tone="gold">
-                    <Crown size={12} />
-                    <BossLink name={b.name} className="gold-ring rounded-sm transition-colors hover:underline" />
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <hr className="rune-divider" />
-
           {/* Current objective */}
           {nextBoss ? (
             <div className="flex items-start gap-3">
@@ -367,6 +370,30 @@ export default async function HomePage() {
               </div>
             </div>
           )}
+
+          <hr className="rune-divider" />
+
+          {/* Felled bosses */}
+          <div>
+            <p className="mb-2 text-xs uppercase tracking-wider text-muted">Felled so far</p>
+            {felledBosses.length === 0 ? (
+              <p className="text-sm text-ash-dim">
+                None yet — every forsaken one still holds its ground.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {felledBosses.map((b) => (
+                  <Badge key={b.id} tone="gold">
+                    <Crown size={12} />
+                    <BossLink
+                      name={b.name}
+                      className="gold-ring rounded-sm transition-colors hover:underline"
+                    />
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
         </CardBody>
       </Card>
     </div>

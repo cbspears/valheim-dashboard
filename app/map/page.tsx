@@ -31,11 +31,87 @@ export default async function MapPage() {
       <PageHeader slot="map">
         <SectionHeader
           title="The Known World"
-          subtitle="Only what the warband has charted. The rest of the world keeps its secrets."
           icon={<Map size={22} />}
           action={liveMap ? <Badge tone="online">Live</Badge> : null}
         />
       </PageHeader>
+
+      {/* How to take part — the two explainers, above the map so nobody misses them */}
+      <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+        {/* How to pin — the naming of places */}
+        <Card className="h-full border-l-2 border-l-gold">
+          <CardBody>
+            <div className="mb-3 flex items-center gap-2">
+              <Landmark size={18} className="text-gold" />
+              <h2 className="font-display text-base tracking-wide text-ash">Name a place</h2>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3 md:grid-cols-1">
+              <div className="flex items-start gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
+                  1
+                </span>
+                <p className="text-sm leading-relaxed text-ash-dim">
+                  Stand at the spot in-game — the pin lands exactly where you are.
+                </p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
+                  2
+                </span>
+                <p className="text-sm leading-relaxed text-ash-dim">
+                  Type in chat:{' '}
+                  <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                    /pin The Dark Chapel
+                  </span>{' '}
+                  — or{' '}
+                  <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                    /pin base Odinshold
+                  </span>{' '}
+                  if it&apos;s a settlement.
+                </p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
+                  3
+                </span>
+                <p className="text-sm leading-relaxed text-ash-dim">
+                  That&apos;s it — your pin joins the atlas at the next map update, and the Saga
+                  remembers who named it.
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-muted">
+              Notable places only, vikings — homes and discoveries, not wood piles. The Cartographer
+              keeps the map honest. Boss altars and traders chart themselves when found — no pin
+              needed.
+            </p>
+          </CardBody>
+        </Card>
+
+        {/* How to add photos to a place */}
+        <Card className="h-full border-l-2 border-l-gold">
+          <CardBody>
+            <div className="mb-3 flex items-center gap-2">
+              <Camera size={18} className="text-gold" />
+              <h2 className="font-display text-base tracking-wide text-ash">
+                Add photos to a place
+              </h2>
+            </div>
+            <p className="text-sm leading-relaxed text-ash-dim">
+              Post a screenshot in Discord, tag the bot, and{' '}
+              <span className="font-semibold text-ash">name the place in your caption</span> — e.g.{' '}
+              <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                @Eilif sunset at Draugheim
+              </span>
+              . The photo lands in the{' '}
+              <span className="text-ash">Gallery</span> and on{' '}
+              <span className="text-ash">Draugheim&apos;s marker</span> here — click any marker to
+              see its album. Pin first or photo first, either order works: a photo naming a place
+              that isn&apos;t pinned yet attaches itself the moment the pin appears.
+            </p>
+          </CardBody>
+        </Card>
+      </div>
 
       {/* The LIVE known world — fed by the real server (fog-masked before upload),
           with the real per-in-game-day replay scrubber and real /pin markers. */}
@@ -68,80 +144,6 @@ export default async function MapPage() {
           </CardBody>
         </Card>
       )}
-
-      {/* How to pin — the naming of places */}
-      <Card className="mb-6 border-l-2 border-l-gold">
-        <CardBody>
-          <div className="mb-3 flex items-center gap-2">
-            <Landmark size={18} className="text-gold" />
-            <h2 className="font-display text-base tracking-wide text-ash">Name a place</h2>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="flex items-start gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
-                1
-              </span>
-              <p className="text-sm leading-relaxed text-ash-dim">
-                Stand at the spot in-game — the pin lands exactly where you are.
-              </p>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
-                2
-              </span>
-              <p className="text-sm leading-relaxed text-ash-dim">
-                Type in chat:{' '}
-                <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
-                  /pin The Dark Chapel
-                </span>{' '}
-                — or{' '}
-                <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
-                  /pin base Odinshold
-                </span>{' '}
-                if it&apos;s a settlement.
-              </p>
-            </div>
-            <div className="flex items-start gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-dim/60 bg-gold/10 font-display text-sm text-gold-light">
-                3
-              </span>
-              <p className="text-sm leading-relaxed text-ash-dim">
-                That&apos;s it — your pin joins the atlas at the next map update, and the Saga
-                remembers who named it.
-              </p>
-            </div>
-          </div>
-          <p className="mt-3 text-xs text-muted">
-            Notable places only, vikings — homes and discoveries, not wood piles. The Cartographer
-            keeps the map honest. Boss altars and traders chart themselves when found — no pin
-            needed.
-          </p>
-        </CardBody>
-      </Card>
-
-      {/* How to add photos to a place */}
-      <Card className="mb-6 border-l-2 border-l-gold">
-        <CardBody>
-          <div className="mb-3 flex items-center gap-2">
-            <Camera size={18} className="text-gold" />
-            <h2 className="font-display text-base tracking-wide text-ash">
-              Add photos to a place
-            </h2>
-          </div>
-          <p className="text-sm leading-relaxed text-ash-dim">
-            Post a screenshot in Discord, tag the bot, and{' '}
-            <span className="font-semibold text-ash">name the place in your caption</span> — e.g.{' '}
-            <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
-              @Eilif sunset at Draugheim
-            </span>
-            . The photo lands in the{' '}
-            <span className="text-ash">Gallery</span> and on{' '}
-            <span className="text-ash">Draugheim&apos;s marker</span> here — click any marker to
-            see its album. Pin first or photo first, either order works: a photo naming a place
-            that isn&apos;t pinned yet attaches itself the moment the pin appears.
-          </p>
-        </CardBody>
-      </Card>
 
       <div className="mx-auto mt-6 max-w-3xl">
         <p className="flex items-start gap-2 text-xs leading-relaxed text-muted">

@@ -303,7 +303,7 @@ export default function GetStartedPage() {
       {/* ══════════════ PART TWO — NOW THAT YOU'RE ASHORE ══════════════ */}
       <section>
         <SectionTitle icon={<ScrollText size={20} />}>
-          Now that you&apos;re ashore — do these three things
+          Once you&apos;re in, do these three things!
         </SectionTitle>
 
         <Card>

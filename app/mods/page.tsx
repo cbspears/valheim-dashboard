@@ -131,7 +131,11 @@ export default function ModsPage() {
       <PageHeader slot="mods">
         <SectionHeader
           title="The Mods"
-          subtitle="Everything running on this world — install every mod marked Client before you can join."
+          subtitle={
+            MODPACK_PROFILE_CODE
+              ? 'Install every mod marked Client before you can join — the one-click pack code below does it for you.'
+              : 'Install every mod marked Client before you can join.'
+          }
           icon={<Scroll size={22} />}
           action={
             <div className="hidden items-center gap-2 sm:flex">
@@ -143,42 +147,47 @@ export default function ModsPage() {
       </PageHeader>
 
       {/* Legend / install note */}
-      <Card className="mb-9">
+      <Card className="mb-9 border-l-2 border-l-gold">
         <CardBody className="flex items-start gap-3.5">
           <span className="mt-0.5 shrink-0 text-gold">
             <ShieldAlert size={20} />
           </span>
-          <p className="text-sm leading-relaxed text-ash-dim">
-            Mods marked{' '}
-            <Badge tone="gold" className="mx-0.5 align-middle">
-              <Download size={11} />
-              Client
-            </Badge>{' '}
-            must be installed on your own machine, matching the versions below — ideally
-            through a mod manager like r2modman. Mods marked{' '}
-            <Badge tone="neutral" className="mx-0.5 align-middle">
-              <Server size={11} />
-              Server-only
-            </Badge>{' '}
-            run on the server itself — nothing for you to install.{' '}
-            <Link
-              href="/get-started"
-              className="gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light hover:underline"
-            >
-              <Compass size={13} className="align-middle" />
-              New here? Get started →
-            </Link>
-            {MODPACK_PROFILE_CODE ? (
-              <>
-                <br />
-                <span className="mt-2 inline-block">
-                  Or skip the list entirely — the one-click Eilif modpack installs every
-                  client mod, pre-configured. r2modman → Import profile → From code:{' '}
-                  <CopyChip value={MODPACK_PROFILE_CODE} />
-                </span>
-              </>
-            ) : null}
-          </p>
+          <div className="min-w-0">
+            <p className="mb-2 font-display text-base leading-snug tracking-wide text-gold-light sm:text-lg">
+              Install every mod marked Client before you can join.
+            </p>
+            <p className="text-sm leading-relaxed text-ash-dim">
+              Mods marked{' '}
+              <Badge tone="gold" className="mx-0.5 align-middle">
+                <Download size={11} />
+                Client
+              </Badge>{' '}
+              must be installed on your own machine, matching the versions below — ideally
+              through a mod manager like r2modman. Mods marked{' '}
+              <Badge tone="neutral" className="mx-0.5 align-middle">
+                <Server size={11} />
+                Server-only
+              </Badge>{' '}
+              run on the server itself — nothing for you to install.{' '}
+              <Link
+                href="/get-started"
+                className="gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light hover:underline"
+              >
+                <Compass size={13} className="align-middle" />
+                New here? Get started →
+              </Link>
+              {MODPACK_PROFILE_CODE ? (
+                <>
+                  <br />
+                  <span className="mt-2 inline-block">
+                    Or skip the list entirely — the one-click Eilif modpack installs every
+                    client mod, pre-configured. r2modman → Import profile → From code:{' '}
+                    <CopyChip value={MODPACK_PROFILE_CODE} />
+                  </span>
+                </>
+              ) : null}
+            </p>
+          </div>
         </CardBody>
       </Card>
 

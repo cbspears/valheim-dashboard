@@ -29,7 +29,6 @@ export default async function GalleryPage() {
       <PageHeader slot="gallery">
         <SectionHeader
           title="The Gallery"
-          subtitle="Screenshots and sagas from the warband."
           icon={<Images size={22} />}
           action={
             <Badge tone="neutral">

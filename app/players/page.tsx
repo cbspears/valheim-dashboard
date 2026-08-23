@@ -315,129 +315,133 @@ export default async function PlayersPage() {
         />
       </PageHeader>
 
-      {/* ── Sailing Now ────────────────────────────────────────── */}
-      <section>
-        <SectionHeader
-          title="Sailing Now"
-          subtitle="Who's online right now."
-          icon={<Sailboat size={20} />}
-          action={
-            online.length > 0 ? (
-              <Badge tone="online">
-                <OnlineDot online />
-                {online.length} at sea
-              </Badge>
-            ) : undefined
-          }
-        />
+      {/* Sailing Now + The Warband sit side by side on desktop (stacked below lg),
+          so the online cards drop to one per row inside the half-width column. */}
+      <div className="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-start lg:gap-8">
+        {/* ── Sailing Now ────────────────────────────────────────── */}
+        <section>
+          <SectionHeader
+            title="Sailing Now"
+            subtitle="Who's online right now."
+            icon={<Sailboat size={20} />}
+            action={
+              online.length > 0 ? (
+                <Badge tone="online">
+                  <OnlineDot online />
+                  {online.length} at sea
+                </Badge>
+              ) : undefined
+            }
+          />
 
-        {online.length === 0 ? (
-          <Card>
-            <EmptyState
-              icon={<Sailboat size={28} />}
-              title="The seas are calm"
-              message="No Vikings are sailing right now. The longhouse fires burn low, awaiting their return."
-            />
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {online.map((p) => (
-              <Card key={p.id} className="flex items-center gap-3 p-4">
-                <OnlineDot online />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-display text-base text-ash">
-                    <VikingLink
-                      name={p.character_name}
-                      className="gold-ring rounded-sm transition-colors hover:text-gold-light"
-                    />
-                  </p>
-                  <p className="truncate text-xs text-muted">
-                    {formatPlaytime(p.total_playtime_minutes)} logged
-                  </p>
-                </div>
-                <Badge tone="online">Sailing</Badge>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* ── The Warband (roster) ──────────────────────────────── */}
-      <section>
-        <SectionHeader
-          title="The Warband"
-          subtitle="Everyone who has played, ranked by hours in the world."
-          icon={<Users size={20} />}
-        />
-
-        <Card>
-          {roster.length === 0 ? (
-            <EmptyState
-              icon={<Users size={28} />}
-              title="No Vikings have landed"
-              message="The shores are empty. As warriors join the server, they will be enshrined here."
-            />
+          {online.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon={<Sailboat size={28} />}
+                title="The seas are calm"
+                message="No Vikings are sailing right now. The longhouse fires burn low, awaiting their return."
+              />
+            </Card>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-rune text-left text-xs uppercase tracking-wider text-muted">
-                    <th className="w-10 px-4 py-3 font-medium sm:px-5">
-                      <span className="sr-only">Status</span>
-                    </th>
-                    <th className="px-2 py-3 font-medium">Name</th>
-                    <th className="hidden px-2 py-3 font-medium sm:table-cell">
-                      Last Seen
-                    </th>
-                    <th className="px-4 py-3 text-right font-medium sm:px-5">
-                      Total Time
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {roster.map((p) => (
-                    <tr
-                      key={p.id}
-                      className="border-t border-rune/60 transition-colors even:bg-surface-raised/25 hover:bg-surface-raised/60"
-                    >
-                      <td className="px-4 py-3 sm:px-5">
-                        <OnlineDot online={p.is_online} />
-                      </td>
-                      <td className="px-2 py-3">
-                        <Link
-                          href={vikingPath(p.character_name)}
-                          className="gold-ring font-display text-ash transition-colors hover:text-gold-light"
-                        >
-                          {p.character_name}
-                        </Link>
-                        {p.is_online && (
-                          <span className="ml-2 align-middle text-[11px] uppercase tracking-wide text-online-glow">
-                            online
-                          </span>
-                        )}
-                        {epithetByName.get(p.character_name) && (
-                          <span className="mt-0.5 block font-display text-xs text-gold-dim">
-                            {epithetByName.get(p.character_name)}
-                          </span>
-                        )}
-                        <span className="mt-0.5 block text-xs text-muted sm:hidden">
-                          {p.is_online ? 'Sailing now' : timeAgo(p.last_seen_at)}
-                        </span>
-                      </td>
-                      <td className="hidden px-2 py-3 text-muted sm:table-cell">
-                        {p.is_online ? 'Sailing now' : timeAgo(p.last_seen_at)}
-                      </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-ash-dim sm:px-5">
-                        {formatPlaytime(p.total_playtime_minutes)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
+              {online.map((p) => (
+                <Card key={p.id} className="flex items-center gap-3 p-4">
+                  <OnlineDot online />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-display text-base text-ash">
+                      <VikingLink
+                        name={p.character_name}
+                        className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                      />
+                    </p>
+                    <p className="truncate text-xs text-muted">
+                      {formatPlaytime(p.total_playtime_minutes)} logged
+                    </p>
+                  </div>
+                  <Badge tone="online">Sailing</Badge>
+                </Card>
+              ))}
             </div>
           )}
-        </Card>
-      </section>
+        </section>
+
+        {/* ── The Warband (roster) ──────────────────────────────── */}
+        <section>
+          <SectionHeader
+            title="The Warband"
+            subtitle="Everyone who has played, ranked by hours in the world."
+            icon={<Users size={20} />}
+          />
+
+          <Card>
+            {roster.length === 0 ? (
+              <EmptyState
+                icon={<Users size={28} />}
+                title="No Vikings have landed"
+                message="The shores are empty. As warriors join the server, they will be enshrined here."
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-rune text-left text-xs uppercase tracking-wider text-muted">
+                      <th className="w-10 px-4 py-3 font-medium sm:px-5">
+                        <span className="sr-only">Status</span>
+                      </th>
+                      <th className="px-2 py-3 font-medium">Name</th>
+                      <th className="hidden px-2 py-3 font-medium sm:table-cell">
+                        Last Seen
+                      </th>
+                      <th className="px-4 py-3 text-right font-medium sm:px-5">
+                        Total Time
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roster.map((p) => (
+                      <tr
+                        key={p.id}
+                        className="border-t border-rune/60 transition-colors even:bg-surface-raised/25 hover:bg-surface-raised/60"
+                      >
+                        <td className="px-4 py-3 sm:px-5">
+                          <OnlineDot online={p.is_online} />
+                        </td>
+                        <td className="px-2 py-3">
+                          <Link
+                            href={vikingPath(p.character_name)}
+                            className="gold-ring font-display text-ash transition-colors hover:text-gold-light"
+                          >
+                            {p.character_name}
+                          </Link>
+                          {p.is_online && (
+                            <span className="ml-2 align-middle text-[11px] uppercase tracking-wide text-online-glow">
+                              online
+                            </span>
+                          )}
+                          {epithetByName.get(p.character_name) && (
+                            <span className="mt-0.5 block font-display text-xs text-gold-dim">
+                              {epithetByName.get(p.character_name)}
+                            </span>
+                          )}
+                          <span className="mt-0.5 block text-xs text-muted sm:hidden">
+                            {p.is_online ? 'Sailing now' : timeAgo(p.last_seen_at)}
+                          </span>
+                        </td>
+                        <td className="hidden px-2 py-3 text-muted sm:table-cell">
+                          {p.is_online ? 'Sailing now' : timeAgo(p.last_seen_at)}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums text-ash-dim sm:px-5">
+                          {formatPlaytime(p.total_playtime_minutes)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </section>
+      </div>
 
       {/* ── Attendance Constellation ───────────────────────────── */}
       <section>

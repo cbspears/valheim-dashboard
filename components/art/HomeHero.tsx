@@ -10,22 +10,22 @@ import { art, isTitleBakedIn, HEADER_ART } from '@/config/art';
  *      doorway/colossus art with NO text overlay (the title is in the art).
  *      On narrow viewports swap to the 16:9 asset (07) so the crop keeps the
  *      subject in frame; if 07 has clean text space (not baked in) the "Eilif"
- *      title is overlaid, otherwise never. The live status strip is preserved
- *      beneath the art exactly as today.
+ *      title is overlaid, otherwise never. The live footer (quick-info strip,
+ *      next gathering, world progress) is preserved beneath the art.
  *   2. Neither hero asset available → render `fallback` (the current
- *      /banner-eilif.webp hero block, status strip included) EXACTLY as today.
+ *      /banner-eilif.webp hero block, footer included) EXACTLY as today.
  *
  * Passing the current hero JSX as `fallback` keeps the page byte-identical
  * while the manifest is empty.
  */
 export function HomeHero({
   fallback,
-  statusStrip,
+  footer,
 }: {
-  /** The existing full hero block (banner image + status strip). */
+  /** The existing full hero block (banner image + footer). */
   fallback: ReactNode;
-  /** The live status strip, re-rendered beneath the art when art is present. */
-  statusStrip: ReactNode;
+  /** Live info beneath the art: quick-info strip, up-next line, world progress. */
+  footer: ReactNode;
 }) {
   const hero = art(HEADER_ART.hero); // 02 — 21:9, title baked in
   const heroSmall = art(HEADER_ART.heroSmall); // 07 — 16:9, clean text space
@@ -71,8 +71,8 @@ export function HomeHero({
         {!isTitleBakedIn(primaryId) && <HeroTitleOverlay />}
       </div>
 
-      {/* Live status strip beneath the art — unchanged from the current hero. */}
-      {statusStrip}
+      {/* Live info beneath the art — identical to the fallback hero's footer. */}
+      {footer}
     </div>
   );
 }
