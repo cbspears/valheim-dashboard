@@ -50,11 +50,11 @@ no persistent marker, so there's no reliable way to detect it. Dropped intention
 | Surface   | movement | staminadrain |
 |-----------|----------|--------------|
 | Path      | 1.25     | 0            |
-| PavedRoad | 1.75     | 0            |
-| Wood      | 1.5      | 0            |
-| Stone     | 1.5      | 0            |
-| Iron      | 1.5      | 0            |
-| HardWood  | 1.5      | 0            |
+| PavedRoad | 1.25     | 0            |
+| Wood      | 1.25     | 0            |
+| Stone     | 1.25     | 0            |
+| Iron      | 1.25     | 0            |
+| HardWood  | 1.25     | 0            |
 
 ## Coexistence guard
 

@@ -70,7 +70,7 @@ namespace EilifPaths
         internal static bool OldModPresent { get; private set; }
 
         // Owner-chosen defaults. movement = speed multiplier, staminadrain = stamina-cost multiplier.
-        // (Path 1.25/0 · PavedRoad 1.75/0 · Wood/Stone/Iron/HardWood 1.5/0 — zero drain on every surface)
+        // (all surfaces 1.25/0 — one speed tier, zero drain everywhere)
         // NOTE: deliberately NOT a tuple/collection field initializer — the plugin class must not
         // reference System.ValueTuple (not shipped with the game's net462 runtime; a static field
         // initializer using it makes the whole class fail to instantiate under BepInEx).
@@ -88,11 +88,11 @@ namespace EilifPaths
             Log = Logger;
 
             BindSurface(PathType.Path,      1.25f, 0f);
-            BindSurface(PathType.PavedRoad, 1.75f, 0f);
-            BindSurface(PathType.Wood,       1.5f, 0f);
-            BindSurface(PathType.Stone,      1.5f, 0f);
-            BindSurface(PathType.Iron,       1.5f, 0f);
-            BindSurface(PathType.HardWood,   1.5f, 0f);
+            BindSurface(PathType.PavedRoad, 1.25f, 0f);
+            BindSurface(PathType.Wood,      1.25f, 0f);
+            BindSurface(PathType.Stone,     1.25f, 0f);
+            BindSurface(PathType.Iron,      1.25f, 0f);
+            BindSurface(PathType.HardWood,  1.25f, 0f);
 
             OldModPresent = Chainloader.PluginInfos != null &&
                             Chainloader.PluginInfos.ContainsKey(OldModGuid);

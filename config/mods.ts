@@ -57,7 +57,7 @@ export const MODS: Mod[] = [
     name: 'Eilif Paths',
     author: 'Blockspace (custom-built)',
     description:
-      'Roads that matter: +25% speed on dirt paths, +75% on paved roads, +50% on built floors (wood, stone, iron) — and zero stamina drain on all of them. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
+      'Roads that matter: +25% speed and zero stamina drain on dirt paths, paved roads, and built floors (wood, stone, iron). Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
     version: '1.1.0',
     category: 'QoL',
     clientRequired: true,

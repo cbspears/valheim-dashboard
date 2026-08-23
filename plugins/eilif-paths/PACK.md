@@ -44,11 +44,11 @@ to the old mod to limit the damage), but the correct fix is to turn the old one 
 | Surface   | movement | staminadrain |
 |-----------|----------|--------------|
 | Path      | 1.25     | 0            |
-| PavedRoad | 1.75     | 0            |
-| Wood      | 1.5      | 0            |
-| Stone     | 1.5      | 0            |
-| Iron      | 1.5      | 0            |
-| HardWood  | 1.5      | 0            |
+| PavedRoad | 1.25     | 0            |
+| Wood      | 1.25     | 0            |
+| Stone     | 1.25     | 0            |
+| Iron      | 1.25     | 0            |
+| HardWood  | 1.25     | 0            |
 
 `movement` = speed multiplier (>1 faster). `staminadrain` = stamina-cost multiplier (<1 cheaper).
 BepInEx writes `net.eilif.paths.cfg` (sections `[Path]`, `[PavedRoad]`, …) on first launch if you
