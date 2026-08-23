@@ -21,6 +21,13 @@ dotnet build -c Release        # outputs + OVERWRITES dist/EilifPaths.dll (inten
 / Deep North update, this is where it'll show — watch for the surface-change log lines
 (`[EilifPaths] terrain: …`) misreporting or never firing after rebuild, not just a compile error.
 
+**Second 1.0 risk (added 1.2.0):** the bed patch hooks the *private* method `Bed.CheckFire` by name
+and calls `EffectArea.IsPointInsideArea(Vector3, EffectArea.Type, float)` with its optional radius
+argument. A rename or a signature change there is a Harmony *runtime* miss, not a compile error, so
+after rebuilding confirm the boot line reads `Bed fire range: +8m` and that claiming a bed a few
+metres from a campfire logs `[EilifPaths] bed fire check passed with +8m: …`. Re-verify with
+`DOTNET_ROLL_FORWARD=Major ilspycmd -t Bed libs/assembly_valheim.dll | grep -A10 CheckFire` if not.
+
 Then re-pack (this plugin ships inside the r2modman pack, not deployed directly to the server):
 1. Open r2modman → **Eilif** profile → **Settings → Import local mod** → pick the freshly-built
    `dist/EilifPaths.dll`, overwriting the previous import (see `PACK.md` for the exact

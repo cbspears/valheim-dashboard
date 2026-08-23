@@ -3,7 +3,8 @@
 `EilifPaths.dll` is a **local custom DLL** — a modern replacement for the broken Thunderstore
 mod **Menthus-Useful_Paths**. It gives the same speed / stamina bonuses on dirt paths, paved
 roads, and built floors, but detects terrain the way *current* Valheim actually stores it
-(Heightmap paint mask), so paths and roads work again.
+(Heightmap paint mask), so paths and roads work again. Since **1.2.0** it also extends the bed's
+"needs a fire nearby" check by 8 m (`[Bed] extraFireRange`, `0` = vanilla).
 
 Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
 **(B) disable/remove Useful_Paths** so bonuses don't double-apply.
@@ -21,7 +22,7 @@ Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
 3. Choose `dist/EilifPaths.dll`. When prompted:
    - **Name:** `EilifPaths`
    - **Author:** `BlockspaceMedia` (or any — local mods aren't namespaced on Thunderstore)
-   - **Version:** `1.1.0`
+   - **Version:** `1.2.0`
    The manager copies the DLL into `<profile>/BepInEx/plugins/EilifPaths/`.
 4. **Enable** it, keep BepInEx + the other Eilif mods enabled.
 
@@ -54,6 +55,10 @@ to the old mod to limit the damage), but the correct fix is to turn the old one 
 BepInEx writes `net.eilif.paths.cfg` (sections `[Path]`, `[PavedRoad]`, …) on first launch if you
 ever want to tweak per-surface; the defaults above ship with the DLL so the pack needs no pre-fill.
 
+One more section, `[Bed] extraFireRange` (default `8`): metres of extra reach for the bed's "needs a
+fire nearby" check, on top of the fireplace's own heat area. `0` restores vanilla. An existing
+`net.eilif.paths.cfg` picks the new key up with its default at the next launch — no pre-fill needed.
+
 **LevelGround is intentionally not supported.** Hoe "level ground" only edits terrain height — it
 paints nothing and leaves no persistent marker in modern Valheim — so there's no reliable signal to
 detect it. (The old mod's LevelGround config did nothing useful on current Valheim either.)
@@ -67,7 +72,7 @@ detect it. (The old mod's LevelGround config did nothing useful on current Valhe
 ## Sanity check before sharing
 
 Launch Valheim once from the profile, join the server, and watch `LogOutput.log`. On boot you should
-see `[EilifPaths] Eilif Paths v1.0.0 loaded.`. Then walk onto a hoe path / paved road / wooden
+see `[EilifPaths] Eilif Paths v1.2.0 loaded. … Bed fire range: +8m.`. Then walk onto a hoe path / paved road / wooden
 floor — each surface change logs exactly once, e.g.:
 
 ```

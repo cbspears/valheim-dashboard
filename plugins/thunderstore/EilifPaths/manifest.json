@@ -1,7 +1,7 @@
 {
   "name": "EilifPaths",
-  "version_number": "1.1.0",
+  "version_number": "1.2.0",
   "website_url": "https://valheim-dashboard.vercel.app/mods",
-  "description": "Eilif community server: +40% move speed and zero stamina drain on dirt paths, paved roads, and built floors. Modern paint-mask terrain detection.",
+  "description": "Eilif community server: +40% move speed and zero stamina drain on dirt paths, paved roads, and built floors, plus beds that accept a fire much further away.",
   "dependencies": ["denikson-BepInExPack_Valheim-5.4.2333"]
 }

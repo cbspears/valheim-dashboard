@@ -57,8 +57,8 @@ export const MODS: Mod[] = [
     name: 'Eilif Paths',
     author: 'cbspears (custom-built)',
     description:
-      'Roads that matter: +40% speed and zero stamina drain on dirt paths, paved roads, and built floors (wood, stone, iron). Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
-    version: '1.1.0',
+      'Roads that matter: +40% speed and zero stamina drain on dirt paths, paved roads, and built floors (wood, stone, iron). Replaces the abandoned Useful Paths, whose path detection broke years ago. Also gives beds 8 metres of extra reach on the fire-nearby check, so you no longer have to shove your bed into the hearth. Ships in the modpack.',
+    version: '1.2.0',
     category: 'QoL',
     clientRequired: true,
     url: 'https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-paths',

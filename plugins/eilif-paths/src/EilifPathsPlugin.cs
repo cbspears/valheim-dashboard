@@ -37,13 +37,17 @@ namespace EilifPaths
     ///   LevelGround (hoe "level ground") is NOT detectable: leveling only edits heights, it
     ///   paints nothing and leaves no persistent piece, so there is no reliable signal to key
     ///   off. It is intentionally dropped (see README / final report).
+    ///
+    /// ALSO (since 1.2.0): a bed's "you need a fire nearby" check gets extra reach, configurable
+    /// under [Bed] extraFireRange. See src/BedFirePatch.cs for the decompiled vanilla method and
+    /// the reasoning behind the default.
     /// </summary>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public class EilifPathsPlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.1.0";
+        public const string PluginVersion = "1.2.0";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -94,6 +98,9 @@ namespace EilifPaths
             BindSurface(PathType.Iron,      1.4f, 0f);
             BindSurface(PathType.HardWood,  1.4f, 0f);
 
+            // [Bed] extraFireRange — widened "bed needs a fire nearby" check (see BedFirePatch.cs).
+            BedFire.Bind(Config);
+
             OldModPresent = Chainloader.PluginInfos != null &&
                             Chainloader.PluginInfos.ContainsKey(OldModGuid);
             if (OldModPresent)
@@ -116,7 +123,8 @@ namespace EilifPaths
                         "Path x" + F(Movement[PathType.Path]) + "/" + F(StaminaDrain[PathType.Path]) + ", " +
                         "PavedRoad x" + F(Movement[PathType.PavedRoad]) + "/" + F(StaminaDrain[PathType.PavedRoad]) + ", " +
                         "floors x" + F(Movement[PathType.Wood]) + "/" + F(StaminaDrain[PathType.Wood]) +
-                        ". Polling every " + GroundCheckRate.ToString("0.0", CultureInfo.InvariantCulture) + "s.");
+                        ". Polling every " + GroundCheckRate.ToString("0.0", CultureInfo.InvariantCulture) + "s. " +
+                        "Bed fire range: " + BedFire.Describe() + ".");
         }
 
         private static string F(ConfigEntry<float> c) => c.Value.ToString("0.##", CultureInfo.InvariantCulture);
