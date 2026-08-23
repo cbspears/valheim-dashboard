@@ -41,7 +41,7 @@ export const metadata: Metadata = {
   description: `New to ${SERVER_NAME}? Log on and install the mods in five steps, then the rituals that put you on the map — for Windows, Mac, and Linux.`,
 };
 
-const R2MODMAN_URL = 'https://thunderstore.io/c/valheim/p/ebkr/r2modman/';
+const R2MODMAN_DOWNLOAD_URL = 'https://github.com/ebkr/r2modmanPlus/releases/latest';
 
 /* ── small presentational helpers ─────────────────────────────────────────── */
 
@@ -164,9 +164,9 @@ export default function GetStartedPage() {
         />
       </PageHeader>
 
-      {/* ══════════════ PART ONE — BEFORE YOU SAIL ══════════════ */}
+      {/* ══════════════ SECTION A — SERVER INFO ══════════════ */}
       <section>
-        <SectionTitle icon={<Ship size={20} />}>Before you sail — log on in 5 steps</SectionTitle>
+        <SectionTitle icon={<Ship size={20} />}>Server info</SectionTitle>
 
         {/* Connect at a glance */}
         <Card className="mb-6 border-l-2 border-l-gold-dim">
@@ -199,6 +199,13 @@ export default function GetStartedPage() {
             </div>
           </CardBody>
         </Card>
+      </section>
+
+      {/* ══════════════ SECTION B — QUICK START ══════════════ */}
+      <section>
+        <SectionTitle icon={<Compass size={20} />}>
+          Quick start — install the mods &amp; log on
+        </SectionTitle>
 
         <p className="mb-5 max-w-3xl text-sm leading-relaxed text-muted">
           Don&apos;t install mods by hand. A free mod manager grabs the loader, every mod, and the
@@ -211,8 +218,25 @@ export default function GetStartedPage() {
             <ol className="space-y-6">
               <Step n={1} title="Install the mod manager" icon={<Package size={16} />}>
                 <p>
-                  Download <Ext href={R2MODMAN_URL}>r2modman</Ext> — it&apos;s free, and runs on
-                  Windows, Mac, and Linux. Open it once it&apos;s installed.
+                  r2modman is the free app that installs and manages all the mods for you — Windows,
+                  Mac, and Linux.
+                </p>
+                <div className="py-1.5">
+                  <a
+                    href={R2MODMAN_DOWNLOAD_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="gold-ring inline-flex items-center gap-2.5 rounded-md bg-gold px-5 py-3 font-display text-base tracking-wide text-night transition-colors hover:bg-gold-light"
+                  >
+                    <Download size={18} />
+                    Download r2modman
+                    <ExternalLink size={13} className="opacity-70" />
+                  </a>
+                </div>
+                <p className="text-xs text-muted">
+                  On that page: Windows → run <span className="text-ash">r2modman Setup ….exe</span> ·
+                  Linux → the <span className="text-ash">.AppImage</span> · Mac needs extra steps —
+                  see the platform notes below. Then open r2modman once installed.
                 </p>
                 <p className="text-xs text-muted">
                   It sets up BepInEx (the mod loader) for you — you never touch that by hand.
