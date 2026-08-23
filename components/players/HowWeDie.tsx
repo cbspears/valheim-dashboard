@@ -41,7 +41,7 @@ const CAUSE_LABELS: Record<string, string> = {
   bonemass: 'Bonemass',
   moder: 'Moder',
   yagluth: 'Yagluth',
-  serpent: 'The Serpent',
+  serpent: 'The Sea Serpent',
   // --- Environmental (HitType) causes — mirrors lib/episodes.ts ENV_DEATHS/ENV_DESC ---
   tree: 'Betrayed by a tree',
   fall: 'Gravity',
@@ -72,6 +72,12 @@ const CAUSE_LABELS: Record<string, string> = {
   ashlandsocean: 'The boiling seas of Ashlands',
   ashlandsoceanfloor: 'The boiling seas of Ashlands',
   lava: 'Molten rock',
+  // The remaining HitType words our own death reporter can deliver.
+  undefined: 'Something nameless',
+  playerhit: 'Another viking',
+  cart: 'Their own cart',
+  catapult: 'A catapult stone',
+  cinderfire: 'Falling cinders',
 };
 
 /** One-line saga observation keyed off the deadliest cause (lowercase, same convention as CAUSE_LABELS). */
@@ -80,7 +86,7 @@ const CAUSE_OBSERVATION: Record<string, string> = {
   greyling: 'The little ones swarm, and the swarm adds up.',
   greydwarf: 'The forest claims more vikings than any boss.',
   greydwarfbrute: 'The forest sends its biggest sons when the little ones fail.',
-  greydwarfshaman: 'The shamans hit from range — and vikings keep forgetting that.',
+  greydwarfshaman: 'The shamans hit from range, and vikings keep forgetting that.',
   boar: 'The mightiest raiders, felled by the humblest of beasts.',
   deer: 'The mightiest raiders, felled by the humblest of beasts.',
   troll: 'The trolls of the Black Forest exact a heavy toll.',
@@ -88,7 +94,7 @@ const CAUSE_OBSERVATION: Record<string, string> = {
   draugr: 'The restless dead of the swamps drag the living down with them.',
   wraith: 'The dead of the swamp do not stay buried.',
   abomination: 'The swamp grows its own monsters, given enough time.',
-  leech: 'It is not the monsters of the swamp that kill — it is the water.',
+  leech: 'It is not the monsters of the swamp that kill. It is the water.',
   tick: 'Small, patient, and everywhere in the plains.',
   bat: 'The dark places of the caves are never quite empty.',
   surtling: 'Fire finds every viking who gets careless near the forge.',
@@ -97,7 +103,7 @@ const CAUSE_OBSERVATION: Record<string, string> = {
   bonemass: 'The swamp’s guardian is patient, and heavy-handed.',
   moder: 'The mountain queen does not forgive a missed dodge.',
   yagluth: 'The plains’ lord takes his due from the reckless.',
-  serpent: 'The Serpent rules the storm-waters, and the drowned know it well.',
+  serpent: 'The Sea Serpent rules the storm-waters, and the drowned know it well.',
   tree: 'More vikings fall to their own axes than to any beast.',
   fall: 'The cliffs of Eilif have taken more warriors than any warband.',
   falling: 'The cliffs of Eilif have taken more warriors than any warband.',
@@ -120,6 +126,11 @@ const CAUSE_OBSERVATION: Record<string, string> = {
   turret: 'A ballista does not know friend from foe.',
   boat: 'The sea takes ship and sailor together, when it wants to.',
   self: 'Some deaths carry no one’s name but the fallen’s own.',
+  undefined: 'No witness, no name. The realm keeps a few of its kills to itself.',
+  playerhit: 'Friendly fire is still fire.',
+  cart: 'The cargo made it home. That is what matters.',
+  catapult: 'Siege engineering has a learning curve, and it is drawn in blood.',
+  cinderfire: 'The Ashlands rain fire. That is not a figure of speech.',
   enemyhit: 'Some killers never step into the torchlight long enough to be named.',
   edgeofworld: 'The world of Eilif has an edge, and someone always finds it.',
   ashlandsocean: 'The Ashlands do not cool for anyone.',
@@ -185,7 +196,7 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
   const max = top?.count ?? 1;
   const observation = top
     ? CAUSE_OBSERVATION[top.cause] ?? 'The North collects its due, one viking at a time.'
-    : 'No cause has yet been witnessed and recorded — the reaper keeps his ledger closed.';
+    : 'No cause has yet been witnessed and recorded. The reaper keeps his ledger closed.';
 
   // Deadliest viking — only called out if one name clearly dominates.
   const tally = [...byViking.entries()].sort((a, b) => b[1] - a[1]);
@@ -205,7 +216,7 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
 
       {total === 0 ? (
         <div className="px-5 py-8 text-center text-sm text-muted">
-          Not a single viking has fallen. The Norns are patient — this will not last.
+          Not a single viking has fallen. The Norns are patient, but this will not last.
         </div>
       ) : (
         <div className="flex flex-col gap-4 p-5">
@@ -224,7 +235,7 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
                 <li
                   key={r.cause}
                   className={clsx('flex items-center gap-3', r.unrecorded && 'opacity-60')}
-                  title={r.unrecorded ? 'Before the ravens kept watch — no cause was recorded.' : undefined}
+                  title={r.unrecorded ? 'Before the ravens kept watch, no cause was recorded.' : undefined}
                 >
                   <span
                     className={clsx(
@@ -262,7 +273,7 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
 
           {unrecordedRow && (
             <p className="text-xs italic text-muted">
-              {unrecordedRow.count} with no known cause — recorded before the player was running the
+              {unrecordedRow.count} with no known cause, recorded before the player was running the
               stats mod, so only the death itself was logged, not what caused it.
             </p>
           )}
@@ -273,7 +284,7 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
                 name={deadliest.name}
                 className="gold-ring rounded-sm font-display text-ash-dim transition-colors hover:text-gold-light"
               />{' '}
-              has died {deadliest.count} times — more than any other viking. Valhalla knows the
+              has died {deadliest.count} times, more than any other viking. Valhalla knows the
               way.
             </p>
           )}

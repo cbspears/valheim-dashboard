@@ -13,7 +13,7 @@ import { getLiveMap, getPins, getPhotosByPin } from '@/lib/data';
 
 export const metadata: Metadata = {
   title: 'Map',
-  description: `The known world of ${SERVER_NAME} — only what the warband has charted.`,
+  description: `The known world of ${SERVER_NAME}: only what the warband has charted.`,
 };
 
 // the live snapshot check must run per-request
@@ -51,7 +51,7 @@ export default async function MapPage() {
                   1
                 </span>
                 <p className="text-sm leading-relaxed text-ash-dim">
-                  Stand at the spot in-game — the pin lands exactly where you are.
+                  Stand at the spot in-game. The pin lands exactly where you are.
                 </p>
               </div>
               <div className="flex items-start gap-3">
@@ -63,7 +63,7 @@ export default async function MapPage() {
                   <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
                     /pin The Dark Chapel
                   </span>{' '}
-                  — or{' '}
+                  or{' '}
                   <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
                     /pin base Odinshold
                   </span>{' '}
@@ -75,15 +75,15 @@ export default async function MapPage() {
                   3
                 </span>
                 <p className="text-sm leading-relaxed text-ash-dim">
-                  That&apos;s it — your pin joins the atlas at the next map update, and the Saga
+                  That&apos;s it. Your pin joins the atlas at the next map update, and the Saga
                   remembers who named it.
                 </p>
               </div>
             </div>
             <p className="mt-3 text-xs text-muted">
-              Notable places only, vikings — homes and discoveries, not wood piles. The Cartographer
-              keeps the map honest. Boss altars and traders chart themselves when found — no pin
-              needed.
+              Notable places only, vikings: homes and discoveries, not wood piles. The Cartographer
+              keeps the map honest. Boss altars and traders chart themselves when found, so no pin
+              is needed.
             </p>
           </CardBody>
         </Card>
@@ -99,13 +99,13 @@ export default async function MapPage() {
             </div>
             <p className="text-sm leading-relaxed text-ash-dim">
               Post a screenshot in Discord, tag the bot, and{' '}
-              <span className="font-semibold text-ash">name the place in your caption</span> — e.g.{' '}
+              <span className="font-semibold text-ash">name the place in your caption</span>, e.g.{' '}
               <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
                 @Eilif sunset at Draugheim
               </span>
               . The photo lands in the{' '}
               <span className="text-ash">Gallery</span> and on{' '}
-              <span className="text-ash">Draugheim&apos;s marker</span> here — click any marker to
+              <span className="text-ash">Draugheim&apos;s marker</span> here. Click any marker to
               see its album. Pin first or photo first, either order works: a photo naming a place
               that isn&apos;t pinned yet attaches itself the moment the pin appears.
             </p>
@@ -126,7 +126,7 @@ export default async function MapPage() {
               photosByPin={photosByPin}
             />
             <p className="mt-3 text-center text-xs text-muted">
-              The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it —
+              The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it,
               refreshed from the server every ~10 minutes
               {liveMap.updatedAt ? ` · last charted ${new Date(liveMap.updatedAt).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })} CT` : ''}.
               The unexplored dark is real: nobody has been there yet.
@@ -139,7 +139,7 @@ export default async function MapPage() {
             <EmptyState
               icon={<Map size={28} />}
               title="The map charts itself once the warband sails"
-              message={`As soon as the ${SERVER_NAME} server is live, its fog-masked world lands here — terrain appears only where vikings have actually walked or sailed, a snapshot is archived every in-game day for the season replay, and every /pin becomes a marker.`}
+              message={`As soon as the ${SERVER_NAME} server is live, its fog-masked world lands here. Terrain appears only where vikings have actually walked or sailed, a snapshot is archived every in-game day for the season replay, and every /pin becomes a marker.`}
             />
           </CardBody>
         </Card>
@@ -152,7 +152,7 @@ export default async function MapPage() {
             How it works: the server tracks everywhere the warband has been and renders the charted
             world; the dashboard pulls a fresh masked snapshot every half hour and archives one
             frame per in-game day. Watching the light spread across the dark is the story of the
-            season — press play above to replay it — and the finale gets the full replay.
+            season, and press play above to replay it. The finale gets the full replay.
           </span>
         </p>
       </div>

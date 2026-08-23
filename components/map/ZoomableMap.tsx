@@ -158,7 +158,7 @@ export function ZoomableMap({
                 </div>
                 {count > 0 && (
                   <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gold-dim">
-                    <Camera size={11} /> {count} {count === 1 ? 'photo' : 'photos'} — click to view
+                    <Camera size={11} /> {count} {count === 1 ? 'photo' : 'photos'} · click to view
                   </div>
                 )}
               </div>
@@ -254,7 +254,7 @@ export function ZoomableMap({
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={photo.url}
-                        alt={photo.caption ?? `${selected.name} — from the gallery`}
+                        alt={photo.caption ?? `${selected.name}, from the gallery`}
                         loading="lazy"
                         className="aspect-video w-full rounded-md border border-rune object-cover"
                       />
@@ -277,8 +277,8 @@ export function ZoomableMap({
               <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-muted">
                 <Camera size={13} className="mt-0.5 shrink-0 text-gold-dim" />
                 <span>
-                  Post a screenshot in Discord, tag the bot, and name the place in your caption —
-                  it lands in the Gallery and here.
+                  Post a screenshot in Discord, tag the bot, and name the place in your caption.
+                  It lands in the Gallery and here.
                 </span>
               </p>
             </div>

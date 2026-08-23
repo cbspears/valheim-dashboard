@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 // segment keeps both the login and the dashboard out of search engines. There is
 // deliberately NO nav link to it anywhere on the public site.
 export const metadata: Metadata = {
-  title: { absolute: 'Eilif — Ops' },
+  title: { absolute: 'Eilif · Ops' },
   robots: { index: false, follow: false, nocache: true },
 };
 

@@ -14,6 +14,17 @@ import {
   SOLO_WHISPERS,
   CREW_WHISPERS,
 } from '../src/voice.js';
+import {
+  POTY_TEMPLATES,
+  ENV_DEATH_POOLS,
+  BOSS_TEMPLATES,
+  CREATURE_TEMPLATES,
+  NO_CAUSE_TEMPLATES,
+  QUIET_RECAP_LINES,
+  formatRecap,
+  formatBossKill,
+  formatFeedEvent,
+} from '../src/format.js';
 
 const silentLog = { info() {}, warn() {}, error() {} };
 
@@ -129,7 +140,7 @@ const minsAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
   h.fixture.stats[0].deaths = 50;
   await h.voice.tick();
   ok(h.queued.length === 1, `tier 50 announced despite a 1-minute-old line, got ${h.queued.length}`);
-  ok(h.queued[0].text === 'Fifty deaths for Steve. The ravens know that name by heart now — and still it walks back in through the door.',
+  ok(h.queued[0].text === 'Fifty deaths for Steve. The ravens know that name by heart and still it walks back in through the door.',
     `exact tier-50 copy, got: ${h.queued[0].text}`);
   ok(h.queued[0].kind === 'event' && h.queued[0].meta.source === 'deaths' && h.queued[0].meta.tier === 50,
     'queued as an event line with death meta');
@@ -154,7 +165,7 @@ const minsAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
   ok(h.queued.length === 0, 'a newcomer at 19 deaths says nothing');
   h.fixture.stats[1].deaths = 20;
   await h.voice.tick();
-  ok(h.queued.length === 1 && h.queued[0].text.startsWith('Mark it in the saga: Newcomer has fallen twenty times'),
+  ok(h.queued.length === 1 && h.queued[0].text.startsWith('Twenty deaths for Newcomer.'),
     `newcomer crossing 20 fires the tier-20 line, got: ${h.queued[0]?.text}`);
 }
 
@@ -442,6 +453,64 @@ const firstNames = (rows) => rows.map((r) => r.character_name.split(' ')[0]);
   ];
   ok(all.every((line) => !vanilla.some((re) => re.test(line))), 'no vanilla-sounding phrasings');
   ok(all.every((line) => line.trim().length > 0 && line.length <= 200), 'lines stay readable in 3 seconds');
+}
+
+// ── 11. No em-dashes anywhere a player can see one ───────────────────────
+// Charlie, 2026-08-23: the em-dash is the loudest AI tell in the copy. Zero
+// allowed in player-visible strings across the bot (comments may keep theirs).
+// This sweeps the voice pools AND the Discord copy in format.js, both the raw
+// template banks and the strings that only exist inside the render functions.
+{
+  const flatten = (v) =>
+    typeof v === 'string' ? [v]
+      : Array.isArray(v) ? v.flatMap(flatten)
+        : v && typeof v === 'object' ? Object.values(v).flatMap(flatten)
+          : [];
+
+  const stats = (over = {}) => ({
+    period: 'evening', playersActive: 2, hoursPlayed: 4.25, deaths: 3,
+    bossKills: [], onlineNow: 1, worldDay: 41, quiet: false,
+    onlineToday: [{ name: 'Steve', hours: 2.5 }],
+    fallenToday: [{ name: 'Steve', count: 3 }],
+    poty: null,
+    ...over,
+  });
+
+  const rendered = [
+    // every POTY blurb, rendered through the real picker via each category
+    ...Object.entries(POTY_TEMPLATES).flatMap(([key, tpls]) =>
+      tpls.map((_, seed) => formatRecap(stats({
+        poty: {
+          key, label: 'L', name: 'Steve', seed,
+          fields: { boss: 'Bonemass', biome: 'Swamp', deaths: 4, cause: 'a Draugr', hours: 3.5, kills: 60, resources: 900, items: 70, newBiome: 'Plains' },
+        },
+      })))),
+    formatRecap(stats()),
+    formatRecap(stats({ period: 'morning' })),
+    formatRecap(stats({ bossKills: [] })),
+    // every quiet-day variant (the picker keys off period + world day)
+    ...Array.from({ length: 64 }, (_, d) => formatRecap(stats({ quiet: true, worldDay: d }))),
+    ...Array.from({ length: 64 }, (_, d) => formatRecap(stats({ quiet: true, period: 'morning', worldDay: d }))),
+    formatBossKill({ name: 'Bonemass', biome: 'Swamp', players_present: ['Steve'], notes: 'ugly' }),
+    formatFeedEvent({ type: 'join', character_name: 'Steve' }),
+    formatFeedEvent({ type: 'leave', character_name: 'Steve' }),
+    formatFeedEvent({ type: 'raid', character_name: 'Steve', metadata: {} }),
+  ];
+
+  const playerVisible = [
+    ...DAWN, ...ATMOSPHERE, ...CALLBACK_TEMPLATES, ...Object.values(DEATH_LINES),
+    ...SOLO_WHISPERS, ...CREW_WHISPERS,
+    deathMilestoneLine(300, 'Steve Stevenson'),
+    ...flatten(POTY_TEMPLATES),
+    ...flatten(ENV_DEATH_POOLS),
+    ...BOSS_TEMPLATES, ...CREATURE_TEMPLATES, ...NO_CAUSE_TEMPLATES,
+    ...QUIET_RECAP_LINES,
+    ...rendered.flatMap(flatten),
+  ];
+
+  const dashed = playerVisible.filter((s) => s.includes('—'));
+  ok(dashed.length === 0, `no em-dash in player-visible copy, found: ${JSON.stringify(dashed.slice(0, 3))}`);
+  ok(QUIET_RECAP_LINES.length >= 3, `the quiet day has more than one variant, got ${QUIET_RECAP_LINES.length}`);
 }
 
 console.log(`voice.test: ${passed} assertions passed`);

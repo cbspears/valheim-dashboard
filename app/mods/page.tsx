@@ -30,7 +30,7 @@ import { CopyChip } from '@/components/get-started/CopyChip';
 // Static page — reads only the curated mod config, no live DB.
 export const metadata: Metadata = {
   title: 'Mods',
-  description: 'Every mod running on The Fractured Realms — and which ones you must install to join.',
+  description: 'Every mod running on The Fractured Realms, and which ones you must install to join.',
 };
 
 const CATEGORY_META: Record<
@@ -39,7 +39,7 @@ const CATEGORY_META: Record<
 > = {
   Core: {
     icon: Boxes,
-    blurb: 'The core stack — required to join the server.',
+    blurb: 'The core stack. Required to join the server.',
   },
   QoL: {
     icon: Wrench,
@@ -47,7 +47,7 @@ const CATEGORY_META: Record<
   },
   Content: {
     icon: Gem,
-    blurb: 'Fresh loot, trinkets, and new reasons to delve into the dark.',
+    blurb: 'Fresh loot, trinkets, and new reasons to go down into the dark.',
   },
   Balance: {
     icon: Scale,
@@ -133,7 +133,7 @@ export default function ModsPage() {
           title="The Mods"
           subtitle={
             MODPACK_PROFILE_CODE
-              ? 'Install every mod marked Client before you can join — the one-click pack code below does it for you.'
+              ? 'Install every mod marked Client before you can join. The one-click pack code below does it for you.'
               : 'Install every mod marked Client before you can join.'
           }
           icon={<Scroll size={22} />}
@@ -162,13 +162,13 @@ export default function ModsPage() {
                 <Download size={11} />
                 Client
               </Badge>{' '}
-              must be installed on your own machine, matching the versions below — ideally
+              must be installed on your own machine, matching the versions below, ideally
               through a mod manager like r2modman. Mods marked{' '}
               <Badge tone="neutral" className="mx-0.5 align-middle">
                 <Server size={11} />
                 Server-only
               </Badge>{' '}
-              run on the server itself — nothing for you to install.{' '}
+              run on the server itself, so there is nothing for you to install.{' '}
               <Link
                 href="/get-started"
                 className="gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light hover:underline"
@@ -180,7 +180,7 @@ export default function ModsPage() {
                 <>
                   <br />
                   <span className="mt-2 inline-block">
-                    Or skip the list entirely — the one-click Eilif modpack installs every
+                    Or skip the list entirely: the one-click Eilif modpack installs every
                     client mod, pre-configured. r2modman → Import profile → From code:{' '}
                     <CopyChip value={MODPACK_PROFILE_CODE} />
                   </span>

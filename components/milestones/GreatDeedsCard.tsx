@@ -33,7 +33,7 @@ export function GreatDeedsCard({ summary }: { summary: MilestoneSummary }) {
           <EmptyState
             icon={<Trophy size={28} />}
             title="No deeds tracked yet"
-            message="Server-wide milestones — distance sailed, foes felled, timber raised — will be tallied here as the warband reaches them together."
+            message="Server-wide milestones, from distance sailed to foes felled to timber raised, are tallied here as the warband reaches them together."
           />
         ) : (
           <>
@@ -51,7 +51,7 @@ export function GreatDeedsCard({ summary }: { summary: MilestoneSummary }) {
               </div>
             ) : (
               <p className="text-sm text-ash-dim">
-                No deeds earned yet — the first is already within reach. Sail, fight, and build on.
+                No deeds earned yet, but the first is already within reach. Sail, fight, and build on.
               </p>
             )}
 
@@ -80,7 +80,7 @@ export function GreatDeedsCard({ summary }: { summary: MilestoneSummary }) {
                     />
                   </div>
                   <p className="mt-1.5 text-xs text-muted">
-                    {metricInfo(next.milestone.metric).label} —{' '}
+                    {metricInfo(next.milestone.metric).label} ·{' '}
                     {formatMetricValue(next.milestone.metric, next.value)} of{' '}
                     {formatMetricValue(next.milestone.metric, next.milestone.threshold)}
                   </p>

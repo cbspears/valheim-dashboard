@@ -88,7 +88,7 @@ export async function generateMetadata({
     viking.character_name,
   )!;
   const name = viking.character_name;
-  const description = `${name} · ${epithet.title} — a viking of the Eilif saga, and the deeds recorded in their name.`;
+  const description = `${name} · ${epithet.title}. A viking of the Eilif saga, and the deeds recorded in their name.`;
 
   return {
     // layout template turns this into "{Name} · Eilif"
@@ -314,7 +314,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
             <Card>
               <EmptyState
                 icon={<Crown size={26} />}
-                title="Uncrowned — for now"
+                title="Uncrowned, for now"
                 message={`${first} has yet to be named Player of the Day. The saga is young.`}
               />
             </Card>
@@ -371,7 +371,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
             <EmptyState
               icon={<Camera size={26} />}
               title="No screenshots yet"
-              message={`${first} has shared no images to the hall — yet.`}
+              message={`${first} has shared no images to the hall. Not yet.`}
             />
           </Card>
         ) : (

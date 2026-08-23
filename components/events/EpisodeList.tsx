@@ -154,7 +154,7 @@ function EpisodeCard({ ep }: { ep: Episode }) {
               >
                 {d.name.split(/\s+/)[0]}
               </VikingLink>
-              <span className="text-muted"> — {phraseDeath(d.cause)}</span>
+              <span className="text-muted">, {phraseDeath(d.cause)}</span>
             </li>
           ))}
         </ul>

@@ -283,7 +283,7 @@ export function AttendanceCalendar({
             {single && selected ? (
               <span className="text-muted">
                 {' '}
-                —{' '}
+                ·{' '}
                 <VikingLink
                   name={selected}
                   className="gold-ring rounded-sm transition-colors hover:text-gold-light"

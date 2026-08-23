@@ -112,7 +112,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
               color: GOLD,
             }}
           >
-            EILIF — The Cozy Canon Playthrough
+            EILIF · The Cozy Canon Playthrough
           </div>
         </div>
       </div>

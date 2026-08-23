@@ -47,8 +47,8 @@ assert.equal(BOSS_MILESTONE_KEY_TO_NAME['defeated_gdking'], 'The Elder');
 assert.equal(BOSS_MILESTONE_KEY_TO_NAME['defeated_dragon'], 'Moder');
 assert.equal(BOSS_MILESTONE_KEY_TO_NAME['defeated_goblinking'], 'Yagluth');
 assert.equal(BOSS_MILESTONE_KEY_TO_NAME['defeated_queen'], 'The Queen');
-// The Bog Witch / Deep North has NO defeat key — never auto-fires.
-assert.ok(!Object.values(BOSS_MILESTONE_KEY_TO_NAME).includes('The Bog Witch'));
+// Forsaken VIII / Deep North has NO defeat key — never auto-fires.
+assert.ok(!Object.values(BOSS_MILESTONE_KEY_TO_NAME).includes('Forsaken VIII'));
 
 // Idempotency: dedupe within a payload (same key twice → one entry).
 const dupe = parseBossMilestones({ milestones: [

@@ -46,67 +46,69 @@ const WHISPER_QUIET_MS = 45 * 60_000;   // "nothing eventful" window for the cre
 // (a) Dawn — a special ambient class, once every 3rd world day. {day} rides in.
 // Most of these name Eilif: the hall should sound like it knows its own name.
 export const DAWN = [
-  'Day {day} over Eilif. The mists have not lifted. Neither, stubbornly, have we.',
-  'Dawn on day {day}. Eilif counted the hearths still burning and found them all.',
+  'Day {day} over Eilif. The mist never lifted, and neither did we.',
+  'Dawn on day {day}. Eilif counted the hearths still burning and got the same number as last night. Good.',
   'Day {day}. Eilif has kept the roof on this long. The rest is your business.',
-  'The light comes back to Eilif on day {day} — and so do the things that hunt in it.',
-  'Day {day}. Eilif marks the ones who rise first, and says nothing of the ones who do not.',
-  'Another dawn on Eilif: day {day}. The mead survived the night. Not everything did.',
-  'Day {day}. Eilif has seen worse mornings. Not many, and not lately.',
+  'Light comes back to Eilif on day {day}, and so do the things that hunt in it.',
+  'Day {day}. Eilif marks who rises first and says nothing about who does not.',
+  'Another dawn on Eilif, day {day}. The mead survived the night.',
+  'Day {day}. Eilif has seen worse mornings, though not lately.',
 ];
 
 // (b) Pure atmosphere — no data, just weather in the bones.
 export const ATMOSPHERE = [
-  'Pine smoke and cold salt on the wind. An omen, or only weather — Eilif has never been sure.',
-  'Out past the fog, something large turned over in its sleep. Leave it where it lies.',
-  'The mead is warm, the night is long, and the trolls are only mostly asleep.',
-  'A raven circled the hall three times, then thought better of it. Wise bird.',
-  'Eilif creaks like an old ship at anchor. It remembers every viking who leaned on its walls.',
-  'Rain on the roof, wolves at the treeline. The realm keeps its own counsel tonight.',
+  'Pine smoke and cold salt on the wind. Eilif has never worked out whether that means anything.',
+  'Something large turned over in its sleep out past the fog. Leave it where it lies.',
+  'The mead is warm and the trolls are only mostly asleep.',
+  'A raven circled the hall three times, then thought better of it.',
+  'Eilif creaks like an old ship at anchor. It remembers everyone who ever leaned on these walls.',
+  'Rain on the roof and wolves at the treeline. The realm keeps its own counsel tonight.',
   'The forge has gone cold, but the coals are still muttering about the blades to come.',
   'Out on the black water the serpents wait, patient as a grudge.',
-  'The stones round the longfire have heard a hundred oaths sworn over them. They have kept every one.',
-  'Quiet in the hall — the kind that comes before a good story or a bad death.',
+  'A hundred oaths have been sworn over the stones round the longfire. The stones kept all of them.',
+  'Quiet in the hall. That usually means a good story or a bad death is on its way.',
 ];
 
 // (c) Callbacks — dated deaths from ~1/2/4 weeks ago, phrased darkly. {span}
-// is the time-ago label, {name}/{cause} come from the archived event.
+// is the time-ago label, {name}/{cause} come from the archived event. {cause}
+// is always a NOUN PHRASE (see findCallbackEvent's fallback) so it can sit
+// inside a sentence without breaking the grammar.
 export const CALLBACK_TEMPLATES = [
-  '{span} tonight, the dark took {name} — {cause}. Eilif remembers. So does the thing that did it.',
-  '{span} this hall lost {name}: {cause}. A saga is only the deaths we choose to tell twice.',
-  'Cast your horn back {span}: {name} fell, and {cause}. The ravens have not forgotten the meal.',
-  '{span} {name} went into the void — {cause}. The gods keep a stool warm for the bold and a cold one for the careless.',
+  '{span} tonight the dark took {name}. Cause of death, {cause}. The thing that did it remembers too.',
+  '{span} this hall lost {name} to {cause}. A saga is only the deaths we bother to tell twice.',
+  'Cast your horn back {span}. {name} fell to {cause}, and the ravens ate well.',
+  '{span} {name} went into the void courtesy of {cause}. The gods keep a stool warm for the bold. The careless get a cold one.',
 ];
 
 // (d) Whispers on quiet nights — the ambient pool SWAP for a near-empty hall.
 // SOLO: exactly one viking online. Second person, spooky-cozy, names them.
 export const SOLO_WHISPERS = [
-  'You are alone in Eilif tonight, {firstName}. Probably. The fire disagrees.',
-  'Just you and the wind out here, {firstName}. One of you is being watched. It is not the wind.',
+  'You are alone in Eilif tonight, {firstName}. Probably.',
+  'Just you and the wind out here, {firstName}. One of you is being watched, and it is not the wind.',
   'Odin sees you, {firstName}. He has always seen you. He thinks the roof pitch is bold.',
-  'No one else came tonight, {firstName}. Something did. It is keeping its distance. For now.',
-  'The hall counts one heartbeat, {firstName}, and two sets of footsteps. Sleep well.',
-  'Work while it is quiet, {firstName}. Quiet is a thing the dark lends out, never gives.',
+  'Nobody else came tonight, {firstName}. Something did. It is keeping its distance for now.',
+  'The hall counts one heartbeat, {firstName}, and two sets of footsteps.',
+  'Work while it is quiet, {firstName}. The dark only ever lends quiet out.',
 ];
 
 // QUIET CREW: 2–3 online and nothing eventful in the last 45 minutes. Some of
 // these name a viking; some let the whole crew feel watched.
 export const CREW_WHISPERS = [
-  'No deeds tonight. Only work, and the dark, and the sound of someone counting you from the treeline.',
-  'The hall is quiet. The world is not. Odin sees you too, {firstName}. Especially you.',
+  'No deeds tonight. Just work and the dark and whatever is counting you from the treeline.',
+  'Odin sees you too, {firstName}. Especially you.',
   'Heads down, hammers busy. The ravens take notes on the quiet ones.',
-  'A small crew and a long night. Eilif has known both to end well. Not often.',
-  'Nothing has gone wrong yet, {firstName}. Eilif has decided to find that suspicious.',
+  'A small crew and a long night. Eilif has known both to end well, though not often.',
+  'Nothing has gone wrong yet, {firstName}. Eilif finds that suspicious.',
   'Torchlight only reaches so far. Past it, something has been very patient tonight.',
 ];
 
 // (e) Per-player death milestones — tiers at 20, 50, 100, then every +100.
 // {name} is the first name, {count} the death total at the tier.
 export const DEATH_LINES = {
-  20: 'Mark it in the saga: {name} has fallen twenty times, and twenty times stood back up. Eilif keeps the count.',
-  50: 'Fifty deaths for {name}. The ravens know that name by heart now — and still it walks back in through the door.',
-  100: 'One hundred deaths, {name}. A round number, honestly earned. Eilif has stopped flinching.',
-  next: '{count} deaths, {name}. Eilif has run out of surprise, but never out of ink.',
+  20: 'Twenty deaths for {name}. Eilif keeps the count, and {name} keeps getting back up.',
+  50: 'Fifty deaths for {name}. The ravens know that name by heart and still it walks back in through the door.',
+  100: 'One hundred deaths, {name}. Eilif stopped flinching somewhere around sixty.',
+  next: '{count} deaths, {name}. Eilif has stopped being surprised. The ink holds out anyway.',
 };
 
 // ── tiny deterministic RNG (mulberry32) + string hash (mirrors format.js) ──
@@ -275,9 +277,10 @@ export function createVoiceEngine({
       const rows = (data || []).filter((r) => (r.character_name || '').trim());
       if (rows.length) {
         const r = rows[Math.floor(rand() * rows.length)];
+        // Noun phrase, always: the callback templates drop {cause} mid-sentence.
         const cause = typeof r.metadata?.cause === 'string' && r.metadata.cause.trim()
           ? r.metadata.cause.trim()
-          : 'the realm took its due';
+          : 'something nobody wrote down';
         return { span: span.label, name: (r.character_name || '').trim(), cause };
       }
     }
@@ -452,7 +455,7 @@ export function createVoiceEngine({
           embeds: [
             {
               title: '📜 A new oath is sworn',
-              description: `**${name}** has sworn upon the charter:\n\n_"${o.oath_text}"_`,
+              description: `**${name}** swore on the charter, and the hall heard it.\n\n_"${o.oath_text}"_`,
               color: 0xc8952a,
               footer: { text: 'Eilif · The Cozy Canon Playthrough' },
             },
@@ -536,7 +539,7 @@ export function createVoiceEngine({
     if (!poty?.name) return;
     const name = String(poty.name).trim();
     await enqueue(
-      `The hall has spoken: tonight the crown rests on ${firstName(name)}. Eilif will remember it come morning.`,
+      `The crown goes to ${firstName(name)} tonight. Eilif will remember it come morning.`,
       'event',
       { source: 'poty', poty: name, award: poty.key, world_day: worldDay },
     );

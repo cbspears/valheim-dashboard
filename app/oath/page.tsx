@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'The Oath',
-  description: `How to swear your oath and bind your viking — and the wall of every vow sworn in ${SERVER_NAME}.`,
+  description: `How to swear your oath and bind your viking, plus the wall of every vow sworn in ${SERVER_NAME}.`,
 };
 
 export default async function OathPage() {
@@ -43,7 +43,7 @@ export default async function OathPage() {
               </h2>
             </div>
             <p className="text-sm leading-relaxed text-ash-dim">
-              Two steps, once — your first oath also binds your Discord to your viking, so your
+              Two steps, once. Your first oath also binds your Discord to your viking, so your
               deeds, photos, and title gather under one name.
             </p>
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm leading-relaxed text-ash-dim">
@@ -55,8 +55,8 @@ export default async function OathPage() {
                 {DISCORD_BOT_HANDLE} I am YourVikingName
               </span>
               <span>
-                — the bot DMs you a one-time rune. Keep it private. (No DM? Allow direct messages
-                for this server and ask again.)
+                Then the bot DMs you a one-time rune. Keep it private. (No DM? Allow direct
+                messages for this server and ask again.)
               </span>
             </div>
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm leading-relaxed text-ash-dim">
@@ -70,7 +70,7 @@ export default async function OathPage() {
                 /s /oath YOURRUNE — your vow, one line
               </span>
               <span>
-                — it must be a shout (<span className="font-mono text-xs">/s</span>); plain chat
+                It must be a shout (<span className="font-mono text-xs">/s</span>); plain chat
                 never leaves the campfire.
               </span>
             </div>

@@ -161,7 +161,7 @@ export default async function TvPage({
               <h2 className="font-display text-2xl tracking-wide text-ash">In-game chat</h2>
             </div>
             {chat.length === 0 ? (
-              <p className="text-base text-ash-dim">The hall is quiet — shouts echo here.</p>
+              <p className="text-base text-ash-dim">The hall is quiet. Shouts echo here.</p>
             ) : (
               <ul className="space-y-2.5">
                 {chat.slice(0, 5).map((c) => (
@@ -185,7 +185,7 @@ export default async function TvPage({
             </div>
             {events.length === 0 ? (
               <p className="text-base text-ash-dim">
-                The saga has not begun — deeds and deaths will be etched here as they happen.
+                The saga has not begun. Deeds and deaths will be etched here as they happen.
               </p>
             ) : (
               <ul className="min-h-0 flex-1 space-y-3 overflow-hidden">

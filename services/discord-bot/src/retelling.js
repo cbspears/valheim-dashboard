@@ -165,7 +165,8 @@ function buildPrompt(f) {
     'Rules:',
     '- Use ONLY the facts listed below. Never invent names, numbers, places, weapons, or events that are not given.',
     '- The warriors are real people playing Vikings. Refer to them ONLY by the character names given, never invent others.',
-    '- Grand and evocative, but grounded — no modern words, no anachronisms.',
+    '- Grand and evocative, but grounded. No modern words, no anachronisms.',
+    '- Never use em-dashes; use plain sentences.',
     '- Output prose ONLY: no title, no headers, no markdown, no bullet points, no quotation marks, and no preamble such as "Here is". Begin directly with the saga.',
     '',
     'Facts:',
@@ -240,7 +241,7 @@ const PARTY = [
   'It was {party} who dared the beast that day.',
 ];
 const BLOW = [
-  'It was {first} who drew first blood, and {top} who struck the hardest — {dmg} wounds carved into the beast.',
+  'It was {first} who drew first blood, and {top} who struck the hardest, {dmg} wounds carved into the beast.',
   '{first} landed the opening blow, while {top} rained the fiercest strikes, dealing {dmg} damage.',
   'First blood fell to {first}, and {top} dealt the deepest wounds, {dmg} in all.',
 ];
@@ -255,7 +256,7 @@ const LENGTH = [
 ];
 const FALLEN = [
   'Not all returned unbloodied: {fallen}.',
-  'The victory was bought in blood — {fallen}.',
+  'The victory was bought in blood: {fallen}.',
   'Yet the fight took its toll: {fallen}.',
 ];
 const CLOSERS = [

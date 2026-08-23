@@ -27,22 +27,22 @@ const inter = Inter({
 export const metadata: Metadata = {
   metadataBase: new URL('https://valheim-dashboard.vercel.app'),
   title: {
-    default: `${SERVER_NAME} — Valheim Server`,
+    default: `${SERVER_NAME} · Valheim Server`,
     template: `%s · ${SERVER_NAME}`,
   },
   description: SERVER_DESCRIPTION,
   openGraph: {
-    title: `${SERVER_NAME} — ${SERVER_TAGLINE}`,
+    title: `${SERVER_NAME} · ${SERVER_TAGLINE}`,
     description: SERVER_DESCRIPTION,
     siteName: SERVER_NAME,
     type: 'website',
     images: [
-      { url: ogImageUrl, width: 1200, height: 630, alt: `${SERVER_NAME} — ${SERVER_TAGLINE}` },
+      { url: ogImageUrl, width: 1200, height: 630, alt: `${SERVER_NAME} · ${SERVER_TAGLINE}` },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: `${SERVER_NAME} — ${SERVER_TAGLINE}`,
+    title: `${SERVER_NAME} · ${SERVER_TAGLINE}`,
     description: SERVER_DESCRIPTION,
     images: [ogImageUrl],
   },

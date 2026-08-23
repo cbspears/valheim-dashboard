@@ -27,14 +27,14 @@ export function Hearth({
       title: 'The hall is lively',
       body:
         typeof worldDay === 'number'
-          ? `Day ${worldDay} — voices and laughter ring beneath the rafters.`
+          ? `Day ${worldDay}. Voices and laughter ring beneath the rafters.`
           : 'Voices and laughter ring beneath the rafters.',
     },
     banked: {
       title: 'The hall is quiet',
       body:
         typeof worldDay === 'number'
-          ? `Day ${worldDay} — the server is up, but no one is online.`
+          ? `Day ${worldDay}. The server is up, but no one is online.`
           : 'The server is up, but no one is online.',
     },
     sleeping: {

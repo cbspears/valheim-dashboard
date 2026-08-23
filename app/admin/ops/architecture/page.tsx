@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 // robots noindex/nofollow is inherited from app/admin/ops/layout.tsx (whole
 // segment). We only pin an absolute title so it doesn't fall back to a template.
 export const metadata: Metadata = {
-  title: { absolute: 'Eilif — Ops · Architecture' },
+  title: { absolute: 'Eilif · Ops Architecture' },
 };
 
 const REPO = 'https://github.com/cbspears/valheim-dashboard';
@@ -62,8 +62,8 @@ export default async function OpsArchitecturePage() {
             <h1>How the whole Eilif system fits together</h1>
             <p className="dek">
               One modded Valheim server, a pack of client mods, four host-side services, a Next.js
-              dashboard on Vercel, a Supabase database, a Discord bot, and an owner-only ops cockpit
-              — all talking to each other. This map traces every hop: what talks to what, over which
+              dashboard on Vercel, a Supabase database, a Discord bot, and an owner-only ops cockpit,
+              all talking to each other. This map traces every hop: what talks to what, over which
               transport, with what auth. Boxes link into{' '}
               <strong>github.com/cbspears/valheim-dashboard</strong>. Start with the simple view,
               then follow the arrows into the detail and the walkthroughs.{' '}
@@ -84,7 +84,7 @@ export default async function OpsArchitecturePage() {
                 <span className="sw" style={{ background: 'var(--z-host-bg)', borderColor: 'var(--z-host)' }} /> Host services (your PC · systemd)
               </div>
               <div className="lg-row">
-                <span className="sw" style={{ background: 'var(--z-api-bg)', borderColor: 'var(--z-api)' }} /> Vercel — Next.js API
+                <span className="sw" style={{ background: 'var(--z-api-bg)', borderColor: 'var(--z-api)' }} /> Vercel · Next.js API
               </div>
             </div>
             <div className="grp">
@@ -194,7 +194,7 @@ export default async function OpsArchitecturePage() {
             Every component and the principal flows between them, coloured by transport. Two flows
             deliberately run “backwards” and are covered in the walkthroughs: the server{' '}
             <em>polls</em> <code>/api/voice</code> for NPC lines, and the Discord bot both reads from
-            and posts to Discord. Boxes are clickable — they open the code on GitHub.
+            and posts to Discord. Boxes are clickable, and they open the code on GitHub.
           </p>
           <div className="stage detail">
             <svg viewBox="0 0 1300 660" role="img" aria-label="Detailed architecture diagram">
@@ -303,7 +303,7 @@ export default async function OpsArchitecturePage() {
               </a>
               <a className="node" href={`${REPO}/tree/main/plugins/eilif-companion-client`} target="_blank" rel="noreferrer">
                 <rect x="20" y="266" width="224" height="132" rx="9" fill="var(--surface)" stroke="var(--z-game)" />
-                <text x="34" y="288" className="n-title" fontSize="13" fill="var(--ink)">💻 Player PCs — r2modman pack</text>
+                <text x="34" y="288" className="n-title" fontSize="13" fill="var(--ink)">💻 Player PCs · r2modman pack</text>
                 <text x="34" y="308" className="n-sub" fontSize="11">GsValheimStatsClient ·3rd-party</text>
                 <text x="34" y="324" className="n-sub" fontSize="11">EilifCompanionClient (map %)</text>
                 <text x="34" y="340" className="n-sub" fontSize="11">EilifPaths (roads)</text>
@@ -323,7 +323,7 @@ export default async function OpsArchitecturePage() {
               <a className="node" href={`${REPO}/tree/main/services/stats-parser`} target="_blank" rel="noreferrer">
                 <rect x="292" y="150" width="212" height="56" rx="9" fill="var(--surface)" stroke="var(--z-host)" />
                 <text x="304" y="172" className="n-title" fontSize="12.5" fill="var(--ink)">Stats parser (.fch)</text>
-                <text x="304" y="190" className="n-sub" fontSize="10.5">optional — full-profile fallback</text>
+                <text x="304" y="190" className="n-sub" fontSize="10.5">optional: full-profile fallback</text>
                 <text x="304" y="201" className="e-label" fontSize="9" fill="var(--z-host)">services/stats-parser ↗</text>
               </a>
               <a className="node" href={`${REPO}/blob/main/scripts/map-snapshot.mjs`} target="_blank" rel="noreferrer">
@@ -415,7 +415,7 @@ export default async function OpsArchitecturePage() {
           </div>
 
           {/* ============ WALKTHROUGHS ============ */}
-          <h2 className="sec">Follow the data — four journeys</h2>
+          <h2 className="sec">Follow the data: four journeys</h2>
           <p className="sec-sub">
             The arrows make more sense once you trace a single thing end to end. Here are the four
             flows that cover almost the whole system.
@@ -433,7 +433,7 @@ export default async function OpsArchitecturePage() {
                 </li>
                 <li>
                   The route flips the <code>bosses</code> row <code>is_killed=true</code> and inserts
-                  a boss <code>event</code> — a one-way latch, written with the <b>service role</b>.
+                  a boss <code>event</code>, a one-way latch written with the <b>service role</b>.
                 </li>
                 <li>
                   The <b>Discord bot</b> (polling Supabase) sees the felled boss and posts an{' '}
@@ -480,7 +480,7 @@ export default async function OpsArchitecturePage() {
                 </li>
                 <li>
                   <b><code>lib/data.ts</code></b> reads Supabase with the <b>anon key</b>, filtered by{' '}
-                  <b>RLS</b> — so only public columns/rows come back (never <code>steam_id</code>,
+                  <b>RLS</b>, so only public columns/rows come back (never <code>steam_id</code>,
                   positions, or private chat).
                 </li>
                 <li>
@@ -488,7 +488,7 @@ export default async function OpsArchitecturePage() {
                   the Emitter&apos;s 120-s posts.
                 </li>
                 <li>Map frames + gallery images load from <b>Supabase Storage</b>.</li>
-                <li>The finished HTML ships to the browser — fast, and with no secrets in it.</li>
+                <li>The finished HTML ships to the browser: fast, and with no secrets in it.</li>
               </ol>
             </div>
             <div className="flow f-db">
@@ -504,7 +504,7 @@ export default async function OpsArchitecturePage() {
                   That route redacts + upserts one row per component into <code>ops_heartbeats</code>.
                 </li>
                 <li>
-                  You open <b>/admin/ops</b> and log in — <code>OPS_PASSWORD</code> sets an
+                  You open <b>/admin/ops</b> and log in, and <code>OPS_PASSWORD</code> sets an
                   HMAC-signed <b>HttpOnly cookie</b>.
                 </li>
                 <li>
@@ -733,7 +733,7 @@ export default async function OpsArchitecturePage() {
             <h3>The one idea that ties it together</h3>
             <p>
               Every arrow points, eventually, at <b>Supabase</b>. Nothing talks to anything else
-              directly — the game emits, the services and API routes write, and every surface reads
+              directly. The game emits, the services and API routes write, and every surface reads
               back from the same database. That&apos;s why the whole thing is loosely coupled and why
               the <b>trust boundary</b> sits at the ingest routes: anything a player&apos;s machine can
               send (mod payloads, in-game chat) is untrusted until an authenticated, validated route

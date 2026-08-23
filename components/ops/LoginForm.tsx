@@ -29,7 +29,7 @@ export function LoginForm() {
         router.refresh();
         return;
       }
-      setError(res.status === 429 ? 'Too many attempts — wait a moment.' : 'Incorrect password.');
+      setError(res.status === 429 ? 'Too many attempts. Wait a moment.' : 'Incorrect password.');
     } catch {
       setError('Could not reach the server.');
     } finally {

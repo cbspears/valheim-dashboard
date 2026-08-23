@@ -27,7 +27,7 @@ export default async function WorldPage() {
         <PageHeader slot="world">
           <SectionHeader
             title="World Progress"
-            subtitle="Boss-gated progression — each forsaken felled opens the next leg of the journey. No one sails ahead of the longship."
+            subtitle="Boss-gated progression: each forsaken felled opens the next leg of the journey. No one sails ahead of the longship."
             icon={<MapIcon size={22} />}
           />
         </PageHeader>
@@ -37,7 +37,7 @@ export default async function WorldPage() {
       <section>
         <SectionHeader
           title="Milestones"
-          subtitle="Server-wide milestones — what the warband has done together, tallied across every viking. Earned deeds and the ones still ahead."
+          subtitle="Server-wide milestones: what the warband has done together, tallied across every viking. Earned deeds and the ones still ahead."
           icon={<Trophy size={22} />}
         />
         <MilestoneLedger summary={milestoneSummary} />
@@ -46,7 +46,7 @@ export default async function WorldPage() {
       <section>
         <SectionHeader
           title="Scheduled Gatherings"
-          subtitle="Game nights, raids, and revelry — what's on the road ahead."
+          subtitle="Game nights, raids, and revelry. What's on the road ahead."
           icon={<CalendarClock size={22} />}
         />
         <Card>

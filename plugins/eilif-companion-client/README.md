@@ -4,12 +4,19 @@ A deliberately tiny, **client-side** BepInEx 5 plugin for the Eilif Valheim serv
 (BepInEx 5.4.2333 + ValheimPlus). The client twin of [`../eilif-companion`](../eilif-companion):
 same toolchain, same repo conventions, no gameplay changes — purely additive.
 
-**One job: automatic cartography.** While you're connected to a multiplayer server it periodically
-reads your local minimap fog, computes your explored-map percentage, and POSTs it to the dashboard.
-The pack ships this DLL, so **playing = tracked** — no opt-in, no scripts, no `.fch` upload. This
-supersedes the `.fch`-uploader plan (`services/stats-parser/REMOTE.md`) for pack players.
+**Two jobs, both purely observational.**
 
-`BepInPlugin` GUID: `net.eilif.companionclient` — name `Eilif Companion Client` — v`0.1.0`.
+1. **Automatic cartography.** While you're connected to a multiplayer server it periodically reads
+   your local minimap fog, computes your explored-map percentage, and POSTs it to the dashboard.
+   The pack ships this DLL, so **playing = tracked** — no opt-in, no scripts, no `.fch` upload. This
+   supersedes the `.fch`-uploader plan (`services/stats-parser/REMOTE.md`) for pack players.
+2. **The real cause of your death** (v0.2.0, see [Death reporter](#death-reporter-v020)). The
+   third-party GsValheimStatsClient reports every unattributed damage-over-time death — a campfire
+   you stood in, the cold, drowning — as the flat catch-all `enemyhit`, because the real cause is
+   destroyed at its source. This plugin reads the killing `HitData` out of the game and reports the
+   exact cause instead.
+
+`BepInPlugin` GUID: `net.eilif.companionclient` — name `Eilif Companion Client` — v`0.2.0`.
 
 ---
 
@@ -65,6 +72,36 @@ Both fields are private → read via HarmonyX `AccessTools.Field` (cached `Field
 
 ---
 
+## Death reporter (v0.2.0)
+
+Valheim keeps the killing blow in `Character.m_lastHit` (a `HitData`) and `Player.OnDeath` reads
+`m_lastHit.m_hitType` from it **unguarded** — so at that exact moment the true cause is still
+available, and it is the only moment it is. A Harmony **postfix** on `Player.OnDeath` (local player
+only) reads it and fires a fire-and-forget POST:
+
+```json
+{ "schemaVersion": 1, "game": "valheim", "source": "eilif-death",
+  "world": "<world>", "player": "<char>", "tsUtc": "2026-08-23T12:00:00.000Z",
+  "hitType": "Burning", "attacker": null, "biome": "Meadows",
+  "pos": { "x": 12.4, "z": -7.8 } }
+```
+
+- **`hitType`** is the `HitData.HitType` enum name **verbatim** — one of the 22 values
+  (`Undefined`, `EnemyHit`, `PlayerHit`, `Fall`, `Drowning`, `Burning`, `Freezing`, `Poisoned`,
+  `Water`, `Smoke`, `EdgeOfWorld`, `Impact`, `Cart`, `Tree`, `Self`, `Structural`, `Turret`, `Boat`,
+  `Stalagtite`, `Catapult`, `CinderFire`, `AshlandsOcean`). The server holds the same list in
+  `lib/deaths.ts` and maps every one to a rendered phrase.
+- **`attacker`** is `null` for an environmental death. For a creature it is the **raw**
+  `Character.m_name`, which is a localization token like `$enemy_serpent` — the server humanizes it
+  via `config/creatures.ts` so there is exactly one naming table, not two. For a player killer it is
+  their character name.
+- The server (`/api/gs-ingest` → `lib/deaths.ts`) collapses this with the GsValheimStatsClient and
+  log-poller reports of the same death within ±3 minutes, **in either arrival order**, so a death is
+  never counted twice and the surviving row always carries this plugin's cause.
+
+Nothing here touches gameplay: everything is wrapped, the POST is off-thread, and any failure ends
+in a Warning line and nothing else. No stats are written — only the death `events` row.
+
 ## Config (`BepInEx/config/net.eilif.companionclient.cfg`, section `[Map]`)
 
 | Key | Default | Notes |
@@ -102,9 +139,22 @@ dotnet build -c Release    # outputs plugins/eilif-companion-client/dist/EilifCo
    `[EilifMap] posted 0.87% for <Char> (Dedicated) [interval]` (or `[logout]`).
 2. The dashboard's Cartographer board / `player_stats.map_explored_pct` for that character updates.
 3. At the menu / in singleplayer there should be **no** `[EilifMap] posted` lines.
+4. On boot: `[EilifDeath] death-cause reporter armed …`. Then die on the server (a campfire is the
+   quickest honest test) and look for
+   `[EilifDeath] <Char> died in <World>: hitType=Burning, attacker=(none), biome=Meadows`
+   followed by `[EilifDeath] reported Burning for <Char>`. The Saga / How We Die should read
+   "lost to the flames", **not** "struck down by an unseen foe".
 
 ## After the Valheim 1.0 / Deep North update
 
 Re-run `./refresh-libs.sh` then `dotnet build -c Release`. If Iron Gate renamed `m_explored` /
 `m_textureSize` or changed the fog layout, re-verify against a fresh `Minimap` decompile (the two
 `AccessTools.Field` lookups fail-soft: a rename just makes the plugin a silent no-op, never a crash).
+
+The death reporter needs the same re-verification against a fresh decompile of `Character`
+(`m_lastHit`), `Player` (`OnDeath`) and `HitData` (`m_hitType`, `GetAttacker()`, and the `HitType`
+enum's member list). `m_lastHit` is looked up via `AccessTools.Field` and so fails soft the same way;
+**a NEW HitType value would not** — it would arrive as a word the server rejects, which is the
+fail-safe (the death still lands via GsValheimStatsClient) but means a lost cause until the value is
+added to `lib/deaths.ts` `HIT_TYPES` and given a phrase in `lib/episodes.ts`.
+`scripts/eilif-death.test.mjs` is what enforces that pairing.

@@ -135,7 +135,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
                   {boss.retelling.trim()}
                 </p>
                 <figcaption className="mt-3 text-xs uppercase tracking-wider text-gold-dim">
-                  — the Skald
+                  The Skald
                 </figcaption>
               </figure>
             ) : boss.notes ? (
@@ -175,7 +175,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
             <EmptyState
               icon={<Camera size={28} />}
               title="No screenshots yet"
-              message="No depiction yet — post one in Discord and name the beast."
+              message="No depiction yet. Post one in Discord and name the beast."
             />
           )}
         </Card>
@@ -239,7 +239,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
                   </div>
                 ) : (
                   <p className="text-sm text-muted">
-                    First blood, hardest blows, the fight&apos;s full record — no runes were carved
+                    First blood, hardest blows, the fight&apos;s full record: no runes were carved
                     for this fall.
                   </p>
                 )}

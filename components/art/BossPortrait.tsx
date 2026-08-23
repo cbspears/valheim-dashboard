@@ -57,7 +57,7 @@ export function BossPortrait({
           >
             ???
           </span>
-          <span className="sr-only">{name} — portrait unknown</span>
+          <span className="sr-only">{name}, portrait unknown</span>
           <HelpCircle size={18} className="text-muted/70" aria-hidden />
         </div>
       ) : (

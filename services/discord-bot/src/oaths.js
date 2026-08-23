@@ -189,7 +189,7 @@ export function createOathIngest({ client, log = console }) {
       if (!player) {
         await reply(
           message,
-          'The Hall does not yet know you. Link your viking first — `@Eilif I am <YourViking>` (or `@Eilif join`) — then shout the rune it gives you in-game.'
+          'The Hall does not yet know you. Link your viking first: `@Eilif I am <YourViking>` (or `@Eilif join`) — then shout the rune it gives you in-game.'
         );
         await message.react('❓').catch(() => {});
         return;

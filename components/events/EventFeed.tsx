@@ -121,7 +121,7 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
           <EmptyState
             icon={<ScrollText size={28} />}
             title="Nothing here yet"
-            message="No events of this type have been recorded yet — try another filter."
+            message="No events of this type have been recorded yet. Try another filter."
           />
         ) : (
           <div className="max-h-[72vh] overflow-y-auto">

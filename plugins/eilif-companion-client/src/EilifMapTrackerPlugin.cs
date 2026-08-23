@@ -15,7 +15,8 @@ using UnityEngine;
 namespace EilifCompanionClient
 {
     /// <summary>
-    /// EARS (client edition): automatic cartography tracking for the Eilif dashboard.
+    /// EARS (client edition): automatic cartography tracking for the Eilif dashboard,
+    /// plus (since v0.2.0) the authoritative DEATH-CAUSE reporter — see DeathReporter.cs.
     ///
     /// While the local player is connected to a multiplayer server, every ~5 min (and once on
     /// logout/disconnect) it reads the private Minimap fog array (<c>Minimap.m_explored</c>,
@@ -36,10 +37,16 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.2.0";
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
+
+        // Ingest endpoint + optional Bearer token, mirrored into plain statics in
+        // Awake so the death reporter can read them off the Harmony patch thread
+        // without touching BepInEx's ConfigEntry objects.
+        internal static string IngestUrl = "";
+        internal static string IngestToken = "";
 
         // ---- Config ----
         private ConfigEntry<string> _url;
@@ -75,6 +82,9 @@ namespace EilifCompanionClient
                 new ConfigDescription("Seconds between map-% posts while connected to a server.",
                     new AcceptableValueRange<int>(60, 3600)));
 
+            IngestUrl = _url.Value;
+            IngestToken = _token.Value;
+
             try
             {
                 // Unity Mono runtime: make sure modern TLS is enabled for the Vercel HTTPS endpoint.
@@ -85,9 +95,13 @@ namespace EilifCompanionClient
             // Hook logout so we always send a FRESH final reading on a clean quit-to-menu / log out
             // (Minimap + local player are still alive inside Game.Logout). Hard disconnects that
             // skip Logout are covered by the connected->disconnected fallback in Update().
-            new Harmony(PluginGuid).PatchAll(typeof(Patch_GameLogout));
+            var harmony = new Harmony(PluginGuid);
+            harmony.PatchAll(typeof(Patch_GameLogout));
+            // v0.2.0: the local player's death cause (see DeathReporter.cs).
+            harmony.PatchAll(typeof(Patch_PlayerOnDeath));
 
             Log.LogInfo($"[EilifMap] {PluginName} v{PluginVersion} loaded. Posting explored-map % to {_url.Value} every {_intervalSeconds.Value}s while on a server.");
+            Log.LogInfo($"[EilifDeath] death-cause reporter armed (posts source:'eilif-death' to {_url.Value} when the local player dies on a server).");
         }
 
         private void Update()
@@ -120,7 +134,7 @@ namespace EilifCompanionClient
         // True only when the local player is connected to a REMOTE multiplayer server (a pure
         // client). False at the menu (no ZNet), in singleplayer / when hosting (IsServer), or before
         // the world + local player + minimap exist. This is the single gate for every post.
-        private static bool IsOnServer()
+        internal static bool IsOnServer()
         {
             var znet = ZNet.instance;
             if (znet == null || znet.IsServer()) return false;      // menu, or local host / singleplayer
@@ -246,8 +260,58 @@ namespace EilifCompanionClient
             }
         }
 
+        /// <summary>
+        /// Fire-and-forget POST of an arbitrary JSON body to the configured ingest.
+        /// Shared plumbing for any one-shot report (v0.2.0: the death reporter).
+        ///
+        /// DELIBERATELY NOT subject to the map path's single-in-flight `_postInFlight`
+        /// guard: that guard exists to stop a 5-minute polling loop from stacking up
+        /// requests. A death is a one-shot event that must never be silently dropped
+        /// because a cartography post happened to be in the air at that instant.
+        ///
+        /// Never throws, never blocks the main thread, never touches gameplay — every
+        /// failure path ends in a Warning line and nothing else.
+        /// </summary>
+        internal static void PostJson(string json, string tag, string successLine)
+        {
+            string url = IngestUrl;
+            if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(json)) return;
+            string token = IngestToken;
+            try
+            {
+                Task.Run(() => SendAsync(url, token, json, tag, successLine));
+            }
+            catch (Exception ex)
+            {
+                Log?.LogWarning($"{tag} could not queue post: {ex.Message}");
+            }
+        }
+
+        private static async Task SendAsync(string url, string token, string json, string tag, string successLine)
+        {
+            try
+            {
+                using (var req = new HttpRequestMessage(HttpMethod.Post, url))
+                {
+                    req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                    if (!string.IsNullOrEmpty(token))
+                        req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
+
+                    using (var resp = await Http.SendAsync(req).ConfigureAwait(false))
+                    {
+                        if (resp.IsSuccessStatusCode) Log?.LogInfo(successLine);
+                        else Log?.LogWarning($"{tag} post HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log?.LogWarning($"{tag} post failed: {ex.Message}");
+            }
+        }
+
         // Minimal JSON string escaper (player/world names only — no dependency needed).
-        private static string JsonStr(string s)
+        internal static string JsonStr(string s)
         {
             var sb = new StringBuilder(s.Length + 2);
             sb.Append('"');

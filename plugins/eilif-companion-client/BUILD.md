@@ -33,9 +33,20 @@ Then re-pack (this plugin ships inside the r2modman pack, not deployed directly 
 - **`System.ValueTuple` must never be used** (target is `net462`; the BepInEx/Unity Mono runtime
   ships no `System.ValueTuple` reference — a tuple literal/field in the plugin's `Awake` path causes
   a **silent** load failure, no exception, the plugin just never registers). This project's source
-  does **not** currently reference tuples, so no action needed. This gotcha is **not** written down
-  anywhere else in this plugin's docs (only `eilif-paths` has an inline source comment on it) — keep
-  it in mind if the post-1.0 patch adds any reflection/dictionary helper code that uses tuples.
+  does **not** reference tuples (re-checked 2026-08-23 when `src/DeathReporter.cs` was added — it
+  deliberately uses ordinary returns, never a tuple). This gotcha is **not** written down anywhere
+  else in this plugin's docs (only `eilif-paths` has an inline source comment on it) — keep it in
+  mind if the post-1.0 patch adds any reflection/dictionary helper code that uses tuples.
+  Verify after any build: `strings -el dist/EilifCompanionClient.dll | grep -i valuetuple` must
+  print nothing.
+- **Two hooks to re-verify at 1.0, not one** (v0.2.0). Besides `Minimap.m_explored` /
+  `m_textureSize`, the death reporter depends on `Character.m_lastHit` (protected field),
+  `Player.OnDeath` (protected override), `HitData.m_hitType` / `GetAttacker()`, and the member list
+  of the `HitData.HitType` enum (22 values as of 0.221.12). Decompile check:
+  `DOTNET_ROLL_FORWARD=Major ilspycmd -t HitData libs/assembly_valheim.dll | grep -A30 'enum HitType'`
+  — any NEW value must be added to `lib/deaths.ts` `HIT_TYPES` and given a phrase in
+  `lib/episodes.ts` (`ENV_DEATHS` **and** `ENV_DESC`); `scripts/eilif-death.test.mjs` fails until
+  both exist.
 - Build-only warnings (`MSB3277` reference-conflict-resolution) are expected and benign — targeting
   `net462` via the reference-assemblies package under a newer SDK, not a real problem.
 - **Local disk only** for the r2modman profile when importing — NAS profiles can't be written to

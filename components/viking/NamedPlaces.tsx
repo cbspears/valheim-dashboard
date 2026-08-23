@@ -32,7 +32,7 @@ export function NamedPlaces({ places, first }: { places: NamedPlace[]; first: st
         <EmptyState
           icon={<MapPin size={26} />}
           title="No places named yet"
-          message={`${first} hasn't named any places yet — shout /pin <name> in-game to plant a marker.`}
+          message={`${first} hasn't named any places yet. Shout /pin <name> in-game to plant a marker.`}
         />
       ) : (
         <ul className="divide-y divide-rune/50">

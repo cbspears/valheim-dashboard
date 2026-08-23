@@ -45,7 +45,7 @@ export function SignatureWall({ oaths }: { oaths: Oath[] }) {
   if (oaths.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted">
-        No marks yet — be the first to swear the oath.
+        No marks yet. Be the first to swear the oath.
       </p>
     );
   }

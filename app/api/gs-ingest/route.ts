@@ -18,6 +18,7 @@ import {
   MIGRATION_REQUIRED,
 } from '@/lib/gs-baseline';
 import { evaluateAndRecord } from '@/lib/milestones';
+import { ingestDeathEvents, ingestEilifDeath } from '@/lib/deaths';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import type { GsClientStats } from '@/lib/types';
 
@@ -30,10 +31,15 @@ import type { GsClientStats } from '@/lib/types';
 //
 // Auth (split by source): server-side Emitter payloads (source:'server') MUST
 // present a Bearer token equal to GS_EMITTER_TOKEN — a header-less or wrong-token
-// server payload is rejected 401. Client payloads ('client'/'client-map') run on
-// players' PCs and carry NO secret; they are instead gated by the world + server-
-// presence cross-checks below. The server-side Emitter config Token must equal
-// GS_EMITTER_TOKEN.
+// server payload is rejected 401. Client payloads ('client' / 'client-map' /
+// 'eilif-death') run on players' PCs and carry NO secret; they are instead gated
+// by the world + server-presence cross-checks below. The server-side Emitter
+// config Token must equal GS_EMITTER_TOKEN.
+//
+// 'eilif-death' is OUR OWN plugin (EilifCompanionClient ≥0.2.0) reporting one
+// death with the real HitData.HitType + attacker — the cause the third-party
+// GsValheimStatsClient flattens to "enemyhit". lib/deaths.ts owns the write and
+// the cross-producer precedence.
 
 export const dynamic = 'force-dynamic';
 
@@ -43,24 +49,6 @@ function db() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } },
   );
-}
-
-/**
- * Clean GsValheimStats' raw `killer` into a cause string. Creature killers arrive
- * as readable names ("Deathsquito") or localization tokens ("$enemy_greydwarf")
- * or clones ("Greydwarf(Clone)"); environmental killers as bare hit-type words
- * ("tree", "fall", "drowning"). We ONLY strip token noise here and pass the value
- * through — all saga phrasing lives in the frontend (lib/episodes.ts phraseDeath /
- * ENV_DEATHS, looked up case-insensitively), so this stays the single cleaning
- * point, not a second place that flavors death text.
- */
-function humanizeKiller(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  let k = raw.trim();
-  if (!k) return null;
-  k = k.replace(/\(Clone\)\s*$/i, '').trim();
-  k = k.replace(/^\$(?:enemy|item|character)_/i, '').replace(/^\$/, '').trim();
-  return k || null;
 }
 
 /**
@@ -181,111 +169,6 @@ function parseOnline(v: unknown): { names: string[] | null; count: number | null
   }
   if (typeof v === 'number' && Number.isFinite(v)) return { names: null, count: v };
   return { names: null, count: null };
-}
-
-/**
- * Ingest GsValheimStatsClient `deathEvents[]` into the `events` table as `death`
- * rows carrying the REAL cause. The snapshot is cumulative and re-POSTed every
- * ~120s, so each death is deduped on (playerName + tsUtc) — a natural unique key
- * (a player can't die twice in the same instant) — stored as `metadata.gsDeathId`.
- */
-async function ingestDeathEvents(rawEvents: unknown, reporter: string): Promise<void> {
-  if (!Array.isArray(rawEvents) || rawEvents.length === 0) return;
-
-  // A client may only report its OWN deaths (a client mod can't witness the true
-  // cause of anyone else's death). Drop anything not authored by the reporting
-  // character — with no reporter name to trust, drop everything.
-  const owner = reporter.trim();
-
-  // Normalize + drop anything without the two fields we key on (and anything the
-  // reporter didn't author).
-  const parsed = rawEvents
-    .map((e) => {
-      const d = e as Record<string, unknown>;
-      const name = typeof d.playerName === 'string' ? d.playerName.trim() : '';
-      const tsUtc = typeof d.tsUtc === 'string' ? d.tsUtc : '';
-      if (!name || name !== owner || !tsUtc || Number.isNaN(Date.parse(tsUtc))) return null;
-      const metadata: Record<string, unknown> = {
-        gsDeathId: `${name}|${tsUtc}`,
-        source: 'gs',
-      };
-      const cause = humanizeKiller(d.killer);
-      if (cause) metadata.cause = cause;
-      if (typeof d.killer === 'string' && d.killer.trim()) metadata.killer = d.killer.trim();
-      if (typeof d.biome === 'string' && d.biome.trim()) metadata.biome = d.biome.trim();
-      if (typeof d.lifeSec === 'number' && Number.isFinite(d.lifeSec)) metadata.lifeSec = Math.round(d.lifeSec);
-      if (typeof d.killsThisLife === 'number' && Number.isFinite(d.killsThisLife)) {
-        metadata.killsThisLife = Math.round(d.killsThisLife);
-      }
-      return { name, occurredIso: new Date(tsUtc).toISOString(), key: `${name}|${tsUtc}`, metadata };
-    })
-    .filter((x): x is NonNullable<typeof x> => x !== null);
-
-  if (parsed.length === 0) return;
-
-  const client = db();
-  const keys = [...new Set(parsed.map((p) => p.key))];
-
-  // Which of these deaths do we already have? (dedupe against prior snapshots)
-  const { data: existing } = await client
-    .from('events')
-    .select('metadata')
-    .eq('type', 'death')
-    .in('metadata->>gsDeathId', keys);
-  const seen = new Set(
-    (existing ?? []).map((r) => (r.metadata as Record<string, unknown>)?.gsDeathId as string),
-  );
-
-  // Also collapse duplicates within this single payload.
-  const fresh: typeof parsed = [];
-  const localSeen = new Set<string>();
-  for (const p of parsed) {
-    if (seen.has(p.key) || localSeen.has(p.key)) continue;
-    localSeen.add(p.key);
-    fresh.push(p);
-  }
-  if (fresh.length === 0) return;
-
-  // Resolve EXISTING players only — never auto-create a row from a client payload.
-  // A brand-new player gets their row from the poller's join path first; until then
-  // we skip their death writes (self-heals on the next cycle).
-  const names = [...new Set(fresh.map((p) => p.name))];
-  const { data: players } = await client.from('players').select('id, character_name').in('character_name', names);
-  const idByName = new Map<string, string>((players ?? []).map((p) => [p.character_name as string, p.id as string]));
-
-  const writable = fresh.filter((p) => idByName.has(p.name));
-  if (writable.length === 0) return;
-
-  await client.from('events').insert(
-    writable.map((p) => ({
-      type: 'death',
-      player_id: idByName.get(p.name)!,
-      character_name: p.name,
-      metadata: p.metadata,
-      created_at: p.occurredIso,
-    })),
-  );
-
-  // The log poller may race ahead of the client's 120s cycle and log the same
-  // death first, but WITHOUT the real cause (no metadata.source, no cause). Now
-  // that we have the authoritative cause row, drop any causeless poller-derived
-  // death for the same character within ±3 minutes so it isn't double-counted.
-  await Promise.all(
-    writable.map(async (p) => {
-      const t = Date.parse(p.occurredIso);
-      const lo = new Date(t - 3 * 60_000).toISOString();
-      const hi = new Date(t + 3 * 60_000).toISOString();
-      await client
-        .from('events')
-        .delete()
-        .eq('type', 'death')
-        .eq('character_name', p.name)
-        .gte('created_at', lo)
-        .lte('created_at', hi)
-        .is('metadata->>source', null)
-        .is('metadata->>cause', null);
-    }),
-  );
 }
 
 // ─── Client-map: automatic cartography (source:'client-map') ─────────────────
@@ -625,7 +508,7 @@ async function ingestBossMilestones(
 
   for (const m of milestones) {
     const row = byName.get(m.bossName);
-    if (!row || row.is_killed) continue; // unknown boss (e.g. Bog Witch) or already felled
+    if (!row || row.is_killed) continue; // unknown boss (e.g. Forsaken VIII, the unrevealed 8th) or already felled
 
     const killedAt = m.tsUtc && !Number.isNaN(Date.parse(m.tsUtc)) ? new Date(m.tsUtc).toISOString() : new Date().toISOString();
 
@@ -808,9 +691,14 @@ export async function POST(req: Request) {
   if (body?.schemaVersion !== 1 || body?.game !== 'valheim') {
     return Response.json({ error: 'unexpected payload' }, { status: 400 });
   }
-  // Allowlist the three recognized producers; an unknown `source` never falls
+  // Allowlist the four recognized producers; an unknown `source` never falls
   // through to the client branch (default-deny, not default-client).
-  if (body.source !== 'server' && body.source !== 'client' && body.source !== 'client-map') {
+  if (
+    body.source !== 'server' &&
+    body.source !== 'client' &&
+    body.source !== 'client-map' &&
+    body.source !== 'eilif-death'
+  ) {
     return Response.json({ error: 'unknown source' }, { status: 400 });
   }
 
@@ -869,7 +757,9 @@ export async function POST(req: Request) {
     const presenceName =
       body.source === 'client-map'
         ? (typeof body.playerName === 'string' ? body.playerName.trim() : '')
-        : reporter;
+        : body.source === 'eilif-death'
+          ? (typeof body.player === 'string' ? body.player.trim() : '')
+          : reporter;
     if (presenceCheckEnabled && presenceName) {
       const presence = await confirmOnThisServer(presenceName);
       if (!presence.onServer) {
@@ -883,6 +773,26 @@ export async function POST(req: Request) {
       }
     }
 
+    // Authoritative death cause from OUR OWN client plugin (EilifCompanionClient
+    // ≥0.2.0, plugins/eilif-companion-client). It Harmony-patches the local
+    // player's Player.OnDeath and reads Character.m_lastHit, so it is the only
+    // producer that can distinguish a campfire from a blizzard from an unseen
+    // foe — the third-party GsValheimStatsClient reports every unattributed
+    // damage-over-time death as the flat catch-all "enemyhit".
+    //
+    // Writes the `events` table ONLY (never player_stats): the collective-deed
+    // death count comes from player_stats.deaths, so this path cannot move it.
+    // Precedence + the ±3-min collapse against the gs and poller producers (in
+    // BOTH arrival orders) lives in lib/deaths.ts — see the table at its top.
+    if (body.source === 'eilif-death') {
+      const r = await ingestEilifDeath(db(), body as Record<string, unknown>);
+      return Response.json(
+        r.ok
+          ? { status: r.status, cause: r.cause ?? null }
+          : { status: 'ignored', reason: r.reason ?? 'bad eilif-death payload' },
+      );
+    }
+
     // Automatic cartography from the client plugin: write only map_explored_pct (GREATEST).
     if (body.source === 'client-map') {
       const r = await ingestClientMap(body as Record<string, unknown>);
@@ -891,7 +801,7 @@ export async function POST(req: Request) {
       );
     }
 
-    await ingestDeathEvents(body.deathEvents, reporter);
+    await ingestDeathEvents(db(), body.deathEvents, reporter);
     const merged = await ingestPlayerStats(body as Record<string, unknown>);
     // Client payloads also carry bossKillEvents (this client's view of a fight)
     // — enrich, but never flip a boss from a client (the server milestone owns that).

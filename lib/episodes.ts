@@ -434,6 +434,14 @@ const ENV_DESC: Record<string, string[]> = {
   ashlandsocean: ['{name} was boiled alive in the Ashlands sea.'],
   ashlandsoceanfloor: ['{name} was boiled alive in the Ashlands sea.'],
   lava: ['{name} was swallowed by molten rock.'],
+  // Added with the eilif-death reporter (our own plugin sends the HitType word
+  // verbatim, so EVERY value of HitData.HitType needs a phrase here as well as
+  // in ENV_DEATHS — scripts/eilif-death.test.mjs asserts the whole enum).
+  undefined: ['{name} fell to something that left no name behind.'],
+  playerhit: ['{name} was cut down by one of their own.'],
+  cart: ['{name} was run down by their own cart — a death without honor.'],
+  catapult: ['{name} was smashed flat by a catapult stone.'],
+  cinderfire: ['{name} was caught in a rain of burning cinders.'],
 };
 
 const DEADLY_DESC = [
@@ -629,6 +637,16 @@ const ENV_DEATHS: Record<string, string> = {
   ashlandsocean: 'boiled in the Ashlands sea',
   ashlandsoceanfloor: 'boiled in the Ashlands sea',
   lava: 'swallowed by molten rock',
+  // ── the remaining HitData.HitType values ──────────────────────────────────
+  // Our own client plugin (source:'eilif-death') sends the HitType enum name
+  // verbatim, so every one of the 22 values must resolve to a phrase here or a
+  // raw token would reach the Saga. lib/deaths.ts HIT_TYPES is the decompiled
+  // list; scripts/eilif-death.test.mjs walks it and fails on any gap.
+  undefined: 'struck down by something nameless',
+  playerhit: 'cut down by another viking',
+  cart: 'run down by their own cart',
+  catapult: 'smashed flat by a catapult stone',
+  cinderfire: 'burned by falling cinders',
 };
 
 // Named forsaken ones read as "felled by …" rather than "taken by a …".

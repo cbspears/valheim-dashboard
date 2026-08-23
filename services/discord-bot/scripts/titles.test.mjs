@@ -78,9 +78,12 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   ok(writeDb.writes.history.length === 1 && writeDb.writes.history[0].title === 'Bane of Beasts',
     'title_history row inserted');
   ok(writeDb.writes.voice.length === 1 &&
-     writeDb.writes.voice[0].text === 'Let the hall know Testmantwo — Bane of Beasts.' &&
+     writeDb.writes.voice[0].text === 'From tonight, Testmantwo goes by Bane of Beasts.' &&
      writeDb.writes.voice[0].kind === 'event' && writeDb.writes.voice[0].status === 'queued',
     `exact voice line queued, got: ${writeDb.writes.voice[0]?.text}`);
+  // Copy guard: zero em-dashes in anything a player reads or hears.
+  ok(!posts[0].p.content.includes('—') && !writeDb.writes.voice[0].text.includes('—'),
+    'no em-dash in the proclamation or its voice line');
 }
 
 // ── 3. No-op when the computed title already matches ──────────────────────

@@ -294,7 +294,7 @@ export default async function PlayersPage() {
       title: 'Anglers',
       icon: <FishSymbol size={16} />,
       accent: 'text-gold',
-      subtitle: 'Fishing skill — ties broken by total catches.',
+      subtitle: 'Fishing skill, with ties broken by total catches.',
       emptyTitle: 'No catches yet',
       empty: 'No viking has yet pulled a fish from the water.',
       entries: anglerEntries(withStats),
@@ -307,7 +307,7 @@ export default async function PlayersPage() {
       <PageHeader slot="players">
         <SectionHeader
           title="The Vikings"
-          subtitle="Every warrior who has set foot on these shores — the warband that carves its saga into the world."
+          subtitle="Every warrior who has set foot on these shores: the warband that carves its saga into the world."
           icon={<Users size={22} />}
           action={
             <Badge tone="neutral">{roster.length} sworn</Badge>
@@ -447,7 +447,7 @@ export default async function PlayersPage() {
       <section>
         <SectionHeader
           title="Activity"
-          subtitle="The last ten weeks — every night the longhouse fires were lit, and by whom."
+          subtitle="The last ten weeks. Every night the longhouse fires were lit, and by whom."
           icon={<CalendarDays size={20} />}
         />
         <AttendanceCalendar sessions={attendanceSessions} />
@@ -457,7 +457,7 @@ export default async function PlayersPage() {
       <section>
         <SectionHeader
           title="Leaderboards"
-          subtitle="The deeds — and misdeeds — that will be sung of in the mead halls."
+          subtitle="The deeds, and the misdeeds, that will be sung of in the mead halls."
           icon={<Swords size={20} />}
         />
 
@@ -493,7 +493,7 @@ export default async function PlayersPage() {
       <section>
         <SectionHeader
           title="Players of the Day"
-          subtitle="The nightly crown — every champion the saga has named, and who's worn it most."
+          subtitle="The nightly crown. Every champion the saga has named, and who's worn it most."
           icon={<Crown size={20} />}
         />
         <PotyArchive entries={potyArchive} />

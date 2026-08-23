@@ -78,7 +78,7 @@ export function createTitlesAnnouncer({
     }
     try {
       const { error: vErr } = await writeDb.from('voice_lines').insert({
-        text: `Let the hall know ${firstName(name)} — ${title}.`,
+        text: `From tonight, ${firstName(name)} goes by ${title}.`,
         kind: 'event',
         meta: { title, player_id: row.id },
         status: 'queued',

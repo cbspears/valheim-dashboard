@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 // tab reads exactly "Eilif — TV". noindex/nofollow keeps this experimental,
 // unlinked page out of search engines (hidden-URL-only, per Charlie).
 export const metadata: Metadata = {
-  title: { absolute: 'Eilif — TV' },
+  title: { absolute: 'Eilif · TV' },
   robots: { index: false, follow: false },
 };
 

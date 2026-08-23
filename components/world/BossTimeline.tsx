@@ -221,7 +221,7 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                 {status === 'locked' && (
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-muted">
                     <Lock size={12} />
-                    Locked — fell the previous forsaken to advance.
+                    Locked. Fell the previous forsaken to advance.
                   </div>
                 )}
 

@@ -75,7 +75,7 @@ export default async function OpsPage() {
           <div>
             <h1 className="heading-engraved text-2xl text-ash">Operations</h1>
             <p className="text-sm text-muted">
-              What is running, and what has drifted. Observational only — no controls here.
+              What is running, and what has drifted. Observational only, with no controls here.
             </p>
           </div>
         </div>
@@ -175,7 +175,7 @@ export default async function OpsPage() {
       <p className="pt-2 text-xs text-muted">
         {data.supabaseOk
           ? 'Data read live with the service role at render time.'
-          : 'Database unreachable or unconfigured — most signals below show as unknown.'}
+          : 'Database unreachable or unconfigured. Most signals below show as unknown.'}
       </p>
 
       {/* Resources — reference material, not live signals. */}

@@ -26,51 +26,51 @@ function nameMd(s) {
 // only always-present fields, so the missing/zero guard can always fall back to
 // it. Placeholders: {name} {boss} {biome} {deaths} {cause} {hours} {kills}
 // {resources} {items} {newBiome}. {boss}/{biome}/{newBiome} are pre-bolded here.
-const POTY_TEMPLATES = {
+export const POTY_TEMPLATES = {
   boss_kill: [
-    '{name} stood over **{boss}** as the **{biome}** fell silent — skål to the one who came home dripping and grinning.',
-    'The **{biome}** bows: {name} put **{boss}** in the dirt and walked back into the hall a legend.',
-    '**{boss}** is no more, and {name} was there at the kill — tonight the mead is on the gods.',
-    '{name} bled {deaths} times wrestling **{boss}** down, then took its head anyway. The saga writes itself.',
+    '{name} stood over **{boss}** while the **{biome}** went quiet. Skål.',
+    'The **{biome}** bows. {name} put **{boss}** in the dirt and walked back into the hall.',
+    '**{boss}** is done, and {name} was there at the kill. The mead is on the gods tonight.',
+    '{name} bled {deaths} times wrestling **{boss}** down and took its head anyway.',
   ],
   most_explored: [
-    '{name} put their prow into the **{newBiome}** for the first time and lived to tell it — new horizons, new ways to be eaten.',
-    'The map grew today: {name} set boots in the **{newBiome}** where no clansman had walked. Bold sail, viking.',
-    '{name} crossed into the **{newBiome}** and the unknown blinked first. Fortune favors the prow that points outward.',
+    '{name} put a prow into the **{newBiome}** for the first time and lived to tell it.',
+    'The map grew today. {name} set boots in the **{newBiome}**, where no clansman had walked.',
+    '{name} crossed into the **{newBiome}** and the unknown blinked first.',
   ],
   most_deaths: [
-    '{name} found {deaths} fresh ways to die and laughed at every one. Reckless, doomed, glorious.',
-    '{name} met the void {deaths} times this day — the last when {name} {cause}. The Allfather keeps a stool warm.',
-    "{deaths} tombstones bear {name}'s name tonight — Valhalla's doorman knows them by sight now.",
-    'Death came {deaths} times for {name}; {name} {cause}, then sailed back for more. Mad. Magnificent.',
+    '{name} found {deaths} fresh ways to die today and laughed at most of them.',
+    '{name} met the void {deaths} times, the last one courtesy of {cause}. The Allfather keeps a stool warm.',
+    "{deaths} tombstones bear {name}'s name tonight. Valhalla's doorman knows them by sight.",
+    'Death came for {name} {deaths} times. {cause} got the last word, and {name} sailed back for more.',
   ],
   most_kills: [
-    '{name} cut down {kills} foes today — the crows of the realm follow them now, fat and grateful.',
+    '{name} cut down {kills} foes today. The crows of the realm follow them now, fat and grateful.',
     "{kills} beasts fell to {name}'s blade. The forest learned a name to fear.",
-    '{name} left {kills} corpses in their wake and barely broke a sweat. Skål to the storm with an axe.',
+    '{name} left {kills} corpses in their wake and barely broke a sweat.',
   ],
   most_resources: [
-    "{name} hauled {resources} of the realm's bounty home — the storehouse sings their name.",
+    "{name} hauled {resources} of the realm's bounty home. The storehouse sings.",
     '{name} gathered {resources} while the saga rested. Cozy and unstoppable.',
-    '{name} stripped {resources} from the land today, hauling like a draugr with a grudge. The longhouse eats well.',
+    '{name} stripped {resources} from the land today, hauling like a draugr with a grudge.',
   ],
   most_crafted: [
-    '{name} bent {items} works from anvil and flame today — even Brokkr the dwarf would nod.',
-    'The forge never cooled for {name}: {items} pieces hammered true. The clan walks better-armed.',
-    "{items} blades, nails, and trinkets left {name}'s anvil this day. A smith of true worth.",
+    '{name} bent {items} works from anvil and flame today. Even Brokkr the dwarf would nod.',
+    'The forge never cooled for {name}. {items} pieces hammered true, and the clan walks better-armed.',
+    "{items} blades, nails and trinkets left {name}'s anvil this day. A smith of true worth.",
   ],
   most_hours: [
-    '{name} held the hall for {hours}h while the rest slept — no glory, just the patient hammer of a true builder.',
-    '{name} kept the longfire burning {hours}h. Devotion is its own kind of saga.',
+    '{name} held the hall for {hours}h while the rest slept. No glory in it. Somebody has to.',
+    '{name} kept the longfire burning {hours}h.',
     '{hours} hours of honest toil from {name} today. The longhouse grows because someone refuses to rest.',
   ],
   // Unsung Hero (underdog spotlight). Every blurb uses ONLY {name} — a quiet
   // viking may have ~0 of every stat, so these must never reach for one.
   underdog: [
-    'Not every saga is loud — {name} kept the longfire lit and the hall warm tonight. Skål to the steady ones.',
-    'The clan raises a horn to {name}: fewer hours, no less heart. Every viking’s name belongs in the saga.',
-    '{name} sailed in for a spell and left the realm brighter for it. The gods may not have noticed — the hall did.',
-    'Tonight the hall toasts {name}, who shows up, hammer in hand, and asks for no glory. That’s its own kind of legend.',
+    '{name} kept the longfire lit and the hall warm tonight. Skål to the steady ones.',
+    'The clan raises a horn to {name}. Fewer hours, no less heart.',
+    '{name} sailed in for a spell and left the realm brighter for it. The gods may not have noticed. The hall did.',
+    'Tonight the hall toasts {name}, who shows up with a hammer and asks for no glory.',
   ],
 };
 
@@ -91,14 +91,14 @@ function renderBoard(rows, line, cap = 10) {
   return shown.join('\n');
 }
 
-// "🛡️ **Name** — 2.3h" lines: everyone who played in the window.
+// "🛡️ **Name** · 2.3h" lines: everyone who played in the window.
 function renderOnlineToday(board) {
-  return renderBoard(board, (row) => `🛡️ **${nameMd(row.name)}** — ${Number(row.hours).toFixed(1)}h`);
+  return renderBoard(board, (row) => `🛡️ **${nameMd(row.name)}** · ${Number(row.hours).toFixed(1)}h`);
 }
 
-// "💀 **Name** — 3" lines: everyone who died in the window.
+// "💀 **Name** ×3" lines: everyone who died in the window.
 function renderFallenToday(board) {
-  return renderBoard(board, (row) => `💀 **${nameMd(row.name)}** — ${row.count}`);
+  return renderBoard(board, (row) => `💀 **${nameMd(row.name)}** ×${row.count}`);
 }
 
 // Deterministically pick + fill a POTY blurb from poty.{key,name,fields,seed}.
@@ -164,7 +164,7 @@ function fillTemplate(tpl, vars) {
 // Bare environmental HitType words, as gs-ingest/GsValheimStatsClient report
 // them (e.g. "tree", "fall", "drowning") — same key set as episodes.ts's
 // ENV_DEATHS, own phrasing.
-const ENV_DEATH_POOLS = {
+export const ENV_DEATH_POOLS = {
   fall: ['{name} took a fatal fall.', "{name} forgot vikings can't fly.", 'Gravity finally caught up with {name}.'],
   falling: ['{name} took a fatal fall.', "{name} forgot vikings can't fly.", 'Gravity finally caught up with {name}.'],
   drowning: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
@@ -195,7 +195,7 @@ const ENV_DEATH_POOLS = {
     'Something in the dark took {name} and never showed its face.',
     "{name} fell to an attacker nobody got a look at. The woods aren't saying.",
   ],
-  edgeofworld: ['{name} sailed off the edge of the world.', "{name} found out what's past the edge — nothing good."],
+  edgeofworld: ['{name} sailed off the edge of the world.', "{name} found out what's past the edge. Nothing good."],
   ashlandsocean: ['{name} was boiled alive in the Ashlands sea.'],
   ashlandsoceanfloor: ['{name} was boiled alive in the Ashlands sea.'],
   lava: ['{name} was swallowed by molten rock.'],
@@ -205,7 +205,7 @@ const ENV_DEATH_POOLS = {
 // clash rather than "killed by a X".
 const BOSS_NAMES = new Set(['eikthyr', 'the elder', 'bonemass', 'moder', 'yagluth', 'the queen', 'fader']);
 
-const BOSS_TEMPLATES = [
+export const BOSS_TEMPLATES = [
   '{name} fell in battle against {cause}.',
   '{cause} sent {name} to Valhalla.',
   '{name} did not rise again after facing {cause}.',
@@ -213,7 +213,7 @@ const BOSS_TEMPLATES = [
 ];
 
 // Plain creature names (e.g. "Neck", "Greydwarf", "Deathsquito").
-const CREATURE_TEMPLATES = [
+export const CREATURE_TEMPLATES = [
   '{name} was killed by {article} {cause}.',
   '{name} tragically fell to {article} {cause}.',
   '{name} met their end at the claws of {article} {cause}.',
@@ -223,7 +223,7 @@ const CREATURE_TEMPLATES = [
 
 // No cause at all — legacy log-derived deaths (unmodded players) carry empty
 // metadata, since the server log never records what killed you.
-const NO_CAUSE_TEMPLATES = [
+export const NO_CAUSE_TEMPLATES = [
   '{name} has fallen.',
   '{name} met their end in the wilds.',
   'The realm claims another: {name}.',
@@ -298,7 +298,7 @@ export function formatBossKill(boss) {
     embeds: [
       {
         title: `👑 ${boss.name} has fallen!`,
-        description: `The **${boss.biome}** bows to the clan. A new region opens — sail on, vikings.`,
+        description: `The **${boss.biome}** bows to the clan. A new stretch of the realm just opened up, so sail on.`,
         color: GOLD,
         fields,
         footer: { text: FOOTER },
@@ -306,6 +306,15 @@ export function formatBossKill(boss) {
     ],
   };
 }
+
+// Nothing happened in the last 24h. One of these leads the recap instead of the
+// stat block; the picker below keeps a dry week from reading like a stuck record.
+export const QUIET_RECAP_LINES = [
+  'Nothing to report. The realm kept to itself and so did we.',
+  'A quiet stretch. No deeds went into the book today.',
+  'Empty hall and a cold hearth, though no new graves either.',
+  'The saga has a blank page for today. It happens.',
+];
 
 /**
  * Daily recap embed for #valheim (no ping). Every number/name covers the
@@ -322,12 +331,16 @@ export function formatRecap(stats) {
   const title = morning ? '🌅 Morning, vikings' : '🌙 The hall winds down';
 
   if (stats.quiet) {
+    // Rotate the quiet-day line so a dry spell doesn't post the same sentence
+    // twice a day for a week. Deterministic (period + world day), so the same
+    // recap always renders identically.
+    const idx = hashString(`${stats.period}:${stats.worldDay}`) % QUIET_RECAP_LINES.length;
     return {
       embeds: [
         {
           title,
           description:
-            'A quiet stretch in the realm — no deeds recorded. The mead halls rest. ' +
+            `${QUIET_RECAP_LINES[idx]} ` +
             `Day **${stats.worldDay}**, **${stats.onlineNow}** sailing now.`,
           color: GOLD,
           footer: { text: FOOTER },
@@ -342,7 +355,7 @@ export function formatRecap(stats) {
     { name: 'Deaths', value: `${stats.deaths}`, inline: true },
     {
       name: 'Bosses felled',
-      value: stats.bossKills.length ? stats.bossKills.join(', ') : '—',
+      value: stats.bossKills.length ? stats.bossKills.join(', ') : 'None',
       inline: true,
     },
     { name: 'Online now', value: `${stats.onlineNow}`, inline: true },
@@ -372,8 +385,8 @@ export function formatRecap(stats) {
       {
         title,
         description: morning
-          ? 'The last day’s deeds, told at sunrise:'
-          : 'The day’s saga, before the fires dim:',
+          ? 'Everything the last day turned up, told at sunrise.'
+          : 'The day’s saga, set down before the fires dim.',
         color: GOLD,
         fields,
         footer: { text: FOOTER },

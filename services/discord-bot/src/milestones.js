@@ -32,6 +32,9 @@ import { GOLD } from './format.js';
 
 const FOOTER = 'Eilif · The Cozy Canon Playthrough';
 const DEFAULT_MIN_GAP_MS = 60_000; // MILESTONE_MIN_GAP_MS default — 1 minute
+// A spoken line has to land center-screen in a couple of seconds, so the
+// equivalence tail is dropped rather than allowed to push past this.
+const VOICE_MAX_CHARS = 200;
 
 /** Interpolate {value} (the achieved aggregate) into a ceremonial line. */
 function renderLine(line, value) {
@@ -40,6 +43,22 @@ function renderLine(line, value) {
   const n = Number(value);
   const shown = Number.isFinite(n) ? Math.round(n).toLocaleString('en-US') : '';
   return text.replace(/\{value\}/g, shown);
+}
+
+/**
+ * Charlie's ask: the equivalence the embed already shows should ride along on
+ * the SPOKEN line too, as a short second sentence ("... That is about 166
+ * trolls of hurt."). The equivalence copy itself lives in the DB and is written
+ * to read casually, so it's dropped in as-is; only a leading ≈ is spelled out.
+ * Returns `line` unchanged when there's no equivalence or the pair would run
+ * past what's readable in-game.
+ */
+function withEquivalence(line, equivalence) {
+  const base = String(line ?? '').trim();
+  const eq = String(equivalence ?? '').trim().replace(/^≈\s*/, 'about ').replace(/[.!?]+$/, '');
+  if (!base || !eq) return base;
+  const combined = `${base} That is ${eq}.`;
+  return combined.length > VOICE_MAX_CHARS ? base : combined;
 }
 
 // Postgres "relation does not exist" — the milestones migration isn't applied.
@@ -155,7 +174,7 @@ export function createMilestonesAnnouncer({
   function buildEmbed(deed, next, line) {
     const fields = [];
     if (deed.equivalence) fields.push({ name: 'That is', value: deed.equivalence, inline: false });
-    if (next) fields.push({ name: 'Next deed', value: `${next.title} — ${next.pct}%`, inline: false });
+    if (next) fields.push({ name: 'Next deed', value: `${next.title} (${next.pct}%)`, inline: false });
     return {
       embeds: [
         {
@@ -228,11 +247,13 @@ export function createMilestonesAnnouncer({
 
     await post(channel, buildEmbed(deed, next, line));
 
-    // Eilif speaks the same ceremonial line center-screen. Exempt from the
-    // voice engine's ambient min-gap — a Great Deed is never small talk.
+    // Eilif speaks the same ceremonial line center-screen, with the deed's
+    // equivalence tacked on when it fits. Exempt from the voice engine's
+    // ambient min-gap — a Great Deed is never small talk.
+    const spoken = withEquivalence(line, deed.equivalence);
     try {
       const { error: vErr } = await writeDb.from('voice_lines').insert({
-        text: line,
+        text: spoken,
         speaker: 'Eilif',
         kind: 'event',
         meta: { source: 'milestone', id: deed.id, title: deed.title },

@@ -347,7 +347,7 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
 //        Dragon, …) — NOT the global key. Mapped via BOSS_OBJECT_TO_NAME.
 //
 // Both maps resolve to the exact `bosses.name` values seeded in Supabase.
-// The Bog Witch (bosses row, biome "Deep North") has NO entry in either map:
+// Forsaken VIII (bosses row, biome "Deep North") has NO entry in either map:
 // Valheim ships no Deep North boss / global key yet, so it can never auto-fire
 // — it stays manual (scripts/mark-boss.js) until the update lands.
 

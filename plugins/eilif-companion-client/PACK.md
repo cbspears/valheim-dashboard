@@ -18,7 +18,7 @@ pack player then gets automatic cartography with **no** extra steps.
 3. Choose `dist/EilifCompanionClient.dll`. When prompted:
    - **Name:** `EilifCompanionClient`
    - **Author:** `BlockspaceMedia` (or any — local mods aren't namespaced on Thunderstore)
-   - **Version:** `0.1.0`
+   - **Version:** `0.2.0`
    The manager copies the DLL into `<profile>/BepInEx/plugins/EilifCompanionClient/`.
 4. **Enable** the mod if it isn't already, and make sure BepInEx + the other Eilif mods stay enabled.
 
@@ -50,8 +50,9 @@ blank for the pilot — the ingest accepts token-less `client-map` posts.)
 ## Sanity check before sharing
 
 Launch Valheim once from the profile, join the server, and confirm `LogOutput.log` shows
-`[EilifMap] … loaded …` on boot and `[EilifMap] posted …%` after the interval (or on logout). Then
-re-export.
+`[EilifMap] … loaded …` **and** `[EilifDeath] death-cause reporter armed …` on boot, then
+`[EilifMap] posted …%` after the interval (or on logout). For the v0.2.0 death reporter, die once on
+the server and confirm a `[EilifDeath] … died in …: hitType=…` line. Then re-export.
 
 ## Notes
 

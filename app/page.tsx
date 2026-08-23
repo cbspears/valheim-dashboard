@@ -128,7 +128,7 @@ export default async function HomePage() {
             ) : (
               <span className="font-display text-ash">{nextEvent.name}</span>
             )}
-            <span className="text-muted">— {formatEventWhen(nextEvent.next_at)}</span>
+            <span className="text-muted">· {formatEventWhen(nextEvent.next_at)}</span>
           </div>
         )}
       </div>
@@ -163,7 +163,7 @@ export default async function HomePage() {
     <div className="overflow-hidden rounded-[var(--radius-card)] border border-gold-dim/40 shadow-[0_0_50px_-14px_rgba(200,149,42,0.45)]">
       <Image
         src="/banner-eilif.webp"
-        alt={`${SERVER_NAME} — ${SERVER_TAGLINE}`}
+        alt={`${SERVER_NAME} · ${SERVER_TAGLINE}`}
         width={1983}
         height={793}
         priority
@@ -288,7 +288,7 @@ export default async function HomePage() {
                   {/* Not a VikingLink: this whole teaser is already an <a> to
                       /oath, and nested anchors are invalid HTML. */}
                   <span className="font-display text-gold-light">{latestOathName}</span>
-                  <span className="italic"> — &ldquo;{latestOath.oath_text}&rdquo;</span>
+                  <span className="italic">: &ldquo;{latestOath.oath_text}&rdquo;</span>
                 </p>
               ) : (
                 <p className="mt-0.5 text-sm text-ash-dim">
@@ -378,7 +378,7 @@ export default async function HomePage() {
             <p className="mb-2 text-xs uppercase tracking-wider text-muted">Felled so far</p>
             {felledBosses.length === 0 ? (
               <p className="text-sm text-ash-dim">
-                None yet — every forsaken one still holds its ground.
+                None yet. Every forsaken one still holds its ground.
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">

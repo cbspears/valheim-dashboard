@@ -62,7 +62,7 @@ export function PhotoGrid({ photos }: { photos: CreditedPhoto[] }) {
       <EmptyState
         icon={<Camera size={28} />}
         title="No pictures yet"
-        message="Share a screenshot in Discord and tag the bot — it will land here with your name and the date."
+        message="Share a screenshot in Discord and tag the bot. It lands here with your name and the date."
       />
     );
   }

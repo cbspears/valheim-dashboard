@@ -57,7 +57,7 @@ export function LiveWorld({
     <div>
       <ZoomableMap
         src={src}
-        alt={`The known world — ${label}`}
+        alt={`The known world, ${label}`}
         markers={atNow ? pins.map((p) => ({ id: p.id, x: p.x, y: p.y, kind: p.kind, name: p.name, by: p.by_character_name, day: p.day, photos: photosByPin[p.id] ?? [] })) : []}
         corner={
           <div className="absolute right-3 top-3 flex items-center gap-2">
@@ -113,7 +113,7 @@ export function LiveWorld({
         </div>
       ) : (
         <p className="mt-3 text-center text-xs text-muted">
-          The saga replay unlocks as in-game days bank — {frames.length === 1 ? 'one day' : `${frames.length} days`} archived so far.
+          The saga replay unlocks as in-game days bank. So far {frames.length === 1 ? 'one day' : `${frames.length} days`} archived.
         </p>
       )}
     </div>
