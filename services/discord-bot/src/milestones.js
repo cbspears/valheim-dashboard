@@ -2,27 +2,45 @@
 //
 // The dashboard's evaluator (lib/milestones.ts, hooked into /api/gs-ingest)
 // stamps achieved_at / achieved_value on a milestone row the moment the warband
-// crosses a server-wide threshold, and queues the in-game voice line + Saga
-// event. THIS loop is the Discord half: it polls for deeds that are achieved but
-// not yet cross-posted (achieved_at not null AND announced_at is null), announces
-// ONE per tick (the spec's announce cap — bursts drain one snapshot at a time),
-// and sets announced_at so it never re-fires.
+// crosses a server-wide threshold, and writes the Saga event. THIS loop is the
+// announcement half: it polls for deeds that are achieved but not yet announced
+// (achieved_at not null AND announced_at is null), announces ONE per tick
+// (bursts drain one snapshot at a time), and sets announced_at so it never
+// re-fires.
+//
+// ONE ANNOUNCEMENT MOMENT (Charlie, 2026-08-22): the Discord embed AND the
+// in-game voice line fire together, here, in the same pass — the evaluator no
+// longer queues the voice line at threshold-crossing time. Several deeds
+// crossing at once are announced SEQUENTIALLY, oldest first, one per tick, with
+// MILESTONE_MIN_GAP_MS (default 1 min) of quiet between deed announcements.
+// Nothing is silenced; rarity is the thresholds' job.
 //
 // Backfilled deeds (the silent ones from scripts/seed-milestones-backfill.mjs)
 // already have announced_at set, so the plain filter excludes them — no
 // meta.backfill check needed.
 //
-// The embed carries the deed's title, ceremonial line, real-world equivalence,
-// and a "Next deed" progress line toward the nearest unachieved milestone (by
-// percentage). No @everyone — Great Deeds are celebratory, not a call to arms.
+// The embed carries the deed's title, ceremonial line (the description), real-
+// world equivalence, and a "Next deed" progress line toward the nearest
+// unachieved milestone (by percentage). No @everyone — Great Deeds are
+// celebratory, not a call to arms.
 //
 // Channel: env MILESTONE_CHANNEL (default 'valheim'). Needs the service-role
-// client to write announced_at; degrades to a warn-once skip without it, and
-// tolerates the milestones table not existing yet (pre-migration).
+// client to write announced_at + the voice line; degrades to a warn-once skip
+// without it, and tolerates the milestones table not existing yet.
 
 import { GOLD } from './format.js';
 
 const FOOTER = 'Eilif · The Cozy Canon Playthrough';
+const DEFAULT_MIN_GAP_MS = 60_000; // MILESTONE_MIN_GAP_MS default — 1 minute
+
+/** Interpolate {value} (the achieved aggregate) into a ceremonial line. */
+function renderLine(line, value) {
+  const text = String(line ?? '');
+  if (!text.includes('{value}')) return text;
+  const n = Number(value);
+  const shown = Number.isFinite(n) ? Math.round(n).toLocaleString('en-US') : '';
+  return text.replace(/\{value\}/g, shown);
+}
 
 // Postgres "relation does not exist" — the milestones migration isn't applied.
 function isMissingTable(error) {
@@ -87,9 +105,25 @@ function computeAggregates({ stats, sessions, onlineNames }) {
   };
 }
 
-export function createMilestonesAnnouncer({ db, writeDb, post, channel = 'valheim', log = console }) {
+export function createMilestonesAnnouncer({
+  db,
+  writeDb,
+  post,
+  channel = 'valheim',
+  state = {},
+  saveState = async () => {},
+  minGapMs = DEFAULT_MIN_GAP_MS,
+  log = console,
+}) {
   let warnedMissing = false;
   let warnedNoWrite = false;
+  const gapMs = Number.isFinite(minGapMs) && minGapMs >= 0 ? minGapMs : DEFAULT_MIN_GAP_MS;
+
+  // Epoch ms of the last deed announcement, persisted across restarts.
+  function lastPostAt() {
+    const t = Date.parse(state.lastMilestonePostAt ?? '');
+    return Number.isFinite(t) ? t : null;
+  }
 
   // The nearest unachieved milestone by percentage, with its progress %.
   async function nextDeedProgress(allRows) {
@@ -118,7 +152,7 @@ export function createMilestonesAnnouncer({ db, writeDb, post, channel = 'valhei
     return best;
   }
 
-  function buildEmbed(deed, next) {
+  function buildEmbed(deed, next, line) {
     const fields = [];
     if (deed.equivalence) fields.push({ name: 'That is', value: deed.equivalence, inline: false });
     if (next) fields.push({ name: 'Next deed', value: `${next.title} — ${next.pct}%`, inline: false });
@@ -126,7 +160,7 @@ export function createMilestonesAnnouncer({ db, writeDb, post, channel = 'valhei
       embeds: [
         {
           title: `🏆 A Great Deed: ${deed.title}`,
-          description: deed.line,
+          description: line,
           color: GOLD,
           fields,
           footer: { text: FOOTER },
@@ -144,13 +178,25 @@ export function createMilestonesAnnouncer({ db, writeDb, post, channel = 'valhei
       return 0;
     }
 
+    // Sequential pacing: when several deeds cross together they still all get
+    // announced, just one per MILESTONE_MIN_GAP_MS (default 1 min), oldest
+    // first. Nothing is dropped — the queue drains at a pace that still reads
+    // as one deed at a time rather than a wall of embeds.
+    const last = lastPostAt();
+    if (last != null && Date.now() - last < gapMs) return 0;
+
     // One achieved-but-unannounced deed, oldest first (announce cap = 1/tick).
+    // A whole evaluator cycle stamps the SAME achieved_at on every deed it
+    // crosses, so achieved_at alone leaves same-instant bursts in arbitrary
+    // order. `sort` (the ladder column the ledger orders by) breaks the tie, so
+    // a chain announces bottom rung first.
     const { data: pending, error } = await db
       .from('milestones')
       .select('*')
       .not('achieved_at', 'is', null)
       .is('announced_at', null)
       .order('achieved_at', { ascending: true })
+      .order('sort', { ascending: true })
       .limit(1);
 
     if (error) {
@@ -177,7 +223,26 @@ export function createMilestonesAnnouncer({ db, writeDb, post, channel = 'valhei
       log.warn?.(`[milestones] progress calc skipped: ${e.message}`);
     }
 
-    await post(channel, buildEmbed(deed, next));
+    // ── the single announcement moment: Discord embed + in-game voice line ──
+    const line = renderLine(deed.line, deed.achieved_value);
+
+    await post(channel, buildEmbed(deed, next, line));
+
+    // Eilif speaks the same ceremonial line center-screen. Exempt from the
+    // voice engine's ambient min-gap — a Great Deed is never small talk.
+    try {
+      const { error: vErr } = await writeDb.from('voice_lines').insert({
+        text: line,
+        speaker: 'Eilif',
+        kind: 'event',
+        meta: { source: 'milestone', id: deed.id, title: deed.title },
+        status: 'queued',
+        queued_at: new Date().toISOString(),
+      });
+      if (vErr) log.error?.(`[milestones] voice enqueue failed for ${deed.id}: ${vErr.message}`);
+    } catch (e) {
+      log.error?.(`[milestones] voice enqueue failed for ${deed.id}: ${e.message}`);
+    }
 
     // Mark announced (guarded so a concurrent tick can't double-post).
     const { error: upErr } = await writeDb
@@ -187,7 +252,10 @@ export function createMilestonesAnnouncer({ db, writeDb, post, channel = 'valhei
       .is('announced_at', null);
     if (upErr) log.error?.(`[milestones] mark announced failed for ${deed.id}: ${upErr.message}`);
 
-    log.info?.(`[milestones] announced "${deed.title}" to #${channel}`);
+    state.lastMilestonePostAt = new Date().toISOString();
+    await saveState();
+
+    log.info?.(`[milestones] announced "${deed.title}" to #${channel} (embed + voice)`);
     return 1;
   }
 

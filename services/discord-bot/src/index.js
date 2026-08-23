@@ -63,8 +63,15 @@ async function runLive() {
 
   // Optional: the Voice of the Hall brain. Off by default (VOICE_ENGINE=1).
   // Created before the recap so the evening POTY crown can hook into it.
+  // VOICE_MIN_GAP_MS gates AMBIENT lines only (atmosphere + callback): no ambient
+  // line within this many ms of the last voice line of any kind. Dawn lines,
+  // deeds, death milestones, POTY, titles and oath echoes are exempt.
+  const voiceMinGapMs = parseInt(process.env.VOICE_MIN_GAP_MS || '1800000', 10);
   const voice = process.env.VOICE_ENGINE === '1'
-    ? createVoiceEngine({ client: poster.client, db, post, state, saveState })
+    ? createVoiceEngine({
+        client: poster.client, db, post, state, saveState,
+        minGapMs: Number.isFinite(voiceMinGapMs) ? voiceMinGapMs : 1800000,
+      })
     : null;
 
   const recap = createRecap({
@@ -172,21 +179,33 @@ async function runLive() {
   }
 
   // Collective Milestones ("Great Deeds"): announce achieved-but-unannounced
-  // deeds to #valheim, one per tick. On by default (MILESTONES_ANNOUNCE=0 to
-  // disable); needs the service-role client to write announced_at. Tolerates the
-  // milestones table not existing yet (logs once, skips).
+  // deeds — Discord embed + in-game voice line together — one per tick, oldest
+  // first, with MILESTONE_MIN_GAP_MS (default 1 min) of quiet between deeds so
+  // a burst still lands one deed at a time. On by default
+  // (MILESTONES_ANNOUNCE=0 to disable); needs the service-role client to write
+  // announced_at + voice_lines. Tolerates the milestones table not existing yet.
   if (process.env.MILESTONES_ANNOUNCE !== '0') {
+    const MILESTONE_GAP_DEFAULT_MS = 60000;
+    const parsedMilestoneGap = parseInt(process.env.MILESTONE_MIN_GAP_MS || '', 10);
+    // Sanitized once, so a garbage env value can't reach the announcer OR the
+    // startup log as NaN — both see the fallback number.
+    const milestoneMinGapMs = Number.isFinite(parsedMilestoneGap) && parsedMilestoneGap >= 0
+      ? parsedMilestoneGap
+      : MILESTONE_GAP_DEFAULT_MS;
     const milestones = createMilestonesAnnouncer({
       db,
       writeDb,
       post,
+      state,
+      saveState,
+      minGapMs: milestoneMinGapMs,
       channel: process.env.MILESTONE_CHANNEL || 'valheim',
     });
     const interval = parseInt(process.env.MILESTONES_INTERVAL_MS || '120000', 10);
     const milestonesLoop = safe('milestones', () => milestones.tick());
     await milestonesLoop();
     timers.push(setInterval(milestonesLoop, interval));
-    extra += `, milestones every ${interval}ms`;
+    extra += `, milestones every ${interval}ms (min gap ${milestoneMinGapMs}ms)`;
   }
 
   // Ops cockpit heartbeat: reports this bot's liveness + its gated sub-loops'

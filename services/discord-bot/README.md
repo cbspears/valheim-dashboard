@@ -69,22 +69,48 @@ as "Eilif"; this bot decides **what** gets queued and **when**, writing rows to 
 table (service role). Eilif is a *presence, not a chatterbox*.
 
 **Ambient cadence:** roughly **one ambient line per 2 hours of someone-online time** — never to an
-empty hall. A 60s tick accumulates online-minutes whenever `server_status.player_count > 0`; at
-120 accumulated minutes (with players still on) it queues one line and resets. **Any** event or
-manual line also resets the clock. The accumulator lives in `state.json`, so restarts don't
-double-speak. Ambient content rotates over ~21 templates (day-cycle ambience using the world day,
-dated **callbacks** to deaths from ~1/2/4 weeks ago, and pure atmosphere), never repeating a
-template within its last 5 uses.
+empty hall — **and** never within `VOICE_MIN_GAP_MS` (default 30 min) of the most recent voice line
+of *any* kind. A 60s tick accumulates online-minutes whenever `server_status.player_count > 0`; at
+120 accumulated minutes it queues one line and resets (if the gap isn't clear the cadence is *held*,
+not thrown away). **Any** event or manual line also resets the clock. The accumulator lives in
+`state.json`, so restarts don't double-speak. Ambient content rotates over atmosphere lines and
+dated **callbacks** to deaths from ~1/2/4 weeks ago, never repeating a template within its last 5
+uses.
 
-**Event lines (immediate; bypass the cadence, reset the clock):**
+**Whispers on quiet nights** — a *pool swap* for that same ambient slot, not extra volume (same
+clock, same gap): when exactly **1** viking is online, Eilif whispers to them by name; when **2–3**
+are online and the `events` table has been silent for 45 minutes, it uses the quiet-crew pool. Any
+other hall (4+, or a busy one) gets the normal atmosphere/callback lines. Whispers carry
+`meta.source = 'whisper'`.
+
+**Dawn lines** — their own clock: once on **every 3rd world day** (`world_day % 3 == 0`), only while
+players are online. Not on the 2h cadence and not gap-limited. Most name **Eilif**, so players can
+tell these from vanilla Valheim's own on-screen text.
+
+**Event lines (immediate; exempt from every gap, reset the ambient clock):**
 - **POTY coronation** — when the evening recap crowns a Player of the Day (thin hook at the
-  `poty_history` insert): *"The hall has spoken. Tonight the crown rests on {name}."*
-- **Death milestones** — every 50th warband death: *"That was the warband's {n}th death. The ravens
-  grow fat."* (idempotent via `state.json`).
-- **First biome** — a `discovery` event entering a new biome earns a welcome line.
+  `poty_history` insert).
+- **Death milestones — per player**, at **20 / 50 / 100 / then every +100** deaths, once each
+  (tiers tracked per viking in `state.json`; the first pass after this shipped adopts everyone's
+  current tier *silently*). The old every-50th-**warband**-death line is retired.
 - **Oath echoes** — an in-game oath (`oaths` where `source='ingame'`, `announced_at` null) gets an
-  in-game echo *"The hall heard you, {firstName}."* **and** is cross-posted to #valheim; then
-  `announced_at` is set.
+  in-game echo **and** is cross-posted to #valheim; then `announced_at` is set.
+- **Great Deeds** and **title changes** — queued by `milestones.js` / `titles.js` at their own
+  announce moment (see below).
+- There is **no** first-biome discovery line — removed entirely.
+
+## Great Deeds & titles (announcements)
+**Great Deeds** (collective milestones): the dashboard's evaluator stamps `achieved_at`; this bot
+announces them. **One announcement moment** — the Discord embed **and** the in-game voice line fire
+together, in the same pass. Deeds that cross at the same instant are drained **one per tick, oldest
+first** (ties broken by the ladder's `sort`), with `MILESTONE_MIN_GAP_MS` (**default 60000 = 1 min**)
+of quiet between them; `MILESTONES_INTERVAL_MS` sets how often the announcer looks (keep it at or
+below the gap, or the loop — not the gap — paces the drain). Nothing is ever silenced; rarity is the
+thresholds' job. Channel: `MILESTONE_CHANNEL` (default `valheim`).
+
+**Titles**: the loop polls `/api/titles` and, whenever a viking's computed title **changes**, posts a
+⚔️ line to #server and queues the matching voice line — no rate limiting, the API's hysteresis makes
+changes rare. A viking's first-ever title is recorded silently.
 
 **Puppet mode:** a member with **Administrator** permission can say `@Eilif say: <line>` to queue a
 `manual` line (reacts **🗣️**). Non-admins are ignored silently; ordinary oath/bio/role messages pass
@@ -108,6 +134,11 @@ journalctl -u eilif-discord-bot -f
 | `GUILD_ID` | server id |
 | `CHANNEL_VALHEIM` / `CHANNEL_SERVER` | channel ids |
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` | reads |
-| `SUPABASE_SERVICE_ROLE_KEY` | only used by `scripts/mark-boss.js` |
+| `SUPABASE_SERVICE_ROLE_KEY` | all writes: voice lines, oaths, titles, deed `announced_at`, `scripts/mark-boss.js` |
 | `POLL_INTERVAL_MS` | event relay cadence (default 15s) |
+| `VOICE_MIN_GAP_MS` | min quiet before an **ambient** line (default `1800000` = 30 min; 0 disables). Dawn/event lines ignore it |
+| `MILESTONE_MIN_GAP_MS` | quiet between two Great Deed announcements (default `60000` = 1 min) |
+| `MILESTONES_INTERVAL_MS` | how often the deed announcer polls (keep ≤ the gap; live `.env` is `60000`) |
 | `TZ` | recap timezone (`America/Chicago`) |
+
+Full annotated list: `.env.example`.

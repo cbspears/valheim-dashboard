@@ -65,6 +65,9 @@ const CAUSE_LABELS: Record<string, string> = {
   turret: 'Friendly ballista fire',
   boat: 'Went down with the ship',
   self: 'Their own hand',
+  // Valheim's catch-all HitType for a killer the client couldn't name — mirrors
+  // lib/episodes.ts. Unmapped it would show up as the row "Enemyhit".
+  enemyhit: 'Unseen foe',
   edgeofworld: 'The edge of the world',
   ashlandsocean: 'The boiling seas of Ashlands',
   ashlandsoceanfloor: 'The boiling seas of Ashlands',
@@ -117,6 +120,7 @@ const CAUSE_OBSERVATION: Record<string, string> = {
   turret: 'A ballista does not know friend from foe.',
   boat: 'The sea takes ship and sailor together, when it wants to.',
   self: 'Some deaths carry no one’s name but the fallen’s own.',
+  enemyhit: 'Some killers never step into the torchlight long enough to be named.',
   edgeofworld: 'The world of Eilif has an edge, and someone always finds it.',
   ashlandsocean: 'The Ashlands do not cool for anyone.',
   ashlandsoceanfloor: 'The Ashlands do not cool for anyone.',

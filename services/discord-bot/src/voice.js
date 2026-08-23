@@ -3,58 +3,111 @@
 // A server-side game plugin polls GET /api/voice and SPEAKS queued lines
 // in-game as "Eilif". THIS module decides what gets queued and when, writing
 // rows to the `voice_lines` table (service-role). It is a presence, not a
-// chatterbox: roughly ONE ambient line per 2 hours of someone-online time,
-// never to an empty hall. Event lines (POTY crown, death milestones, first
-// biome, in-game oaths) bypass the cadence and reset its clock. Admins can
-// also puppet Eilif with `@Eilif say: <line>`.
+// chatterbox.
+//
+// Pacing model (Charlie's decisions, 2026-08-22):
+//   • AMBIENT (atmosphere + callback) — one line per ~2 HOURS of someone-online
+//     time, AND never within VOICE_MIN_GAP_MS (default 30 min) of the most
+//     recent voice line of ANY kind. Never to an empty hall.
+//   • WHISPERS ON QUIET NIGHTS — not extra volume: when the ambient slot fires
+//     to a nearly-empty hall (exactly 1 viking online, or 2–3 with no `events`
+//     row in the last 45 minutes), the ambient POOL is swapped for a closer,
+//     spookier one that says a viking's name. Same clock, same gap.
+//   • DAWN — a special ambient class on its own clock: once on every 3rd world
+//     day (worldDay % 3 === 0), only while players are online. NOT on the 2h
+//     clock and NOT subject to the 30-minute gap. Most dawn lines name Eilif so
+//     players can tell these are custom, not vanilla.
+//   • EVENTS — per-player death milestones, in-game oath echoes, the evening
+//     POTY crown, admin `@Eilif say:` lines: EXEMPT from every gap. Great Deeds
+//     and title proclamations are queued by milestones.js / titles.js at their
+//     own announce moment (also exempt).
+//
+// Retired here: the warband-every-50th-death line (now per-player tiers) and
+// first-biome discovery welcomes (removed entirely).
 //
 // Voice matches the saga register of format.js — evocative, dry, never
-// mechanical. Gated behind VOICE_ENGINE=1 (see index.js), like GALLERY_INGEST.
+// mechanical, and never an echo of vanilla Valheim's own on-screen text.
+// Gated behind VOICE_ENGINE=1 (see index.js), like GALLERY_INGEST.
 
 import { serviceClient } from './supabase.js';
 
 const TICK_MS = 60_000;                 // the caller ticks us every 60s
 const CADENCE_MINUTES = 120;            // one ambient line per ~2h online-time
 const STALE_MS = 24 * 3600 * 1000;      // queued-but-unspoken lines expire after 24h
-const DEATH_MILESTONE_STEP = 50;        // announce every Nth warband death
 const RECENT_KEEP = 5;                  // no template repeats within its last 5 uses
-const ANNOUNCED_CAP = 200;              // bound the discovery-dedupe list
+const DEFAULT_MIN_GAP_MS = 1_800_000;   // VOICE_MIN_GAP_MS default — ambient only
+const DAWN_EVERY_DAYS = 3;              // dawn line on every 3rd world day
+const DEATH_TIER_STEP = 100;            // after 100, a tier every +100 deaths
+const WHISPER_CREW_MAX = 3;             // 2..3 online = a quiet crew
+const WHISPER_QUIET_MS = 45 * 60_000;   // "nothing eventful" window for the crew whisper
 
 // ── Content bank (saga register — match format.js) ────────────────────────
 
-// (a) Day-cycle ambience — the current world day rides in as {day}.
-const DAY_CYCLE = [
-  'Day {day}. The mists have not lifted, and neither have we.',
-  'Day {day} in the realm. The longfire holds; so does the clan.',
-  'Another dawn tallied — day {day}. The dead keep count more carefully than we do.',
-  'Day {day}. Somewhere a greydwarf gnaws a fence, patient as the tide.',
-  'The saga turns to day {day}. Old horns, new hangovers.',
-  'Day {day}, and the sea is still hungry. It always is.',
-  'Day {day}. The Allfather watches the ones who rise before the ravens.',
+// (a) Dawn — a special ambient class, once every 3rd world day. {day} rides in.
+// Most of these name Eilif: the hall should sound like it knows its own name.
+export const DAWN = [
+  'Day {day} over Eilif. The mists have not lifted. Neither, stubbornly, have we.',
+  'Dawn on day {day}. Eilif counted the hearths still burning and found them all.',
+  'Day {day}. Eilif has kept the roof on this long. The rest is your business.',
+  'The light comes back to Eilif on day {day} — and so do the things that hunt in it.',
+  'Day {day}. Eilif marks the ones who rise first, and says nothing of the ones who do not.',
+  'Another dawn on Eilif: day {day}. The mead survived the night. Not everything did.',
+  'Day {day}. Eilif has seen worse mornings. Not many, and not lately.',
 ];
 
-// (c) Pure atmosphere — no data, just weather in the bones.
-const ATMOSPHERE = [
-  'The wind carries the smell of pine and old smoke. A good omen, or none at all.',
-  'Somewhere out past the fog, something large turned over in its sleep. Best not to wake it.',
+// (b) Pure atmosphere — no data, just weather in the bones.
+export const ATMOSPHERE = [
+  'Pine smoke and cold salt on the wind. An omen, or only weather — Eilif has never been sure.',
+  'Out past the fog, something large turned over in its sleep. Leave it where it lies.',
   'The mead is warm, the night is long, and the trolls are only mostly asleep.',
   'A raven circled the hall three times, then thought better of it. Wise bird.',
-  'The longhouse creaks like an old ship. It remembers every viking who leaned on it.',
+  'Eilif creaks like an old ship at anchor. It remembers every viking who leaned on its walls.',
   'Rain on the roof, wolves at the treeline. The realm keeps its own counsel tonight.',
-  'The forge has gone cold, but the coals still whisper of the blades to come.',
-  'Out on the black water the serpents wait, patient as grudges.',
-  'The stones by the fire have heard a hundred oaths. They keep them all.',
-  'Quiet in the hall — the kind of quiet that comes before a good story or a bad death.',
+  'The forge has gone cold, but the coals are still muttering about the blades to come.',
+  'Out on the black water the serpents wait, patient as a grudge.',
+  'The stones round the longfire have heard a hundred oaths sworn over them. They have kept every one.',
+  'Quiet in the hall — the kind that comes before a good story or a bad death.',
 ];
 
-// (b) Callbacks — dated deaths from ~1/2/4 weeks ago, phrased darkly. {span}
+// (c) Callbacks — dated deaths from ~1/2/4 weeks ago, phrased darkly. {span}
 // is the time-ago label, {name}/{cause} come from the archived event.
-const CALLBACK_TEMPLATES = [
-  '{span} this night, {name} was taken — {cause}. The realm remembers. So do the things that did it.',
-  '{span}, the hall lost {name} to the dark: {cause}. A saga is only the deaths we choose to retell.',
+export const CALLBACK_TEMPLATES = [
+  '{span} tonight, the dark took {name} — {cause}. Eilif remembers. So does the thing that did it.',
+  '{span} this hall lost {name}: {cause}. A saga is only the deaths we choose to tell twice.',
   'Cast your horn back {span}: {name} fell, and {cause}. The ravens have not forgotten the meal.',
-  '{span} {name} met the void — {cause}. The gods keep a stool warm for the bold.',
+  '{span} {name} went into the void — {cause}. The gods keep a stool warm for the bold and a cold one for the careless.',
 ];
+
+// (d) Whispers on quiet nights — the ambient pool SWAP for a near-empty hall.
+// SOLO: exactly one viking online. Second person, spooky-cozy, names them.
+export const SOLO_WHISPERS = [
+  'You are alone in Eilif tonight, {firstName}. Probably. The fire disagrees.',
+  'Just you and the wind out here, {firstName}. One of you is being watched. It is not the wind.',
+  'Odin sees you, {firstName}. He has always seen you. He thinks the roof pitch is bold.',
+  'No one else came tonight, {firstName}. Something did. It is keeping its distance. For now.',
+  'The hall counts one heartbeat, {firstName}, and two sets of footsteps. Sleep well.',
+  'Work while it is quiet, {firstName}. Quiet is a thing the dark lends out, never gives.',
+];
+
+// QUIET CREW: 2–3 online and nothing eventful in the last 45 minutes. Some of
+// these name a viking; some let the whole crew feel watched.
+export const CREW_WHISPERS = [
+  'No deeds tonight. Only work, and the dark, and the sound of someone counting you from the treeline.',
+  'The hall is quiet. The world is not. Odin sees you too, {firstName}. Especially you.',
+  'Heads down, hammers busy. The ravens take notes on the quiet ones.',
+  'A small crew and a long night. Eilif has known both to end well. Not often.',
+  'Nothing has gone wrong yet, {firstName}. Eilif has decided to find that suspicious.',
+  'Torchlight only reaches so far. Past it, something has been very patient tonight.',
+];
+
+// (e) Per-player death milestones — tiers at 20, 50, 100, then every +100.
+// {name} is the first name, {count} the death total at the tier.
+export const DEATH_LINES = {
+  20: 'Mark it in the saga: {name} has fallen twenty times, and twenty times stood back up. Eilif keeps the count.',
+  50: 'Fifty deaths for {name}. The ravens know that name by heart now — and still it walks back in through the door.',
+  100: 'One hundred deaths, {name}. A round number, honestly earned. Eilif has stopped flinching.',
+  next: '{count} deaths, {name}. Eilif has run out of surprise, but never out of ink.',
+};
 
 // ── tiny deterministic RNG (mulberry32) + string hash (mirrors format.js) ──
 function mulberry32(a) {
@@ -69,24 +122,51 @@ function mulberry32(a) {
 
 const firstName = (s) => String(s || '').trim().split(/\s+/)[0] || 'viking';
 
-export function createVoiceEngine({ client, db, post, state, saveState, log = console, writeDb: injectedWriteDb }) {
+/** Highest death tier a total has crossed: 20, 50, 100, then every +100. 0 = none. */
+export function deathTier(deaths) {
+  const n = Math.floor(Number(deaths) || 0);
+  if (n >= 100) return Math.floor(n / DEATH_TIER_STEP) * DEATH_TIER_STEP;
+  if (n >= 50) return 50;
+  if (n >= 20) return 20;
+  return 0;
+}
+
+/** The line for a crossed death tier, with {name}/{count} filled in. */
+export function deathMilestoneLine(tier, name) {
+  const template = DEATH_LINES[tier] ?? DEATH_LINES.next;
+  return template.replace(/\{name\}/g, firstName(name)).replace(/\{count\}/g, String(tier));
+}
+
+export function createVoiceEngine({
+  client,
+  db,
+  post,
+  state,
+  saveState,
+  log = console,
+  writeDb: injectedWriteDb,
+  minGapMs = DEFAULT_MIN_GAP_MS,
+}) {
   // `injectedWriteDb` is a test seam; production builds the real service client.
   const writeDb = injectedWriteDb ?? (process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceClient() : null);
   if (!writeDb) {
     log.warn?.('[voice] no SUPABASE_SERVICE_ROLE_KEY — voice engine disabled (reads only)');
   }
+  const gapMs = Number.isFinite(minGapMs) && minGapMs >= 0 ? minGapMs : DEFAULT_MIN_GAP_MS;
 
   function st() {
-    if (!state.voice) {
-      state.voice = {
-        onlineMinutes: 0,       // cadence accumulator (someone-online minutes)
-        ambientCount: 0,        // total ambient lines queued (variety seed)
-        recentTemplates: [],    // last RECENT_KEEP template ids (no-repeat)
-        lastDeathMilestone: 0,  // highest death-count multiple already announced
-        announcedDiscoveries: [], // discovery event ids already welcomed
-      };
-    }
-    return state.voice;
+    if (!state.voice || typeof state.voice !== 'object') state.voice = {};
+    const v = state.voice;
+    if (typeof v.onlineMinutes !== 'number') v.onlineMinutes = 0;   // ambient cadence accumulator
+    if (typeof v.ambientCount !== 'number') v.ambientCount = 0;     // variety seed
+    if (!Array.isArray(v.recentTemplates)) v.recentTemplates = [];  // last RECENT_KEEP template ids
+    if (!v.deathTiers || typeof v.deathTiers !== 'object') v.deathTiers = {}; // name -> last tier said
+    if (typeof v.deathTiersSeeded !== 'boolean') v.deathTiersSeeded = false;
+    if (!('lastDawnDay' in v)) v.lastDawnDay = null;                // world day of the last dawn line
+    // Retired mechanics — drop their keys so state.json stays honest.
+    delete v.lastDeathMilestone;   // warband-every-50th (now per-player tiers)
+    delete v.announcedDiscoveries; // first-biome welcomes (removed)
+    return v;
   }
 
   // Queue a line for the in-game plugin to speak. speaker defaults to 'Eilif'.
@@ -120,14 +200,39 @@ export function createVoiceEngine({ client, db, post, state, saveState, log = co
     };
   }
 
+  // ── global pacing (ambient only) ─────────────────────────────────────────
+
+  // When the most recent voice line of ANY kind was queued, in epoch ms.
+  // voice_lines has no public-read policy, so this must use the service client.
+  async function lastVoiceQueuedAt() {
+    if (!writeDb) return null;
+    const { data, error } = await writeDb
+      .from('voice_lines')
+      .select('queued_at')
+      .order('queued_at', { ascending: false })
+      .limit(1);
+    if (error) {
+      log.warn?.(`[voice] gap check failed, treating hall as quiet: ${error.message}`);
+      return null;
+    }
+    const ts = Array.isArray(data) ? data[0]?.queued_at : data?.queued_at;
+    const t = ts ? Date.parse(ts) : NaN;
+    return Number.isFinite(t) ? t : null;
+  }
+
+  // Milliseconds still owed before an AMBIENT line may be queued (0 = clear).
+  async function ambientGapRemaining() {
+    if (gapMs <= 0) return 0;
+    const last = await lastVoiceQueuedAt();
+    if (last == null) return 0;
+    return Math.max(0, gapMs - (Date.now() - last));
+  }
+
   // ── ambient content selection ────────────────────────────────────────────
 
   // Build the candidate lines for one category as {id, text}. Callback candidates
   // require a DB read, so they're only built when the roll actually lands there.
   async function buildCategory(cat, status, rand) {
-    if (cat === 'dayCycle') {
-      return DAY_CYCLE.map((t, i) => ({ id: `day:${i}`, text: t.replace(/\{day\}/g, status.worldDay) }));
-    }
     if (cat === 'atmosphere') {
       return ATMOSPHERE.map((t, i) => ({ id: `atmo:${i}`, text: t }));
     }
@@ -179,26 +284,97 @@ export function createVoiceEngine({ client, db, post, state, saveState, log = co
     return null;
   }
 
+  // Online character names, sorted so a seeded pick is stable across ticks.
+  async function onlineRoster() {
+    const { data, error } = await db.from('players').select('character_name, is_online');
+    if (error) {
+      log.warn?.(`[voice] roster read failed: ${error.message}`);
+      return [];
+    }
+    return (data || [])
+      .filter((p) => p.is_online && String(p.character_name || '').trim())
+      .map((p) => String(p.character_name).trim())
+      .sort();
+  }
+
+  // Has the saga recorded NOTHING for 45 minutes? A read failure counts as a
+  // busy hall, so a broken query can never invent a quiet night.
+  async function hallHasBeenQuiet() {
+    const since = new Date(Date.now() - WHISPER_QUIET_MS).toISOString();
+    const { data, error } = await db
+      .from('events')
+      .select('id')
+      .gte('created_at', since)
+      .limit(1);
+    if (error) {
+      log.warn?.(`[voice] quiet check failed, treating the hall as busy: ${error.message}`);
+      return false;
+    }
+    return (data || []).length === 0;
+  }
+
+  // Whispers on quiet nights: candidates for the ambient slot when the hall is
+  // nearly empty. Returns [] when the night doesn't qualify — then the normal
+  // atmosphere/callback pools run, untouched. This is a POOL SWAP, never an
+  // extra line: the 2h clock and VOICE_MIN_GAP_MS still decide *when*.
+  async function buildWhispers(status, rand = Math.random) {
+    // Presence must be unambiguous: whispers lean on WHO is in the hall, so an
+    // empty/stale roster, or one that disagrees with server_status, says
+    // nothing clever and lets the normal pools run.
+    const roster = await onlineRoster();
+    const count = roster.length;
+    if (count < 1 || count > WHISPER_CREW_MAX) return [];
+    const reported = status.playerCount | 0;
+    if (reported > 0 && reported !== count) return [];
+
+    let pool;
+    let prefix;
+    if (count === 1) {
+      pool = SOLO_WHISPERS;
+      prefix = 'solo';
+    } else {
+      if (!(await hallHasBeenQuiet())) return [];
+      pool = CREW_WHISPERS;
+      prefix = 'crew';
+    }
+
+    // One viking, picked deterministically from the (sorted) online roster.
+    const named = roster[Math.floor(rand() * roster.length)];
+    return pool.map((text, i) => ({
+      id: `${prefix}:${i}`,
+      source: 'whisper',
+      text: text.replace(/\{firstName\}/g, firstName(named)),
+    }));
+  }
+
+  // No-repeat guard: prefer templates outside the last RECENT_KEEP uses.
+  function chooseFresh(cand, v, rand) {
+    const recent = v.recentTemplates || [];
+    const fresh = cand.filter((c) => !recent.includes(c.id));
+    const pool = fresh.length ? fresh : cand;
+    return pool[Math.floor(rand() * pool.length)];
+  }
+
   // Weighted category pick + no-repeat guard. Deterministic-ish per world-day.
+  // Dawn lines are NOT in this pool — they run on their own every-3rd-day clock.
   async function pickAmbient(status) {
     const v = st();
     const rand = mulberry32(((status.worldDay | 0) * 1000 + (v.ambientCount | 0)) >>> 0);
+
+    // A quiet night takes the slot before the normal pools are ever consulted.
+    const whispers = await buildWhispers(status, rand);
+    if (whispers.length) return chooseFresh(whispers, v, rand);
+
     const roll = rand();
-    // ≈ atmosphere 40% / day-cycle 35% / callback 25% (callback only if data exists;
-    // day-cycle & atmosphere are always non-empty, so callback only runs its DB
-    // read when it wins the FIRST slot — keeping ticks cheap).
-    let order;
-    if (roll < 0.25) order = ['callback', 'atmosphere', 'dayCycle'];
-    else if (roll < 0.6) order = ['dayCycle', 'atmosphere', 'callback'];
-    else order = ['atmosphere', 'dayCycle', 'callback'];
+    // ≈ atmosphere 65% / callback 35% (callback only if a dated death exists;
+    // atmosphere is always non-empty, so callback only runs its DB read when it
+    // wins the FIRST slot — keeping ticks cheap).
+    const order = roll < 0.35 ? ['callback', 'atmosphere'] : ['atmosphere', 'callback'];
 
     for (const cat of order) {
       const cand = await buildCategory(cat, status, rand);
       if (!cand.length) continue;
-      const recent = v.recentTemplates || [];
-      const fresh = cand.filter((c) => !recent.includes(c.id));
-      const pool = fresh.length ? fresh : cand;
-      return pool[Math.floor(rand() * pool.length)];
+      return chooseFresh(cand, v, rand);
     }
     return null;
   }
@@ -207,7 +383,11 @@ export function createVoiceEngine({ client, db, post, state, saveState, log = co
     const v = st();
     const pick = await pickAmbient(status);
     if (!pick) return false;
-    const ok = await enqueue(pick.text, 'ambient', { template: pick.id, world_day: status.worldDay });
+    const ok = await enqueue(pick.text, 'ambient', {
+      template: pick.id,
+      world_day: status.worldDay,
+      ...(pick.source ? { source: pick.source } : {}),
+    });
     if (!ok) return false;
     v.ambientCount = (v.ambientCount | 0) + 1;
     v.recentTemplates = [...(v.recentTemplates || []), pick.id].slice(-RECENT_KEEP);
@@ -215,7 +395,37 @@ export function createVoiceEngine({ client, db, post, state, saveState, log = co
     return true;
   }
 
-  // ── event lines (immediate; bypass cadence, reset the clock) ──────────────
+  // ── dawn: every 3rd world day, once, only to a populated hall ─────────────
+  // Independent of the 2h ambient clock and exempt from VOICE_MIN_GAP_MS. The
+  // once-per-day guard is an equality check, so a world wipe (day counter back
+  // to 1) starts the cycle over instead of going silent.
+  async function checkDawn(status) {
+    const v = st();
+    const day = status.worldDay | 0;
+    if (!(day > 0) || day % DAWN_EVERY_DAYS !== 0) return false;
+    if ((status.playerCount ?? 0) <= 0) return false;
+    if (v.lastDawnDay === day) return false;
+
+    const rand = mulberry32(((day * 7919) >>> 0));
+    const cand = DAWN.map((t, i) => ({ id: `dawn:${i}`, text: t.replace(/\{day\}/g, String(day)) }));
+    const recent = v.recentTemplates || [];
+    const fresh = cand.filter((c) => !recent.includes(c.id));
+    const pool = fresh.length ? fresh : cand;
+    const pick = pool[Math.floor(rand() * pool.length)];
+
+    const ok = await enqueue(pick.text, 'ambient', {
+      source: 'dawn',
+      template: pick.id,
+      world_day: day,
+    });
+    if (!ok) return false;
+    v.lastDawnDay = day;
+    v.recentTemplates = [...recent, pick.id].slice(-RECENT_KEEP);
+    log.info?.(`[voice] dawn line queued for day ${day} (${pick.id})`);
+    return true;
+  }
+
+  // ── event lines (immediate; exempt from every gap, reset the ambient clock) ─
 
   // In-game oaths: echo in-game + cross-post to #valheim, then mark announced.
   async function checkOathEchoes() {
@@ -233,7 +443,10 @@ export function createVoiceEngine({ client, db, post, state, saveState, log = co
     let n = 0;
     for (const o of data || []) {
       const name = (o.character_name || '').trim() || 'A viking';
-      await enqueue(`The hall heard you, ${firstName(name)}.`, 'event', { oath_id: o.id });
+      await enqueue(`Eilif heard you, ${firstName(name)}. These walls will hold you to it.`, 'event', {
+        source: 'oath',
+        oath_id: o.id,
+      });
       try {
         await post('valheim', {
           embeds: [
@@ -254,86 +467,79 @@ export function createVoiceEngine({ client, db, post, state, saveState, log = co
     return n;
   }
 
-  // Death milestones: every Nth warband death crosses a threshold once.
-  async function checkDeathMilestone() {
+  // Per-player death milestones: 20, 50, 100, then every +100 deaths, once each.
+  // Deaths come from player_stats (the cumulative per-character counter the
+  // dashboard already trusts), joined to players for the name.
+  async function checkDeathMilestones() {
     const v = st();
-    const { count, error } = await db
-      .from('events')
-      .select('*', { count: 'exact', head: true })
-      .eq('type', 'death');
-    if (error || count == null) return 0;
-    const milestone = Math.floor(count / DEATH_MILESTONE_STEP) * DEATH_MILESTONE_STEP;
-    if (milestone >= DEATH_MILESTONE_STEP && milestone > (v.lastDeathMilestone || 0)) {
-      const ok = await enqueue(
-        `That was the warband's ${milestone}th death. The ravens grow fat.`,
-        'event',
-        { death_total: count, milestone },
-      );
-      if (ok) {
-        v.lastDeathMilestone = milestone;
-        log.info?.(`[voice] death milestone ${milestone} announced`);
-        return 1;
-      }
+    const [playersRes, statsRes] = await Promise.all([
+      db.from('players').select('id, character_name'),
+      db.from('player_stats').select('player_id, deaths'),
+    ]);
+    if (playersRes.error || statsRes.error) {
+      log.warn?.('[voice] death milestone read failed — skipping this tick');
+      return 0;
     }
-    return 0;
-  }
 
-  // First-biome discoveries: welcome a viking into a new land, once per event.
-  async function checkDiscoveries() {
-    const v = st();
-    const { data, error } = await db
-      .from('events')
-      .select('id, character_name, metadata, created_at')
-      .eq('type', 'discovery')
-      .order('created_at', { ascending: false })
-      .limit(20);
-    if (error) return 0;
-    const seen = new Set(v.announcedDiscoveries || []);
+    const idToName = new Map();
+    for (const p of playersRes.data || []) {
+      const nm = (p.character_name || '').trim();
+      if (nm) idToName.set(p.id, nm);
+    }
+    // Keyed by NAME, keeping the highest count: duplicate players rows (the
+    // 2026-07-25 Testman incident) must never split or multiply a viking's tally.
+    const deathsByName = new Map();
+    for (const s of statsRes.data || []) {
+      const nm = idToName.get(s.player_id);
+      if (!nm) continue;
+      const n = Math.floor(Number(s.deaths) || 0);
+      deathsByName.set(nm, Math.max(deathsByName.get(nm) ?? 0, n));
+    }
+    if (deathsByName.size === 0) return 0;
+
+    // First pass after this mechanic shipped: adopt everyone's CURRENT tier
+    // silently, so a roster that already died plenty doesn't get a storm of
+    // back-dated proclamations. Vikings who appear later start from tier 0.
+    if (!v.deathTiersSeeded) {
+      for (const [name, deaths] of deathsByName) {
+        const tier = deathTier(deaths);
+        if (tier > 0) v.deathTiers[name] = tier;
+      }
+      v.deathTiersSeeded = true;
+      log.info?.(`[voice] death tiers seeded silently for ${deathsByName.size} viking(s)`);
+      return 0;
+    }
+
     let n = 0;
-    for (const ev of data || []) {
-      if (seen.has(ev.id)) continue;
-      const biome = biomeFromDiscovery(ev.metadata);
-      if (!biome) continue; // not a first-biome discovery we can phrase
-      const name = (ev.character_name || '').trim() || 'A viking';
-      const ok = await enqueue(
-        `${firstName(name)} has set foot in the ${biome} where none of the clan had walked. New horizons, new ways to be eaten.`,
-        'event',
-        { discovery_id: ev.id, biome },
-      );
+    for (const [name, deaths] of deathsByName) {
+      const tier = deathTier(deaths);
+      if (tier <= 0) continue;
+      const last = Math.floor(Number(v.deathTiers[name]) || 0);
+      if (tier <= last) continue;
+      const ok = await enqueue(deathMilestoneLine(tier, name), 'event', {
+        source: 'deaths',
+        player: name,
+        tier,
+        deaths,
+      });
       if (ok) {
-        seen.add(ev.id);
+        v.deathTiers[name] = tier;
         n++;
+        log.info?.(`[voice] death milestone ${tier} announced for ${name}`);
       }
     }
-    // remember what we've welcomed (bounded) so restarts don't re-welcome
-    v.announcedDiscoveries = [...seen].slice(-ANNOUNCED_CAP);
-    if (n) log.info?.(`[voice] welcomed ${n} new-biome discovery(ies)`);
     return n;
-  }
-
-  // Pull a biome name out of a discovery event's metadata, if it looks like a
-  // first-time biome entry. Lenient about the exact shape the log poller emits.
-  function biomeFromDiscovery(meta) {
-    if (!meta || typeof meta !== 'object') return null;
-    const biome = [meta.biome, meta.region, meta.location, meta.detail]
-      .map((x) => (typeof x === 'string' ? x.trim() : ''))
-      .find(Boolean);
-    if (!biome) return null;
-    // If the event carries an explicit not-first flag, skip it; otherwise a
-    // discovery event is treated as a first entry (idempotent via the id set).
-    if (meta.first === false || meta.first_time === false) return null;
-    return biome;
   }
 
   // ── POTY coronation (called by recap.js at the poty_history insert) ───────
   async function announcePoty(poty, worldDay = null) {
     if (!poty?.name) return;
     const name = String(poty.name).trim();
-    await enqueue(`The hall has spoken. Tonight the crown rests on ${firstName(name)}.`, 'event', {
-      poty: name,
-      award: poty.key,
-      world_day: worldDay,
-    });
+    await enqueue(
+      `The hall has spoken: tonight the crown rests on ${firstName(name)}. Eilif will remember it come morning.`,
+      'event',
+      { source: 'poty', poty: name, award: poty.key, world_day: worldDay },
+    );
     st().onlineMinutes = 0; // an event line resets the ambient clock
     await saveState();
     log.info?.(`[voice] POTY coronation queued for ${name}`);
@@ -359,20 +565,30 @@ export function createVoiceEngine({ client, db, post, state, saveState, log = co
 
     const status = await readStatus();
 
-    // Immediate event lines first — they bypass the cadence and reset its clock.
+    // Immediate event lines first — exempt from every gap; they reset the
+    // ambient clock so Eilif doesn't follow a proclamation with small talk.
     let events = 0;
     events += await checkOathEchoes();
-    events += await checkDeathMilestone();
-    events += await checkDiscoveries();
+    events += await checkDeathMilestones();
+
+    // Dawn rides its own every-3rd-day clock, gap-exempt, never to an empty hall.
+    const dawn = await checkDawn(status);
 
     if (events > 0) {
       v.onlineMinutes = 0; // a presence, not a chatterbox
-    } else if (status.playerCount > 0) {
-      // Accumulate someone-online time; queue one ambient line per ~2h.
+    } else if ((status.playerCount ?? 0) > 0) {
+      // Accumulate someone-online time; one ambient line per ~2h, and never
+      // within the global min-gap of the last voice line of ANY kind.
       v.onlineMinutes = (v.onlineMinutes || 0) + TICK_MS / 60000;
-      if (v.onlineMinutes >= CADENCE_MINUTES) {
-        await queueAmbient(status);
-        v.onlineMinutes = 0;
+      if (v.onlineMinutes >= CADENCE_MINUTES && !dawn) {
+        const owed = await ambientGapRemaining();
+        if (owed > 0) {
+          // Hold the accumulator and retry next tick — the cadence is owed, the
+          // hall just spoke too recently.
+          log.info?.(`[voice] ambient held ${Math.round(owed / 1000)}s for the min-gap`);
+        } else if (await queueAmbient(status)) {
+          v.onlineMinutes = 0;
+        }
       }
     }
     await saveState();
@@ -416,8 +632,22 @@ export function createVoiceEngine({ client, db, post, state, saveState, log = co
 
   function attach() {
     client.on('messageCreate', handleMessage);
-    log.info?.('[voice] engine active — ambient cadence + events; admins: `@Eilif say: <line>`');
+    log.info?.(
+      `[voice] engine active — ambient every ${CADENCE_MINUTES}m online-time (min gap ${Math.round(gapMs / 60000)}m), ` +
+      `dawn every ${DAWN_EVERY_DAYS} world days, events exempt; admins: \`@Eilif say: <line>\``,
+    );
   }
 
-  return { tick, attach, announcePoty, handleMessage, pickAmbient, _state: st };
+  return {
+    tick,
+    attach,
+    announcePoty,
+    handleMessage,
+    pickAmbient,
+    _state: st,
+    _checkDawn: checkDawn,
+    _buildWhispers: buildWhispers,
+    _checkDeathMilestones: checkDeathMilestones,
+    _ambientGapRemaining: ambientGapRemaining,
+  };
 }

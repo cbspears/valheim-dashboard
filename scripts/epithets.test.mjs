@@ -284,4 +284,114 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
   ok(stuck.get('Idler').title !== otherPh, 'placeholders still unique after sticky');
 }
 
+// ── 13. CROWN SPREAD: a power player tops three boards, keeps one, the other ──
+// two crowns are inherited by the next-best vikings (who would never have cleared
+// the distinctiveness gates on their own next to a runaway leader).
+{
+  const roster = [
+    mk('Power', { kills: 300, resources: 3000, builds: 900 }),
+    mk('Rune', { kills: 40, resources: 1200, builds: 100 }),
+    mk('Sten', { kills: 30, resources: 400, builds: 400 }),
+    mk('Tova', { kills: 20, resources: 300, builds: 90 }),
+    mk('Ulf', { kills: 10, resources: 200, builds: 60 }),
+  ];
+  const titles = epithetsFor(roster);
+  // Power leads kills, resources AND builds — the sword wins, and it wins once.
+  ok(titles.get('Power').source === 'kills' && titles.get('Power').title === 'Bane of Beasts',
+    `power player keeps the combat crown, got ${titles.get('Power').source}:${titles.get('Power').title}`);
+  // The two vacated crowns flow to the runners-up rather than dying as placeholders.
+  ok(titles.get('Rune').source === 'resources' && titles.get('Rune').title === 'the Provider',
+    `vacated resources crown inherited, got ${titles.get('Rune').source}:${titles.get('Rune').title}`);
+  ok(titles.get('Sten').source === 'builds' && titles.get('Sten').title === 'Stonewright',
+    `vacated builds crown inherited, got ${titles.get('Sten').source}:${titles.get('Sten').title}`);
+  // Nobody else is handed a deed they don't own, and the roster stays all-unique.
+  ok(titles.get('Tova').source === 'flavor' && titles.get('Ulf').source === 'flavor',
+    `also-rans stay placeholders, got ${titles.get('Tova').source}/${titles.get('Ulf').source}`);
+  const all = roster.map((p) => titles.get(p.character_name).title);
+  ok(new Set(all).size === all.length, `crown spread stays unique, got [${all.join(', ')}]`);
+  // Inherited crowns must not churn: nudge every stat and re-title with the prior
+  // titles as incumbents — the hall wakes up wearing exactly what it went to bed in.
+  const inc = new Map(roster.map((p) => [p.character_name, titles.get(p.character_name).title]));
+  const nudged = [
+    mk('Power', { kills: 302, resources: 3010, builds: 900 }),
+    mk('Rune', { kills: 41, resources: 1210, builds: 101 }),
+    mk('Sten', { kills: 30, resources: 405, builds: 402 }),
+    mk('Tova', { kills: 21, resources: 300, builds: 90 }),
+    mk('Ulf', { kills: 10, resources: 205, builds: 61 }),
+  ];
+  const after = epithetsFor(nudged, { incumbentByName: inc });
+  for (const p of roster) {
+    ok(titles.get(p.character_name).title === after.get(p.character_name).title,
+      `inherited crowns stable under a nudge for ${p.character_name}: ${titles.get(p.character_name).title} -> ${after.get(p.character_name).title}`);
+  }
+  // Determinism: the same warband in any order is titled identically.
+  const reversed = epithetsFor([...roster].reverse());
+  ok(roster.every((p) => titles.get(p.character_name).title === reversed.get(p.character_name).title),
+    'inheritance is independent of roster input order');
+}
+
+// ── 14. Inheritance respects LEADER_MARGIN: a tight pack inherits nothing ──────
+// Same shape as 13, but the untitled resources field is bunched inside 15% — no one
+// owns the vacated crown, so it stays empty and they all fall to placeholders.
+{
+  const roster = [
+    mk('Power', { kills: 300, resources: 3000 }),
+    mk('Rune', { kills: 40, resources: 1000 }),
+    mk('Sten', { kills: 30, resources: 950 }),
+    mk('Tova', { kills: 20, resources: 900 }),
+    mk('Ulf', { kills: 10, resources: 850 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.get('Power').source === 'kills', `power player still takes kills, got ${titles.get('Power').source}`);
+  const held = roster.map((p) => titles.get(p.character_name).title);
+  ok(!held.includes('the Provider'),
+    `near-tied field inherits nothing, got [${held.join(', ')}]`);
+  ok(['Rune', 'Sten', 'Tova', 'Ulf'].every((n) => titles.get(n).source === 'flavor'),
+    `tight pack stays placeholders, got ${['Rune', 'Sten', 'Tova', 'Ulf'].map((n) => titles.get(n).source).join(',')}`);
+}
+
+// ── 15. The hours superlative NEVER falls back ────────────────────────────────
+// Power tops hours and kills; the blade wins, so 'the Ever-Present' goes unclaimed.
+// Being there second-most is not being there most — no one inherits it.
+{
+  const roster = [
+    mk('Power', { hours: 5000, kills: 300 }),
+    mk('Rune', { hours: 1200, kills: 40 }),
+    mk('Sten', { hours: 400, kills: 30 }),
+    mk('Tova', { hours: 300, kills: 20 }),
+    mk('Ulf', { hours: 200, kills: 10 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.get('Power').source === 'kills', `combat crown beats the hours crown, got ${titles.get('Power').source}`);
+  const held = roster.map((p) => titles.get(p.character_name).title);
+  ok(!held.includes('the Ever-Present'),
+    `hours never falls back to second place, got [${held.join(', ')}]`);
+  ok(titles.get('Rune').source === 'flavor',
+    `hours runner-up gets no deed title, got ${titles.get('Rune').source}:${titles.get('Rune').title}`);
+}
+
+// ── 16. Hysteresis inside the fallback: the incumbent wins a near-tie ─────────
+// Sten edges Rune on resources but not by the margin, so with no incumbent the
+// vacated crown goes unclaimed. Give Rune the title he already wears and he keeps
+// it — an incumbent is never demoted to a placeholder over a hair's-breadth swing.
+{
+  const roster = [
+    mk('Power', { kills: 300, resources: 3000 }),
+    mk('Rune', { kills: 40, resources: 1000 }),
+    mk('Sten', { kills: 30, resources: 1050 }),
+    mk('Tova', { kills: 20, resources: 900 }),
+    mk('Ulf', { kills: 10, resources: 850 }),
+  ];
+  const cold = epithetsFor(roster);
+  ok(cold.get('Rune').source === 'flavor' && cold.get('Sten').source === 'flavor',
+    `control: near-tie inherits nothing, got ${cold.get('Rune').title}/${cold.get('Sten').title}`);
+  const inc = new Map([['Rune', 'the Provider']]);
+  const stuck = epithetsFor(roster, { incumbentByName: inc });
+  ok(stuck.get('Rune').title === 'the Provider' && stuck.get('Rune').source === 'resources',
+    `incumbent keeps the vacated crown through a near-tie, got ${stuck.get('Rune').source}:${stuck.get('Rune').title}`);
+  ok(stuck.get('Sten').title !== 'the Provider', 'inherited title still unique');
+  const all = roster.map((p) => stuck.get(p.character_name).title);
+  ok(new Set(all).size === all.length, `still all-unique, got [${all.join(', ')}]`);
+}
+
 console.log(`epithets.test: ${passed} assertions passed`);

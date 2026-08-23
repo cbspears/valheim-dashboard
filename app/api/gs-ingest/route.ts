@@ -858,6 +858,13 @@ export async function POST(req: Request) {
     // per-player totals just advanced. Best-effort only — a milestone failure
     // (or a missing milestones table pre-migration) must NEVER fail the ingest.
     // Skipped entirely when nothing merged (no self snapshot this cycle).
+    //
+    // This call only RECORDS deeds (achieved_at + a Saga event) — it announces
+    // nothing. The Discord bot owns the announcement, firing the embed and the
+    // in-game voice line together, one deed per tick. So a cycle that crosses
+    // five deeds at once writes five rows here and stays silent; the players
+    // hear them spaced out over the following minutes. Safe to run on every
+    // ~120s re-POST: the marking UPDATE is guarded on achieved_at is null.
     if (merged) {
       try {
         await evaluateAndRecord(db());

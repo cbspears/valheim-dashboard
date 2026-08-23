@@ -63,6 +63,9 @@ const ENV_DEATHS = {
   poison: 'succumbed to poison', poisoned: 'succumbed to poison',
   impact: 'was broken by the fall', self: 'was undone by their own hand',
   lava: 'was swallowed by molten rock',
+  // Valheim's catch-all HitType for an unnamed killer — mirrors lib/episodes.ts.
+  // Without it the skald is handed "was taken by an enemyhit".
+  enemyhit: 'was struck down by an unseen foe',
 };
 function phraseDeath(name, cause) {
   const nm = firstName(name);

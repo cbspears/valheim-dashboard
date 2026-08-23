@@ -422,6 +422,14 @@ const ENV_DESC: Record<string, string[]> = {
   turret: ['{name} was shot down by a ballista, friendly fire perhaps.'],
   boat: ['{name} went down with their ship.'],
   self: ['{name} was undone by their own hand; the hall asks no questions.'],
+  // Mirrors the ENV_DEATHS entry — and it must exist HERE too, because ENV_KEYS
+  // (derived from this map) is what tells featuredDeath a cause is an
+  // environmental one. Missing, "enemyhit" would be classed as a creature name
+  // and featured as "{name} learned to fear the humble Enemyhit."
+  enemyhit: [
+    '{name} was struck down by an unseen foe.',
+    'Something out in the dark took {name}, and did not show its face.',
+  ],
   edgeofworld: ['{name} sailed clean off the edge of the world.'],
   ashlandsocean: ['{name} was boiled alive in the Ashlands sea.'],
   ashlandsoceanfloor: ['{name} was boiled alive in the Ashlands sea.'],
@@ -612,6 +620,11 @@ const ENV_DEATHS: Record<string, string> = {
   turret: 'shot down by a ballista',
   boat: 'wrecked with their ship',
   self: 'undone by their own hand',
+  // Valheim's catch-all HitType for damage from a creature the client couldn't
+  // name (an off-screen projectile, a despawned attacker, a mod-spawned foe).
+  // Without an entry here it would fall through to the creature branch and read
+  // "taken by an EnemyHit", so give it an honest, unnamed-attacker phrasing.
+  enemyhit: 'struck down by an unseen foe',
   edgeofworld: "sailed off the edge of the world",
   ashlandsocean: 'boiled in the Ashlands sea',
   ashlandsoceanfloor: 'boiled in the Ashlands sea',

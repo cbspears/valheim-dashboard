@@ -187,6 +187,14 @@ const ENV_DEATH_POOLS = {
   turret: ['{name} was shot down by a ballista. Friendly fire, perhaps?'],
   boat: ['{name} went down with their ship.'],
   self: ["{name} was undone by their own hand. We don't ask questions."],
+  // Valheim's catch-all HitType for a killer the client couldn't name (an
+  // off-screen projectile, a despawned attacker, a mod-spawned foe). Mirrors
+  // lib/episodes.ts — without it the feed reads "killed by an Enemyhit".
+  enemyhit: [
+    '{name} was struck down by an unseen foe.',
+    'Something in the dark took {name} and never showed its face.',
+    "{name} fell to an attacker nobody got a look at. The woods aren't saying.",
+  ],
   edgeofworld: ['{name} sailed off the edge of the world.', "{name} found out what's past the edge — nothing good."],
   ashlandsocean: ['{name} was boiled alive in the Ashlands sea.'],
   ashlandsoceanfloor: ['{name} was boiled alive in the Ashlands sea.'],

@@ -22,7 +22,7 @@ namespace EilifCompanion
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
         public const string PluginName = "Eilif Companion";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.2.1";
 
         internal static ManualLogSource Log;
 
@@ -32,12 +32,20 @@ namespace EilifCompanion
         private ConfigEntry<int> _pollSeconds;
         private ConfigEntry<string> _speakerName;
         private ConfigEntry<string> _chatType;
+        private ConfigEntry<int> _lineSpacing;
 
         // ---- Voice pump state (main thread except where noted) ----
+        // NOTE: no System.ValueTuple anywhere in this file — see BUILD.md and the source comment in
+        // ../eilif-paths/src/EilifPathsPlugin.cs. The net462 BepInEx/Unity Mono runtime ships no
+        // ValueTuple reference, and a tuple literal/field on the Awake path fails the plugin load
+        // SILENTLY. Plain fields and out-vars only.
         private static readonly ConcurrentQueue<VoiceLine> OutQueue = new ConcurrentQueue<VoiceLine>();
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         private int _fetchInFlight; // 0/1 via Interlocked
         private float _pollTimer;
+        // Time since the last spoken line. Starts "already elapsed" so the first line of a session
+        // is spoken the moment it lands rather than after an opening LineSpacingSeconds of silence.
+        private float _speakTimer = float.MaxValue;
         private bool _voiceDormant;
 
         private void Awake()
@@ -57,6 +65,9 @@ namespace EilifCompanion
             _chatType = Config.Bind("Voice", "ChatType", "center",
                 new ConfigDescription("How spoken lines are broadcast: 'center' (raid-banner style, most reliable), 'shout' (chat, global) or 'normal' (chat, proximity).",
                     new AcceptableValueList<string>("center", "shout", "normal")));
+            _lineSpacing = Config.Bind("Voice", "LineSpacingSeconds", 20,
+                new ConfigDescription("Minimum seconds between two spoken lines. A poll can hand back several lines at once; they wait in the queue and Eilif speaks one at a time at this spacing instead of stacking them in a single frame.",
+                    new AcceptableValueRange<int>(5, 300)));
 
             try
             {
@@ -69,7 +80,7 @@ namespace EilifCompanion
             if (_voiceDormant)
                 Log.LogInfo("[Eilif] VoiceToken is empty - voice half is DORMANT (only /oath capture is active).");
             else
-                Log.LogInfo($"[Eilif] Voice half active. Polling {_voiceUrl.Value} every {_pollSeconds.Value}s while players online.");
+                Log.LogInfo($"[Eilif] Voice half active. Polling {_voiceUrl.Value} every {_pollSeconds.Value}s while players online; speaking at most one line per {_lineSpacing.Value}s.");
 
             new Harmony(PluginGuid).PatchAll();
             Log.LogInfo($"[Eilif] {PluginName} v{PluginVersion} loaded. /oath capture armed, /pin capture armed, position emitter armed ({PositionEmitter.EmitIntervalSeconds:0}s).");
@@ -78,9 +89,15 @@ namespace EilifCompanion
         // Main-thread pump: poll timer + drain the outbound line queue.
         private void Update()
         {
-            // 1) Drain queued lines and speak them (must happen on the main thread).
-            while (OutQueue.TryDequeue(out var line))
+            // 1) Speak at most ONE queued line per LineSpacingSeconds (must happen on the main
+            //    thread). A poll can return up to 3 lines; the rest wait in the queue rather than
+            //    being fired back-to-back in a single frame, so center-screen messages don't
+            //    overwrite each other before anyone can read them. Nothing is dropped.
+            float spacing = _lineSpacing.Value;
+            if (_speakTimer < spacing) _speakTimer += Time.unscaledDeltaTime; // clamped: never grows unbounded while idle
+            if (_speakTimer >= spacing && OutQueue.TryDequeue(out var line))
             {
+                _speakTimer = 0f;
                 try { Speak(line); }
                 catch (Exception ex) { Log.LogWarning($"[Eilif] Failed to speak line {line?.id}: {ex.Message}"); }
             }

@@ -78,7 +78,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   ok(writeDb.writes.history.length === 1 && writeDb.writes.history[0].title === 'Bane of Beasts',
     'title_history row inserted');
   ok(writeDb.writes.voice.length === 1 &&
-     writeDb.writes.voice[0].text === 'Let the hall know Testmantwo, Bane of Beasts.' &&
+     writeDb.writes.voice[0].text === 'Let the hall know Testmantwo — Bane of Beasts.' &&
      writeDb.writes.voice[0].kind === 'event' && writeDb.writes.voice[0].status === 'queued',
     `exact voice line queued, got: ${writeDb.writes.voice[0]?.text}`);
 }

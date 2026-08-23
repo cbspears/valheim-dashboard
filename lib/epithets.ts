@@ -40,6 +40,15 @@
 //      highest-scoring edges first, and a title/viking already claimed is skipped —
 //      that is what guarantees uniqueness AND lets each dimension go to its truest
 //      owner.
+//      INHERITANCE: one power player often tops half the boards, and the greedy pass
+//      can only give them ONE title — so their other crowns go begging, and land on a
+//      runner-up only if that runner-up independently clears the gates (which, next to
+//      a runaway leader, they rarely do). A FALLBACK pass therefore hands each VACATED
+//      crown (a dimension whose roster leader is already titled elsewhere) down to the
+//      best still-untitled viking, provided they own it clearly: a LEADER_MARGIN lead
+//      over the next untitled viking, or being the only one on the board at all. The
+//      superlative ("the Ever-Present") never falls back — being there most is the
+//      whole meaning of it, and second place is simply not it.
 //      HYSTERESIS: when a viking already holds a title (`incumbent` / current_title),
 //      that dimension gets a small stickiness bonus, so a challenger must beat it by
 //      a genuine margin before the title flips. In a 4-8 player hall this kills the
@@ -277,6 +286,72 @@ function byName(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/**
+ * Is this dimension's crown VACATED — i.e. is its roster leader already wearing some
+ * other title? That is the one situation the fallback pass may fire in: the board has
+ * a real owner, the sagas simply couldn't name them twice. When the leader is still
+ * untitled they were no standout to begin with (they failed the gates like everyone
+ * else), so nothing was vacated and no one inherits anything.
+ */
+function crownVacated(
+  roster: PlayerWithStats[],
+  dim: Dimension,
+  s: DimStats,
+  assigned: ReadonlySet<string>,
+): boolean {
+  if (!(s.max > 0)) return false;
+  return roster.some((p) => {
+    const v = dim.value(p);
+    return (
+      v != null && Number.isFinite(v) && v === s.max && assigned.has(p.character_name)
+    );
+  });
+}
+
+/**
+ * Who inherits a vacated crown, judged only against the vikings still untitled.
+ *
+ * The distinctiveness gates are deliberately NOT re-applied here — next to a runaway
+ * leader almost nobody clears them, which is exactly why the crown went begging. What
+ * IS required is that the heir owns the board among the remaining field:
+ *   (a) a LEADER_MARGIN lead over the next untitled viking, or being the only one with
+ *       any value at all on it; and
+ *   (b) hysteresis — a viking who ALREADY holds this title keeps it unless a rival
+ *       clears them by that same margin, so an incumbent wins every tie and the title
+ *       never churns down to a placeholder over a hair's-breadth swing.
+ * Returns null when the field is too tight to name anyone; the crown then stays empty
+ * and its would-be claimants fall to placeholders, as before.
+ */
+function fallbackWinner(
+  dim: Dimension,
+  untitled: PlayerWithStats[],
+  incumbentOf: (p: PlayerWithStats) => string | null,
+): { player: PlayerWithStats; value: number } | null {
+  const ranked: { player: PlayerWithStats; value: number }[] = [];
+  for (const p of untitled) {
+    const v = dim.value(p);
+    if (v != null && Number.isFinite(v) && v > 0) ranked.push({ player: p, value: v });
+  }
+  ranked.sort(
+    (a, b) => b.value - a.value || byName(a.player.character_name, b.player.character_name),
+  );
+  if (ranked.length === 0) return null;
+
+  // (b) The incumbent of this very title holds it through any near-tie.
+  const held = ranked.find((c) => incumbentOf(c.player) === dim.epithet);
+  if (held) {
+    const unseated = ranked.some(
+      (c) => c !== held && c.value >= held.value * LEADER_MARGIN,
+    );
+    if (!unseated) return held;
+  }
+
+  // (a) Otherwise the highest value takes it — with a real lead, or alone on the board.
+  const [top, next] = ranked;
+  if (!next || top.value >= next.value * LEADER_MARGIN) return top;
+  return null;
+}
+
 /** How many of a viking's death causes were trees (for ranking Treefoe claimants). */
 function treeDeathCount(causes: string[]): number {
   return causes.filter((c) => /tree/i.test(c)).length;
@@ -330,6 +405,12 @@ export interface EpithetsOptions {
  *      score (desc; deterministic tie-breaks), and greedily assign — a title or a
  *      viking already taken is skipped, so each deed-title lands on its truest
  *      owner and its runner-up drops to their next-best deed.
+ *   2b. Hand down every crown VACATED by that pass — a dimension whose roster leader
+ *      is now titled elsewhere — to the best still-untitled viking, so a hall with one
+ *      power player still names its second-best provider, builder and strider instead
+ *      of burying them in placeholders. The heir must lead the remaining field by
+ *      LEADER_MARGIN (or be alone on the board), an incumbent of the title wins ties,
+ *      and the hours superlative never falls back.
  *   3. Anyone still untitled gets a personalized placeholder — their incumbent one
  *      if it's still free (stability), else a name-hash pick de-duplicated against
  *      the roster.
@@ -400,6 +481,38 @@ export function epithetsFor(
     result.set(e.name, { title: e.dim.epithet, source: e.dim.source });
     assigned.add(e.name);
     usedTitles.add(e.dim.epithet);
+  }
+
+  // ── 2b. Inheritance — crowns vacated by a viking who tops several boards. ──
+  // One award per round, re-reading the field each time: taking a viking out of the
+  // running changes who the next crown's heir is (and whether that crown has a clear
+  // enough heir at all), so every round is judged on the roster as it now stands.
+  // Rounds pick the vacated crown whose heir is the most distinctive on it (z-score,
+  // the same yardstick the greedy pass ranks by), ties broken by dimension order —
+  // so a viking in line for two vacated crowns inherits the one that is more theirs.
+  for (;;) {
+    const untitled = roster.filter((p) => !assigned.has(p.character_name));
+    if (untitled.length === 0) break;
+    let best: { dim: Dimension; player: PlayerWithStats; strength: number } | null = null;
+    for (const dim of DIMENSIONS) {
+      // "the Ever-Present" is a pure superlative: no one inherits second place.
+      if (dim.superlative || usedTitles.has(dim.epithet)) continue;
+      const s = dimStats.get(dim.source)!;
+      if (!crownVacated(roster, dim, s, assigned)) continue;
+      const heir = fallbackWinner(dim, untitled, incumbentOf);
+      if (!heir) continue;
+      const strength = s.std > 0 ? (heir.value - s.mean) / s.std : 0;
+      if (best === null || strength > best.strength) {
+        best = { dim, player: heir.player, strength };
+      }
+    }
+    if (!best) break;
+    result.set(best.player.character_name, {
+      title: best.dim.epithet,
+      source: best.dim.source,
+    });
+    assigned.add(best.player.character_name);
+    usedTitles.add(best.dim.epithet);
   }
 
   // ── 3. Personalized placeholders for the rest (stable, unique). ──

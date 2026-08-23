@@ -42,7 +42,15 @@ before assuming step 2/3 above will work — see the tracker's readiness review 
   registers). This project's source (`src/*.cs`) does **not** currently reference tuples, so no
   action needed — but if you add one during a post-1.0 patch, don't. (The sibling `eilif-paths`
   plugin has a source-level comment on this same gotcha; it isn't otherwise written down here or
-  in `eilif-companion-client`, hence this note.)
+  in `eilif-companion-client`, hence this note.) **v0.2.1 adds a matching source comment** on the
+  voice-pump state block in `src/EilifCompanionPlugin.cs` so the constraint is visible where the
+  next edit is most likely to land.
+- **Line pacing is config, not code (since v0.2.1).** The `Update()` pump speaks at most one queued
+  line per `Voice.LineSpacingSeconds` (default 20, range 5–300) instead of draining the whole queue
+  in one frame — center-screen messages used to overwrite each other when a poll returned 2–3 lines.
+  Tunable live in `BepInEx/config/media.blockspace.eilif.companion.cfg` on the server, no rebuild
+  needed; the queue holds the backlog, nothing is dropped. This is the plugin-side floor only —
+  the dashboard/bot side owns the *semantic* gaps (ambient 30 min, deeds 10 min).
 - Build-only warnings (`MSB3277` reference-conflict-resolution, ~30 lines) are expected and benign
   — they come from targeting `net462` via the `Microsoft.NETFramework.ReferenceAssemblies` package
   under a newer SDK, not from anything wrong with this project.

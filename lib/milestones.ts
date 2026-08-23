@@ -8,9 +8,18 @@
 //   2. An async orchestrator (evaluateAndRecord) called at the end of the
 //      client-stats merge in /api/gs-ingest: it loads the still-unachieved rows,
 //      computes the aggregates in one batch, marks the crossed ones achieved
-//      (idempotent, guarded on achieved_at is null), and fans each new deed out
-//      to the Saga (events) + in-game voice (voice_lines). The Discord bot's own
-//      loop picks up achieved-but-unannounced rows (announce cap lives there).
+//      (idempotent, guarded on achieved_at is null), and writes each new deed
+//      into the Saga (events). The Discord bot's own loop then drains the
+//      achieved-but-unannounced rows.
+//
+// ⚠️ The evaluator does NOT queue in-game voice (2026-08-22). A deed's Discord
+// embed and its spoken line are ONE announcement moment, fired together by the
+// bot when it announces the deed — not split between "crossed" and "announced".
+// When several deeds cross in the same cycle they are ALL marked achieved here
+// (no silencing, no quiet flags); announced_at stays NULL on each so the bot can
+// drain them sequentially, one per tick, with its own MILESTONE_MIN_GAP_MS
+// between announcements. Rarity is a property of the thresholds
+// (db/2026-08-22_milestones_reseed.sql), not of a gate in this file.
 //
 // v1 metrics are restricted to columns already persisted by the pipeline — no
 // new counters. Distances are summed from the per-mode breakdown that
@@ -101,6 +110,38 @@ function sumStats(stats: Record<string, unknown>[], key: string): number {
   return total;
 }
 
+/**
+ * Total catches for one viking from `player_stats.gs_stats.fish`.
+ *
+ * The canonical shape written by /api/gs-ingest (via lib/gs-client
+ * parseSelfSnapshot) is an array of `{ item, count }` — the pickups[] breakdown
+ * filtered to the prefab ids in config/fish.ts, e.g.
+ * `[{ item: 'Fish3', count: 4 }, { item: 'Fish1', count: 2 }]`. Nothing else
+ * writes it, but this is jsonb from a third-party mod's payload, so read it
+ * defensively: a missing/renamed key, a null blob, a non-numeric count, or the
+ * plausible-but-unused `{ Fish1: 2 }` map shape must all degrade to a number
+ * rather than throw and take the whole ingest cycle's evaluation with them.
+ */
+function fishCount(row: Record<string, unknown>): number {
+  const gs = row.gs_stats as { fish?: unknown } | null | undefined;
+  const list = gs?.fish;
+  if (Array.isArray(list)) {
+    let total = 0;
+    for (const f of list) {
+      if (!f || typeof f !== 'object') continue;
+      total += num((f as { count?: unknown }).count);
+    }
+    return total;
+  }
+  // Fallback: a bare `{ prefabId: count }` map, should the blob ever arrive that way.
+  if (list && typeof list === 'object') {
+    let total = 0;
+    for (const v of Object.values(list as Record<string, unknown>)) total += num(v);
+    return total;
+  }
+  return 0;
+}
+
 export const METRICS: Record<string, (a: AggregateInput) => number> = {
   // Per-mode distances (metres) — sail vs walk/run split lives in gs_stats.
   sail_total: (a) => a.stats.reduce((t, r) => t + distances(r).sail, 0),
@@ -114,6 +155,10 @@ export const METRICS: Record<string, (a: AggregateInput) => number> = {
   resources_total: (a) => sumStats(a.stats, 'resources_harvested'),
   crafts_total: (a) => sumStats(a.stats, 'items_crafted'),
   builds_total: (a) => sumStats(a.stats, 'structures_built'),
+
+  // Catches, summed from each viking's per-species fish breakdown in gs_stats
+  // (there is no dedicated column — fish ride along in pickups[]/resources).
+  fish_total: (a) => a.stats.reduce((t, r) => t + fishCount(r), 0),
 
   // Total hours lived, derived from sessions like the Vikings page.
   playtime_total_hours: (a) => playtimeMinutes(a.sessions, a.onlineNames) / 60,
@@ -195,6 +240,7 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   builds_total: { label: 'Pieces built', description: 'every piece placed, all vikings' },
   playtime_total_hours: { label: 'Hours lived in the world', description: 'combined time played' },
   explored_avg_pct: { label: 'Map explored', description: "clan average across every viking's map" },
+  fish_total: { label: 'Fish caught', description: 'every catch landed, all vikings' },
 };
 
 /** Plain label + description for a metric key; falls back to the raw key if unmapped. */
@@ -313,12 +359,16 @@ function isMissingTable(error: { code?: string; message?: string } | null): bool
 let warnedMissing = false;
 
 /**
- * Load unachieved milestone rows, evaluate them against the live aggregates, and
- * record + fan out any newly crossed. Cheap: if every milestone is already
- * achieved the very first query returns nothing and we bail before touching the
- * heavier stats/session reads. All failures are the caller's problem to swallow
- * (the ingest hook wraps this in try/catch), but the missing-table case is
- * handled here so a fresh environment logs once and skips instead of throwing.
+ * Load unachieved milestone rows, evaluate them against the live aggregates,
+ * stamp any newly crossed as achieved, and write each one's Saga event. Cheap:
+ * if every milestone is already achieved the very first query returns nothing
+ * and we bail before touching the heavier stats/session reads. All failures are
+ * the caller's problem to swallow (the ingest hook wraps this in try/catch), but
+ * the missing-table case is handled here so a fresh environment logs once and
+ * skips instead of throwing.
+ *
+ * Announcement (Discord embed + in-game voice, together) belongs to the bot —
+ * this function never queues voice and never sets announced_at.
  *
  * @returns a small summary for logging.
  */
@@ -363,9 +413,13 @@ export async function evaluateAndRecord(
   const crossed = evaluateMilestones(defs, aggregates);
   if (crossed.length === 0) return { crossed: 0 };
 
-  // 3. Record + fan out each newly-crossed deed. The UPDATE is guarded on
-  //    achieved_at is null so a concurrent ingest can't double-fire; only when
-  //    OUR update flips the row do we insert the Saga event + voice line.
+  // 3. Record each newly-crossed deed. The UPDATE is guarded on achieved_at is
+  //    null so a concurrent ingest (or the same ~120s snapshot re-POSTed) can't
+  //    double-fire; only when OUR update flips the row do we write the Saga
+  //    event. ALL crossed deeds are recorded in this one pass — the sequencing
+  //    of their announcements is entirely the bot's business (it announces the
+  //    oldest unannounced row per tick, MILESTONE_MIN_GAP_MS apart), so nothing
+  //    is suppressed, delayed or flagged here.
   const now = new Date().toISOString();
   let recorded = 0;
   for (const { def, value } of crossed) {
@@ -392,15 +446,14 @@ export async function evaluateAndRecord(
       created_at: now,
     });
 
-    // In-game voice — Eilif speaks it center-screen (Companion polls /api/voice).
-    await client.from('voice_lines').insert({
-      text: line,
-      speaker: 'Eilif',
-      kind: 'event',
-      status: 'queued',
-      meta: { milestone: def.id, title: def.title },
-      queued_at: now,
-    });
+    // NO voice_lines insert here, deliberately. The in-game line and the Discord
+    // embed are a single announcement moment owned by the bot: it queues the
+    // voice line at the instant it posts the embed. Queueing here instead would
+    // make Eilif speak the deed the moment the threshold crossed and then post
+    // about it minutes later — two announcements for one deed, and it would
+    // bypass the bot's sequential MILESTONE_MIN_GAP_MS pacing when several deeds
+    // cross together. The row (achieved_at set, announced_at still NULL) is the
+    // whole handoff.
 
     recorded++;
     log.info?.(`[milestones] achieved "${def.title}" (${def.metric} >= ${def.threshold}, value ${achievedValue})`);

@@ -13,6 +13,12 @@
 // The API applies hysteresis against current_title, so a title only changes here
 // once a challenger clears a real margin — no churn from 24-vs-23 kill noise.
 //
+// NO RATE LIMITING, by decision (Charlie, 2026-08-22): every title change is
+// proclaimed the moment it is recorded — #server line AND in-game voice line,
+// together. Title proclamations are exempt from the voice engine's ambient
+// min-gap (VOICE_MIN_GAP_MS) and from the Great Deeds gap; hysteresis already
+// makes a change rare enough that a gate would only ever lose one.
+//
 // SEED-SILENT: a viking whose current_title is still NULL (never recorded) is
 // seeded WITHOUT announcing — so the very first pass after the migration doesn't
 // dump a storm of "earned a new title" for the whole existing roster.
@@ -71,13 +77,14 @@ export function createTitlesAnnouncer({
       log.error?.(`[titles] #server post failed for ${name}: ${e.message}`);
     }
     try {
-      await writeDb.from('voice_lines').insert({
-        text: `Let the hall know ${firstName(name)}, ${title}.`,
+      const { error: vErr } = await writeDb.from('voice_lines').insert({
+        text: `Let the hall know ${firstName(name)} — ${title}.`,
         kind: 'event',
         meta: { title, player_id: row.id },
         status: 'queued',
         queued_at: new Date().toISOString(),
       });
+      if (vErr) log.error?.(`[titles] voice enqueue failed for ${name}: ${vErr.message}`);
     } catch (e) {
       log.error?.(`[titles] voice enqueue failed for ${name}: ${e.message}`);
     }
