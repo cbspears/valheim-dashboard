@@ -59,15 +59,16 @@ export default async function MapPage() {
                   2
                 </span>
                 <p className="text-sm leading-relaxed text-ash-dim">
-                  Type in chat:{' '}
+                  <span className="font-semibold text-ash">Shout</span> it in chat, leading with{' '}
+                  <span className="font-mono text-xs text-ash">/s</span>:{' '}
                   <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
-                    /pin The Dark Chapel
+                    /s /pin The Dark Chapel
                   </span>{' '}
                   or{' '}
                   <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
-                    /pin base Odinshold
+                    /s /pin base Odinshold
                   </span>{' '}
-                  if it&apos;s a settlement.
+                  if it&apos;s a settlement. A plain chat line never leaves the campfire.
                 </p>
               </div>
               <div className="flex items-start gap-3">
