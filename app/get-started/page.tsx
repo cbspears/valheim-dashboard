@@ -382,23 +382,49 @@ export default function GetStartedPage() {
           </CardBody>
         </Card>
 
-        {/* Mod updates */}
+        {/* Updating the pack */}
         <div className="mt-6">
-          <Card>
-            <CardBody className="flex items-start gap-3.5">
-              <span className="mt-0.5 shrink-0 text-gold">
-                <RefreshCcw size={18} />
-              </span>
-              <div className="text-sm leading-relaxed text-ash-dim">
-                <p className="font-medium text-ash">Mod updates</p>
-                <p className="mt-1">
-                  Your pack is pinned to the exact versions the server runs, and r2modman never
-                  updates it on its own, so an &quot;update available&quot; badge is safe to ignore.
-                  When the server updates, a new pack code lands in Discord: re-import it and
-                  you&apos;re current. Updating a mod solo can lock you out until versions match
-                  again.
-                </p>
+          <Card className="border-l-2 border-l-gold">
+            <CardBody>
+              <div className="mb-3 flex items-center gap-2">
+                <RefreshCcw size={18} className="text-gold" />
+                <h2 className="font-display text-base tracking-wide text-ash">
+                  When the mods update
+                </h2>
               </div>
+              <p className="text-sm leading-relaxed text-ash-dim">
+                Every so often we announce a new pack code in Discord. The code on this page is
+                always the current one. Updating takes about a minute:
+              </p>
+              <ol className="mt-3 space-y-1.5 text-sm leading-relaxed text-ash-dim">
+                <li>
+                  <span className="font-mono text-xs text-gold-light">1.</span> Open r2modman and
+                  select your <span className="text-ash">Eilif</span> profile.
+                </li>
+                <li>
+                  <span className="font-mono text-xs text-gold-light">2.</span> Choose{' '}
+                  <span className="text-ash">Import / Update → Update existing profile → From code</span>.
+                </li>
+                <li>
+                  <span className="font-mono text-xs text-gold-light">3.</span> Paste the current
+                  code:{' '}
+                  {MODPACK_PROFILE_CODE ? (
+                    <CopyChip value={MODPACK_PROFILE_CODE} />
+                  ) : (
+                    <span className="text-ash">shared in Discord</span>
+                  )}
+                </li>
+                <li>
+                  <span className="font-mono text-xs text-gold-light">4.</span> Click{' '}
+                  <span className="text-ash">Import</span>, wait for it to finish, then{' '}
+                  <span className="text-ash">Start modded</span> as usual.
+                </li>
+              </ol>
+              <p className="mt-3 text-xs text-muted">
+                Never update mods one by one from r2modman&apos;s own &quot;update available&quot;
+                badges. The pack pins the exact versions the server runs, and a solo update can
+                lock you out until versions match again.
+              </p>
             </CardBody>
           </Card>
         </div>
