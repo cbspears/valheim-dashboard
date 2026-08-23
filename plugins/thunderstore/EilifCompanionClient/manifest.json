@@ -1,7 +1,7 @@
 {
   "name": "EilifCompanionClient",
-  "version_number": "0.1.0",
-  "website_url": "https://valheim-dashboard.vercel.app/players",
+  "version_number": "0.1.1",
+  "website_url": "https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-companion-client",
   "description": "Eilif community server: sends your explored-map percentage to the community dashboard's Cartographer leaderboard while you play. No setup.",
   "dependencies": ["denikson-BepInExPack_Valheim-5.4.2333"]
 }

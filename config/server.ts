@@ -23,4 +23,4 @@ export const SERVER_PASSWORD = 'Leroy';
 // Shared r2modman / Thunderstore Mod Manager profile code. Once you publish the
 // version-pinned modpack, paste its code here and the Get Started page switches
 // to the one-click "import this code" flow. Leave '' until then.
-export const MODPACK_PROFILE_CODE = '01a02c52-aa60-8692-d443-3672e3e75a49';
+export const MODPACK_PROFILE_CODE = '01a02c81-b55d-0c49-9cb0-197b995fbb54';
