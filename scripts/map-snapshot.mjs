@@ -216,6 +216,17 @@ async function snapshot() {
   if (day !== null) {
     const dayPath = `frames-by-day/day-${String(day).padStart(4, '0')}.webp`;
     const rd = await put(dayPath);
+    // ALSO archive the raw fog mask for this day (1.0-proofing, 2026-08-23):
+    // composited frames bake the terrain render in, so if WebMap ever re-renders
+    // terrain (game hotfix changed world-gen, Deep North colors, etc.) the whole
+    // timelapse can be rebuilt from these masks over the corrected base. The fog
+    // mask reveals only the explored-region SHAPE — exactly what the public
+    // composite already shows — so the secret-map doctrine is intact.
+    await fetch(`${base}/object/map/frames-fog/day-${String(day).padStart(4, '0')}.png`, {
+      method: 'POST',
+      headers: { ...auth, 'Content-Type': 'image/png', 'x-upsert': 'true' },
+      body: fogPng,
+    }).catch((e) => console.warn(`[map-snapshot] fog archive failed (ignored): ${e.message}`));
     if (rd.ok) {
       const st = loadState();
       if (!st.days.includes(day)) { st.days.push(day); st.days.sort((a, b) => a - b); saveState(st); }
