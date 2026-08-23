@@ -47,7 +47,7 @@ namespace EilifPaths
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.2.0";
+        public const string PluginVersion = "1.2.1";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -74,7 +74,7 @@ namespace EilifPaths
         internal static bool OldModPresent { get; private set; }
 
         // Owner-chosen defaults. movement = speed multiplier, staminadrain = stamina-cost multiplier.
-        // (all surfaces 1.4/0 — one speed tier, zero drain everywhere)
+        // (all surfaces 1.4 speed, 0.25 stamina drain)
         // NOTE: deliberately NOT a tuple/collection field initializer — the plugin class must not
         // reference System.ValueTuple (not shipped with the game's net462 runtime; a static field
         // initializer using it makes the whole class fail to instantiate under BepInEx).
@@ -91,12 +91,12 @@ namespace EilifPaths
         {
             Log = Logger;
 
-            BindSurface(PathType.Path,      1.4f, 0f);
-            BindSurface(PathType.PavedRoad, 1.4f, 0f);
-            BindSurface(PathType.Wood,      1.4f, 0f);
-            BindSurface(PathType.Stone,     1.4f, 0f);
-            BindSurface(PathType.Iron,      1.4f, 0f);
-            BindSurface(PathType.HardWood,  1.4f, 0f);
+            BindSurface(PathType.Path,      1.4f, 0.25f);
+            BindSurface(PathType.PavedRoad, 1.4f, 0.25f);
+            BindSurface(PathType.Wood,      1.4f, 0.25f);
+            BindSurface(PathType.Stone,     1.4f, 0.25f);
+            BindSurface(PathType.Iron,      1.4f, 0.25f);
+            BindSurface(PathType.HardWood,  1.4f, 0.25f);
 
             // [Bed] extraFireRange — widened "bed needs a fire nearby" check (see BedFirePatch.cs).
             BedFire.Bind(Config);
