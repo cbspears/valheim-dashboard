@@ -27,7 +27,7 @@ export default async function OathPage() {
       <section>
         <PageHeader slot="oath" prominent>
           <SectionHeader
-            title="The Signature Wall"
+            title="Swear Your Oath to Odin"
             subtitle={`${count} ${count === 1 ? 'viking has' : 'vikings have'} sworn.`}
             icon={<PenLine size={22} />}
           />
@@ -39,7 +39,7 @@ export default async function OathPage() {
             <div className="flex items-center gap-2">
               <ScrollText size={18} className="text-gold" />
               <h2 className="font-display text-base tracking-wide text-ash">
-                Swear your oath &amp; bind your viking
+                Swear your oath &amp; bind your viking{' '}<span className="font-body text-xs font-normal tracking-normal text-muted">(oath + Discord account link guide)</span>
               </h2>
             </div>
             <p className="text-sm leading-relaxed text-ash-dim">

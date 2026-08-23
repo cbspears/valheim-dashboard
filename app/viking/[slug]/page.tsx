@@ -233,7 +233,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           className="gold-ring mb-5 inline-flex items-center gap-1 text-xs text-muted transition-colors hover:text-ash-dim"
         >
           <ChevronLeft size={14} />
-          The Warband
+          Players
         </Link>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -299,7 +299,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
       {/* ── Attendance ─────────────────────────────────────────── */}
       <section>
         <SectionHeader
-          title="Attendance"
+          title="Activity"
           subtitle={`Every night ${first} lit the longhouse fires, across ten weeks.`}
           icon={<CalendarDays size={20} />}
         />

@@ -85,7 +85,7 @@ export default async function TvPage({
   const hall: HallState = !isOnline ? 'sleeping' : playerCount > 0 ? 'lively' : 'banked';
   const hallCopy = {
     lively: { title: 'The hall is lively', body: 'Voices ring beneath the rafters.' },
-    banked: { title: 'The fire is banked', body: 'The server is up, but no one sails.' },
+    banked: { title: 'The hall is quiet', body: 'The server is up, but no one sails.' },
     sleeping: { title: 'The hall sleeps', body: 'The server is offline.' },
   }[hall];
 

@@ -30,7 +30,7 @@ export function MilestoneLedger({ summary }: { summary: MilestoneSummary }) {
           <EmptyState
             icon={<Trophy size={28} />}
             title="No deeds tracked yet"
-            message="Great Deeds are server-wide milestones — total distance sailed, foes felled, hours lived, timber raised. Once the warband is under way, earned and upcoming deeds will both be listed here."
+            message="Milestones are server-wide goals — total distance sailed, foes felled, hours lived, timber raised. Once the warband is under way, earned and upcoming deeds will both be listed here."
           />
         </CardBody>
       </Card>
@@ -54,7 +54,7 @@ export function MilestoneLedger({ summary }: { summary: MilestoneSummary }) {
             <EmptyState
               icon={<CheckCircle2 size={24} />}
               title="Nothing earned yet"
-              message="The first Great Deed is still ahead — every viking's tally counts toward it."
+              message="The first milestone is still ahead — every viking's tally counts toward it."
             />
           ) : (
             <ul className="divide-y divide-rune">

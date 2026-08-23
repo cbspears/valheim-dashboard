@@ -36,7 +36,7 @@ export default async function WorldPage() {
 
       <section>
         <SectionHeader
-          title="Great Deeds"
+          title="Milestones"
           subtitle="Server-wide milestones — what the warband has done together, tallied across every viking. Earned deeds and the ones still ahead."
           icon={<Trophy size={22} />}
         />

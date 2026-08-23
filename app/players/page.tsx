@@ -368,7 +368,7 @@ export default async function PlayersPage() {
         {/* ── The Warband (roster) ──────────────────────────────── */}
         <section>
           <SectionHeader
-            title="The Warband"
+            title="Players"
             subtitle="Everyone who has played, ranked by hours in the world."
             icon={<Users size={20} />}
           />
@@ -446,7 +446,7 @@ export default async function PlayersPage() {
       {/* ── Attendance Constellation ───────────────────────────── */}
       <section>
         <SectionHeader
-          title="Attendance"
+          title="Activity"
           subtitle="The last ten weeks — every night the longhouse fires were lit, and by whom."
           icon={<CalendarDays size={20} />}
         />

@@ -17,7 +17,7 @@ export function GreatDeedsCard({ summary }: { summary: MilestoneSummary }) {
   return (
     <Card>
       <CardHeader
-        title="Great Deeds"
+        title="Milestones"
         icon={<Trophy size={16} />}
         action={
           <Link

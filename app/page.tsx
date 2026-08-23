@@ -292,7 +292,7 @@ export default async function HomePage() {
                 </p>
               ) : (
                 <p className="mt-0.5 text-sm text-ash-dim">
-                  Swear the charter before we sail — be the first to set your mark.
+                  Be the first to swear your oath to Odin.
                 </p>
               )}
             </div>

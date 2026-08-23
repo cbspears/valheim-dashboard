@@ -159,7 +159,7 @@ export function createMilestonesAnnouncer({
     return {
       embeds: [
         {
-          title: `🏆 A Great Deed: ${deed.title}`,
+          title: `🏆 Milestone: ${deed.title}`,
           description: line,
           color: GOLD,
           fields,

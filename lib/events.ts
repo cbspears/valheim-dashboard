@@ -84,7 +84,7 @@ export function describeEvent(e: GameEvent): EventPresentation {
       return {
         icon: Crown,
         accent: 'text-gold-light',
-        label: 'Great Deed',
+        label: 'Milestone',
         description: line ? `${title} — ${line}` : `${title} — a great deed achieved together.`,
       };
     }
