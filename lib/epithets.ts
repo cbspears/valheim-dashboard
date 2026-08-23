@@ -59,6 +59,30 @@
 //      a stable name-hash and de-duplicated against the rest of the roster, so even
 //      a full launch hall of no-standout newcomers stays unique.
 //
+// ABSOLUTE FLOORS (the "week one" rule):
+//   Every gate above is RELATIVE, so on a fresh world the best of four beginners is
+//   still crowned even at absurd numbers (49 structures made a "Stonewright"; 16
+//   resources made "the Provider"). A crown must therefore also be EARNED in raw
+//   terms: a viking may take a dimension's title, in the greedy pass and in the
+//   crown-spread fallback alike, only once their raw value meets that dimension's
+//   floor. Below it the crown simply goes unclaimed and the viking falls to a
+//   hall-name placeholder, exactly as when nothing qualifies. The floors, tuned for
+//   a 4-8 player cozy server so first crowns land around week one:
+//     hours     "the Ever-Present"       10 hours (600 minutes)
+//     kills     "Bane of Beasts"         50 kills
+//     damage    "the Heavy-Handed"       2,500 damage
+//     bossdmg   "Bane of the Forsaken"   500 boss damage
+//     deaths    "the Oft-Slain"          10 deaths
+//     resources "the Provider"           500 resources
+//     crafts    "the Forgehand"          100 crafts
+//     distance  "the Far-Strider"        20,000 meters
+//     builds    "Stonewright"            250 structures
+//     map       "the Far-Seer"           5 percent explored
+//     treefoe   "Treefoe"                3 tree deaths (majority rule still applies)
+//   Floors change WHO may be crowned, never the distribution: roster medians, means
+//   and z-scores are still computed over everyone, so the relative gates behave the
+//   same and the engine stays deterministic.
+//
 // Pure + dependency-free (imports a type only), so it's trivially testable.
 
 import type { PlayerWithStats } from './types';
@@ -141,6 +165,30 @@ const DIMENSIONS: Dimension[] = [
   { source: 'builds', epithet: 'Stonewright', value: (p) => p.stats?.structures_built ?? null },
   { source: 'map', epithet: 'the Far-Seer', value: (p) => p.stats?.map_explored_pct ?? null },
 ];
+
+/**
+ * ABSOLUTE floors, keyed by the same source keys as DIMENSIONS. A viking may only
+ * take a crown once their RAW value meets the floor for that dimension, in the
+ * greedy pass and in the crown-spread fallback alike; below it the crown goes
+ * unclaimed. Units follow the underlying stat: hours is stored in MINUTES
+ * (total_playtime_minutes), distance in metres, map in percent. See the file
+ * header for the reasoning and the full table.
+ */
+const FLOORS: Record<Dimension['source'], number> = {
+  hours: 600, // 10 hours, stored as minutes
+  kills: 50,
+  damage: 2500,
+  bossdmg: 500,
+  deaths: 10,
+  resources: 500,
+  crafts: 100,
+  distance: 20000, // metres
+  builds: 250,
+  map: 5, // percent explored
+};
+
+/** Treefoe's own floor: the forest must have felled a viking this many times. */
+const TREE_FLOOR = 3;
 
 // Reverse lookup so an incumbent title string maps back to the dimension it came
 // from — that dimension is the one hysteresis makes sticky. Treefoe/flavor titles
@@ -236,10 +284,15 @@ function statsFor(roster: PlayerWithStats[], dim: Dimension): DimStats {
   return { median: median(values), mean, std: Math.sqrt(variance), max, secondMax, leaderCount };
 }
 
-/** True when a majority of a viking's deaths came from trees. */
+/**
+ * True when a majority of a viking's deaths came from trees AND the forest has
+ * felled them at least TREE_FLOOR times — one unlucky birch on day one is a story,
+ * not yet a title.
+ */
 function isTreefoe(deathCauses: string[]): boolean {
   if (deathCauses.length === 0) return false;
   const trees = deathCauses.filter((c) => /tree/i.test(c)).length;
+  if (trees < TREE_FLOOR) return false;
   return trees / deathCauses.length > TREE_MAJORITY;
 }
 
@@ -258,6 +311,9 @@ function scoreDim(
 ): number | null {
   const v = dim.value(player);
   if (v == null || !Number.isFinite(v) || v <= 0) return null;
+  // The absolute floor comes first: a crown has to be earned in raw terms before
+  // any relative gate gets a say, so a fresh world crowns nobody.
+  if (v < FLOORS[dim.source]) return null;
   if (s.median <= 0 || s.std <= 0) return null;
 
   const lead = v / s.median;
@@ -312,7 +368,9 @@ function crownVacated(
  * Who inherits a vacated crown, judged only against the vikings still untitled.
  *
  * The distinctiveness gates are deliberately NOT re-applied here — next to a runaway
- * leader almost nobody clears them, which is exactly why the crown went begging. What
+ * leader almost nobody clears them, which is exactly why the crown went begging. The
+ * dimension's ABSOLUTE floor still is, though: inheritance hands down a real crown,
+ * not a participation prize, so a heir under the floor is no heir. Beyond that, what
  * IS required is that the heir owns the board among the remaining field:
  *   (a) a LEADER_MARGIN lead over the next untitled viking, or being the only one with
  *       any value at all on it; and
@@ -327,10 +385,15 @@ function fallbackWinner(
   untitled: PlayerWithStats[],
   incumbentOf: (p: PlayerWithStats) => string | null,
 ): { player: PlayerWithStats; value: number } | null {
+  const floor = FLOORS[dim.source];
   const ranked: { player: PlayerWithStats; value: number }[] = [];
   for (const p of untitled) {
     const v = dim.value(p);
-    if (v != null && Number.isFinite(v) && v > 0) ranked.push({ player: p, value: v });
+    // The floor applies to heirs too: an inherited crown is still a crown, and a
+    // second-best who hasn't earned it in raw terms leaves it unclaimed.
+    if (v != null && Number.isFinite(v) && v > 0 && v >= floor) {
+      ranked.push({ player: p, value: v });
+    }
   }
   ranked.sort(
     (a, b) => b.value - a.value || byName(a.player.character_name, b.player.character_name),

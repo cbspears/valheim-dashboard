@@ -39,13 +39,16 @@ let passed = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
 
 // ── 1. A clear #1 killer reliably wears a slayer's title ──────────────────
+// (Every dimension is scaled past its absolute floor; scaling a whole column by a
+// constant leaves medians, z-scores and crown margins untouched, so the shape of
+// each case below is exactly what it always was.)
 {
-  const killer = mk('Killer', { kills: 40, resources: 30, crafts: 5 });
+  const killer = mk('Killer', { kills: 400, resources: 600, crafts: 100 });
   const roster = [
     killer,
-    mk('B', { kills: 5, resources: 25, crafts: 4 }),
-    mk('C', { kills: 4, resources: 28, crafts: 6 }),
-    mk('D', { kills: 3, resources: 26, crafts: 3 }),
+    mk('B', { kills: 50, resources: 500, crafts: 80 }),
+    mk('C', { kills: 40, resources: 560, crafts: 120 }),
+    mk('D', { kills: 30, resources: 520, crafts: 60 }),
   ];
   const ep = epithetFor(killer, roster);
   ok(ep.title === 'Bane of Beasts' && ep.source === 'kills',
@@ -59,11 +62,11 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
 // stickiness bonus keeps it there — no churn from a hair's-breadth delta.
 {
   const roster = [
-    mk('X', { resources: 100, damage: 100 }),
-    mk('R2', { resources: 90, damage: 88 }),
-    mk('C', { resources: 20, damage: 20 }),
-    mk('D', { resources: 20, damage: 20 }),
-    mk('E', { resources: 20, damage: 20 }),
+    mk('X', { resources: 1000, damage: 3000 }),
+    mk('R2', { resources: 900, damage: 2640 }),
+    mk('C', { resources: 200, damage: 600 }),
+    mk('D', { resources: 200, damage: 600 }),
+    mk('E', { resources: 200, damage: 600 }),
   ];
   const X = roster[0];
   const pure = epithetFor(X, roster);
@@ -79,11 +82,11 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
 // shift beats the stickiness bonus and the title flips (and is worth announcing).
 {
   const roster = [
-    mk('X', { resources: 100, damage: 300 }),
-    mk('R2', { resources: 90, damage: 20 }),
-    mk('C', { resources: 20, damage: 20 }),
-    mk('D', { resources: 20, damage: 20 }),
-    mk('E', { resources: 20, damage: 20 }),
+    mk('X', { resources: 1000, damage: 3000 }),
+    mk('R2', { resources: 900, damage: 200 }),
+    mk('C', { resources: 200, damage: 200 }),
+    mk('D', { resources: 200, damage: 200 }),
+    mk('E', { resources: 200, damage: 200 }),
   ];
   const flipped = epithetFor(roster[0], roster, [], 'the Provider');
   ok(flipped.source === 'damage' && flipped.title === 'the Heavy-Handed',
@@ -91,14 +94,14 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
 }
 
 // ── 4. A near-tie for #1 does NOT mint a crown (LEADER_MARGIN) ─────────────
-// B edges A by one kill (31 vs 30) — inside the 15% margin — so kills is not a
+// B edges A by ten kills (310 vs 300) — inside the 15% margin — so kills is not a
 // crown for B; with no other standout B is not handed the slayer title on noise.
 {
   const roster = [
-    mk('A', { kills: 30, crafts: 3 }),
-    mk('B', { kills: 31, crafts: 3 }),
-    mk('C', { kills: 3, crafts: 3 }),
-    mk('D', { kills: 2, crafts: 3 }),
+    mk('A', { kills: 300, crafts: 30 }),
+    mk('B', { kills: 310, crafts: 30 }),
+    mk('C', { kills: 30, crafts: 30 }),
+    mk('D', { kills: 20, crafts: 30 }),
   ];
   // With no incumbent, B's only lead is a within-margin kills edge → no crown.
   // (A crown would add +2; here the tiny z alone must not read as a decisive title.)
@@ -108,7 +111,7 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
   // treated as a crown — assert B did not gain a crown-strength kills title by
   // checking the crown margin explicitly via a decisive counter-case.
   const decisiveRoster = [
-    mk('A', { kills: 30 }), mk('B', { kills: 60 }), mk('C', { kills: 3 }), mk('D', { kills: 2 }),
+    mk('A', { kills: 300 }), mk('B', { kills: 600 }), mk('C', { kills: 30 }), mk('D', { kills: 20 }),
   ];
   const decisive = epithetFor(decisiveRoster[1], decisiveRoster);
   ok(decisive.source === 'kills',
@@ -118,11 +121,11 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
   // vs. here: give near-tie B an incumbent and a rival dim; the tiny non-crown
   // kills edge must NOT beat a sticky incumbent.
   const roster2 = [
-    mk('A', { kills: 30, resources: 10 }),
-    mk('B', { kills: 31, resources: 100, current_title: 'the Provider' }),
-    mk('C', { kills: 3, resources: 90 }),
-    mk('D', { kills: 2, resources: 20 }),
-    mk('E', { kills: 2, resources: 20 }),
+    mk('A', { kills: 300, resources: 100 }),
+    mk('B', { kills: 310, resources: 1000, current_title: 'the Provider' }),
+    mk('C', { kills: 30, resources: 900 }),
+    mk('D', { kills: 20, resources: 200 }),
+    mk('E', { kills: 20, resources: 200 }),
   ];
   const bStuck = epithetFor(roster2[1], roster2, [], 'the Provider');
   ok(bStuck.title === 'the Provider',
@@ -259,9 +262,10 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
 // ── 11. Treefoe is unique: the most tree-felled claimant wins it ─────────────
 {
   const roster = [mk('Woodsman', { kills: 5 }), mk('Sapling', { kills: 5 }), mk('Elm', { kills: 5 })];
+  // Both clear the 3-tree-death floor, so the tie-break (most felled) is what decides.
   const causes = new Map([
-    ['Woodsman', ['Tree', 'Tree', 'Tree', 'Tree']], // 4 tree deaths
-    ['Sapling', ['Tree', 'Tree', 'Greydwarf']],       // majority tree but fewer
+    ['Woodsman', ['Tree', 'Tree', 'Tree', 'Tree', 'Tree']],          // 5 tree deaths
+    ['Sapling', ['Tree', 'Tree', 'Tree', 'Greydwarf', 'Greydwarf']], // majority tree but fewer
   ]);
   const titles = epithetsFor(roster, { causesByName: causes });
   ok(titles.get('Woodsman').title === 'Treefoe', `most-felled wins Treefoe, got ${titles.get('Woodsman').title}`);
@@ -392,6 +396,79 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
   ok(stuck.get('Sten').title !== 'the Provider', 'inherited title still unique');
   const all = roster.map((p) => stuck.get(p.character_name).title);
   ok(new Set(all).size === all.length, `still all-unique, got [${all.join(', ')}]`);
+}
+
+// ── 17. FLOORS: a day-one roster is crowned with NOTHING ─────────────────────
+// The real numbers from the fresh world's first evening (builds 49/19/3/2,
+// resources 49/20/16/2, kills 6/6/2/0). Relatively, Ari is a runaway leader in
+// builds and resources — and that is exactly how "Stonewright at 49 structures"
+// happened. Absolutely, nobody has done anything yet, so nobody is titled.
+{
+  const roster = [
+    mk('Ari', { builds: 49, resources: 49, kills: 6 }),
+    mk('Bo', { builds: 19, resources: 20, kills: 6 }),
+    mk('Cai', { builds: 3, resources: 16, kills: 2 }),
+    mk('Dis', { builds: 2, resources: 2, kills: 0 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(roster.every((p) => titles.get(p.character_name).source === 'flavor'),
+    `day-one roster earns no crowns, got ${roster.map((p) => `${p.character_name}=${titles.get(p.character_name).source}`).join(',')}`);
+  const all = roster.map((p) => titles.get(p.character_name).title);
+  ok(new Set(all).size === all.length, `day-one hall-names still unique, got [${all.join(', ')}]`);
+}
+
+// ── 18. FLOORS: crossing ONE floor earns exactly that one crown ───────────────
+// Same day-one hall, but Ari has kept swinging the hammer past 250 structures.
+// Builds is now earned; her resources and kills are still day-one numbers, so
+// they stay uncrowned, and nobody else gains anything.
+{
+  const roster = [
+    mk('Ari', { builds: 260, resources: 49, kills: 6 }),
+    mk('Bo', { builds: 19, resources: 20, kills: 6 }),
+    mk('Cai', { builds: 3, resources: 16, kills: 2 }),
+    mk('Dis', { builds: 2, resources: 2, kills: 0 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.get('Ari').source === 'builds' && titles.get('Ari').title === 'Stonewright',
+    `crossing the builds floor earns Stonewright, got ${titles.get('Ari').source}:${titles.get('Ari').title}`);
+  ok(['Bo', 'Cai', 'Dis'].every((n) => titles.get(n).source === 'flavor'),
+    `the rest stay hall-named, got ${['Bo', 'Cai', 'Dis'].map((n) => titles.get(n).source).join(',')}`);
+  const held = roster.map((p) => titles.get(p.character_name).title);
+  ok(!held.includes('the Provider') && !held.includes('Bane of Beasts'),
+    `no crown for the still-tiny stats, got [${held.join(', ')}]`);
+}
+
+// ── 19. FLOORS apply to the crown-spread fallback too ─────────────────────────
+// Power is crowned on kills, vacating a resources crown. Rune leads the untitled
+// field on resources by a mile (300 vs 200 clears LEADER_MARGIN, so pre-floors he
+// WOULD have inherited 'the Provider') — but 300 is under the 500 floor, so the
+// vacated crown stays unclaimed and he keeps a hall-name.
+{
+  const roster = [
+    mk('Power', { kills: 300, resources: 3000 }),
+    mk('Rune', { kills: 40, resources: 300 }),
+    mk('Sten', { kills: 30, resources: 200 }),
+    mk('Tova', { kills: 20, resources: 100 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.get('Power').source === 'kills' && titles.get('Power').title === 'Bane of Beasts',
+    `power player keeps the combat crown, got ${titles.get('Power').source}:${titles.get('Power').title}`);
+  const held = roster.map((p) => titles.get(p.character_name).title);
+  ok(!held.includes('the Provider'),
+    `heir under the floor inherits nothing, got [${held.join(', ')}]`);
+  ok(titles.get('Rune').source === 'flavor',
+    `sub-floor runner-up stays hall-named, got ${titles.get('Rune').source}:${titles.get('Rune').title}`);
+  // Control: lift that same runner-up over the floor and the inheritance fires,
+  // proving it was the FLOOR doing the blocking and not the margin.
+  const lifted = [
+    mk('Power', { kills: 300, resources: 3000 }),
+    mk('Rune', { kills: 40, resources: 600 }),
+    mk('Sten', { kills: 30, resources: 200 }),
+    mk('Tova', { kills: 20, resources: 100 }),
+  ];
+  const after = epithetsFor(lifted);
+  ok(after.get('Rune').source === 'resources' && after.get('Rune').title === 'the Provider',
+    `over the floor, the vacated crown is inherited, got ${after.get('Rune').source}:${after.get('Rune').title}`);
 }
 
 console.log(`epithets.test: ${passed} assertions passed`);
