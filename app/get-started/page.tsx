@@ -14,9 +14,6 @@ import {
   Terminal,
   MapPin,
   UserRound,
-  Camera,
-  Bed,
-  Sailboat,
   RefreshCcw,
   Wrench,
   MessageCircle,
@@ -31,6 +28,7 @@ import { CopyChip } from '@/components/get-started/CopyChip';
 import {
   SERVER_NAME,
   SERVER_ADDRESS,
+  SERVER_PASSWORD,
   DISCORD_URL,
   DISCORD_BOT_HANDLE,
   MODPACK_PROFILE_CODE,
@@ -102,17 +100,6 @@ function Platform({
   );
 }
 
-function Tip({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
-  return (
-    <li className="flex gap-3">
-      <span className="mt-0.5 shrink-0 text-gold-light">{icon}</span>
-      <span className="text-sm leading-relaxed text-ash-dim">
-        <span className="font-medium text-ash">{title}</span> — {children}
-      </span>
-    </li>
-  );
-}
-
 function Trouble({ symptom, children }: { symptom: string; children: ReactNode }) {
   return (
     <div className="border-t border-rune/60 py-3 first:border-t-0 first:pt-0">
@@ -159,7 +146,7 @@ export default function GetStartedPage() {
       <PageHeader slot="get-started">
         <SectionHeader
           title="Get Started"
-          subtitle={`New to ${SERVER_NAME}? Log on and install the mods in five steps — about 15 minutes, no experience needed. Then the four things to do once you're in.`}
+          subtitle={`New to ${SERVER_NAME}? Log on and install the mods in five steps — about 15 minutes, no experience needed. Then the three things to do once you're in.`}
           icon={<Compass size={22} />}
         />
       </PageHeader>
@@ -183,13 +170,9 @@ export default function GetStartedPage() {
             </div>
             <div>
               <p className="text-xs uppercase tracking-wider text-muted">Password</p>
-              <p className="mt-1 text-sm text-ash">
-                {discord ? (
-                  <Ext href={discord}>ask in Discord</Ext>
-                ) : (
-                  'ask in Discord (kept off this public page)'
-                )}
-              </p>
+              <div className="mt-1.5">
+                <CopyChip value={SERVER_PASSWORD} />
+              </div>
             </div>
             <div>
               <p className="text-xs uppercase tracking-wider text-muted">How to connect</p>
@@ -204,7 +187,14 @@ export default function GetStartedPage() {
       {/* ══════════════ SECTION B — QUICK START ══════════════ */}
       <section>
         <SectionTitle icon={<Compass size={20} />}>
-          Quick start — install the mods &amp; log on
+          Quick start — install the mods &amp; log on{' '}
+          <span className="font-body text-xs font-normal tracking-normal text-muted">
+            (prefer to install mods by hand? see the{' '}
+            <Link href="/mods" className="text-gold-light hover:underline">
+              Mods page
+            </Link>
+            )
+          </span>
         </SectionTitle>
 
         <Card>
@@ -292,17 +282,11 @@ export default function GetStartedPage() {
                     <span className="text-ash">the address shared in Discord</span>
                   )}
                 </div>
-                <p>
-                  Enter the password{' '}
-                  {discord ? (
-                    <>
-                      (<Ext href={discord}>ask in Discord</Ext>)
-                    </>
-                  ) : (
-                    '(ask in Discord)'
-                  )}
-                  , and welcome to {SERVER_NAME}. 🛡️
-                </p>
+                <p>Enter the password:</p>
+                <div className="py-0.5">
+                  <CopyChip value={SERVER_PASSWORD} />
+                </div>
+                <p>…and welcome to {SERVER_NAME}. 🛡️</p>
               </Step>
             </ol>
           </CardBody>
@@ -319,12 +303,8 @@ export default function GetStartedPage() {
       {/* ══════════════ PART TWO — NOW THAT YOU'RE ASHORE ══════════════ */}
       <section>
         <SectionTitle icon={<ScrollText size={20} />}>
-          Now that you&apos;re ashore — do these four things
+          Now that you&apos;re ashore — do these three things
         </SectionTitle>
-        <p className="mb-5 max-w-3xl text-sm leading-relaxed text-muted">
-          You&apos;re in the game. These are the rituals that put you on the map, in the gallery, and
-          into the saga. Each is one line — shout it in-game, or tell the bot in Discord.
-        </p>
 
         <Card>
           <CardBody>
@@ -368,83 +348,34 @@ export default function GetStartedPage() {
                 </p>
               </Step>
 
-              <Step n={3} title="Name your places" icon={<MapPin size={16} />}>
+              <Step n={3} title="Turn on your location" icon={<MapPin size={16} />}>
                 <p>
-                  Stand where you want the marker, then <strong className="text-ash-dim">shout</strong>{' '}
-                  it to drop a pin on the live map:
-                </p>
-                <div className="py-0.5">
-                  <CopyChip value="/s /pin " label="/s /pin <name>" />
-                </div>
-                <p>
-                  Lead the name with <span className="font-mono text-xs text-ash">base</span> for a
-                  settlement — e.g.{' '}
-                  <span className="font-mono text-xs text-ash-dim">/s /pin base Odinshold</span>. Your
-                  pins join the{' '}
-                  <Link href="/map" className="text-gold-light hover:underline">
-                    atlas
-                  </Link>{' '}
-                  at the next map update.
-                </p>
-              </Step>
-
-              <Step n={4} title="Share your screenshots" icon={<Camera size={16} />}>
-                <p>
-                  Post a screenshot in Discord and tag the bot in the same message — it gathers into
-                  the{' '}
-                  <Link href="/gallery" className="text-gold-light hover:underline">
-                    gallery
-                  </Link>{' '}
-                  and onto your viking page and the map albums:
-                </p>
-                <div className="py-0.5">
-                  <CopyChip value={`${bot} `} label={`${bot} [attach an image]`} />
-                </div>
-                <p className="text-xs text-muted">
-                  Link your name first (step 2) so your shots land on your own page.
+                  Open the map (<span className="font-mono text-xs text-ash">M</span>) and enable{' '}
+                  <span className="text-ash">Share position</span> (bottom-left) so the warband can
+                  find you in the world.
                 </p>
               </Step>
             </ol>
           </CardBody>
         </Card>
 
-        {/* First-night best practices */}
+        {/* Mod updates */}
         <div className="mt-6">
           <Card>
-            <CardBody>
-              <p className="mb-4 font-display text-base tracking-wide text-ash">
-                And a few good habits for your first night
-              </p>
-              <ul className="grid gap-4 sm:grid-cols-2">
-                <Tip icon={<MapPin size={16} />} title="Turn on your location">
-                  Open the map (<span className="font-mono text-xs">M</span>) and enable{' '}
-                  <span className="text-ash">Share position</span> (bottom-left) so the warband can
-                  rally.
-                </Tip>
-                <Tip icon={<Bed size={16} />} title="Claim a bed early">
-                  Build a bed and sleep in it to set your spawn — dying back at the start is a long
-                  row home.
-                </Tip>
-                <Tip icon={<Sailboat size={16} />} title="Don't sail ahead of the longship">
-                  Progression is boss-gated — the whole point of the Cozy Canon. Stay with the fleet;
-                  don&apos;t rush biomes the group hasn&apos;t unlocked.
-                </Tip>
-                <Tip icon={<RefreshCcw size={16} />} title="Don't auto-update mods">
-                  Let the group update together and keep versions pinned. A solo update locks you out
-                  until everyone matches.
-                </Tip>
-                <Tip icon={<MessageCircle size={16} />} title="Live in Discord">
-                  Boss raids, base coords, and &quot;is the server up?&quot; all happen there. The
-                  server restarts every few hours — a brief drop is normal.
-                </Tip>
-                <Tip icon={<UserRound size={16} />} title="Use a clear character name">
-                  It&apos;s how you show up in the{' '}
-                  <Link href="/players" className="text-gold-light hover:underline">
-                    leaderboards
-                  </Link>{' '}
-                  and Discord recaps. Make it recognizable.
-                </Tip>
-              </ul>
+            <CardBody className="flex items-start gap-3.5">
+              <span className="mt-0.5 shrink-0 text-gold">
+                <RefreshCcw size={18} />
+              </span>
+              <div className="text-sm leading-relaxed text-ash-dim">
+                <p className="font-medium text-ash">Mod updates</p>
+                <p className="mt-1">
+                  Your pack is pinned to the exact versions the server runs, and r2modman never
+                  updates it on its own — an &quot;update available&quot; badge is safe to ignore.
+                  When the server updates, a new pack code lands in Discord: re-import it and
+                  you&apos;re current. Updating a mod solo can lock you out until versions match
+                  again.
+                </p>
+              </div>
             </CardBody>
           </Card>
         </div>
@@ -499,30 +430,6 @@ export default function GetStartedPage() {
         </div>
       </section>
 
-      {/* Manual install (advanced) */}
-      <Card>
-        <CardBody className="flex items-start gap-3.5">
-          <span className="mt-0.5 shrink-0 text-gold">
-            <Wrench size={18} />
-          </span>
-          <div className="text-sm leading-relaxed text-ash-dim">
-            <p className="font-medium text-ash">Prefer to do it by hand?</p>
-            <p className="mt-1">
-              Advanced only: install the{' '}
-              <Ext href="https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/">
-                BepInEx pack
-              </Ext>{' '}
-              into your Valheim folder, then drop each mod&apos;s files into{' '}
-              <span className="font-mono text-xs">BepInEx/plugins</span> — the full list is on the{' '}
-              <Link href="/mods" className="text-gold-light hover:underline">
-                Mods page
-              </Link>
-              . A manager is strongly recommended instead — version-matching by hand is exactly what
-              trips people up.
-            </p>
-          </div>
-        </CardBody>
-      </Card>
 
       {/* Troubleshooting */}
       <section>

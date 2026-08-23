@@ -14,9 +14,11 @@ export const DISCORD_URL = '';
 
 // The bot's @handle in Discord — shown in the Gallery's "how to add" explainer.
 export const DISCORD_BOT_HANDLE = '@Eilif';
-// Public connect address shown on the Hall + Get Started page. The join password
-// is intentionally NOT here (this site is public) — share it privately in Discord.
+// Public connect address shown on the Hall + Get Started page.
 export const SERVER_ADDRESS = '194.50.234.131:5914';
+// Join password, shown on Get Started. Charlie's call (2026-08-22): the page is
+// public but that's fine — friends-and-family server. Case-sensitive in Valheim.
+export const SERVER_PASSWORD = 'Leroy';
 
 // Shared r2modman / Thunderstore Mod Manager profile code. Once you publish the
 // version-pinned modpack, paste its code here and the Get Started page switches
