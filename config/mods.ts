@@ -55,7 +55,7 @@ export const MODS: Mod[] = [
   },
   {
     name: 'Eilif Paths',
-    author: 'Blockspace (custom-built)',
+    author: 'cbspears (custom-built)',
     description:
       'Roads that matter: +40% speed and zero stamina drain on dirt paths, paved roads, and built floors (wood, stone, iron). Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
     version: '1.1.0',
@@ -77,7 +77,7 @@ export const MODS: Mod[] = [
   },
   {
     name: 'Eilif Companion',
-    author: 'Blockspace (custom-built)',
+    author: 'cbspears (custom-built)',
     description:
       "The voice of the Hall itself — carries the in-game /oath swearing and speaks as Eilif. Built just for this server; nothing to install.",
     version: '0.2.0',
@@ -120,7 +120,7 @@ export const MODS: Mod[] = [
   },
   {
     name: 'Eilif Companion Client',
-    author: 'Blockspace (custom-built)',
+    author: 'cbspears (custom-built)',
     description:
       'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play — no setup, no uploads. Ships in the modpack.',
     version: '0.1.0',
