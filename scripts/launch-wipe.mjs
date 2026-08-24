@@ -251,6 +251,13 @@ const UPDATE_TARGETS = [
     // NOTE: players_present is read as `boss.players_present.length` with no
     // null-guard in app/boss/[slug]/page.tsx — it must reset to [] (empty
     // array), never null, or that page throws.
+    // NOTE: players_present is a `text[]` column, but the PATCH body below
+    // sends it as a JSON array ([]), not a SQL array literal. That is
+    // correct and must stay that way — PostgREST (via json_to_recordset)
+    // converts a JSON array body value into a text[] column fine (verified
+    // against PostgREST 14.5 / PostgreSQL 17). Do NOT change this to a
+    // string like '{}' or a SQL literal like '{}'::text[] — those are SQL
+    // syntax and are wrong here; PostgREST expects JSON in the body.
     patch: {
       is_killed: false,
       killed_at: null,
@@ -386,7 +393,12 @@ async function main() {
   }
 
   banner('RESET — milestones / bosses achieved state');
-  for (const t of UPDATE_TARGETS) {
+  // Iterate updateCounts (not UPDATE_TARGETS) — exists/count only ever get
+  // attached to the copies pushed into updateCounts above, never back onto
+  // UPDATE_TARGETS itself. Iterating UPDATE_TARGETS here previously left
+  // t.exists permanently undefined, so every target printed "skipped (table
+  // not found)" and this reset silently never ran.
+  for (const t of updateCounts) {
     if (!t.exists) {
       console.log(`  ${t.table.padEnd(20)} skipped (table not found)`);
       continue;
