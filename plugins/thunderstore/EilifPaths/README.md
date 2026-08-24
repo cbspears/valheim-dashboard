@@ -6,9 +6,9 @@ Roads that matter: while you stand on a recognised surface, movement speed is mu
 
 | Surface | Speed | Stamina drain |
 |---|---|---|
-| Dirt paths (hoe) | ×1.4 | ×0 |
-| Paved roads | ×1.4 | ×0 |
-| Built floors (wood, stone, iron, hardwood) | ×1.4 | ×0 |
+| Dirt paths (hoe) | ×1.4 | ×0.25 |
+| Paved roads | ×1.4 | ×0.25 |
+| Built floors (wood, stone, iron, hardwood) | ×1.4 | ×0.25 |
 
 All values configurable in `net.eilif.paths.cfg` (per surface: `movement`, `staminadrain`).
 
