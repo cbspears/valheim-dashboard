@@ -3,7 +3,7 @@
 <!-- ───────────────────────────────────────────────────────────── -->
 ## Eilif — orientation for a fresh session
 
-**This repo** = the Eilif Valheim community dashboard + Discord integration (an *evolving* project). **Site is LIVE:** https://valheim-dashboard.vercel.app
+**This repo** = the Eilif Valheim community dashboard + Discord integration (an *evolving* project). **Site is LIVE:** https://eilif-dashboard.vercel.app (also serves https://valheim-dashboard.vercel.app — do not redirect: ingest/webhook endpoints are hard-coded to it in shipped mod configs)
 
 **Get oriented fast — read these (all current):**
 1. `docs/PROJECT.md` — requirements, architecture, decisions, risks

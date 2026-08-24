@@ -279,6 +279,6 @@ export async function GET(request: Request) {
  * app/layout.tsx; overridable for a self-hosted/preview origin.
  */
 function dashboardOpsUrl(): string {
-  const base = process.env.NEXT_PUBLIC_SITE_URL || 'https://valheim-dashboard.vercel.app';
+  const base = process.env.NEXT_PUBLIC_SITE_URL || 'https://eilif-dashboard.vercel.app';
   return `${base.replace(/\/$/, '')}/admin/ops`;
 }

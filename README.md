@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://valheim-dashboard.vercel.app">🌐 Live dashboard</a> ·
+  <a href="https://eilif-dashboard.vercel.app">🌐 Live dashboard</a> (also serves <a href="https://valheim-dashboard.vercel.app">valheim-dashboard.vercel.app</a> — do not redirect: ingest/webhook endpoints are hard-coded to it in shipped mod configs) ·
   Next.js 16 · React 19 · Tailwind v4 · Supabase · Discord
 </p>
 

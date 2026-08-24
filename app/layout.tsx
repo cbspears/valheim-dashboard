@@ -25,7 +25,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://valheim-dashboard.vercel.app'),
+  metadataBase: new URL('https://eilif-dashboard.vercel.app'),
   title: {
     default: `${SERVER_NAME} · Valheim Server`,
     template: `%s · ${SERVER_NAME}`,

@@ -60,7 +60,7 @@ ServerCharacters .fch ─────SFTP─> stats parser ──┼──> /api
 
 ## 4. Status
 
-- ✅ Dashboard built + **LIVE** at https://valheim-dashboard.vercel.app (the long deploy block was a git-author access check, not a rate-limit — fixed; deploys require commit author `charlie@blockspace.media`).
+- ✅ Dashboard built + **LIVE** at https://eilif-dashboard.vercel.app (also serves https://valheim-dashboard.vercel.app — do not redirect: ingest/webhook endpoints are hard-coded to it in shipped mod configs) (the long deploy block was a git-author access check, not a rate-limit — fixed; deploys require commit author `charlie@blockspace.media`).
 - ✅ Discord bot **live** (systemd, auto-boot); recaps gated until launch.
 - ✅ Log poller built + parser-tested — not running (waits for server launch).
 - ✅ Stats parser built + validated (ServerCharacters `.fch` → parser → `player_stats`); `structures_built` + `map_explored_pct` columns + Master Builder / Cartographer cards. Run `db/2026-06-24_player_stats_extra_columns.sql` before it goes live; service runs post-launch.
