@@ -57,8 +57,8 @@ export const MODS: Mod[] = [
     name: 'Eilif Paths',
     author: 'cbspears (custom-built)',
     description:
-      'Roads that matter: +40% speed and stamina drain cut to a quarter on dirt paths, paved roads, and built floors (wood, stone, iron). Replaces the abandoned Useful Paths, whose path detection broke years ago. Also gives beds 8 metres of extra reach on the fire-nearby check, so you no longer have to shove your bed into the hearth, and lets crafting upgrades attach from 10 metres further out at every station, not just the workbench. Ships in the modpack.',
-    version: '1.3.0',
+      'Dirt paths, paved roads, and floors you have built move you 40% faster, and running, jumping, swimming and hauling on them cost a quarter of the usual stamina. Tools and weapons are left out: a swing, a block, a drawn bow or a hoe costs normal stamina on a path or road, and nothing at all on a floor you built. Beds also accept a fire 8 metres further off, and crafting upgrades attach 10 metres further out at every station. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
+    version: '1.4.0',
     category: 'QoL',
     clientRequired: true,
     url: 'https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-paths',

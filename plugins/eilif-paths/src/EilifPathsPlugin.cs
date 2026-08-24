@@ -45,13 +45,20 @@ namespace EilifPaths
     /// ALSO (since 1.3.0): crafting-station upgrades/attachments may sit further from their station,
     /// for EVERY station type, configurable under [Workstation] extraAttachmentRange. See
     /// src/StationRangePatch.cs for the decompile and why one hook covers both sides of the rule.
+    ///
+    /// ALSO (since 1.4.0): the stamina discount is SPLIT IN TWO. 'staminadrain' now applies only to
+    /// ordinary movement (running, jumping, swimming, dodging, being encumbered, sneaking), while
+    /// tools and weapons — attacks, blocking, bow draw, building, hoe/cultivator work, repairs,
+    /// fishing, harpooning — use the new per-surface 'actionstamina': vanilla cost on dirt paths and
+    /// paved roads, free on built floors. See src/ToolStaminaPatch.cs for the call-site survey and
+    /// how a charge is told apart from a movement charge.
     /// </summary>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public class EilifPathsPlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.3.0";
+        public const string PluginVersion = "1.4.0";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -67,6 +74,8 @@ namespace EilifPaths
             new Dictionary<PathType, ConfigEntry<float>>();
         internal static readonly Dictionary<PathType, ConfigEntry<float>> StaminaDrain =
             new Dictionary<PathType, ConfigEntry<float>>();
+        internal static readonly Dictionary<PathType, ConfigEntry<float>> ActionStamina =
+            new Dictionary<PathType, ConfigEntry<float>>();
 
         // The surface the local player is currently standing on (written on the 0.4s timer,
         // read by the Harmony patches). volatile-ish: single writer (main thread), single reader.
@@ -77,30 +86,37 @@ namespace EilifPaths
         // add the Path / PavedRoad detection it can no longer do.
         internal static bool OldModPresent { get; private set; }
 
-        // Owner-chosen defaults. movement = speed multiplier, staminadrain = stamina-cost multiplier.
-        // (all surfaces 1.4 speed, 0.25 stamina drain)
+        // Owner-chosen defaults. movement = speed multiplier, staminadrain = MOVEMENT stamina-cost
+        // multiplier, actionstamina = TOOL/WEAPON stamina-cost multiplier.
+        // (all surfaces 1.4 speed and 0.25 movement drain; tools cost vanilla on Path/PavedRoad and
+        // nothing on built floors)
         // NOTE: deliberately NOT a tuple/collection field initializer — the plugin class must not
         // reference System.ValueTuple (not shipped with the game's net462 runtime; a static field
         // initializer using it makes the whole class fail to instantiate under BepInEx).
-        private void BindSurface(PathType type, float move, float stam)
+        private void BindSurface(PathType type, float move, float stam, float action)
         {
             string section = type.ToString();
             Movement[type] = Config.Bind(section, "movement", move,
                 "Speed multiplier while on " + section + " (1.0 = vanilla, >1 = faster).");
             StaminaDrain[type] = Config.Bind(section, "staminadrain", stam,
-                "Stamina-cost multiplier while on " + section + " (1.0 = vanilla, <1 = drains less).");
+                "Stamina-cost multiplier for ordinary movement while on " + section + ": running, " +
+                "jumping, swimming, dodging, being encumbered (1.0 = vanilla, <1 = drains less).");
+            ActionStamina[type] = Config.Bind(section, "actionstamina", action,
+                "Stamina-cost multiplier for tools and weapons while on " + section + ": attacks, " +
+                "blocking, bow draw, building, hoe and cultivator terrain work, repairs, fishing. " +
+                "1 = vanilla cost, 0 = free.");
         }
 
         private void Awake()
         {
             Log = Logger;
 
-            BindSurface(PathType.Path,      1.4f, 0.25f);
-            BindSurface(PathType.PavedRoad, 1.4f, 0.25f);
-            BindSurface(PathType.Wood,      1.4f, 0.25f);
-            BindSurface(PathType.Stone,     1.4f, 0.25f);
-            BindSurface(PathType.Iron,      1.4f, 0.25f);
-            BindSurface(PathType.HardWood,  1.4f, 0.25f);
+            BindSurface(PathType.Path,      1.4f, 0.25f, 1f);
+            BindSurface(PathType.PavedRoad, 1.4f, 0.25f, 1f);
+            BindSurface(PathType.Wood,      1.4f, 0.25f, 0f);
+            BindSurface(PathType.Stone,     1.4f, 0.25f, 0f);
+            BindSurface(PathType.Iron,      1.4f, 0.25f, 0f);
+            BindSurface(PathType.HardWood,  1.4f, 0.25f, 0f);
 
             // [Bed] extraFireRange — widened "bed needs a fire nearby" check (see BedFirePatch.cs).
             BedFire.Bind(Config);
@@ -125,15 +141,45 @@ namespace EilifPaths
             }
 
             InvokeRepeating(nameof(UpdateGround), 0f, GroundCheckRate);
-            new Harmony(PluginGuid).PatchAll(typeof(EilifPathsPlugin).Assembly);
 
-            Log.LogInfo($"[EilifPaths] {PluginName} v{PluginVersion} loaded. Surfaces: " +
-                        "Path x" + F(Movement[PathType.Path]) + "/" + F(StaminaDrain[PathType.Path]) + ", " +
-                        "PavedRoad x" + F(Movement[PathType.PavedRoad]) + "/" + F(StaminaDrain[PathType.PavedRoad]) + ", " +
-                        "floors x" + F(Movement[PathType.Wood]) + "/" + F(StaminaDrain[PathType.Wood]) +
+            Harmony harmony = new Harmony(PluginGuid);
+            // Each attribute-declared patch class is applied ON ITS OWN. A bare PatchAll() aborts the
+            // whole batch on the first unresolvable target, and the order it walks the classes in is
+            // not defined: if it died AFTER Patch_UseStamina had gone on but BEFORE ToolStamina.Apply
+            // ran, every tool/weapon charge would silently keep the movement discount — exactly the
+            // failure this version exists to prevent. Isolating each class (and always reaching
+            // ToolStamina.Apply below) makes that unreachable.
+            int classesApplied = 0, classesTotal = 0;
+            foreach (Type t in AccessTools.GetTypesFromAssembly(typeof(EilifPathsPlugin).Assembly))
+            {
+                try
+                {
+                    if (t.GetCustomAttributes(typeof(HarmonyPatch), true).Length == 0) continue;
+                    classesTotal++;
+                    harmony.CreateClassProcessor(t).Patch();
+                    classesApplied++;
+                }
+                catch (Exception ex)
+                {
+                    Log.LogError("[EilifPaths] could not apply patch class " +
+                                 (t != null ? t.Name : "?") + ": " + ex.Message);
+                }
+            }
+
+            // Tool/weapon context hooks are applied one by one (not by attribute) so a single
+            // unresolvable target cannot take the rest of the plugin down with it. This ALWAYS runs,
+            // whatever happened above.
+            ToolStamina.Apply(harmony);
+
+            Log.LogInfo($"[EilifPaths] {PluginName} v{PluginVersion} loaded. Surfaces (speed / movement " +
+                        "stamina / tool stamina): " +
+                        "Path x" + F(Movement[PathType.Path]) + "/x" + F(StaminaDrain[PathType.Path]) + "/x" + F(ActionStamina[PathType.Path]) + ", " +
+                        "PavedRoad x" + F(Movement[PathType.PavedRoad]) + "/x" + F(StaminaDrain[PathType.PavedRoad]) + "/x" + F(ActionStamina[PathType.PavedRoad]) + ", " +
+                        "floors x" + F(Movement[PathType.Wood]) + "/x" + F(StaminaDrain[PathType.Wood]) + "/x" + F(ActionStamina[PathType.Wood]) +
                         ". Polling every " + GroundCheckRate.ToString("0.0", CultureInfo.InvariantCulture) + "s. " +
                         "Bed fire range: " + BedFire.Describe() + ". " +
-                        "Workstation attachment range: " + StationRange.Describe() + ".");
+                        "Workstation attachment range: " + StationRange.Describe() + ". " +
+                        "Core patch classes: " + classesApplied + "/" + classesTotal + " applied.");
         }
 
         private static string F(ConfigEntry<float> c) => c.Value.ToString("0.##", CultureInfo.InvariantCulture);
@@ -144,6 +190,10 @@ namespace EilifPaths
         /// </summary>
         private void UpdateGround()
         {
+            // This tick never runs nested inside a wrapped tool/weapon method, so the context depth
+            // must be zero here. If it is not, something leaked — clear it (see ToolStaminaPatch.cs).
+            ToolStamina.SanityReset();
+
             var player = Player.m_localPlayer;
             if (player == null) { SetCurrent(PathType.None); return; }
 
@@ -209,16 +259,36 @@ namespace EilifPaths
             }
             else
             {
-                float mv = Movement[t].Value, st = StaminaDrain[t].Value;
+                float mv = Movement[t].Value, st = StaminaDrain[t].Value, ac = ActionStamina[t].Value;
                 Log.LogInfo($"[EilifPaths] terrain: {t} (x{mv.ToString("0.##", CultureInfo.InvariantCulture)} speed, " +
-                            $"x{st.ToString("0.##", CultureInfo.InvariantCulture)} stamina)");
+                            $"x{st.ToString("0.##", CultureInfo.InvariantCulture)} movement stamina, " +
+                            $"x{ac.ToString("0.##", CultureInfo.InvariantCulture)} tool stamina)");
             }
         }
 
         internal static float MoveMult() =>
             Current == PathType.None ? 1f : Movement[Current].Value;
+        /// <summary>Movement stamina multiplier for the current surface ('staminadrain').</summary>
         internal static float StamMult() =>
             Current == PathType.None ? 1f : StaminaDrain[Current].Value;
+        /// <summary>Tool/weapon stamina multiplier for the current surface ('actionstamina').</summary>
+        internal static float ActionMult() =>
+            Current == PathType.None ? 1f : ActionStamina[Current].Value;
+
+        /// <summary>
+        /// The multiplier for the stamina charge being paid RIGHT NOW: 'actionstamina' while a wrapped
+        /// tool/weapon method is on the stack, 'staminadrain' otherwise. If a tool/weapon hook failed to
+        /// apply (degraded), an unclassified charge takes the LARGER of the two instead — vanilla on
+        /// paths and roads, 0.25 on floors — so a missed tool charge can never keep the movement
+        /// discount and nothing can become unexpectedly free.
+        /// </summary>
+        internal static float CostMult()
+        {
+            if (Current == PathType.None) return 1f;
+            if (ToolStamina.Active) return ActionMult();
+            if (ToolStamina.Degraded) return Mathf.Max(ActionMult(), StamMult());
+            return StamMult();
+        }
     }
 
     // --- Harmony patches (same surface the old mod used) ---
@@ -245,14 +315,24 @@ namespace EilifPaths
         }
     }
 
-    // Stamina drain: scale the cost down while on a surface.
+    // Stamina drain: scale the cost while on a surface. Movement charges take the surface's
+    // 'staminadrain'; tool and weapon charges take its 'actionstamina' (see src/ToolStaminaPatch.cs
+    // for how the two are told apart). Runs BEFORE vanilla's own 'v *= Game.m_staminaRate', which is
+    // where the scaling belongs.
     [HarmonyPatch(typeof(Player), "UseStamina")]
     internal static class Patch_UseStamina
     {
-        private static void Prefix(ref float v)
+        private static void Prefix(Player __instance, ref float v)
         {
-            if (EilifPathsPlugin.Current != EilifPathsPlugin.PathType.None)
-                v *= EilifPathsPlugin.StamMult();
+            try
+            {
+                // Only the local player: this is a client-side comfort mod, and no vanilla code path
+                // calls UseStamina on someone else's Player object.
+                if (__instance == null || __instance != Player.m_localPlayer) return;
+                if (EilifPathsPlugin.Current == EilifPathsPlugin.PathType.None) return;
+                v *= EilifPathsPlugin.CostMult();
+            }
+            catch { /* any failure here leaves v untouched, i.e. vanilla stamina */ }
         }
     }
 

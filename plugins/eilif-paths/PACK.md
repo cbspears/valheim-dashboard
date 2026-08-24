@@ -6,7 +6,9 @@ roads, and built floors, but detects terrain the way *current* Valheim actually 
 (Heightmap paint mask), so paths and roads work again. Since **1.2.0** it also extends the bed's
 "needs a fire nearby" check by 8 m (`[Bed] extraFireRange`, `0` = vanilla), and since **1.3.0** it
 extends the station↔upgrade attachment reach by 10 m at **every** crafting station
-(`[Workstation] extraAttachmentRange`, `0` = vanilla).
+(`[Workstation] extraAttachmentRange`, `0` = vanilla). Since **1.4.0** the stamina discount applies
+to movement only: tools and weapons cost vanilla stamina on dirt paths and paved roads and nothing
+on built floors (`actionstamina`, below).
 
 Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
 **(B) disable/remove Useful_Paths** so bonuses don't double-apply.
@@ -24,7 +26,7 @@ Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
 3. Choose `dist/EilifPaths.dll`. When prompted:
    - **Name:** `EilifPaths`
    - **Author:** `BlockspaceMedia` (or any — local mods aren't namespaced on Thunderstore)
-   - **Version:** `1.3.0`
+   - **Version:** `1.4.0`
    The manager copies the DLL into `<profile>/BepInEx/plugins/EilifPaths/`.
 4. **Enable** it, keep BepInEx + the other Eilif mods enabled.
 
@@ -44,17 +46,19 @@ to the old mod to limit the damage), but the correct fix is to turn the old one 
 
 ## The baked-in defaults (no config needed)
 
-| Surface   | movement | staminadrain |
-|-----------|----------|--------------|
-| Path      | 1.4      | 0            |
-| PavedRoad | 1.4      | 0            |
-| Wood      | 1.4      | 0            |
-| Stone     | 1.4      | 0            |
-| Iron      | 1.4      | 0            |
-| HardWood  | 1.4      | 0            |
+| Surface   | movement | staminadrain | actionstamina |
+|-----------|----------|--------------|---------------|
+| Path      | 1.4      | 0.25         | 1             |
+| PavedRoad | 1.4      | 0.25         | 1             |
+| Wood      | 1.4      | 0.25         | 0             |
+| Stone     | 1.4      | 0.25         | 0             |
+| Iron      | 1.4      | 0.25         | 0             |
+| HardWood  | 1.4      | 0.25         | 0             |
 
-`movement` = speed multiplier (>1 faster). `staminadrain` = stamina-cost multiplier (<1 cheaper).
-BepInEx writes `net.eilif.paths.cfg` (sections `[Path]`, `[PavedRoad]`, …) on first launch if you
+`movement` = speed multiplier (>1 faster). `staminadrain` = stamina-cost multiplier for ordinary
+movement — running, jumping, swimming, dodging, being encumbered (<1 cheaper). `actionstamina` =
+stamina-cost multiplier for tools and weapons — attacks, blocking, bow draw, building, hoe and
+cultivator work, repairs, fishing (`1` = vanilla cost, `0` = free). BepInEx writes `net.eilif.paths.cfg` (sections `[Path]`, `[PavedRoad]`, …) on first launch if you
 ever want to tweak per-surface; the defaults above ship with the DLL so the pack needs no pre-fill.
 
 Two more sections, both optional and both picked up with their defaults by an existing
@@ -87,14 +91,21 @@ detect it. (The old mod's LevelGround config did nothing useful on current Valhe
 ## Sanity check before sharing
 
 Launch Valheim once from the profile, join the server, and watch `LogOutput.log`. On boot you should
-see `[EilifPaths] Eilif Paths v1.3.0 loaded. … Bed fire range: +8m. Workstation attachment range: +10m.`.
+see `[EilifPaths] Eilif Paths v1.4.0 loaded. … Bed fire range: +8m. Workstation attachment range: +10m.
+Core patch classes: 6/6 applied.` and `[EilifPaths] tool/weapon stamina hooks: 9/9 applied.` Anything
+less than `6/6` or `9/9` means a hook went missing — the ERROR line above it names which one, and the
+stamina split is running degraded until it is fixed.
 Then walk onto a hoe path / paved road / wooden floor — each surface change logs exactly once, e.g.:
 
 ```
-[EilifPaths] terrain: PavedRoad (x1.75 speed, x0 stamina)
-[EilifPaths] terrain: Path (x1.5 speed, x0 stamina)
+[EilifPaths] terrain: PavedRoad (x1.4 speed, x0.25 movement stamina, x1 tool stamina)
+[EilifPaths] terrain: Path (x1.4 speed, x0.25 movement stamina, x1 tool stamina)
 [EilifPaths] terrain: None (vanilla speed/stamina)
 ```
+
+Swing an axe on a paved road (vanilla stamina cost) and then on a wooden floor (no cost at all) to
+check the 1.4.0 split. Note that the server-side ServersideQoL tops building and farming stamina
+back up, so use a weapon, a bow or fishing to see the difference clearly.
 
 Then walk up to a workbench and place an upgrade (chest / anvils / tanning rack) well beyond the
 usual hugging distance — it should turn green and, once placed, raise the station level. The first

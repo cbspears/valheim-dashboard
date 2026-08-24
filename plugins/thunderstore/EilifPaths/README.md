@@ -4,13 +4,17 @@ Custom plugin for the **Eilif** community Valheim server ([dashboard](https://va
 
 Roads that matter: while you stand on a recognised surface, movement speed is multiplied and stamina drain is scaled — and it reverts the instant you step off.
 
-| Surface | Speed | Stamina drain |
-|---|---|---|
-| Dirt paths (hoe) | ×1.4 | ×0.25 |
-| Paved roads | ×1.4 | ×0.25 |
-| Built floors (wood, stone, iron, hardwood) | ×1.4 | ×0.25 |
+| Surface | Speed | Movement stamina | Tools & weapons |
+|---|---|---|---|
+| Dirt paths (hoe) | ×1.4 | ×0.25 | ×1 |
+| Paved roads | ×1.4 | ×0.25 | ×1 |
+| Built floors (wood, stone, iron, hardwood) | ×1.4 | ×0.25 | ×0 |
 
-All values configurable in `net.eilif.paths.cfg` (per surface: `movement`, `staminadrain`).
+All values configurable in `net.eilif.paths.cfg` (per surface: `movement`, `staminadrain`, `actionstamina`).
+
+## Tools & weapons
+
+The cheap stamina is for getting somewhere, not for working or fighting. Running, jumping, swimming, dodging and hauling a heavy load cost a quarter of the usual stamina on any recognised surface. Swinging a weapon or a tool does not: on a dirt path or a paved road an attack, a block, a drawn bow, a hammer, a hoe, a repair or a fishing line costs exactly what it costs anywhere else. On a floor you built yourself, all of that is free.
 
 ## Beds
 

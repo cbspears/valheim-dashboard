@@ -7,6 +7,10 @@ Players move faster and spend less stamina while on dirt paths, paved roads, and
 exactly like the old mod — but detection uses the terrain API *current* Valheim actually uses, so
 paths and roads work again.
 
+Since **1.4.0** the stamina discount only covers *movement*. Tools and weapons cost vanilla stamina
+on dirt paths and paved roads, and nothing at all on built floors (see
+[Tool and weapon stamina](#tool-and-weapon-stamina-140)).
+
 It also carries two unrelated quality-of-life patches: beds accept a fire much further away
 (**1.2.0**, see [Bed fire range](#bed-fire-range-120)) and crafting-station upgrades attach from
 much further out at *every* station (**1.3.0**, see
@@ -41,7 +45,8 @@ no persistent marker, so there's no reliable way to detect it. Dropped intention
 
 - `Player.GetJogSpeedFactor` postfix — multiply result by the surface's `movement`.
 - `Player.GetRunSpeedFactor` postfix — multiply result by the surface's `movement`.
-- `Player.UseStamina` prefix — multiply the stamina cost by the surface's `staminadrain`.
+- `Player.UseStamina` prefix — multiply the stamina cost by the surface's `staminadrain`
+  (movement) or `actionstamina` (tools and weapons, 1.4.0 — see below). Local player only.
 - `Character.UpdateWalking` prefix/postfix — the jog/run factors don't affect *walking*
   (walk uses `m_walkSpeed` directly), so for the local player we **multiply** `m_walkSpeed` by
   `movement` and **restore it** in the postfix. We do not hard-set it: modern vanilla `m_walkSpeed`
@@ -51,22 +56,65 @@ no persistent marker, so there's no reliable way to detect it. Dropped intention
   through to the untouched original on no-match or any error. See below.
 - `StationExtension.Awake` postfix (1.3.0) — widens that instance's `m_maxStationDistance`, the one
   field every station-attachment distance check reads. See below.
+- Nine prefix/finalizer pairs (1.4.0) that mark "a tool or weapon charge is being paid right now",
+  applied individually at load so one unresolvable target can't take the plugin down. Full list and
+  reasoning in `src/ToolStaminaPatch.cs`. See below.
+
+Every one of the attribute-declared classes above is applied on its own at load (`CreateClassProcessor`
+per class, not a bare `PatchAll`), and the tool/weapon hooks are applied after that unconditionally.
+A bare `PatchAll` aborts the whole batch on the first unresolvable target, which could leave the
+`UseStamina` prefix installed while the tool/weapon hooks never went on — i.e. tools silently keeping
+the movement discount, the one outcome this version exists to prevent. Both counts are printed on the
+boot line (see "Verifying in-game").
 
 ## Config (baked-in defaults, no pre-fill needed)
 
-`net.eilif.paths.cfg`, sections named per surface, keys `movement` / `staminadrain`:
+`net.eilif.paths.cfg`, sections named per surface, keys `movement` / `staminadrain` /
+`actionstamina`:
 
-| Surface   | movement | staminadrain |
-|-----------|----------|--------------|
-| Path      | 1.4      | 0            |
-| PavedRoad | 1.4      | 0            |
-| Wood      | 1.4      | 0            |
-| Stone     | 1.4      | 0            |
-| Iron      | 1.4      | 0            |
-| HardWood  | 1.4      | 0            |
+| Surface   | movement | staminadrain | actionstamina |
+|-----------|----------|--------------|---------------|
+| Path      | 1.4      | 0.25         | 1             |
+| PavedRoad | 1.4      | 0.25         | 1             |
+| Wood      | 1.4      | 0.25         | 0             |
+| Stone     | 1.4      | 0.25         | 0             |
+| Iron      | 1.4      | 0.25         | 0             |
+| HardWood  | 1.4      | 0.25         | 0             |
+
+`movement` = speed multiplier (>1 faster). `staminadrain` = stamina-cost multiplier for ordinary
+movement (running, jumping, swimming, dodging, being encumbered). `actionstamina` = stamina-cost
+multiplier for tools and weapons (1 = vanilla, 0 = free).
 
 Plus two non-surface sections: `[Bed] extraFireRange` = `8` and
 `[Workstation] extraAttachmentRange` = `10` (see below).
+
+## Tool and weapon stamina (1.4.0)
+
+Up to 1.3.0 there was one multiplier for everything, so swinging an axe or holding a bow drawn on a
+road was as cheap as running along it. 1.4.0 splits the two. `Player.UseStamina` sees every charge
+but not *why* it is being paid, so the (closed, decompile-verified) set of vanilla methods that
+charge tool/weapon stamina is wrapped: a Harmony **prefix** opens a context, a Harmony **finalizer**
+closes it. A finalizer rather than a postfix, because it also runs on an early return or an
+exception, so the context can never be left stuck open. It is a depth counter, not a flag, because
+`Player.Repair` nests inside `Player.UpdatePlacement` and `Attack.FireProjectileBurst` nests inside
+`Attack.Update`. While the depth is above zero the charge takes `actionstamina`; otherwise it takes
+`staminadrain`.
+
+Wrapped: `Attack.Update`, `Attack.FireProjectileBurst`, `Humanoid.BlockAttack`,
+`Player.UpdatePlacement` (building, piece removal, **and** the hoe and cultivator — terrain work is
+an ordinary piece placement), `Player.Repair`, `Player.UpdateAttackBowDraw`,
+`Player.UpdateActionQueue` (crossbow reload), `FishingFloat.FixedUpdate`,
+`SE_Harpooned.UpdateStatusEffect`. Deliberately not wrapped: `Attack.Start` and friends (they only
+pre-check, they never charge), `Sadle.UpdateRiding` (that is the mount's own stamina), and
+`SE_Stats.UpdateStatusEffect` (a generic status-effect drain, neither movement nor a tool, so it
+keeps its old behaviour). `Character.HaveStamina` is **not** patched: with `actionstamina = 0` a
+swing is free but still needs the vanilla amount in the bar to start, and `HaveStamina` also drives
+the empty-bar flash, the projectile stop, fishing-line loss and harpoon release.
+
+Each hook is applied on its own inside try/catch and logged, so a future game update that renames a
+private method shows up as an error in `LogOutput.log` instead of silently handing the movement
+discount back to tools. If any hook fails to apply, unclassified charges fall back to the larger of
+the two multipliers — vanilla on paths and roads, `0.25` on floors.
 
 ## Bed fire range (1.2.0)
 
@@ -271,13 +319,16 @@ pack as a local mod and removing the old Useful_Paths before the next pack expor
 
 ## Verifying in-game
 
-On boot: `[EilifPaths] Eilif Paths v1.3.0 loaded. … Bed fire range: +8m. Workstation attachment
-range: +10m.` Then each surface change logs once at Info:
+On boot: `[EilifPaths] Eilif Paths v1.4.0 loaded. … Bed fire range: +8m. Workstation attachment
+range: +10m. Core patch classes: 6/6 applied.`, followed by
+`[EilifPaths] tool/weapon stamina hooks: 9/9 applied.` **Both counts are the line to check after any
+Valheim update** — anything less than `6/6` or `9/9` means a target went missing, and the ERROR line
+above it names which one. Then each surface change logs once at Info:
 
 ```
-[EilifPaths] terrain: PavedRoad (x1.75 speed, x0 stamina)
-[EilifPaths] terrain: Path (x1.5 speed, x0 stamina)
-[EilifPaths] terrain: Wood (x1.35 speed, x0 stamina)
+[EilifPaths] terrain: PavedRoad (x1.4 speed, x0.25 movement stamina, x1 tool stamina)
+[EilifPaths] terrain: Path (x1.4 speed, x0.25 movement stamina, x1 tool stamina)
+[EilifPaths] terrain: Wood (x1.4 speed, x0.25 movement stamina, x0 tool stamina)
 [EilifPaths] terrain: None (vanilla speed/stamina)
 ```
 
