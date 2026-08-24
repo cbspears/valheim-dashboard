@@ -99,7 +99,9 @@ export function normalizeHitType(raw: unknown): HitType | null {
  * ("$enemy_serpent", which is literally what `Character.m_name` holds), a prefab
  * clone name ("Greydwarf(Clone)"), or an already-readable name ("Deathsquito").
  * We strip the token/clone noise and then look the remainder up in
- * config/creatures.ts so all three land on ONE display name ("Sea Serpent").
+ * config/creatures.ts so all three land on ONE display name ("Serpent" — the
+ * bucket config/creatures.ts maps the token to; HowWeDie.tsx renders it as
+ * "The Sea Serpent" in the UI).
  *
  * An unmapped creature is never dropped and never rendered raw: a `$token`
  * input falls back to its capitalized stripped form, and a plain readable name
@@ -134,7 +136,7 @@ export function humanizeKiller(raw: unknown): string | null {
  * The cause string for one eilif death report.
  *
  * • A named attacker wins — that is the whole point of the plugin ("taken by a
- *   Sea Serpent" beats "struck down by an unseen foe").
+ *   Serpent" beats "struck down by an unseen foe").
  * • PlayerHit with a named attacker becomes "the hand of <Name>": phraseDeath()
  *   routes any cause starting with "the " through its `felled by …` branch, so
  *   this reads "Sven was felled by the hand of Bjorn" instead of the nonsense

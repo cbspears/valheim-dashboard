@@ -166,8 +166,8 @@ assert.deepEqual(parsed.metadata.pos, { x: 12, z: -8 });
 assert.ok(!('attacker' in parsed.metadata), 'no attacker key when there was no attacker');
 
 const serpentParsed = parseEilifDeath({ ...goodBody, hitType: 'EnemyHit', attacker: '$enemy_serpent', biome: 'Ocean' });
-assert.equal(serpentParsed.cause, 'Sea Serpent');
-assert.equal(serpentParsed.metadata.attacker, 'Sea Serpent');
+assert.equal(serpentParsed.cause, 'Serpent');
+assert.equal(serpentParsed.metadata.attacker, 'Serpent');
 assert.equal(serpentParsed.metadata.hitType, 'EnemyHit', 'the raw HitType is kept for diagnosis');
 
 // Junk in → null out (and, crucially, NO eilif precedence claimed, so the gs
@@ -371,7 +371,7 @@ const deaths = (db) => db.state.events.filter((e) => e.type === 'death');
   await ingestDeathEvents(db, [{ playerName: 'Bjorn', killer: '$enemy_serpent', tsUtc: gsTs }], 'Bjorn');
   assert.equal(deaths(db).length, 2, 'different vikings never collapse into each other');
   const bjorn = deaths(db).find((e) => e.character_name === 'Bjorn');
-  assert.equal(bjorn.metadata.cause, 'Sea Serpent', 'and gs killers still humanize');
+  assert.equal(bjorn.metadata.cause, 'Serpent', 'and gs killers still humanize');
 }
 
 // ── 12. no players row yet → nothing is written (self-heals next cycle) ─────
