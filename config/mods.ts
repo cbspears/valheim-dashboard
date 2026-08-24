@@ -37,7 +37,7 @@ export const MODS: Mod[] = [
     name: 'ValheimPlus (Grantapher fork)',
     author: 'Grantapher',
     description:
-      'The backbone tweak suite — raises the player cap, build-from-nearby-chests, infinite fuel, and dozens of light QoL toggles. The version must match the server exactly, so install it through the shared modpack.',
+      'The backbone tweak suite: raises the player cap, infinite fuel, and dozens of light QoL toggles. The version must match the server exactly, so install it through the shared modpack.',
     version: '0.9.17.1',
     category: 'Core',
     clientRequired: true,
@@ -109,10 +109,20 @@ export const MODS: Mod[] = [
 
   // ── Client-side, ships in the modpack ──────────────────────────────────────────────
   {
+    name: 'AzuCraftyBoxes',
+    author: 'Azumatt',
+    description:
+      'Craft and build using materials straight out of nearby chests, out to 20 metres (the server sets the range). Replaces the ValheimPlus chest-crafting feature, which broke in a live test. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
+    version: '1.8.15',
+    category: 'QoL',
+    clientRequired: true,
+    url: 'https://thunderstore.io/c/valheim/p/Azumatt/AzuCraftyBoxes/',
+  },
+  {
     name: 'GsValheimStatsClient',
     author: 'Proudlock_Technology',
     description:
-      'Richer per-viking stats — real causes of death, damage dealt, weapon records — feeding the leaderboards and your viking page. Ships in the modpack.',
+      'Richer per-viking stats — kills and deaths, damage dealt, weapon records — feeding the leaderboards and your viking page. Ships in the modpack.',
     version: '0.2.12',
     category: 'Content',
     clientRequired: true,
@@ -122,8 +132,8 @@ export const MODS: Mod[] = [
     name: 'Eilif Companion Client',
     author: 'cbspears (custom-built)',
     description:
-      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play — no setup, no uploads. Ships in the modpack.',
-    version: '0.1.0',
+      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play, with no setup and nothing to upload. It also names exactly what killed you the moment you die, the creature or the hazard, so How We Die and the Saga show the real cause instead of a guess. Ships in the modpack.',
+    version: '0.2.0',
     category: 'Content',
     clientRequired: true,
     url: 'https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-companion-client',
