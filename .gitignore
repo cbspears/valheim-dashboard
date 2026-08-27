@@ -60,6 +60,14 @@ plugins/eilif-paths/libs/
 plugins/eilif-paths/obj/
 plugins/eilif-paths/bin/
 # NOTE: plugins/eilif-paths/dist/EilifPaths.dll IS committed (the deployable artifact).
+
+# eilif-boards plugin (BepInEx / .NET build) — same convention as above.
+plugins/eilif-boards/libs/
+plugins/eilif-boards/obj/
+plugins/eilif-boards/bin/
+# NOTE: plugins/eilif-boards/dist/EilifBoards.dll IS committed (the deployable artifact), and so is
+# dist/media.blockspace.eilif.boards.cfg — the Token in it is the literal placeholder __BOARDS_TOKEN__,
+# NEVER the real secret. Substitute at upload time only.
 pilot-staging/
 scripts/.map-snapshot-state.json
 .claude/
