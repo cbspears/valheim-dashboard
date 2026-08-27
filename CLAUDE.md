@@ -5,6 +5,8 @@
 
 **This repo** = the Eilif Valheim community dashboard + Discord integration (an *evolving* project). **Site is LIVE:** https://eilif-dashboard.vercel.app (also serves https://valheim-dashboard.vercel.app — do not redirect: ingest/webhook endpoints are hard-coded to it in shipped mod configs)
 
+**🆕 2026-08-27 LIVING BOARDS (in-game leaderboard signs) is LIVE:** `GET /api/boards` (Bearer `BOARDS_TOKEN`; strings rendered by `lib/boards.ts`) + server-only plugin `plugins/eilif-boards/` (EilifBoards 0.2.0, no Harmony — writes sign ZDO text, revision-based replication). Players write `[board:kills]` (or `[board:kills:leader]` for a champion plaque) on any sign; write anything else to unclaim. Full player how-to + ops crib: vault `08-Dashboard/06-Living-Boards.md`; plugin design/ops: `plugins/eilif-boards/README.md`. ⚠️ GTX host is Windows: loaded plugin DLLs are file-locked — swap DLLs only while the server is STOPPED (retrying-upload pattern).
+
 **Get oriented fast — read these (all current):**
 1. `docs/PROJECT.md` — requirements, architecture, decisions, risks
 2. Obsidian **live tracker** → `~/Documents/Obsidian Vault/30-Personal/projects/Valheim-SuperServer/08-Dashboard/02-Tracker.md` (status, to-dos, ideas — the source of truth; **keep it updated as you work** — user preference)

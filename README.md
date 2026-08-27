@@ -65,3 +65,7 @@ nvm use && npm install && npm run dev
 
 ---
 <p align="center"><em>Sailing the tenth world. May your axes stay sharp. 🛡️</em></p>
+
+## Living Boards — the dashboard, on a plank
+
+Write `[board:kills]` on any in-game sign and the server repaints it as a live top-5 leaderboard, refreshed within a minute of the stats moving. Also: `deaths`, `builds`, `resources`, `explored`, `distance`, `titles`, `deeds` — and `[board:kills:leader]` for a plaque naming just the champion. Write anything else on the sign to take it back. Powered by `app/api/boards` (token-authed feed rendering the same numbers the site shows) and `plugins/eilif-boards` (a server-only BepInEx plugin — players install nothing). Details in `plugins/eilif-boards/README.md`.
