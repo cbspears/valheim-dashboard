@@ -85,6 +85,15 @@ export const MODS: Mod[] = [
     clientRequired: false,
   },
 
+  {
+    name: 'Eilif Boards',
+    author: 'cbspears (custom-built)',
+    description:
+      'Turns any sign into a living leaderboard. Write [board:kills] on a sign and it fills in with the top five, updating within a minute — the same for [board:deaths], [board:builds], [board:resources], [board:explored], [board:distance], plus [board:titles] and [board:deeds]. Add :leader — [board:kills:leader] — for a small plaque naming just the champion. Write anything else on the sign to take it back. Server-side, nothing to install.',
+    category: 'Content',
+    clientRequired: false,
+  },
+
   // ── Server-only, confirmed (feeds this dashboard — nothing to install) ────
   {
     name: 'GsValheimStats Emitter',

@@ -5,9 +5,10 @@ A deliberately tiny, **server-side-only** BepInEx 5 plugin for the Eilif Valheim
 all** — it only reads and writes sign ZDOs.
 
 It polls the dashboard's `/api/boards` feed and paints the eight leaderboard strings onto ordinary
-in-game signs, so the crew can read the standings without leaving Valheim.
+in-game signs, so the crew can read the standings without leaving Valheim. The six ranked stat
+boards can also be asked for as a one-line **leader plaque** instead of a full top five.
 
-`BepInPlugin` GUID: `media.blockspace.eilif.boards` — name `Eilif Boards` — v`0.1.0`.
+`BepInPlugin` GUID: `media.blockspace.eilif.boards` — name `Eilif Boards` — v`0.2.0`.
 
 Sibling plugins: `../eilif-companion` (server, ears/voice/positions — the HTTP + threading pattern
 here is lifted from it), `../eilif-paths` and `../eilif-companion-client` (client, shipped in the
@@ -24,11 +25,28 @@ Write a marker on any sign in-game (build a sign, interact, type):
 ```
 [board:kills]      [board:deaths]     [board:builds]     [board:resources]
 [board:explored]   [board:distance]   [board:titles]     [board:deeds]
+
+[board:kills:leader]   <- any of the six stat markers, with ":leader" added
 ```
 
-Case-insensitive, surrounding whitespace fine (`  [BOARD: Deeds ]  ` works). The marker must be the
-sign's **whole** text — a sign that merely mentions a marker inside a sentence is a player's sign
-and is never touched.
+| Marker | What the sign shows |
+| --- | --- |
+| `[board:kills]` … `[board:distance]` | The **top five** for that stat, leader's number accented. |
+| `[board:kills:leader]` … `[board:distance:leader]` | Only the **leader** — header plus one line. Same header, same name, same number as the top row of the full board. |
+| `[board:titles]` | Every titled viking, alphabetical. |
+| `[board:deeds]` | Great Deeds progress and the newest deed earned. |
+
+Case-insensitive, surrounding whitespace fine (`  [BOARD: Deeds ]  `, `[ board : kills : leader ]`
+both work). The marker must be the sign's **whole** text — a sign that merely mentions a marker
+inside a sentence is a player's sign and is never touched.
+
+`:leader` works on the **six ranked stat boards only**. Living Titles is alphabetical (no winner to
+name) and Great Deeds is a warband total, so `[board:titles:leader]` and `[board:deeds:leader]` are
+not markers at all: those signs stay the player's, exactly like any other text we do not recognise.
+An unknown suffix (`[board:kills:best]`) is the same — not a marker, sign untouched.
+
+To change a live board into a plaque (or the other way round), just write the other marker on it.
+The next poll re-points it; nothing has to be rebuilt.
 
 It must be a plain **`sign`** (the writable wooden sign piece). That is the only text-bearing sign
 prefab in 0.221.12; the blank decorative `sign_notext` plank cannot hold a marker and is not
@@ -42,10 +60,11 @@ walks at most 400 non-empty sectors per call. The plugin makes exactly **one cal
 then classifies at most 128 collected ZDOs per frame, so a scan is spread over many frames and never
 stalls the server tick.
 
-A sign whose text is a marker gets the board key stamped into a custom ZDO string
-(`eilif_board = "kills"`) and the live board text written over the marker immediately. From then on
-the sign is found by its `eilif_board` key, and the claim survives restarts because it lives in the
-world save, not in memory.
+A sign whose text is a marker gets the claim stamped into a custom ZDO string
+(`eilif_board = "kills"`, or `"kills:leader"` for a plaque) and the live board text written over the
+marker immediately. From then on the sign is found by its `eilif_board` stamp, and the claim —
+variant included — survives restarts because it lives in the world save, not in memory. A bare
+`"kills"` still means the full board, so signs stamped by v0.1.0 keep working untouched.
 
 ### 3. Poll writes the boards
 
@@ -53,6 +72,10 @@ Every `PollSeconds` (default 60) a **background** task does
 `GET Url` with `Authorization: Bearer <Token>`. The response is parsed with
 `DataContractJsonSerializer` (no extra shipped dependency, same as the Companion's `/api/voice`
 parser) and handed back to the main thread, which is the only place that touches the world.
+
+A plaque claim reads the response's `leaders` member. If a dashboard is older than that member, the
+claim falls back to the full board **silently** — a top five where a plaque was asked for, rather
+than a frozen sign — and becomes a plaque again by itself once the feed carries one.
 
 For each claimed sign, the board string is written to `ZDOVars.s_text` **only if it differs** from
 what the ZDO already holds, and `s_author` / `s_authorDisplayName` are set to `""` (an empty author
@@ -125,10 +148,11 @@ A healthy boot looks like this (in this order, within ~15s of the world loading)
 
 | Grep | Meaning |
 | --- | --- |
-| `Eilif Boards v0.1.0 loaded. Enabled=true, Url=…, PollSeconds=60, ScanSeconds=300, Token=set (N chars)` | **The boot summary.** Confirms the DLL loaded AND the cfg was read. Absent ⇒ the plugin did not load at all. |
+| `Eilif Boards v0.2.0 loaded. Enabled=true, Url=…, PollSeconds=60, ScanSeconds=300, Token=set (N chars)` | **The boot summary.** Confirms the DLL loaded AND the cfg was read; it also lists the markers. Absent ⇒ the plugin did not load at all. |
 | `updated 3/8 boards` | A poll landed and wrote 3 of 8 claimed signs. Logged on the first apply and thereafter only when something changed. |
 | `scan complete: 12 sign(s) in world, 8 claimed, 0 new this scan` | A discovery scan finished. The first number is **distinct valid** sign ZDOs (the game's iterator hands back the boundary sector twice; that is deduped before counting). |
-| `claimed sign 123456:78 for board kills` | A marker was picked up. |
+| `claimed sign 123456:78 for board kills` | A marker was picked up. A plaque reads `for board kills:leader`. |
+| `claimed sign 123456:78 for board kills:leader (was kills)` | Someone rewrote a live board sign as a plaque (or any marker as another). |
 | `unclaimed sign 123456:78 (player edit)` | Someone wrote their own text on a board sign. |
 | `feed recovered (was http:401)` | The feed came back. |
 
@@ -141,7 +165,7 @@ Trouble:
 | `the world was reloaded; dropping N cached claim(s)` | Should never appear on a dedicated server. Harmless (claims rebuild from the ZDO stamps on the next scan), but worth knowing about. |
 | `feed poll failed: HTTP 401 …` | Token mismatch with the dashboard's `BOARDS_TOKEN`. |
 | `feed poll failed: HTTP 503 …` | `BOARDS_TOKEN` is unset on Vercel. |
-| `board 'titles' is not in the feed` | The feed shape changed; that sign keeps its last text. |
+| `board 'titles' is not in the feed` | The feed shape changed; that sign keeps its last text. A claim reads `'kills:leader'` here only when the **full board** is missing too — a missing plaque alone falls back quietly and logs nothing. |
 | `the update pump threw and has been stopped` | Bug. Signs are frozen; nothing else is affected. Restart to retry, and file it. |
 | *(nothing at all)* | The DLL is not in `BepInEx/plugins/` — or the log did not truncate and you are reading the previous boot. Confirm the truncation first. |
 
@@ -175,7 +199,9 @@ newer SDK), exactly as in the sibling plugins. See `BUILD.md` for the rebuild-at
 4. **Stop → Start** the server from the panel (not "Restart" if the panel's restart is a soft one —
    the DLL has to be re-read).
 5. Verify with the greps above, then in-game: build a sign, write `[board:kills]` on it, and within
-   `ScanSeconds` it should turn into the kills leaderboard.
+   `ScanSeconds` it should turn into the kills leaderboard. Then write `[board:kills:leader]` on that
+   same sign — by the next poll it should collapse to the leader alone, which also proves the
+   re-marker path still re-points a live board.
 6. **Look at that first board.** `Sign.m_characterLimit` is 50 — that is the limit on what a *player*
    can type, and nothing checks length on the read path, so the feed's ≤200-character strings set and
    replicate fine. But the sign art was laid out for ~50 characters. If a board overflows or clips,

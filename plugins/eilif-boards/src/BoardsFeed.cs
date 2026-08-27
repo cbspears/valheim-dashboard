@@ -107,10 +107,10 @@ namespace EilifBoards
                         else
                         {
                             byte[] bytes = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                            BoardsPayload boards = Parse(bytes);
-                            result = boards == null
+                            BoardsResponse snapshot = Parse(bytes);
+                            result = snapshot == null
                                 ? FeedResult.Network("response was 200 but the JSON did not parse")
-                                : FeedResult.Success(boards);
+                                : FeedResult.Success(snapshot);
                         }
                     }
                 }
@@ -151,13 +151,18 @@ namespace EilifBoards
         /// an absent "boards" yields null, which the caller reports as a parse failure; and TMP
         /// markup, \n, \uXXXX and raw multi-byte UTF-8 (o-umlaut, em-dash, ellipsis) all round-trip.
         ///
+        /// The "missing members are left null" leg is what makes the 0.2.0 "leaders" member safe in
+        /// BOTH directions: a dashboard that predates it leaves <see cref="BoardsResponse.leaders"/>
+        /// null (handled by <see cref="BoardsResponse.Resolve"/>), and a 0.1.0 plugin still in the
+        /// field never declares the member and skips it, exactly as it always has with "data".
+        ///
         /// ONE THING THAT DOES NOT WORK, hence the skip below: a leading UTF-8 BOM makes ReadObject
         /// throw `SerializationException: Encountered unexpected character 'ï'`. Today's route uses
         /// `Response.json()` and never emits one, so this is belt-and-braces — but a CDN, proxy or
         /// hand-saved fixture in front of the feed could introduce one, and losing every board to
         /// three invisible bytes is not a failure worth allowing.
         /// </summary>
-        private static BoardsPayload Parse(byte[] json)
+        private static BoardsResponse Parse(byte[] json)
         {
             try
             {
@@ -172,7 +177,9 @@ namespace EilifBoards
                 {
                     var ser = new DataContractJsonSerializer(typeof(BoardsResponse));
                     var r = (BoardsResponse)ser.ReadObject(ms);
-                    return r == null ? null : r.boards;
+                    // No "boards" member is not a usable snapshot even if "leaders" arrived: every
+                    // claim can fall back to the full board, so that is the one member we require.
+                    return (r == null || r.boards == null) ? null : r;
                 }
             }
             catch (Exception ex)
@@ -194,21 +201,21 @@ namespace EilifBoards
         internal readonly int Kind;
         internal readonly int HttpStatus;    // 0 unless Kind == KindHttp
         internal readonly string Detail;     // human text for the log; null on success
-        internal readonly BoardsPayload Boards;
+        internal readonly BoardsResponse Snapshot;   // the whole parsed response: boards AND leaders
 
-        private FeedResult(int kind, int status, string detail, BoardsPayload boards)
+        private FeedResult(int kind, int status, string detail, BoardsResponse snapshot)
         {
             Kind = kind;
             HttpStatus = status;
             Detail = detail;
-            Boards = boards;
+            Snapshot = snapshot;
         }
 
         internal bool Ok { get { return Kind == KindOk; } }
 
-        internal static FeedResult Success(BoardsPayload boards)
+        internal static FeedResult Success(BoardsResponse snapshot)
         {
-            return new FeedResult(KindOk, 0, null, boards);
+            return new FeedResult(KindOk, 0, null, snapshot);
         }
 
         internal static FeedResult Http(int status, string reason)
@@ -253,12 +260,43 @@ namespace EilifBoards
     {
         [DataMember(Name = "generatedAt")] public string generatedAt;
         [DataMember(Name = "boards")] public BoardsPayload boards;
+
+        /// <summary>
+        /// The six leader plaques, added alongside "boards" by the 0.2.0 feed. NULL when the
+        /// dashboard predates it — see <see cref="Resolve"/>, which is the only reader.
+        /// </summary>
+        [DataMember(Name = "leaders")] public LeadersPayload leaders;
+
+        /// <summary>
+        /// The sign text one CLAIM asks for ("kills" = the full board, "kills:leader" = the plaque),
+        /// or null if this snapshot cannot answer it (the caller then leaves the sign alone).
+        ///
+        /// A leader claim falls back to the full board SILENTLY whenever the plaque is missing: an
+        /// older dashboard, or a feed that dropped the member. Showing a top-five where a plaque was
+        /// asked for is a small, self-explaining wrong; freezing the sign — or logging once per
+        /// missing key on every poll — is worse. The claim itself stays intact in the ZDO, so the
+        /// sign becomes a plaque again the moment the feed carries one.
+        /// </summary>
+        public string Resolve(string claim)
+        {
+            string key = BoardKeys.KeyOf(claim);
+            if (key == null) return null;
+
+            if (BoardKeys.IsLeader(claim) && leaders != null)
+            {
+                string plaque = leaders.Get(key);
+                if (plaque != null) return plaque;
+            }
+
+            return boards == null ? null : boards.Get(key);
+        }
     }
 
     /// <summary>
     /// The eight ready-to-paste sign strings. Field names match the JSON keys exactly, and the
     /// same eight names are the marker vocabulary (<c>[board:kills]</c> etc.) — see
-    /// <see cref="BoardKeys.All"/>.
+    /// <see cref="BoardKeys.All"/>. Six of them also answer to a <c>:leader</c> suffix, whose
+    /// strings live in <see cref="LeadersPayload"/>.
     /// </summary>
     [DataContract]
     public class BoardsPayload
@@ -273,8 +311,9 @@ namespace EilifBoards
         [DataMember(Name = "deeds")] public string deeds;
 
         /// <summary>
-        /// The board string for a key, or null if the feed did not carry it this time. Null is a
-        /// real case the caller must handle: a claimed sign whose board vanished keeps its text.
+        /// The board string for a BARE key, or null if the feed did not carry it this time. Null is
+        /// a real case the caller must handle: a claimed sign whose board vanished keeps its text.
+        /// Claims with a variant go through <see cref="BoardsResponse.Resolve"/>, not here.
         /// </summary>
         public string Get(string key)
         {
@@ -288,6 +327,40 @@ namespace EilifBoards
                 case BoardKeys.Distance: return distance;
                 case BoardKeys.Titles: return titles;
                 case BoardKeys.Deeds: return deeds;
+                default: return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The six leader plaques: the same six ranked stat boards as <see cref="BoardsPayload"/>, each
+    /// cut down to its top row. Titles and Deeds are deliberately absent — see
+    /// <see cref="BoardKeys.Claim"/>.
+    /// </summary>
+    [DataContract]
+    public class LeadersPayload
+    {
+        [DataMember(Name = "kills")] public string kills;
+        [DataMember(Name = "deaths")] public string deaths;
+        [DataMember(Name = "builds")] public string builds;
+        [DataMember(Name = "resources")] public string resources;
+        [DataMember(Name = "explored")] public string explored;
+        [DataMember(Name = "distance")] public string distance;
+
+        /// <summary>
+        /// The plaque for a BARE stat key, or null if the feed did not carry it. Never pass a
+        /// combined claim here — <see cref="BoardsResponse.Resolve"/> splits that first.
+        /// </summary>
+        public string Get(string key)
+        {
+            switch (key)
+            {
+                case BoardKeys.Kills: return kills;
+                case BoardKeys.Deaths: return deaths;
+                case BoardKeys.Builds: return builds;
+                case BoardKeys.Resources: return resources;
+                case BoardKeys.Explored: return explored;
+                case BoardKeys.Distance: return distance;
                 default: return null;
             }
         }
@@ -310,6 +383,25 @@ namespace EilifBoards
             Kills, Deaths, Builds, Resources, Explored, Distance, Titles, Deeds
         };
 
+        /// <summary>
+        /// The six RANKED stat boards — the only ones a leader plaque exists for, and the same six
+        /// members <see cref="LeadersPayload"/> carries.
+        /// </summary>
+        internal static readonly string[] Stats =
+        {
+            Kills, Deaths, Builds, Resources, Explored, Distance
+        };
+
+        /// <summary>The variant that asks for the leader row alone instead of the top five.</summary>
+        internal const string Leader = "leader";
+
+        /// <summary>
+        /// Separates a board key from its variant, in the marker AND in the <c>eilif_board</c> stamp:
+        /// "kills:leader". A BARE "kills" is the full board, which is why every sign stamped by
+        /// 0.1.0 keeps meaning exactly what it meant then.
+        /// </summary>
+        internal const char VariantSeparator = ':';
+
         /// <summary>Case-insensitive membership test, returning the canonical lower-case key.</summary>
         internal static string Canonical(string candidate)
         {
@@ -319,6 +411,63 @@ namespace EilifBoards
                 if (string.Equals(All[i], candidate, StringComparison.OrdinalIgnoreCase)) return All[i];
             }
             return null;
+        }
+
+        /// <summary>
+        /// The canonical CLAIM for a key plus an optional variant — "kills" or "kills:leader" — or
+        /// null if the pair is not a claim at all.
+        ///
+        /// ":leader" is only meaningful for the six ranked stat boards. Living Titles is
+        /// alphabetical (it spends no accent precisely because there is no winner to name) and Great
+        /// Deeds is a warband total, not a race, so neither has a leader row to show and the feed
+        /// carries no plaque for them. "[board:titles:leader]" is therefore treated as NOT A MARKER
+        /// rather than as a mistyped "[board:titles]": a sign we do not understand belongs to the
+        /// player who wrote it, and silently showing them the full board would teach the crew that a
+        /// suffix works where it does not.
+        /// </summary>
+        internal static string Claim(string key, string variant)
+        {
+            string canonical = Canonical(key);
+            if (canonical == null) return null;
+            if (string.IsNullOrEmpty(variant)) return canonical;
+            if (!string.Equals(variant, Leader, StringComparison.OrdinalIgnoreCase)) return null;
+
+            for (int i = 0; i < Stats.Length; i++)
+            {
+                if (Stats[i] == canonical) return canonical + VariantSeparator + Leader;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// The canonical claim for a stored <c>eilif_board</c> string, or null if it is not one.
+        /// Splits on the FIRST separator only, so anything past a second colon fails
+        /// <see cref="Claim"/> rather than being quietly ignored.
+        /// </summary>
+        internal static string CanonicalClaim(string stored)
+        {
+            if (string.IsNullOrEmpty(stored)) return null;
+            int sep = stored.IndexOf(VariantSeparator);
+            return sep < 0
+                ? Claim(stored, null)
+                : Claim(stored.Substring(0, sep), stored.Substring(sep + 1));
+        }
+
+        /// <summary>The board key a claim names ("kills:leader" -> "kills"), or null if it is not a claim.</summary>
+        internal static string KeyOf(string claim)
+        {
+            if (string.IsNullOrEmpty(claim)) return null;
+            int sep = claim.IndexOf(VariantSeparator);
+            return Canonical(sep < 0 ? claim : claim.Substring(0, sep));
+        }
+
+        /// <summary>True if this claim asks for the leader plaque rather than the full board.</summary>
+        internal static bool IsLeader(string claim)
+        {
+            if (string.IsNullOrEmpty(claim)) return false;
+            int sep = claim.IndexOf(VariantSeparator);
+            return sep >= 0 &&
+                   string.Equals(claim.Substring(sep + 1), Leader, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

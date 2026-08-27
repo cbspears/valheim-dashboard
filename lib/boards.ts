@@ -75,6 +75,22 @@ export interface Boards {
   deeds: string;
 }
 
+/**
+ * The leader-only plaques: the same six RANKED stat boards, each cut down to its top row.
+ *
+ * Six, not eight, on purpose. Living Titles is alphabetical (colouring a first name would
+ * invent a winner) and Great Deeds is a warband total, not a race — neither has a leader to
+ * put on a plaque, so neither gets one here or in the marker vocabulary.
+ */
+export interface Leaders {
+  kills: string;
+  deaths: string;
+  builds: string;
+  resources: string;
+  explored: string;
+  distance: string;
+}
+
 // ── Formatters ────────────────────────────────────────────────────────────
 // Deliberately NOT lib/format.ts: that module is the website's display layer
 // (it pulls in date-fns and switches units — "920 m" under a kilometre), while a
@@ -155,25 +171,58 @@ function renderBoard(header: string, rows: Row[], accentFirst: boolean): string 
   return fitBudget([head, ...lines]);
 }
 
+/** One ranked stat board: its header word, how to read its number, how to render it. */
+interface StatSpec {
+  header: string;
+  pick: (p: BoardPlayer) => number | null | undefined;
+  format: (n: number) => string;
+}
+
 /**
- * Top-N leaderboard for one numeric stat.
+ * The six ranked stat boards, declared ONCE. The full board and the leader plaque both
+ * render from this table, which is what makes "the plaque names whoever tops the board"
+ * true by construction instead of by two lists happening to agree.
+ */
+const STATS: Record<keyof Leaders, StatSpec> = {
+  kills: { header: 'Kills', pick: (p) => p.kills, format: formatCount },
+  deaths: { header: 'Deaths', pick: (p) => p.deaths, format: formatCount },
+  builds: { header: 'Builds', pick: (p) => p.builds, format: formatCount },
+  resources: { header: 'Resources', pick: (p) => p.resources, format: formatCount },
+  explored: { header: 'Explored', pick: (p) => p.exploredPct, format: formatPct },
+  distance: { header: 'Distance', pick: (p) => p.distanceM, format: formatKm },
+};
+
+/**
+ * The top `limit` rows of one ranked stat, rendered.
  *
  * Zero (and null / NaN) is SKIPPED rather than shown: a sign listing five vikings
- * with "0" reads as a broken feed, and the boards are meant to celebrate.
+ * with "0" reads as a broken feed, and the boards are meant to celebrate. That skip is
+ * why an empty stat's plaque says "no entries yet" rather than naming a leader at 0.
  */
-function statBoard(
-  header: string,
-  players: BoardPlayer[],
-  pick: (p: BoardPlayer) => number | null | undefined,
-  format: (n: number) => string,
-): string {
+function rankedBoard(players: BoardPlayer[], spec: StatSpec, limit: number): string {
   const rows = players
-    .map((p) => ({ name: p.name, value: Number(pick(p) ?? 0) }))
+    .map((p) => ({ name: p.name, value: Number(spec.pick(p) ?? 0) }))
     .filter((r) => Number.isFinite(r.value) && r.value > 0)
     .sort(byValueThenName)
-    .slice(0, TOP_N)
-    .map((r) => ({ label: truncate(r.name, MAX_NAME_CHARS), value: format(r.value) }));
-  return renderBoard(header, rows, true);
+    .slice(0, limit)
+    .map((r) => ({ label: truncate(r.name, MAX_NAME_CHARS), value: spec.format(r.value) }));
+  return renderBoard(spec.header, rows, true);
+}
+
+/** Top-N leaderboard for one numeric stat. */
+function statBoard(players: BoardPlayer[], spec: StatSpec): string {
+  return rankedBoard(players, spec, TOP_N);
+}
+
+/**
+ * The same board, cut to its single top row — a compact plaque for a small sign.
+ *
+ * Same header, same truncation, same formatter, same tie-break, same accent: it IS the
+ * board's first line, so a plaque and a full board standing side by side can never
+ * disagree about who is winning.
+ */
+function leaderPlaque(players: BoardPlayer[], spec: StatSpec): string {
+  return rankedBoard(players, spec, 1);
 }
 
 /**
@@ -205,13 +254,31 @@ function deedsBoard(deeds: DeedsSummary): string {
 /** Build all eight sign strings from an already-flattened roster. */
 export function buildBoards(players: BoardPlayer[], deeds: DeedsSummary): Boards {
   return {
-    kills: statBoard('Kills', players, (p) => p.kills, formatCount),
-    deaths: statBoard('Deaths', players, (p) => p.deaths, formatCount),
-    builds: statBoard('Builds', players, (p) => p.builds, formatCount),
-    resources: statBoard('Resources', players, (p) => p.resources, formatCount),
-    explored: statBoard('Explored', players, (p) => p.exploredPct, formatPct),
-    distance: statBoard('Distance', players, (p) => p.distanceM, formatKm),
+    kills: statBoard(players, STATS.kills),
+    deaths: statBoard(players, STATS.deaths),
+    builds: statBoard(players, STATS.builds),
+    resources: statBoard(players, STATS.resources),
+    explored: statBoard(players, STATS.explored),
+    distance: statBoard(players, STATS.distance),
     titles: titlesBoard(players),
     deeds: deedsBoard(deeds),
+  };
+}
+
+/**
+ * Build the six leader plaques from the same roster.
+ *
+ * A player asks for one by writing `[board:kills:leader]` instead of `[board:kills]`; the
+ * plugin resolves that claim against this map and falls back to the full board if a feed
+ * ever answers without it, so nothing here can freeze a sign.
+ */
+export function buildLeaders(players: BoardPlayer[]): Leaders {
+  return {
+    kills: leaderPlaque(players, STATS.kills),
+    deaths: leaderPlaque(players, STATS.deaths),
+    builds: leaderPlaque(players, STATS.builds),
+    resources: leaderPlaque(players, STATS.resources),
+    explored: leaderPlaque(players, STATS.explored),
+    distance: leaderPlaque(players, STATS.distance),
   };
 }

@@ -11,8 +11,9 @@ namespace EilifBoards
     ///
     /// It polls the dashboard's /api/boards feed and paints the resulting leaderboard strings onto
     /// ordinary in-game signs, so the crew can read the standings without leaving Valheim. A player
-    /// claims a sign by writing "[board:kills]" on it; from then on the plugin owns that sign until
-    /// the player writes something else on it.
+    /// claims a sign by writing "[board:kills]" on it — or "[board:kills:leader]" for a plaque with
+    /// only the leader on it; from then on the plugin owns that sign until the player writes
+    /// something else on it.
     ///
     /// SHAPE (deliberately the same as ../eilif-companion): one BaseUnityPlugin with an Update()
     /// pump on the main thread, one background Task for HTTP, results handed back by reference and
@@ -28,7 +29,7 @@ namespace EilifBoards
     {
         public const string PluginGuid = "media.blockspace.eilif.boards";
         public const string PluginName = "Eilif Boards";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.2.0";
 
         /// <summary>Every log line this plugin emits starts with this. Grep for it after a restart.</summary>
         private const string LogPrefix = "[EilifBoards] ";
@@ -60,7 +61,7 @@ namespace EilifBoards
         // ---- Runtime state (main thread only) ----
         private BoardsFeed _feed;
         private SignBoards _boards;
-        private BoardsPayload _latest;      // most recent successful snapshot (for scan-time writes)
+        private BoardsResponse _latest;     // most recent successful snapshot (for scan-time writes)
 
         private bool _dormant;              // no token => do nothing at all
         private bool _bootstrapped;         // first ready frame has run
@@ -127,7 +128,8 @@ namespace EilifBoards
                      ", PollSeconds=" + PollInterval() + ", ScanSeconds=" + ScanInterval() +
                      ", Token=set (" + _token.Value.Length + " chars). Markers: [board:kills] " +
                      "[board:deaths] [board:builds] [board:resources] [board:explored] [board:distance] " +
-                     "[board:titles] [board:deeds].");
+                     "[board:titles] [board:deeds]. The six stat markers also take a ':leader' " +
+                     "suffix ([board:kills:leader]) for a plaque showing only the leader.");
             }
             catch (Exception ex)
             {
@@ -211,8 +213,8 @@ namespace EilifBoards
                     LogInfo("feed recovered (was " + _lastStatusKey + "); back to polling every " + PollInterval() + "s.");
                 _lastStatusKey = key;
                 _backingOff = false;
-                _latest = result.Boards;
-                _boards.Apply(result.Boards);
+                _latest = result.Snapshot;
+                _boards.Apply(result.Snapshot);
                 return;
             }
 

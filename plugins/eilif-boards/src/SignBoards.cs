@@ -13,9 +13,16 @@ namespace EilifBoards
     /// ---------------------------------------------------------------------------------------
     /// A player writes a marker on any sign in-game: "[board:kills]" (the eight keys are the eight
     /// members of <see cref="BoardsPayload"/>; case-insensitive, surrounding whitespace ignored).
-    /// The periodic discovery scan sees that text, stamps the board key into a custom ZDO string
-    /// (<c>eilif_board</c>) and immediately writes the live board text over the marker. From then on
-    /// the sign is found by its <c>eilif_board</c> key, so the marker never has to survive.
+    /// The six ranked stat boards also take an optional ":leader" suffix — "[board:kills:leader]" —
+    /// which asks for a compact plaque holding only the leader instead of the top five.
+    /// The periodic discovery scan sees that text, stamps the CLAIM into a custom ZDO string
+    /// (<c>eilif_board</c> = "kills" or "kills:leader") and immediately writes the live board text
+    /// over the marker. From then on the sign is found by its <c>eilif_board</c> stamp, so the
+    /// marker never has to survive.
+    ///
+    /// The variant lives in that same stamp on purpose: a bare "kills" is still the full board, so
+    /// every sign stamped by 0.1.0 keeps working with no migration, and a plaque survives a restart
+    /// exactly the way a board does — the world save is the only place either claim is recorded.
     ///
     /// ---------------------------------------------------------------------------------------
     /// WHY WE WRITE THE ZDO DIRECTLY AND DO **NOT** TAKE OWNERSHIP
@@ -153,16 +160,22 @@ namespace EilifBoards
         /// <summary>What we know about one claimed sign. Mutable, main thread only.</summary>
         private sealed class Claim
         {
-            internal string Board;      // one of BoardKeys.All
+            internal string Board;      // a canonical claim: "kills" (full board) or "kills:leader"
             internal string LastWrote;  // the exact text we last wrote, or null = "never / unknown"
 
             internal Claim(string board) { Board = board; }
         }
 
-        // "[board:kills]", "  [BOARD: Deeds ]  " — anchored, so a sign that merely mentions a
-        // marker inside a longer sentence is a player's sign and is left alone.
+        // "[board:kills]", "  [BOARD: Deeds ]  ", "[board:kills:leader]" — anchored, so a sign that
+        // merely mentions a marker inside a longer sentence is a player's sign and is left alone.
+        //
+        // The variant is captured as a plain word rather than the literal "leader" so the whole
+        // vocabulary lives in BoardKeys and nowhere else: this regex decides SHAPE, BoardKeys.Claim
+        // decides MEANING. An unknown suffix ("[board:kills:best]") therefore fails the same way an
+        // unknown key does — not a marker, sign untouched — instead of being rejected here by shape
+        // and accepted there by meaning, or vice versa.
         private static readonly Regex MarkerRe =
-            new Regex(@"^\s*\[\s*board\s*:\s*([A-Za-z]+)\s*\]\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            new Regex(@"^\s*\[\s*board\s*:\s*([A-Za-z]+)\s*(?::\s*([A-Za-z]+)\s*)?\]\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         private readonly Dictionary<ZDOID, Claim> _claims = new Dictionary<ZDOID, Claim>();
         private readonly HashSet<string> _missingBoardLogged = new HashSet<string>();
@@ -243,7 +256,7 @@ namespace EilifBoards
         /// One frame's slice of the discovery scan. Returns true when the scan has just finished.
         /// Never throws.
         /// </summary>
-        internal bool ScanStep(BoardsPayload boards)
+        internal bool ScanStep(BoardsResponse snapshot)
         {
             if (!_scanActive) return false;
             try
@@ -263,7 +276,7 @@ namespace EilifBoards
                 int budget = ClassifyBudgetPerFrame;
                 while (_scanCursor < _scanBuf.Count && budget-- > 0)
                 {
-                    Classify(_scanBuf[_scanCursor++], boards);
+                    Classify(_scanBuf[_scanCursor++], snapshot);
                 }
                 if (_scanCursor < _scanBuf.Count) return false;
 
@@ -297,7 +310,7 @@ namespace EilifBoards
             {
                 if (_scanSeen.Contains(kv.Key)) continue;
                 ZDO zdo = SafeGet(kv.Key);
-                if (zdo != null && BoardKeys.Canonical(zdo.GetString(BoardKeyZdoKey, "")) == kv.Value.Board) continue;
+                if (zdo != null && BoardKeys.CanonicalClaim(zdo.GetString(BoardKeyZdoKey, "")) == kv.Value.Board) continue;
                 if (stale == null) stale = new List<ZDOID>();
                 stale.Add(kv.Key);
             }
@@ -316,7 +329,7 @@ namespace EilifBoards
         }
 
         /// <summary>Decide what one scanned sign ZDO is: a fresh marker, an existing board, or a player's sign.</summary>
-        private void Classify(ZDO zdo, BoardsPayload boards)
+        private void Classify(ZDO zdo, BoardsResponse snapshot)
         {
             try
             {
@@ -331,7 +344,7 @@ namespace EilifBoards
 
                 string text = zdo.GetString(ZDOVars.s_text, "");
                 string marked = ParseMarker(text);
-                string stamped = BoardKeys.Canonical(zdo.GetString(BoardKeyZdoKey, ""));
+                string stamped = BoardKeys.CanonicalClaim(zdo.GetString(BoardKeyZdoKey, ""));
 
                 if (marked != null)
                 {
@@ -354,7 +367,7 @@ namespace EilifBoards
 
                     // "immediately write the current board text" — only possible once a poll has
                     // landed; otherwise the marker stays visible until the first successful poll.
-                    if (boards != null) WriteBoard(zdo, claim, boards);
+                    if (snapshot != null) WriteBoard(zdo, claim, snapshot);
                     return;
                 }
 
@@ -399,9 +412,9 @@ namespace EilifBoards
         /// <summary>
         /// Push a fresh feed snapshot onto every claimed sign. Main thread. Never throws.
         /// </summary>
-        internal void Apply(BoardsPayload boards)
+        internal void Apply(BoardsResponse snapshot)
         {
-            if (boards == null) return;
+            if (snapshot == null) return;
             try
             {
                 SyncWorld();
@@ -431,7 +444,7 @@ namespace EilifBoards
                         }
 
                         string current = zdo.GetString(ZDOVars.s_text, "");
-                        string want = boards.Get(claim.Board);
+                        string want = snapshot.Resolve(claim.Board);
 
                         // ---- respect player edits ----------------------------------------------
                         // Differs from BOTH our last write and the board string => a human touched it.
@@ -447,7 +460,7 @@ namespace EilifBoards
                                 claim.Board = marked;
                                 claim.LastWrote = null;
                                 zdo.Set(BoardKeyZdoKey, marked);
-                                want = boards.Get(marked);
+                                want = snapshot.Resolve(marked);
                             }
                             else
                             {
@@ -490,9 +503,9 @@ namespace EilifBoards
         // helpers
         // =====================================================================================
 
-        private bool WriteBoard(ZDO zdo, Claim claim, BoardsPayload boards)
+        private bool WriteBoard(ZDO zdo, Claim claim, BoardsResponse snapshot)
         {
-            return WriteBoard(zdo, claim, boards.Get(claim.Board));
+            return WriteBoard(zdo, claim, snapshot.Resolve(claim.Board));
         }
 
         /// <summary>
@@ -527,7 +540,7 @@ namespace EilifBoards
             return true;
         }
 
-        /// <summary>The board key a sign's text claims, or null if it is not a marker.</summary>
+        /// <summary>The canonical claim a sign's text makes, or null if it is not a marker.</summary>
         private static string ParseMarker(string text)
         {
             if (string.IsNullOrEmpty(text)) return null;
@@ -535,7 +548,7 @@ namespace EilifBoards
             if (text.IndexOf('[') < 0) return null;
             Match m = MarkerRe.Match(text);
             if (!m.Success) return null;
-            return BoardKeys.Canonical(m.Groups[1].Value);
+            return BoardKeys.Claim(m.Groups[1].Value, m.Groups[2].Success ? m.Groups[2].Value : null);
         }
 
         private static ZDO SafeGet(ZDOID id)

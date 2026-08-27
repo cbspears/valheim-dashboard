@@ -22,7 +22,7 @@
 
 import { getPlayersWithStats, getMilestones } from '@/lib/data';
 import { safeEqual } from '@/lib/ops/auth';
-import { buildBoards, type BoardPlayer, type Boards, type DeedsSummary } from '@/lib/boards';
+import { buildBoards, buildLeaders, type BoardPlayer, type Boards, type DeedsSummary, type Leaders } from '@/lib/boards';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -32,9 +32,15 @@ const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
 const CACHE_TTL_MS = 30_000;
 
+// `leaders` is a SIBLING of `boards`, never a replacement: the deployed plugin parses this
+// payload with DataContractJsonSerializer, which binds the members it declares and skips the
+// rest (that is how the undeclared `data` has always been ignored). So adding a member is
+// invisible to a 0.1.0 plugin in the field, and a 0.2.0 plugin asked for a leader plaque by a
+// feed that predates this line just gets null and falls back to the full board.
 interface BoardsResponse {
   generatedAt: string;
   boards: Boards;
+  leaders: Leaders;
   data: { players: BoardPlayer[]; deeds: DeedsSummary };
 }
 
@@ -83,6 +89,7 @@ async function compute(): Promise<BoardsResponse> {
   return {
     generatedAt: new Date().toISOString(),
     boards: buildBoards(players, deeds),
+    leaders: buildLeaders(players),
     data: { players, deeds },
   };
 }
