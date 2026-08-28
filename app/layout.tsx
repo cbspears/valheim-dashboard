@@ -46,6 +46,9 @@ export const metadata: Metadata = {
     description: SERVER_DESCRIPTION,
     images: [ogImageUrl],
   },
+  appleWebApp: {
+    title: SERVER_NAME,
+  },
 };
 
 export default function RootLayout({
