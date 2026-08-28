@@ -86,7 +86,9 @@ export default async function WorldPage() {
         </div>
       </div>
 
-      <section>
+      {/* id: the nav's next-gathering pill links here when the event has no
+          Discord link of its own. */}
+      <section id="gatherings" className="scroll-mt-20">
         <SectionHeader
           title="Scheduled Gatherings"
           subtitle="Game nights, raids, and revelry. What's on the road ahead."

@@ -93,6 +93,72 @@ export function eventCountdown(iso: string | null | undefined): string {
   return `in ${Math.round(days / 7)} weeks`;
 }
 
+// Which calendar day (in Central) a moment falls on, as a plain day number so
+// two moments can be compared. "en-CA" formats as YYYY-MM-DD, which parses
+// cleanly; Date.UTC then flattens it to a day index.
+function centralDayIndex(d: Date): number {
+  const [y, m, day] = new Intl.DateTimeFormat('en-CA', {
+    timeZone: EVENT_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .format(d)
+    .split('-')
+    .map(Number);
+  return Math.floor(Date.UTC(y, m - 1, day) / 86_400_000);
+}
+
+/** Hour of the day (0-23) in Central. */
+function centralHour(d: Date): number {
+  return Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: EVENT_TZ,
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).format(d)
+  );
+}
+
+/**
+ * Countdown for the nav's next-gathering pill: same job as `eventCountdown`,
+ * but it counts calendar days rather than 24-hour blocks, so a gathering this
+ * evening reads "tonight" and one the next morning reads "tomorrow" — the way
+ * a person would say it. Days are judged in Central, matching every other
+ * event time on the site. `now` is injectable so the pill can recompute on the
+ * client after mount (and so this is testable).
+ */
+export function gatheringCountdown(
+  iso: string | null | undefined,
+  now: number = Date.now()
+): string {
+  if (!iso) return '';
+  const start = new Date(iso);
+  const ms = start.getTime() - now;
+  if (Number.isNaN(ms)) return '';
+  if (ms <= 0) return 'happening now';
+
+  const mins = Math.round(ms / 60_000);
+  if (mins < 60) return `in ${mins} min`;
+
+  const dayGap = centralDayIndex(start) - centralDayIndex(new Date(now));
+  if (dayGap <= 0) return centralHour(start) >= 17 ? 'tonight' : 'later today';
+  if (dayGap === 1) return 'tomorrow';
+  if (dayGap < 14) return `in ${dayGap} days`;
+  return `in ${Math.round(dayGap / 7)} weeks`;
+}
+
+/** True once a gathering is a day out or nearer — the pill glows harder then. */
+export function isGatheringImminent(
+  iso: string | null | undefined,
+  now: number = Date.now()
+): boolean {
+  if (!iso) return false;
+  const ms = new Date(iso).getTime() - now;
+  if (Number.isNaN(ms)) return false;
+  return ms < 86_400_000;
+}
+
 /** 31.9 -> "31.9%" (drops a trailing ".0"). */
 export function formatPercent(pct: number | null | undefined): string {
   if (!pct || pct <= 0) return '0%';

@@ -6,6 +6,7 @@
 // Pages that render this data should set `export const dynamic = 'force-dynamic'`
 // so live values (online players, server status) are fresh on every request.
 
+import { unstable_cache } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
 import type {
   Player,
@@ -318,6 +319,24 @@ export async function getUpcomingEvents(limit = 10): Promise<UpcomingEvent[]> {
   upcoming.sort((a, b) => new Date(a.next_at).getTime() - new Date(b.next_at).getTime());
   return upcoming.slice(0, limit);
 }
+
+/**
+ * The single soonest gathering, for the nav bar's pill.
+ *
+ * The nav renders inside the root layout, i.e. on EVERY route — including the
+ * two pages that are prerendered at build time (/mods, /get-started). An
+ * uncached read here would drag both of them into per-request rendering, so
+ * this one goes through the data cache with a five-minute life. Every other
+ * page already sets `dynamic = 'force-dynamic'` and is unaffected.
+ */
+export const getNextEvent = unstable_cache(
+  async (): Promise<UpcomingEvent | null> => {
+    const [next] = await getUpcomingEvents(1);
+    return next ?? null;
+  },
+  ['nav-next-event'],
+  { revalidate: 300, tags: ['discord-events'] }
+);
 
 export async function getGalleryPhotos(limit = 60): Promise<GalleryPhoto[]> {
   // Embed the linked map pin (place name) so the Gallery can show a place tag.

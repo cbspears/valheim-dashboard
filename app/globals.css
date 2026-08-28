@@ -150,6 +150,49 @@ body {
   animation: pulse-glow 2.2s infinite;
 }
 
+/* ------------------------------------------------------------------ */
+/* Next-gathering pill — a hearth ember in the nav bar                  */
+/* A slow gold breath: the border and a soft outer glow rise and fall   */
+/* together, so the eye catches it without it ever reading as an alarm. */
+/* The static glow below is the whole look when motion isn't welcome;   */
+/* the animations only exist inside the no-preference query.            */
+/* ------------------------------------------------------------------ */
+.ember-pill {
+  box-shadow: 0 0 10px -3px rgba(200, 149, 42, 0.4);
+}
+
+@keyframes ember-breath {
+  0%, 100% {
+    box-shadow: 0 0 6px -2px rgba(200, 149, 42, 0.3);
+    border-color: var(--color-gold-dim);
+  }
+  50% {
+    box-shadow: 0 0 15px 1px rgba(200, 149, 42, 0.45);
+    border-color: var(--color-gold);
+  }
+}
+
+/* Within a day of the gathering — the same breath, quicker and brighter. */
+@keyframes ember-breath-soon {
+  0%, 100% {
+    box-shadow: 0 0 8px -1px rgba(200, 149, 42, 0.45);
+    border-color: var(--color-gold);
+  }
+  50% {
+    box-shadow: 0 0 19px 2px rgba(232, 184, 75, 0.6);
+    border-color: var(--color-gold-light);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ember-pill {
+    animation: ember-breath 3s ease-in-out infinite;
+  }
+  .ember-pill-soon {
+    animation: ember-breath-soon 2s ease-in-out infinite;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--color-pitch); }

@@ -6,6 +6,8 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import { Menu, X } from 'lucide-react';
 import { SERVER_NAME } from '@/config/server';
+import { NextGatheringPill } from '@/components/events/NextGatheringPill';
+import type { NextGathering } from '@/lib/next-gathering';
 
 const LINKS = [
   { href: '/', label: 'Hall' },
@@ -19,7 +21,7 @@ const LINKS = [
   { href: '/get-started', label: 'Get Started', cta: true },
 ];
 
-export function NavBar() {
+export function NavBar({ nextGathering }: { nextGathering?: NextGathering | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
@@ -29,15 +31,31 @@ export function NavBar() {
   return (
     <header className="sticky top-0 z-50 border-b border-rune bg-pitch/85 backdrop-blur-md">
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-        <Link href="/" className="group flex items-center gap-2.5" onClick={() => setOpen(false)}>
+        <Link
+          href="/"
+          className="group flex shrink-0 items-center gap-2.5"
+          onClick={() => setOpen(false)}
+        >
           <span className="text-xl text-gold transition-transform group-hover:scale-110">⚔</span>
           <span className="font-display text-base tracking-wide text-ash sm:text-lg">
             {SERVER_NAME}
           </span>
         </Link>
 
+        {/*
+          Next gathering — fills the dead space between the wordmark and the
+          tabs. It only appears from lg up: at md the nine tabs already use the
+          whole bar, and `min-w-0` + `truncate` mean that even here the pill
+          gives up width rather than pushing anything.
+        */}
+        {nextGathering && (
+          <div className="hidden min-w-0 flex-1 justify-center lg:flex">
+            <NextGatheringPill gathering={nextGathering} className="max-w-full" />
+          </div>
+        )}
+
         {/* Desktop links */}
-        <div className="hidden items-center gap-1 md:flex">
+        <div className="hidden shrink-0 items-center gap-1 md:flex">
           {LINKS.map((l) =>
             l.cta ? (
               <Link
@@ -82,6 +100,13 @@ export function NavBar() {
       {/* Mobile menu */}
       {open && (
         <div className="border-t border-rune bg-pitch/95 px-4 py-2 md:hidden">
+          {/* The gathering can't fit in the bar at this width, so it rides at
+              the top of the drawer instead of disappearing on phones. */}
+          {nextGathering && (
+            <div className="flex py-1.5">
+              <NextGatheringPill gathering={nextGathering} className="max-w-full" />
+            </div>
+          )}
           {LINKS.map((l) => (
             <Link
               key={l.href}

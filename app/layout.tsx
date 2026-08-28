@@ -5,6 +5,8 @@ import { NavBar } from '@/components/NavBar';
 import { Footer } from '@/components/Footer';
 import { SERVER_NAME, SERVER_TAGLINE, SERVER_DESCRIPTION } from '@/config/server';
 import { art, HEADER_ART } from '@/config/art';
+import { getNextEvent } from '@/lib/data';
+import { toNextGathering } from '@/lib/next-gathering';
 
 // Social card: swap in the baked-in reference art (00) once it lands; until
 // then art() returns null and we keep the current /og-eilif.jpg exactly.
@@ -51,13 +53,19 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // The soonest gathering, for the nav pill. Cached (see getNextEvent) so this
+  // layout-level read doesn't pull the statically prerendered pages into
+  // per-request rendering. Null when nothing is scheduled — the nav then looks
+  // exactly as it did before the pill existed.
+  const nextGathering = toNextGathering(await getNextEvent());
+
   return (
     <html lang="en" className={`${cinzel.variable} ${inter.variable} h-full`}>
       <body className="flex min-h-full flex-col">
-        <NavBar />
+        <NavBar nextGathering={nextGathering} />
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
           {children}
         </main>
