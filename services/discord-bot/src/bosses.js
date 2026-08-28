@@ -25,7 +25,9 @@ export function createBossWatcher({ db, post, state, saveState, skald = null }) 
     let posted = 0;
     for (const b of bosses) {
       if (b.is_killed && !announced.has(b.id)) {
-        await post('valheim', formatBossKill(b));
+        // Channel: env BOSS_CHANNEL ('server' during the rehearsal pilot, default
+        // 'valheim' — revert/remove at launch with the other pilot overrides).
+        await post(process.env.BOSS_CHANNEL === 'server' ? 'server' : 'valheim', formatBossKill(b));
         announced.add(b.id);
         freshKills.push(b);
         posted++;
