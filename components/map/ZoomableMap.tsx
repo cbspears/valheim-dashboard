@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Camera, Minus, Plus, RotateCcw, X } from 'lucide-react';
 import { VikingLink } from '@/components/ui';
 import { timeAgo } from '@/lib/format';
+import type { PinPhase } from '@/lib/map-replay';
 
 const MAX_ZOOM = 6;
 
@@ -25,11 +26,25 @@ export interface ZoomableMapMarker {
   by?: string | null;
   day?: number | null;
   photos?: MarkerPhoto[];
+  /**
+   * Replay emphasis, set only by the timelapse (see lib/map-replay): 'new' on
+   * the frame where this place was named, 'established' on later frames.
+   * Undefined = the live map, which renders every marker at full strength.
+   */
+  phase?: PinPhase;
 }
 
 /** One glyph per pin kind (mirrors MapTimelapse's demo glyphs). */
-function MarkerGlyph({ kind }: { kind: ZoomableMapMarker['kind'] }) {
-  const glow = 'shadow-[0_0_6px_rgba(200,149,42,0.8)]';
+function MarkerGlyph({
+  kind,
+  bright = false,
+}: {
+  kind: ZoomableMapMarker['kind'];
+  bright?: boolean;
+}) {
+  const glow = bright
+    ? 'shadow-[0_0_11px_rgba(232,184,75,0.95)]'
+    : 'shadow-[0_0_6px_rgba(200,149,42,0.8)]';
   return kind === 'base' ? (
     <span className={`block h-2 w-2 border border-gold bg-gold/80 ${glow}`} />
   ) : (
@@ -120,6 +135,10 @@ export function ZoomableMap({
 
         {markers.map((m) => {
           const count = m.photos?.length ?? 0;
+          // Replay emphasis: the place being named right now burns gold and pops
+          // in; places already on the map sit back a little so the eye goes to
+          // the new one. The live map passes no phase and is unaffected.
+          const isNew = m.phase === 'new';
           return (
             <button
               key={m.id}
@@ -127,17 +146,29 @@ export function ZoomableMap({
               onClick={() => {
                 if (!moved.current) setSelected(m);
               }}
-              className="group absolute animate-[fadeIn_0.6s_ease] cursor-pointer gold-ring"
+              className={`group absolute animate-[fadeIn_0.6s_ease] cursor-pointer gold-ring${isNew ? ' z-[1]' : ''}`}
               style={{
                 left: `${m.x * 100}%`,
                 top: `${m.y * 100}%`,
                 transform: `translate(-50%, -50%) scale(${1 / zoom})`,
               }}
-              aria-label={`${m.name} — ${kindLabel(m.kind)}${m.by ? `, pinned by ${m.by}` : ''}${count ? `, ${count} photo${count === 1 ? '' : 's'}` : ''}`}
+              aria-label={`${m.name} — ${kindLabel(m.kind)}${m.by ? `, pinned by ${m.by}` : ''}${isNew ? ', named on this day' : ''}${count ? `, ${count} photo${count === 1 ? '' : 's'}` : ''}`}
             >
-              <div className="flex flex-col items-center gap-0.5">
-                <MarkerGlyph kind={m.kind} />
-                <span className="map-label-scrim map-text-halo whitespace-nowrap font-display text-[12px] font-semibold tracking-wide text-gold-light">
+              <div
+                className={`flex flex-col items-center gap-0.5${
+                  isNew
+                    ? ' pin-pop'
+                    : m.phase === 'established'
+                      ? ' opacity-65 transition-opacity duration-700'
+                      : ''
+                }`}
+              >
+                <MarkerGlyph kind={m.kind} bright={isNew} />
+                <span
+                  className={`map-text-halo whitespace-nowrap font-display text-[12px] font-semibold tracking-wide ${
+                    isNew ? 'map-label-new map-label-scrim' : 'map-label-scrim text-gold-light'
+                  }`}
+                >
                   {m.name}
                 </span>
               </div>

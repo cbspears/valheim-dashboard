@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, SkipForward } from 'lucide-react';
-import { ZoomableMap } from './ZoomableMap';
+import { ZoomableMap, type ZoomableMapMarker } from './ZoomableMap';
 import type { LiveMapFrame, LivePin, PinPhoto } from '@/lib/data';
+import { pinAppearanceByFrame, pinPhaseAt } from '@/lib/map-replay';
 
 const FRAME_MS = 700; // real days are few (for now) — let each one breathe
 
@@ -53,12 +54,39 @@ export function LiveWorld({
   const label = atNow ? 'Now' : `Day ${frames[pos].day}`;
   const replayReady = frames.length >= 2;
 
+  // Which replay position each named place shows up on. Pin days and frame days
+  // are the same in-game world day, so this is a day↔day match — see
+  // lib/map-replay for why that beats any wall-clock correlation.
+  const appearance = useMemo(() => pinAppearanceByFrame(frames, pins), [frames, pins]);
+
+  const toMarker = (p: LivePin, phase?: 'new' | 'established'): ZoomableMapMarker => ({
+    id: p.id,
+    x: p.x,
+    y: p.y,
+    kind: p.kind,
+    name: p.name,
+    by: p.by_character_name,
+    day: p.day,
+    photos: photosByPin[p.id] ?? [],
+    phase,
+  });
+
+  // At Now the live map is unchanged: every pin, no emphasis. On an archived
+  // frame only the places named by that day are on the chart, and the one named
+  // that very day is highlighted.
+  const markers: ZoomableMapMarker[] = atNow
+    ? pins.map((p) => toMarker(p))
+    : pins.flatMap((p) => {
+        const phase = pinPhaseAt(appearance, p.id, pos);
+        return phase ? [toMarker(p, phase)] : [];
+      });
+
   return (
     <div>
       <ZoomableMap
         src={src}
         alt={`The known world, ${label}`}
-        markers={atNow ? pins.map((p) => ({ id: p.id, x: p.x, y: p.y, kind: p.kind, name: p.name, by: p.by_character_name, day: p.day, photos: photosByPin[p.id] ?? [] })) : []}
+        markers={markers}
         corner={
           <div className="absolute right-3 top-3 flex items-center gap-2">
             <div className="rounded-md border border-rune bg-pitch/85 px-2.5 py-1 font-display text-sm font-semibold tracking-wide text-gold-light backdrop-blur-sm">
