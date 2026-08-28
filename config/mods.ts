@@ -1,7 +1,7 @@
 // The server's mod list. Edit this file to update the Mods page — the dashboard
 // reads it directly (no database needed). Push to redeploy.
 //
-// Source of truth: verified against the live server boot log 2026-08-22 (see Obsidian note
+// Source of truth: verified against the live server boot log 2026-08-27 (see Obsidian note
 // `05-Server/Mods/Selected-Mods.md`). Keep `tentative` in sync with what's
 // actually locked vs. still being piloted.
 
@@ -80,7 +80,7 @@ export const MODS: Mod[] = [
     author: 'cbspears (custom-built)',
     description:
       "The voice of the Hall itself — carries the in-game /oath swearing and speaks as Eilif. Built just for this server; nothing to install.",
-    version: '0.2.0',
+    version: '0.2.1',
     category: 'Core',
     clientRequired: false,
   },
@@ -89,7 +89,8 @@ export const MODS: Mod[] = [
     name: 'Eilif Boards',
     author: 'cbspears (custom-built)',
     description:
-      'Turns any sign into a living leaderboard. Write [board:kills] on a sign and it fills in with the top five, updating within a minute — the same for [board:deaths], [board:builds], [board:resources], [board:explored], [board:distance], plus [board:titles] and [board:deeds]. Add :leader — [board:kills:leader] — for a small plaque naming just the champion. Write anything else on the sign to take it back. Server-side, nothing to install.',
+      'Turns any sign into a living leaderboard. Write [board:kills] on a sign and it fills in with the top five within a few minutes, then keeps itself current about once a minute — the same for [board:deaths], [board:builds], [board:resources], [board:explored], [board:distance], plus [board:titles] and [board:deeds]. Add :leader to any of the six ranked boards — [board:kills:leader] — for a small plaque naming just the champion. Write anything else on the sign to take it back. Server-side, nothing to install.',
+    version: '0.2.0',
     category: 'Content',
     clientRequired: false,
   },
@@ -121,7 +122,7 @@ export const MODS: Mod[] = [
     name: 'AzuCraftyBoxes',
     author: 'Azumatt',
     description:
-      'Craft and build using materials straight out of nearby chests, out to 20 metres (the server sets the range). Replaces the ValheimPlus chest-crafting feature, which broke in a live test. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
+      'Craft and build using materials straight out of nearby chests, out to 20 metres (the server sets the range). Replaces the ValheimPlus chest-crafting feature, which broke in a live test. The mod also has a hotkey, Alt+O, that quietly switches all chest pulling off with no message to tell you — the current modpack ships that key unbound, so it cannot happen to you. If you are on an older pack and your crafting suddenly stops seeing chests, press Alt+O again to switch pulling back on, or update your pack. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
     version: '1.8.15',
     category: 'QoL',
     clientRequired: true,
