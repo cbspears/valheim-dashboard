@@ -9,7 +9,7 @@
 
 **Get oriented fast — read these (all current):**
 1. `docs/PROJECT.md` — requirements, architecture, decisions, risks
-2. Obsidian **live tracker** → `~/Documents/Obsidian Vault/30-Personal/projects/Valheim-SuperServer/08-Dashboard/02-Tracker.md` (status, to-dos, ideas — the source of truth; **keep it updated as you work** — user preference)
+2. Obsidian **live tracker** → `~/Documents/Obsidian Vault/Main/30-Personal/projects/Valheim-SuperServer/08-Dashboard/02-Tracker.md` (status, to-dos, ideas — the source of truth; **keep it updated as you work** — user preference)
 3. `git log --oneline -20`
 4. Auto-memory `project-valheim-dashboard` (loads automatically)
 
