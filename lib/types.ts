@@ -181,6 +181,19 @@ export interface Boss {
     fighters?: string[];
     /** The reconciled online roster at kill time — for the "also in the realm" note. */
     onlineAtKill?: string[];
+    /**
+     * fighter name → boss damage credited by the CLIENT-DAMAGE FALLBACK
+     * (lib/boss-damage.ts): what each viking's own cumulative snapshot proves they
+     * landed on this boss. Written when no bossKillEvents MVP summary ever arrives
+     * — the case that left the 2026-08-28 Eikthyr kill with an empty fighter set.
+     */
+    damage?: Record<string, number>;
+    /**
+     * Set while topDamagePlayer is the fallback's own derived verdict, and cleared
+     * the moment a real MVP summary lands. It is what stops the fallback from ever
+     * overwriting the fight's own record of who struck hardest.
+     */
+    topDamageFrom?: string;
   } | null;
   /**
    * Skald-written saga retelling of the fight, generated once per kill by the

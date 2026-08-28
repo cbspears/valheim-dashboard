@@ -398,8 +398,16 @@ export function parseBossMilestones(body: Obj): ParsedBossMilestone[] {
   return out;
 }
 
-/** Map a raw boss gameObject name (tolerating a "(Clone)" suffix) → bosses.name. */
-function mapBossObject(raw: string): string | null {
+/**
+ * Map a raw boss gameObject name (tolerating a "(Clone)" suffix) → bosses.name.
+ *
+ * EXPORTED because it is the one place that answers "which bosses row does this
+ * raw creature name belong to". lib/boss-damage.ts needs the same answer for the
+ * keys inside gs_stats.bossDamage (which are these exact gameObject names) — a
+ * second copy of the map is how Fader or a future boss ends up recognized on one
+ * path and silently dropped on the other.
+ */
+export function mapBossObject(raw: string): string | null {
   return BOSS_OBJECT_TO_NAME[raw] ?? BOSS_OBJECT_TO_NAME[raw.replace(/\(Clone\)$/i, '').trim()] ?? null;
 }
 
