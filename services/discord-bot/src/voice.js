@@ -430,7 +430,10 @@ export function createVoiceEngine({
 
   // ── event lines (immediate; exempt from every gap, reset the ambient clock) ─
 
-  // In-game oaths: echo in-game + cross-post to #valheim, then mark announced.
+  // In-game oaths: echo in-game + cross-post to Discord, then mark announced.
+  // Channel: env OATH_CHANNEL ('server' during the rehearsal pilot, default
+  // 'valheim' — revert/remove at launch alongside RECAP_CHANNEL/MILESTONE_CHANNEL).
+  const OATH_CHANNEL = process.env.OATH_CHANNEL === 'server' ? 'server' : 'valheim';
   async function checkOathEchoes() {
     if (!writeDb) return 0;
     const { data, error } = await writeDb
@@ -451,7 +454,7 @@ export function createVoiceEngine({
         oath_id: o.id,
       });
       try {
-        await post('valheim', {
+        await post(OATH_CHANNEL, {
           embeds: [
             {
               title: '📜 A new oath is sworn',
