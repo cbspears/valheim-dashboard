@@ -194,6 +194,15 @@ export interface Boss {
      * overwriting the fight's own record of who struck hardest.
      */
     topDamageFrom?: string;
+    /**
+     * OBSERVED-damage high-water ledger: observer (reporting client) name →
+     * observed fighter name → the last cumulative damage that observer reported
+     * for that fighter on this boss. The memory lib/boss-damage.ts foldObservedDamage
+     * differences each ~120s re-post against, so a bystander's account of who hit a
+     * boss (the only record when their client owned its ZDO) is credited exactly
+     * once. Bookkeeping, not display data.
+     */
+    observed?: Record<string, Record<string, number>>;
   } | null;
   /**
    * Skald-written saga retelling of the fight, generated once per kill by the

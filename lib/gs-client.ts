@@ -12,7 +12,10 @@
 // source — it carries `stats` (raw .fch profile counters keyed "vh_<StatType>"),
 // kills/deaths/bossKills, plus weapon/creature/craft/pickup/boss breakdowns.
 // Further players[] entries are others the reporter merely observed (partial
-// combat only) and are ignored here.
+// combat only) and are ignored by the cumulative self parse — but NOT thrown
+// away: parseObservedBossDamage below reads their per-boss damage, which is the
+// only record that exists of what the OTHER vikings hit a boss for whenever the
+// reporter's client owned that creature's ZDO (see its doc comment).
 
 import type { GsClientStats } from './types';
 import { FISH } from '../config/fish';
@@ -169,8 +172,14 @@ export function capGsStats(gs: GsClientStats): GsClientStats {
  * Matching on the folded key costs nothing — two DIFFERENT vikings can't share a
  * name modulo case, because Valheim character names are what the roster keys on —
  * and bystander semantics are otherwise unchanged.
+ *
+ * EXPORTED for the same reason mapBossObject is: it is the one place that answers
+ * "are these two strings the same viking". /api/gs-ingest canonicalizes observed
+ * bystander names against the `players` roster with this exact rule
+ * (ingestObservedBossDamage), and a second copy of that rule is how one path
+ * starts minting "chaerleif" as a fighter separate from the real "ChÆrleif".
  */
-function identityKey(v: unknown): string {
+export function identityKey(v: unknown): string {
   return typeof v === 'string' ? v.trim().toLowerCase() : '';
 }
 
@@ -454,6 +463,68 @@ export function parseBossFighters(body: Obj): Record<string, string[]> {
 
   const out: Record<string, string[]> = {};
   for (const [k, v] of Object.entries(acc)) out[k] = [...v];
+  return out;
+}
+
+/**
+ * The BYSTANDER half of players[]: what the reporter's client watched OTHER
+ * vikings do to each boss. Returns bosses.name → observed player name →
+ * CUMULATIVE damage that player has dealt to that boss on this world.
+ *
+ * WHY THIS EXISTS (the Eikthyr kill of 2026-08-28, second lesson). In Valheim
+ * multiplayer the damage numbers are computed on whichever client OWNS the
+ * creature's ZDO — Character.RPC_Damage runs there — and the mod is built around
+ * exactly that (0.2.0 changelog: "whichever client owns a creature records the
+ * damage EVERY player deals to it, attributed to the real attacker"). That night
+ * ChÆrleif's client owned Eikthyr, so his payload carried his own 201 points in
+ * players[0] AND Bren's and Lóa's shares as bystander entries. The ingest read
+ * only the reporter's own entry, so ~300 of Eikthyr's 500 HP went unattributed
+ * and the war party came out of the fight empty. The evidence was in the payload.
+ *
+ * THE ENTRIES SKIPPED. Exactly one: the reporter's own (identityKey match, the
+ * same case/whitespace-insensitive rule findSelfEntry uses — a case skew must not
+ * turn the reporter into their own bystander and double-book their damage against
+ * the reporter-own path in lib/boss-damage). When the reporter's own entry is
+ * missing ALTOGETHER, every remaining entry is still a genuine observation of
+ * someone else and is kept: there is no reason to lose three real fighters
+ * because the fourth hadn't spawned yet.
+ *
+ * Rows with a non-finite or non-positive damageDealt are dropped (an entry that
+ * dealt nothing proves nothing), as is any creature BOSS_OBJECT_TO_NAME doesn't
+ * know — mini-bosses like Serpent have no bosses row to fold into. Two raw keys
+ * that resolve to one bosses.name (the "(Clone)" variant) are SUMMED, the same
+ * way the reporter-own path collapses them (bossDamageDeltas): the mod keeps a
+ * SEPARATE cumulative bucket per gameObject, so a boss reinstantiated mid-fight
+ * leaves two independently-growing totals whose SUM is the real damage — MAX would
+ * silently drop the smaller bucket forever.
+ *
+ * Defensive on every field like everything else here — this shape crosses the
+ * wire from a closed-source third-party mod, so junk yields {} and never throws.
+ */
+export function parseObservedBossDamage(body: Obj): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  const selfKey = identityKey((body as Obj | null | undefined)?.reporter);
+
+  for (const p of arr((body as Obj | null | undefined)?.players)) {
+    if (identityKey(p.name) === selfKey) continue; // the reporter's own cumulative snapshot — not an observation
+    const who = str(p.name);
+    // Reject the object-key names that could poison a plain-object accumulator
+    // (__proto__ reparents it; constructor/prototype shadow real reads). The
+    // route drops any non-roster name at canonicalization anyway, but keeping them
+    // out of this map too means the arithmetic below never touches a prototype.
+    if (!who || who === '__proto__' || who === 'constructor' || who === 'prototype') continue;
+
+    for (const b of arr(p.boss)) {
+      const raw = str(b.boss);
+      const dmg = b.damageDealt;
+      if (!raw || typeof dmg !== 'number' || !Number.isFinite(dmg) || dmg <= 0) continue;
+      const bossName = mapBossObject(raw);
+      if (!bossName) continue;
+      const bucket = (out[bossName] ??= {});
+      bucket[who] = (bucket[who] ?? 0) + dmg; // clone buckets of one boss SUM (see doc comment)
+    }
+  }
+
   return out;
 }
 

@@ -39,6 +39,53 @@
 // The same holds for a baseline HOLE the moment it fills (raw − raw). We credit
 // exactly what player_stats itself credits — no more, no less.
 //
+// ─────────────────────────────────────────────────────────────────────────────
+// THE OTHER HALF OF THAT NIGHT: OBSERVED (BYSTANDER) DAMAGE — foldObservedDamage.
+//
+// The fallback above credits the REPORTER only, and on the Eikthyr kill that was
+// still not the whole war party. In Valheim multiplayer damage is computed on
+// whichever client OWNS the creature's ZDO (Character.RPC_Damage runs there), and
+// the mod is designed around it — 0.2.0 changelog: "whichever client owns a
+// creature records the damage EVERY player deals to it, attributed to the real
+// attacker". ChÆrleif's client owned Eikthyr, so his payload carried his own 201
+// points in players[0] AND Bren's and Lóa's shares as bystander entries. Nothing
+// read those, and ~300 of the beast's 500 HP stayed unattributed.
+//
+// WHY THIS CANNOT DOUBLE-COUNT AGAINST THE REPORTER-OWN PATH. Because each blow
+// is recorded by EXACTLY ONE client — the owner at the instant it landed. Own-
+// entry damage is "blows my own client recorded"; bystander damage is "blows the
+// observer's client recorded". The two sets are disjoint by construction, not by
+// luck: Bren's own snapshot carries only what Bren's client owned, and ChÆrleif's
+// observation of Bren carries only what ChÆrleif's client owned. No blow is in
+// both, so folding both paths sums the fight rather than inflating it. (When two
+// observers both watched a fight they still each report only their own share, and
+// the per-observer ledger below keeps those shares separate.)
+//
+// WHY A PER-OBSERVER LEDGER. The observed numbers are CUMULATIVE per world and
+// re-posted every ~120s, exactly like the reporter's own. There is no `prev` row
+// to difference against here (this damage never touches player_stats — see
+// below), so fight_stats carries its own memory: `observed[observer][player]` is
+// the last cumulative reading THIS observer reported for THAT player on THIS
+// boss. Each post credits `cum − prev` and only when positive. The ledger NEVER
+// decreases: a smaller reading (a mod restart, a stale post, a re-post racing
+// ahead) is ignored rather than written down, because lowering it would let the
+// very same blows be credited a second time on the next post.
+//
+// WHY NO gs_baseline HERE. The reporter-own path differences BASELINED values so
+// an imported veteran's lifetime damage on somebody else's server credits nothing.
+// The observed numbers need no such zero-point: the mod's combat file is scoped
+// per WORLD (and since 0.2.12 per character+world), so what a bystander is seen
+// to have dealt is by construction damage dealt on THIS world — a veteran's
+// other-server career simply is not in that file. Cross-server reuse of the whole
+// payload is a different threat, and it is already gated in the route by the
+// GS_EXPECTED_WORLD guard plus the log-poller presence cross-check
+// (confirmOnThisServer) before any of this runs.
+//
+// NEVER INTO player_stats. Observed damage is a bystander's account of someone
+// else's combat: it is proof enough for a fight record (a bystander cannot deal
+// boss damage) and nowhere near enough for a career total, which stays
+// reporter-own-entry-only so there is exactly one authoritative writer per row.
+//
 // PURE MODULE — no Supabase, no I/O, so scripts/gs-boss-damage.test.mjs can drive
 // every rule directly and scripts/backfill-eikthyr-fight.mjs can reuse the very
 // same fold. /api/gs-ingest owns the reads and writes.
@@ -80,17 +127,38 @@ export interface FightStats {
   damage?: Record<string, number>;
   /** CLIENT_DAMAGE_SOURCE while the top-damage verdict is ours to recompute. */
   topDamageFrom?: string;
+  /**
+   * The OBSERVED-damage ledger: observer (reporting client) name → observed
+   * fighter name → the last cumulative damage that observer reported for that
+   * fighter ON THIS BOSS. Not a score — a high-water mark, the memory
+   * foldObservedDamage differences each post against so a cumulative reading
+   * re-posted every ~120s is credited exactly once. Grows only: a smaller
+   * reading is ignored, never written down (see the module header).
+   */
+  observed?: Record<string, Record<string, number>>;
 }
 
 function isFiniteNum(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-/** Non-empty trimmed string, or null. Everything here comes from jsonb. */
+// Keys that must NEVER index a plain-object ledger / damage map: __proto__ (whose
+// setter reparents the object) plus constructor / prototype (own-property shadows
+// that corrupt every later read). No Valheim character is meaningfully named these
+// — but a client payload is unauthenticated, and an attacker's `reporter:'__proto__'`
+// reaching `ledger[who] ??= {}` in foldObservedDamage would otherwise write onto
+// Object.prototype for the whole serverless instance's life. `name()` is the single
+// gate every key here passes through (both the read side — readObserved/readDamage/
+// readFighters — and the write side — foldClientDamage/foldObservedDamage), so
+// rejecting them here closes the hole for all of them at once.
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Non-empty trimmed string that is safe as an object key, or null. From jsonb. */
 function name(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   const t = v.trim();
-  return t ? t : null;
+  if (!t || UNSAFE_KEYS.has(t)) return null;
+  return t;
 }
 
 /**
@@ -244,4 +312,97 @@ export function foldClientDamage(
   if (!name(next.source)) next.source = CLIENT_DAMAGE_SOURCE;
 
   return next;
+}
+
+/**
+ * The stored observed-damage ledger, narrowed to real names and finite
+ * non-negative numbers — same discipline as readDamage, for the same reason: this
+ * blob round-trips through jsonb and a junk entry must read as "no prior
+ * reading" (credit the full cumulative once) rather than poison the arithmetic.
+ * Returns a fresh, detached copy so the caller can advance it in place.
+ */
+function readObserved(existing: FightStats | null): Record<string, Record<string, number>> {
+  const raw = existing?.observed;
+  const out: Record<string, Record<string, number>> = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [obs, byPlayer] of Object.entries(raw as Record<string, unknown>)) {
+    const o = name(obs);
+    if (!o || !byPlayer || typeof byPlayer !== 'object' || Array.isArray(byPlayer)) continue;
+    const bucket: Record<string, number> = {};
+    for (const [player, v] of Object.entries(byPlayer as Record<string, unknown>)) {
+      const p = name(player);
+      if (!p || !isFiniteNum(v) || v < 0) continue;
+      bucket[p] = v;
+    }
+    if (Object.keys(bucket).length > 0) out[o] = bucket;
+  }
+  return out;
+}
+
+/**
+ * Fold ONE observer's OBSERVED per-boss cumulative damage into a bosses row's
+ * fight_stats — the bystander half of the Eikthyr incident, documented in full at
+ * the top of this module.
+ *
+ * `playerCums` is that observer's reading, for THIS boss, of what each OTHER
+ * viking has cumulatively dealt to it (lib/gs-client parseObservedBossDamage,
+ * canonicalized against the roster by the route). For each of them:
+ *
+ *   • prev = the last reading this observer filed for that player on this boss
+ *     (fight_stats.observed[observer][player], 0 when never seen).
+ *   • delta = cum − prev. A POSITIVE delta is credited exactly as the
+ *     reporter-own path credits its own delta — by calling foldClientDamage, so
+ *     there is ONE implementation of the fighters/damage/verdict rules and not a
+ *     second copy here that can drift — and the ledger advances to `cum`.
+ *   • delta ≤ 0 changes nothing at all, and in particular DOES NOT lower the
+ *     ledger. A smaller cumulative is a stale or restarted client, not a refund;
+ *     writing it down would let the blows between it and the high-water mark be
+ *     credited all over again on the next post.
+ *
+ * Returns NULL when nothing was credited (no positive delta, a nameless observer,
+ * junk input) so the caller skips the write entirely rather than churn the row —
+ * the same contract foldClientDamage keeps, and the reason a re-posted snapshot
+ * is a true no-op down to the database.
+ *
+ * Every foldClientDamage guarantee therefore holds here too: `fighters` is a
+ * monotonic union, `damage` accumulates and never decreases, the top-damage
+ * verdict is recomputed ONLY while it is ours to recompute (a real MVP summary's
+ * verdict is never overwritten), `source` is stamped only onto a row that had no
+ * fight detail at all, and every other field is carried through untouched.
+ */
+export function foldObservedDamage(
+  existing: FightStats | null,
+  observer: string,
+  playerCums: Record<string, number>,
+): FightStats | null {
+  const who = name(observer);
+  if (!who) return null;
+  if (!playerCums || typeof playerCums !== 'object' || Array.isArray(playerCums)) return null;
+
+  const ledger = readObserved(existing);
+  const mine = (ledger[who] ??= {});
+
+  let next: FightStats | null = existing;
+  let credited = false;
+
+  for (const [rawPlayer, cum] of Object.entries(playerCums)) {
+    const player = name(rawPlayer);
+    if (!player || !isFiniteNum(cum) || cum <= 0) continue;
+
+    // Read the prev from the LIVE ledger, not from `existing`: two keys that trim
+    // to the same viking ("Bren" and "Bren ") must difference against each other,
+    // not both against the stored reading and credit the same blows twice.
+    const prev = mine[player] ?? 0;
+    const delta = cum - prev;
+    if (!(delta > 0)) continue; // stale, duplicate, or a shrunken reading — the ledger stands
+
+    const folded = foldClientDamage(next, player, delta);
+    if (!folded) continue; // defensive: the shared fold owns the rules, including its own refusals
+    next = folded;
+    mine[player] = cum;
+    credited = true;
+  }
+
+  if (!credited || !next) return null;
+  return { ...next, observed: ledger };
 }

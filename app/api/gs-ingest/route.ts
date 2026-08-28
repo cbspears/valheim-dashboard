@@ -5,6 +5,8 @@ import {
   parseBossMilestones,
   parseBossKillEvents,
   parseBossFighters,
+  parseObservedBossDamage,
+  identityKey,
   type ParsedBossKill,
 } from '@/lib/gs-client';
 import {
@@ -20,6 +22,7 @@ import {
 import {
   bossDamageDeltas,
   foldClientDamage,
+  foldObservedDamage,
   CLIENT_DAMAGE_SOURCE,
   type FightStats,
 } from '@/lib/boss-damage';
@@ -228,6 +231,15 @@ async function ingestClientMap(body: Obj): Promise<{ ok: boolean; pct: number | 
 // bystander's snapshot never clobbers someone's real totals. Result: exactly one
 // authoritative writer per character, which makes the read-modify-write below
 // race-free in practice.
+//
+// ONE CARVE-OUT (2026-08-28, the second half of the Eikthyr incident). Those
+// bystander entries are still ignored for every CUMULATIVE player_stats column —
+// that stays reporter-own-entry-only, exactly as above — but their PER-BOSS
+// damage is no longer thrown away: ingestObservedBossDamage folds it into
+// bosses.fight_stats. It has to be read from somewhere, because Valheim computes
+// damage on whichever client owns the creature's ZDO, so when ChÆrleif's client
+// owned Eikthyr his payload was the ONLY record of what Bren and Lóa hit it for.
+// See lib/boss-damage.ts for why that can't double-count the reporter's own path.
 //
 // Snapshots are cumulative and re-posted every ~120s, so the merge is idempotent
 // and uses GREATEST (never let a fresh character / profile reset roll counters
@@ -591,6 +603,176 @@ async function ingestBossDamageDeltas(
   }
 }
 
+/**
+ * OBSERVED-DAMAGE FOLD — the war party the reporter WATCHED, not the one it was.
+ *
+ * The gap, in full, is at the top of lib/boss-damage.ts. Short version: Valheim
+ * computes a creature's damage on whichever client OWNS its ZDO
+ * (Character.RPC_Damage runs there), and the mod is built around that — 0.2.0
+ * changelog, "whichever client owns a creature records the damage EVERY player
+ * deals to it, attributed to the real attacker". On the 2026-08-28 Eikthyr kill
+ * ChÆrleif's client owned the beast, so his payload carried his own 201 points in
+ * players[0] AND Bren's and Lóa's shares as bystander entries. ingestPlayerStats
+ * ignores bystander entries (rightly — cumulative columns stay
+ * reporter-own-entry-only) and nothing else read them, so ~300 of Eikthyr's 500
+ * HP went unattributed and the fight record came out empty.
+ *
+ * This reads exactly those entries and folds ONLY their per-boss damage into
+ * bosses.fight_stats. Never into player_stats — a bystander's account is proof
+ * enough that someone fought (a bystander cannot deal boss damage) and nowhere
+ * near enough to move a career total.
+ *
+ * Each blow is recorded by exactly ONE client, so this cannot double-count
+ * against ingestBossDamageDeltas above: own-entry damage is what your own client
+ * recorded, observed damage is what the observer's client recorded, and the two
+ * sets are disjoint by construction. The per-observer high-water ledger
+ * (fight_stats.observed) makes the ~120s re-posts idempotent — see
+ * foldObservedDamage.
+ *
+ * NAMES ARE CANONICALIZED AGAINST THE ROSTER FIRST. An observed name comes from
+ * another player's live Player object as one client saw it; writing it straight
+ * into fight_stats would let a case skew mint "chærleif" as a second viking
+ * beside "ChÆrleif", and a name the roster has NEVER seen would mint a phantom
+ * one outright. So every observed name (and the observer key itself, or the
+ * ledger fragments) must resolve to an existing players.character_name; anything
+ * that doesn't is logged and skipped. Unlike ingestPlayerStats this is NOT gated
+ * on the reporter's own merge: a payload whose own-entry merge deferred (an
+ * incomplete snapshot, a missing zero-point) still carries genuine observations
+ * of everyone else.
+ *
+ * Best-effort throughout, like every other enrichment in this file: errors are
+ * logged with this prefix and swallowed. Boss enrichment must never fail an ingest.
+ */
+async function ingestObservedBossDamage(
+  client: ReturnType<typeof db>,
+  body: Obj,
+  rawReporter: string,
+): Promise<void> {
+  const observed = parseObservedBossDamage(body);
+  if (Object.keys(observed).length === 0) return; // no bystander combat in this payload — no read, no log noise
+
+  // The roster is ~5-20 rows and warnOnWeaponCollision already does a full scan,
+  // so one cheap read buys us the canonical spelling of every name below.
+  const { data: roster, error: rosterErr } = await client.from('players').select('id, character_name');
+  if (rosterErr) {
+    console.error(`[gs-ingest] observed boss damage: could not read the players roster — ${rosterErr.message}`);
+    return;
+  }
+  const canonical = new Map<string, string>();
+  for (const r of roster ?? []) {
+    const nm = typeof r.character_name === 'string' ? r.character_name.trim() : '';
+    if (nm) canonical.set(identityKey(nm), nm);
+  }
+
+  const byBoss = new Map<string, Record<string, number>>();
+  const unknown = new Set<string>();
+  for (const [bossName, players] of Object.entries(observed)) {
+    const resolved: Record<string, number> = {};
+    for (const [seenAs, cum] of Object.entries(players)) {
+      const canon = canonical.get(identityKey(seenAs));
+      if (!canon) {
+        unknown.add(seenAs);
+        continue;
+      }
+      // Two spellings of one viking collapse to their canonical name; these are
+      // cumulative readings of the same total, so MAX (never sum) — same rule
+      // parseObservedBossDamage applies to a "(Clone)" boss key.
+      resolved[canon] = Math.max(resolved[canon] ?? 0, cum);
+    }
+    if (Object.keys(resolved).length > 0) byBoss.set(bossName, resolved);
+  }
+  if (unknown.size > 0) {
+    console.info(
+      `[gs-ingest] observed boss damage: no players row for ${[...unknown].map((n) => `"${n}"`).join(', ')} — ` +
+        `skipped (a name the roster has never seen must not mint a phantom viking in fight_stats).`,
+    );
+  }
+  if (byBoss.size === 0) return;
+
+  // The observer is a ledger KEY, so it MUST resolve to a roster row — no raw
+  // fallback. Two compounding failures if we trusted the reporter name verbatim:
+  //   (1) a key that starts as the raw spelling and later flips to its canonical
+  //       one — a players row appearing mid-fight during poller lag, or a
+  //       character re-cased — reads prev=0 under the new key and re-credits the
+  //       observer's ENTIRE cumulative, doubling every blow already banked.
+  //   (2) the reporter name is unauthenticated; a spoofed or junk one would mint
+  //       an unbounded pile of distinct ledger buckets on the row (jsonb bloat)
+  //       and, if it ever equalled a real character's cfg-name skew, re-book that
+  //       character's own damage as a bystander observation of themselves.
+  // A genuine reporter has a players row within one poll cycle, so an unresolved
+  // observer is DEFERRED, not lost: its observations credit once its row lands and
+  // the next ~120s snapshot posts. (Same one-sided, self-healing spirit as the
+  // presence check that already gated us here.)
+  const observer = canonical.get(identityKey(rawReporter));
+  if (!observer) {
+    console.info(
+      `[gs-ingest] observed boss damage: reporter "${rawReporter}" has no players row yet — ` +
+        `deferring its observations (they credit once its row lands and it re-posts).`,
+    );
+    return;
+  }
+
+  const { data: rows, error: readErr } = await client
+    .from('bosses')
+    .select('id, name, fight_stats, players_present')
+    .in('name', [...byBoss.keys()]);
+  if (readErr) {
+    console.error(`[gs-ingest] observed boss damage: could not read bosses rows — ${readErr.message}`);
+    return;
+  }
+
+  for (const row of rows ?? []) {
+    const bossName = row.name as string;
+    const cums = byBoss.get(bossName);
+    if (!cums) continue;
+
+    const existing = ((row as { fight_stats?: FightStats | null }).fight_stats ?? null) as FightStats | null;
+    const next = foldObservedDamage(existing, observer, cums);
+    if (!next) continue; // nothing grew since this observer's last reading — skip the write entirely
+
+    // Who actually got credited: the players whose high-water mark advanced. Read
+    // defensively off the stored blob (jsonb, third-party-derived) so a junk prior
+    // entry reads as "never seen" exactly like the fold treats it.
+    const priorOf = (p: string): number => {
+      const v = (existing?.observed?.[observer] as Record<string, unknown> | undefined)?.[p];
+      return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
+    };
+    const creditedNow = Object.entries(next.observed?.[observer] ?? {})
+      .map(([p, cum]) => [p, cum - priorOf(p)] as const)
+      .filter(([, gained]) => gained > 0);
+    if (creditedNow.length === 0) continue; // belt-and-braces; foldObservedDamage already returned null for this
+
+    // Fold the CREDITED fighters into players_present as well (union — grow only,
+    // never blank/shrink), on the same reasoning as ingestBossDamageDeltas: a
+    // viking someone watched land damage on this boss was demonstrably there.
+    const priorPresent = Array.isArray((row as { players_present?: unknown }).players_present)
+      ? (row as { players_present: unknown[] }).players_present.filter((n): n is string => typeof n === 'string')
+      : [];
+    const presentSet = new Set<string>(priorPresent);
+    for (const [p] of creditedNow) presentSet.add(p);
+
+    const patch: Record<string, unknown> = { fight_stats: next };
+    if (presentSet.size > priorPresent.length) patch.players_present = [...presentSet];
+
+    const { error } = await client.from('bosses').update(patch).eq('id', row.id);
+    if (error) {
+      // Includes the pre-migration "no fight_stats column" case. Logged, never
+      // thrown: the ledger only advances on a successful write, so the next post
+      // recomputes the same deltas and self-heals instead of losing them.
+      console.error(
+        `[gs-ingest] observed boss damage: could not fold "${observer}"'s observations into ${bossName} — ${error.message}`,
+      );
+      continue;
+    }
+    console.info(
+      `[gs-ingest] observed boss damage: "${observer}" credited ` +
+        `${creditedNow.map(([p, gained]) => `"${p}" +${Math.round(gained)}`).join(', ')} on ${bossName} ` +
+        `(fighters now ${next.fighters?.length ?? 0}` +
+        `${next.topDamageFrom === CLIENT_DAMAGE_SOURCE ? `, top damage "${next.topDamagePlayer}"` : ''}).`,
+    );
+  }
+}
+
 // ─── Boss detection ──────────────────────────────────────────────────────────
 //
 // Server payloads carry `milestones[]`; a boss-defeat milestone (a Valheim
@@ -787,6 +969,12 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): 
       // dropped — and dropping that map would delete the only record of who hit
       // this boss for how much whenever a late MVP summary arrived.
       ...(existing?.damage ? { damage: existing.damage } : {}),
+      // And the observed-damage LEDGER, for a harder reason than nostalgia: it is
+      // the high-water mark foldObservedDamage differences each ~120s re-post
+      // against. Dropping it here would reset every prev to 0, and the next
+      // bystander post would credit every observed blow all over again — the one
+      // way this feature can inflate a fight record.
+      ...(existing?.observed ? { observed: existing.observed } : {}),
       // topDamageFrom is deliberately NOT carried: THIS is the real verdict, so
       // the fallback's marker retires with it and we never recompute over it.
     };
@@ -947,6 +1135,19 @@ export async function POST(req: Request) {
 
     await ingestDeathEvents(db(), body.deathEvents, reporter);
     const merged = await ingestPlayerStats(body as Record<string, unknown>);
+
+    // Observed (bystander) per-boss damage → bosses.fight_stats. Deliberately
+    // NOT gated on `merged`: that flag is about the REPORTER's own cumulative
+    // merge, and a payload whose own entry deferred (incomplete snapshot, no
+    // zero-point yet) still carries perfectly real observations of everyone else
+    // — which, when this client owned the boss's ZDO, is the only record that
+    // exists of what they hit it for. Best-effort like every other enrichment.
+    try {
+      await ingestObservedBossDamage(db(), body as Record<string, unknown>, reporter);
+    } catch (e) {
+      console.error('[gs-ingest] observed boss damage', e instanceof Error ? e.message : e);
+    }
+
     // Client payloads also carry bossKillEvents (this client's view of a fight)
     // — enrich, but never flip a boss from a client (the server milestone owns that).
     await ingestBossKillEvents(body.bossKillEvents, 'client');
