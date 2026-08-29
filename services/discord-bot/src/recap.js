@@ -1,7 +1,9 @@
-// Daily recaps: two cron jobs (08:00 and 22:00 America/Chicago) post an
-// activity summary embed to #valheim. Every recap covers the TRAILING 24
-// HOURS (the two daily posts overlap by design — each answers "what happened
-// in the last day?", not "since the last post").
+// Daily recap: ONE cron job (evening, 23:00 America/Chicago by default) posts an
+// activity summary embed to #valheim. It covers the TRAILING 24 HOURS — "what
+// happened in the last day?". The 08:00 morning recap was retired 2026-08-28; a
+// single evening post is the cadence now. buildStats/postRecap still accept a
+// 'morning' period so scripts/preview.js and dry runs can render one, but nothing
+// schedules it.
 //
 // On top of the base stats ride the per-name day boards (who was online, who
 // fell) and an evening-only "🏆 Player of the Day" (POTY) crown.
@@ -450,15 +452,15 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
       }
       return postRecap(period);
     };
-    // Hours are env-tunable so pilot testing can move them without a code edit.
-    const morningHour = parseInt(process.env.RECAP_MORNING_HOUR || '8', 10);
-    const eveningHour = parseInt(process.env.RECAP_EVENING_HOUR || '21', 10);
+    // One evening recap. The hour stays env-tunable (RECAP_EVENING_HOUR) so it can
+    // move without a code edit; default 23 = 11 PM Central. The 08:00 morning
+    // recap was retired 2026-08-28 — one evening post is the cadence now.
+    const eveningHour = parseInt(process.env.RECAP_EVENING_HOUR || '23', 10);
     const jobs = [
-      cron.schedule(`0 ${morningHour} * * *`, () => run('morning').catch((e) => console.error('[recap] morning:', e.message)), opts),
       cron.schedule(`0 ${eveningHour} * * *`, () => run('evening').catch((e) => console.error('[recap] evening:', e.message)), opts),
     ];
     console.log(
-      `[recap] scheduled ${String(morningHour).padStart(2, '0')}:00 & ${String(eveningHour).padStart(2, '0')}:00 ${tz}` +
+      `[recap] scheduled ${String(eveningHour).padStart(2, '0')}:00 ${tz}` +
         (startsAt ? ` (begins ${startsAt.toISOString().slice(0, 10)})` : '')
     );
     return jobs;
