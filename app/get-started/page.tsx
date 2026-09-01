@@ -47,6 +47,16 @@ const R2MODMAN_WINDOWS_URL = `https://github.com/ebkr/r2modmanPlus/releases/down
 const R2MODMAN_LINUX_URL = `https://github.com/ebkr/r2modmanPlus/releases/download/v${R2MODMAN_VERSION}/r2modman-${R2MODMAN_VERSION}.AppImage`;
 const R2MODMAN_ALL_URL = 'https://github.com/ebkr/r2modmanPlus/releases/latest';
 
+// Macheim — the macOS-native Valheim mod manager. r2modman has no Mac build, and
+// on Apple Silicon Macheim runs the game under Rosetta so the x64 mod loader can
+// hook in. Direct .dmg so Mac players skip the GitHub releases page.
+// ⚠️ When bumping: the asset FILENAME version trails the release TAG (a Tauri
+// build quirk — tag v1.0.1 ships Macheim_1.0.0_aarch64.dmg), so copy the exact
+// asset URL off the release rather than templating it from the tag.
+const MACHEIM_APPLE_SILICON_URL =
+  'https://github.com/lofcgi/macheim/releases/download/v1.0.1/Macheim_1.0.0_aarch64.dmg';
+const MACHEIM_ALL_URL = 'https://github.com/lofcgi/macheim/releases/latest';
+
 /* ── small presentational helpers ─────────────────────────────────────────── */
 
 /** One big numbered step in a vertical "follow me" list. */
@@ -229,8 +239,8 @@ export default function GetStartedPage() {
                 </div>
                 <p className="text-xs text-muted">
                   The download starts right away. Run the installer, click through it, and open
-                  r2modman. It keeps itself updated from then on. No Mac version, so Mac players
-                  see the notes further down.{' '}
+                  r2modman. It keeps itself updated from then on. No Mac version — on a Mac, use
+                  the Apple Silicon setup below instead.{' '}
                   <Ext href={R2MODMAN_ALL_URL}>All downloads</Ext>
                 </p>
                 <p className="text-xs text-muted">
@@ -312,6 +322,93 @@ export default function GetStartedPage() {
                 <p>Welcome to {SERVER_NAME}. 🛡️</p>
               </Step>
             </ol>
+          </CardBody>
+        </Card>
+      </section>
+
+      {/* ══════════════ SECTION B2 — MAC (APPLE SILICON) ══════════════ */}
+      <section>
+        <SectionTitle icon={<Laptop size={20} />}>On a Mac? Apple Silicon setup</SectionTitle>
+
+        <Card className="border-l-2 border-l-gold-dim">
+          <CardBody>
+            <p className="text-sm leading-relaxed text-ash-dim">
+              Valheim runs on Mac, but r2modman doesn&apos;t. On Apple Silicon (M1 and later) you
+              use <Ext href={MACHEIM_ALL_URL}>Macheim</Ext> instead — a Mac-native mod manager that
+              sets up the mod loader and runs the game under Rosetta for you. About 15 minutes.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3 py-3">
+              <a
+                href={MACHEIM_APPLE_SILICON_URL}
+                className="gold-ring inline-flex items-center gap-2.5 rounded-md bg-gold px-5 py-3 font-display text-base tracking-wide text-night transition-colors hover:bg-gold-light"
+              >
+                <Download size={18} />
+                Download Macheim (Apple Silicon)
+              </a>
+              <Ext href={MACHEIM_ALL_URL}>All downloads (incl. Intel Mac)</Ext>
+            </div>
+
+            <ol className="mt-1 space-y-2.5 text-sm leading-relaxed text-ash-dim">
+              <li>
+                <span className="font-mono text-xs text-gold-light">1.</span> Open the downloaded{' '}
+                <span className="text-ash">.dmg</span> and drag{' '}
+                <span className="text-ash">Macheim</span> into Applications.
+              </li>
+              <li>
+                <span className="font-mono text-xs text-gold-light">2.</span> The first launch is
+                blocked because Macheim isn&apos;t signed. Open{' '}
+                <span className="text-ash">Terminal</span>, run this, then open Macheim:
+                <span className="mt-1.5 block">
+                  <CopyChip value="xattr -cr /Applications/Macheim.app" />
+                </span>
+                <span className="mt-1 block text-xs text-muted">
+                  Still blocked? System Settings → Privacy &amp; Security → Open Anyway.
+                </span>
+              </li>
+              <li>
+                <span className="font-mono text-xs text-gold-light">3.</span> Macheim finds your
+                Valheim install. Click <span className="text-ash">Install BepInEx</span> — it sets
+                up the mod loader and installs Rosetta automatically (on Apple Silicon the mods run
+                under Rosetta).
+              </li>
+              <li>
+                <span className="font-mono text-xs text-gold-light">4.</span> Add the pack. If
+                Macheim offers <span className="text-ash">import from code</span>, paste the{' '}
+                {SERVER_NAME} code:
+                {MODPACK_PROFILE_CODE ? (
+                  <span className="mt-1.5 block">
+                    <CopyChip value={MODPACK_PROFILE_CODE} />
+                  </span>
+                ) : (
+                  <span> shared in Discord.</span>
+                )}
+                <span className="mt-1 block">
+                  If it doesn&apos;t, add each mod from the{' '}
+                  <Link href="/mods" className="text-gold-light hover:underline">
+                    Mods page
+                  </Link>{' '}
+                  in Macheim&apos;s Thunderstore browser — match the versions exactly.
+                </span>
+              </li>
+              <li>
+                <span className="font-mono text-xs text-gold-light">5.</span> Launch from{' '}
+                <span className="text-ash">Macheim</span> (not Steam&apos;s Play button), pick your
+                character, then <span className="text-ash">Join Game → Add server</span> with the
+                address and password from the top of this page.
+              </li>
+            </ol>
+
+            <div className="mt-4 space-y-1.5">
+              <p className="text-xs text-muted">
+                Some modded objects may look bright pink — a harmless Mac shader quirk, not a
+                broken install.
+              </p>
+              <p className="text-xs text-muted">
+                A 2020 MacBook Air is the lightest Apple Silicon chip: keep the graphics low and
+                expect it to strain on raids and big bases.
+              </p>
+            </div>
           </CardBody>
         </Card>
       </section>
@@ -466,15 +563,14 @@ export default function GetStartedPage() {
 
           <Platform icon={<Laptop size={17} />} name="Mac" difficulty="Tricky" tone="raid">
             <p>
-              <strong className="text-ash-dim">Valheim has no native Mac version</strong>, so
-              there&apos;s an extra hop. Run the Windows build through{' '}
-              <Ext href="https://www.codeweavers.com/crossover">CrossOver</Ext> or{' '}
-              <Ext href="https://getwhisky.app/">Whisky</Ext>, then install r2modman inside that
-              environment.
+              Valheim runs on Mac, but r2modman doesn&apos;t. On Apple Silicon (M1 and later), use{' '}
+              <Ext href={MACHEIM_ALL_URL}>Macheim</Ext> — the one-click download and full
+              walkthrough are in the <span className="text-ash">Apple Silicon setup</span> section
+              above.
             </p>
             <p className="text-xs text-muted">
-              Cloud streaming (GeForce NOW) <em>can&apos;t</em> run mods. On Apple Silicon the easiest
-              answer is often borrowing a Windows/Linux PC. Ask in Discord and we&apos;ll help.
+              Cloud streaming (GeForce NOW) <em>can&apos;t</em> run mods. A 2020 MacBook Air will
+              run it but strain on raids, so keep the graphics low.
             </p>
           </Platform>
         </div>
@@ -510,8 +606,11 @@ export default function GetStartedPage() {
               second, and your kills, deaths, and builds are never touched.
             </Trouble>
             <Trouble symptom="It won't run on my Mac">
-              There&apos;s no native Mac client, so you need CrossOver or Whisky (see the Mac card
-              above), or a Windows/Linux machine. Ask in Discord and we&apos;ll walk you through it.
+              On Apple Silicon, use <span className="text-ash">Macheim</span> (see the Apple Silicon
+              setup section) — it runs the mods under Rosetta for you. If Macheim itself won&apos;t
+              open, it needs the Gatekeeper step: Terminal{' '}
+              <span className="font-mono text-xs">xattr -cr /Applications/Macheim.app</span>, or
+              System Settings → Privacy &amp; Security → Open Anyway. Still stuck? Ask in Discord.
             </Trouble>
             <Trouble symptom="“Failed to connect” / can't reach the server">
               The server may be mid-restart (it cycles every few hours). Wait a minute and retry.
