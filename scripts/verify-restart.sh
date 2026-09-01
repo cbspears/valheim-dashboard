@@ -8,8 +8,11 @@
 #   1. AzuCraftyBoxes server DLL loaded by this boot's chainloader (BepInEx/LogOutput.log)
 #   2. ValheimPlus [CraftFromChest] enabled=false          (server cfg, fleet-synced)
 #   3. ValheimPlus [Workbench] workbenchAttachmentRange=20  (server cfg, fleet-synced)
-#   4. `-modifier deathpenalty ...` active: shows up as a death* global key in the world .db,
-#      but ONLY after a world save that happened after the restart (autosave, or panel console `save`).
+#   4. `-modifier deathpenalty ...` active: the keys it grants land in the world .fwl's
+#      startingGlobalKeys (saved on the post-restart world save). NOTE (2026-08-31): tiers map to
+#      keys via Unity scene data, decompile-verified per the live .fwl — veryeasy grants ONLY
+#      `skillreductionrate 15` (softer skill loss). KEEP-GEAR = `deathkeepequip`, granted by the
+#      CASUAL tier only. Player.OnDeath drops everything unless deathkeepequip is set.
 # Needs: sshpass, sftp, strings (binutils). The GTX nest dir is IP_PORT-derived: if the box moves,
 # update N= below together with the poller's LOG_PATH / MAP_REMOTE_DIR.
 set -u
@@ -22,6 +25,7 @@ get $N/BepInEx/LogOutput.log $OUT/LogOutput.log
 get $N/console.log $OUT/console.log
 get $N/BepInEx/config/valheim_plus.cfg $OUT/valheim_plus.cfg
 get $N/worlds_local/EilifRehearsal.db $OUT/EilifRehearsal.db
+get $N/worlds_local/EilifRehearsal.fwl $OUT/EilifRehearsal.fwl
 ls -la $N/BepInEx/config/
 ls -la $N/worlds_local/EilifRehearsal.db
 EOF
@@ -33,8 +37,12 @@ grep -i "AzuCraftyBoxes" "$OUT/LogOutput.log" | grep -iv "Loading \[" | head -5
 echo "== ② V+ CraftFromChest OFF / ③ workbenchAttachmentRange=20 (server cfg, fleet-synced) =="
 awk '/^\[CraftFromChest\]/{f=1} f&&/^enabled/{print "CraftFromChest.enabled =", $3; f=0}' "$OUT/valheim_plus.cfg"
 awk '/^\[Workbench\]/{f=1} f&&/^(enabled|workbenchAttachmentRange)/{print "Workbench." $0} f&&/^\[/&&!/Workbench/{f=0}' "$OUT/valheim_plus.cfg"
-echo "== ④ deathpenalty modifier: global keys in the world .db (needs a world save AFTER the restart; autosave ~30 min or panel console 'save') =="
-strings -n 6 "$OUT/EilifRehearsal.db" | grep -iE "^(death|nomap|noportals|passivemobs|playerevents|teleportall|weakermobs|defeated_)" | sort | uniq -c || true
-strings -n 6 "$OUT/EilifRehearsal.db" | grep -qi "^death" && echo "DEATH-PENALTY KEY PRESENT (see above)" || echo "no death* global key in the .db (modifier NOT active as of the last world save; remote mtime: $(grep 'EilifRehearsal.db$' "$OUT/sftp-ls.txt" | awk '{print $6,$7,$8}'))"
+echo "== ④ death-penalty keys in the world .fwl startingGlobalKeys (saved on the post-restart world save) =="
+strings -n 4 "$OUT/EilifRehearsal.fwl" | grep -ioE "deathkeepequip|deathdeleteitems|deathdeleteunequipped|skillreductionrate [0-9]+|deathpenalty_[a-z]+" | sort | uniq -c || true
+if strings -n 4 "$OUT/EilifRehearsal.fwl" | grep -qi "deathkeepequip"; then
+  echo "KEEP-GEAR ACTIVE (deathkeepequip present — equipped items survive death)"
+else
+  echo "NO deathkeepequip — players DROP ALL ITEMS on death (veryeasy only softens skill loss; keep-gear needs tier=Casual)"
+fi
 echo "== console.log: any modifier/preset lines =="; grep -i "modifier\|preset\|penalty" "$OUT/console.log" | head -5 || true
 echo "== companion / emitter alive =="; tail -3 "$OUT/LogOutput.log"
