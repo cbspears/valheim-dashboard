@@ -46,6 +46,9 @@ namespace EilifCompanion
         private string[] _enforceList = Array.Empty<string>();
         private float _enforceTimer;
         private const float EnforceIntervalSeconds = 30f;
+        private string _lastLoggedKeys;
+        private System.Reflection.MethodInfo _sendGlobalKeys; // private ZoneSystem.SendGlobalKeys(long)
+        private bool _sendGlobalKeysMissing;
 
         // ---- Voice pump state (main thread except where noted) ----
         // NOTE: no System.ValueTuple anywhere in this file — see BUILD.md and the source comment in
@@ -165,16 +168,42 @@ namespace EilifCompanion
             return ZNet.instance != null && ZRoutedRpc.instance != null;
         }
 
-        // Assert any missing enforced keys into the live world. Main thread only.
-        // ZoneSystem.SetGlobalKey routes through the server's own "SetGlobalKey" RPC
-        // (RPC_SetGlobalKey: idempotent add + broadcast to every client), so a key set here
-        // reaches all connected peers and any peer that joins later. Vanilla's boot-time
-        // SetStartingGlobalKeys wipes modifier-enum keys before re-applying its own list, so
-        // after a restart the key can be missing for up to EnforceIntervalSeconds — acceptable,
-        // since nobody dies in the first 30 seconds of a boot with nobody connected yet.
+        // Assert any missing enforced keys into the live world, log the runtime key list
+        // whenever it changes, and re-broadcast the list to every client. Main thread only.
+        //
+        // Why all three (live-debugged 2026-08-31): the boot logged DeathPenalty->casual and the
+        // .fwl carried deathkeepequip, yet a player who joined and died a minute after the boot
+        // still dropped equipped gear — so somewhere between the world's startingGlobalKeys, the
+        // server's runtime key set, and the client's synced copy, the key went missing, and none
+        // of those hops is observable from outside. This makes the server log the source of truth
+        // ([EILIF_KEY] lines readable over SFTP) and heals both possible failure points:
+        //  - key absent server-side  -> SetGlobalKey routes through the server's own "SetGlobalKey"
+        //    RPC (RPC_SetGlobalKey: idempotent add + broadcast), fixing all peers at once;
+        //  - key present server-side but a client desynced -> the periodic SendGlobalKeys
+        //    re-broadcast (private; reflection) re-syncs every connected client each pass.
+        // Vanilla's boot-time SetStartingGlobalKeys wipes modifier-enum keys before re-applying
+        // its own list, so after a restart a key can be missing for up to EnforceIntervalSeconds —
+        // acceptable: nobody dies in the first 30 seconds of a boot.
         private void EnforceWorldKeys()
         {
             if (!ServerReady() || ZoneSystem.instance == null) return;
+
+            try
+            {
+                var current = ZoneSystem.instance.GetGlobalKeys();
+                current.Sort(StringComparer.Ordinal);
+                var joined = string.Join(" | ", current);
+                if (joined != _lastLoggedKeys)
+                {
+                    _lastLoggedKeys = joined;
+                    Log.LogInfo($"[EILIF_KEY] runtime world keys ({current.Count}): {joined}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.LogWarning($"[Eilif] world-key list read failed: {ex.Message}");
+            }
+
             foreach (var key in _enforceList)
             {
                 try
@@ -186,6 +215,31 @@ namespace EilifCompanion
                 catch (Exception ex)
                 {
                     Log.LogWarning($"[Eilif] world-key enforce failed for '{key}': {ex.Message}");
+                }
+            }
+
+            // Belt-and-suspenders: re-sync every connected client's key list. Cheap (a small
+            // string list per pass) and idempotent client-side (RPC_GlobalKeys clears + re-adds).
+            if (ConnectedPeerCount() > 0 && !_sendGlobalKeysMissing)
+            {
+                try
+                {
+                    if (_sendGlobalKeys == null)
+                    {
+                        _sendGlobalKeys = AccessTools.Method(typeof(ZoneSystem), "SendGlobalKeys");
+                        if (_sendGlobalKeys == null)
+                        {
+                            _sendGlobalKeysMissing = true;
+                            Log.LogWarning("[Eilif] ZoneSystem.SendGlobalKeys not found - client key re-sync disabled.");
+                            return;
+                        }
+                    }
+                    _sendGlobalKeys.Invoke(ZoneSystem.instance, new object[] { ZRoutedRpc.Everybody });
+                }
+                catch (Exception ex)
+                {
+                    _sendGlobalKeysMissing = true; // don't retry a broken reflection path every pass
+                    Log.LogWarning($"[Eilif] client key re-sync failed (disabled): {ex.Message}");
                 }
             }
         }
