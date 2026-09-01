@@ -22,7 +22,7 @@ namespace EilifCompanion
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
         public const string PluginName = "Eilif Companion";
-        public const string PluginVersion = "0.2.1";
+        public const string PluginVersion = "0.3.0";
 
         internal static ManualLogSource Log;
 
@@ -33,6 +33,19 @@ namespace EilifCompanion
         private ConfigEntry<string> _speakerName;
         private ConfigEntry<string> _chatType;
         private ConfigEntry<int> _lineSpacing;
+        private ConfigEntry<string> _enforcedKeys;
+
+        // ---- World-key enforcement state ----
+        // Vanilla applies `-modifier` launch args to the world's startingGlobalKeys and logs
+        // "Setting world modifier: ..." at boot, but on this host the granted keys never showed up
+        // in the RUNTIME global-key set (live-verified 2026-08-31: boot logged DeathPenalty->casual
+        // yet players still dropped equipped gear — Player.OnDeath keys off ZoneSystem's
+        // DeathKeepEquip global key, checked client-side). Global keys are server-authoritative
+        // and sync to every client, so re-asserting them here fixes the whole fleet with no
+        // client-side mod change. Assert-if-missing, so a normal pass is a no-op.
+        private string[] _enforceList = Array.Empty<string>();
+        private float _enforceTimer;
+        private const float EnforceIntervalSeconds = 30f;
 
         // ---- Voice pump state (main thread except where noted) ----
         // NOTE: no System.ValueTuple anywhere in this file — see BUILD.md and the source comment in
@@ -68,6 +81,11 @@ namespace EilifCompanion
             _lineSpacing = Config.Bind("Voice", "LineSpacingSeconds", 20,
                 new ConfigDescription("Minimum seconds between two spoken lines. A poll can hand back several lines at once; they wait in the queue and Eilif speaks one at a time at this spacing instead of stacking them in a single frame.",
                     new AcceptableValueRange<int>(5, 300)));
+            _enforcedKeys = Config.Bind("WorldKeys", "EnforcedGlobalKeys", "deathkeepequip",
+                "Comma-separated global keys asserted into the world whenever they are missing (checked every 30s). " +
+                "Use for world-modifier keys the panel's -modifier args fail to apply at runtime, e.g. " +
+                "'deathkeepequip' (keep equipped gear on death; inventory still drops). Value keys like " +
+                "'skillreductionrate 15' work too. Empty = feature off.");
 
             try
             {
@@ -75,6 +93,17 @@ namespace EilifCompanion
                 ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             }
             catch { /* older runtimes may not expose Tls12 explicitly; ignore */ }
+
+            var keys = (_enforcedKeys.Value ?? "").Split(',');
+            var list = new System.Collections.Generic.List<string>(keys.Length);
+            foreach (var k in keys)
+            {
+                var t = k.Trim().ToLowerInvariant();
+                if (t.Length > 0) list.Add(t);
+            }
+            _enforceList = list.ToArray();
+            if (_enforceList.Length > 0)
+                Log.LogInfo($"[Eilif] World-key enforcement armed: {string.Join(", ", _enforceList)} (every {EnforceIntervalSeconds:0}s).");
 
             _voiceDormant = string.IsNullOrEmpty(_voiceToken.Value);
             if (_voiceDormant)
@@ -105,6 +134,17 @@ namespace EilifCompanion
             // Live player-position emitter (independent of the voice half; own 60s timer).
             PositionEmitter.Tick(Time.unscaledDeltaTime);
 
+            // World-key enforcement (independent of the voice half; runs even when voice is dormant).
+            if (_enforceList.Length > 0)
+            {
+                _enforceTimer += Time.unscaledDeltaTime;
+                if (_enforceTimer >= EnforceIntervalSeconds)
+                {
+                    _enforceTimer = 0f;
+                    EnforceWorldKeys();
+                }
+            }
+
             if (_voiceDormant) return;
 
             // 2) Poll timer (real time, unaffected by game time scale).
@@ -123,6 +163,31 @@ namespace EilifCompanion
         private static bool ServerReady()
         {
             return ZNet.instance != null && ZRoutedRpc.instance != null;
+        }
+
+        // Assert any missing enforced keys into the live world. Main thread only.
+        // ZoneSystem.SetGlobalKey routes through the server's own "SetGlobalKey" RPC
+        // (RPC_SetGlobalKey: idempotent add + broadcast to every client), so a key set here
+        // reaches all connected peers and any peer that joins later. Vanilla's boot-time
+        // SetStartingGlobalKeys wipes modifier-enum keys before re-applying its own list, so
+        // after a restart the key can be missing for up to EnforceIntervalSeconds — acceptable,
+        // since nobody dies in the first 30 seconds of a boot with nobody connected yet.
+        private void EnforceWorldKeys()
+        {
+            if (!ServerReady() || ZoneSystem.instance == null) return;
+            foreach (var key in _enforceList)
+            {
+                try
+                {
+                    if (ZoneSystem.instance.GetGlobalKeyExact(key)) continue;
+                    ZoneSystem.instance.SetGlobalKey(key);
+                    Log.LogInfo($"[EILIF_KEY] enforced world key: {key}");
+                }
+                catch (Exception ex)
+                {
+                    Log.LogWarning($"[Eilif] world-key enforce failed for '{key}': {ex.Message}");
+                }
+            }
         }
 
         private static int ConnectedPeerCount()

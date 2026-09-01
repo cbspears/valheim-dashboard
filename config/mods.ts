@@ -79,8 +79,8 @@ export const MODS: Mod[] = [
     name: 'Eilif Companion',
     author: 'cbspears (custom-built)',
     description:
-      "The voice of the Hall itself — carries the in-game /oath swearing and speaks as Eilif. Built just for this server; nothing to install.",
-    version: '0.2.1',
+      "The voice of the Hall itself — carries the in-game /oath swearing and speaks as Eilif. Also keeps the world's death rules honest: your worn armor and weapons stay with you when you fall. Built just for this server; nothing to install.",
+    version: '0.3.0',
     category: 'Core',
     clientRequired: false,
   },
