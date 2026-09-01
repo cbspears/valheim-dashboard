@@ -37,7 +37,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.3.0";
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
@@ -52,6 +52,7 @@ namespace EilifCompanionClient
         private ConfigEntry<string> _url;
         private ConfigEntry<string> _token;
         private ConfigEntry<int> _intervalSeconds;
+        private ConfigEntry<string> _keepItemTypes;
 
         // ---- State (main thread unless noted) ----
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
@@ -82,8 +83,14 @@ namespace EilifCompanionClient
                 new ConfigDescription("Seconds between map-% posts while connected to a server.",
                     new AcceptableValueRange<int>(60, 3600)));
 
+            _keepItemTypes = Config.Bind("Death", "KeepItemTypes", TombstoneKeeper.DefaultKeepTypes,
+                "Item types that stay with you on death IN ADDITION to equipped gear (comma-separated " +
+                "ItemDrop.ItemData.ItemType names). Only active on a world whose deathkeepequip global key " +
+                "is set (i.e. this server); on other servers deaths are pure vanilla. Empty = off.");
+
             IngestUrl = _url.Value;
             IngestToken = _token.Value;
+            TombstoneKeeper.Configure(_keepItemTypes.Value);
 
             try
             {
@@ -99,6 +106,10 @@ namespace EilifCompanionClient
             harmony.PatchAll(typeof(Patch_GameLogout));
             // v0.2.0: the local player's death cause (see DeathReporter.cs).
             harmony.PatchAll(typeof(Patch_PlayerOnDeath));
+            // v0.3.0: keep tools/weapons/ammo out of the tombstone (see TombstoneKeeper.cs).
+            harmony.PatchAll(typeof(Patch_MoveInventoryToGrave));
+            if (TombstoneKeeper.KeepTypes.Count > 0)
+                Log.LogInfo($"[EilifDeath] tombstone keep-list armed ({TombstoneKeeper.KeepTypes.Count} item types; active only where deathkeepequip is set).");
 
             Log.LogInfo($"[EilifMap] {PluginName} v{PluginVersion} loaded. Posting explored-map % to {_url.Value} every {_intervalSeconds.Value}s while on a server.");
             Log.LogInfo($"[EilifDeath] death-cause reporter armed (posts source:'eilif-death' to {_url.Value} when the local player dies on a server).");
