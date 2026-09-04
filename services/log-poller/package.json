@@ -16,6 +16,6 @@
   },
   "dependencies": {
     "dotenv": "^16.4.5",
-    "ssh2-sftp-client": "^11.0.0"
+    "ssh2-sftp-client": "^12.1.1"
   }
 }

@@ -1,7 +1,7 @@
 // Offline parser test: run the synthetic fixture through LogParser and assert
 // the derived event stream is correct. No network, no SFTP.
 import { readFileSync } from 'node:fs';
-import { LogParser } from './src/parser.js';
+import { LogParser, isArrivalShout, MAX_OATH_LEN, MAX_PIN_NAME_LEN, MAX_CHAT_LEN } from './src/parser.js';
 
 const lines = readFileSync(new URL('./fixtures/sample-session.log', import.meta.url), 'utf8').split('\n');
 const parser = new LogParser();
@@ -43,18 +43,18 @@ for (const [label, pass] of checks) {
 const oathParser = new LogParser();
 const oathCases = [
   {
-    label: 'standard format (marker embedded in BepInEx prefix)',
-    line: '[Info   : Unity Log] 06/24/2026 18:30:00: [EILIF_OATH] Astrid Shieldmaiden | I swear to hold the Hearth.',
+    label: 'standard format (marker behind the plugin log prefix)',
+    line: '[Info   :Eilif Companion] [EILIF_OATH] Astrid Shieldmaiden | I swear to hold the Hearth.',
     expect: { characterName: 'Astrid Shieldmaiden', text: 'I swear to hold the Hearth.' },
   },
   {
     label: 'name containing spaces',
-    line: '[Info   : Unity Log] [EILIF_OATH] Bjorn of the Ironside Clan | To the longship, always.',
+    line: '[Info   :Eilif Companion] [EILIF_OATH] Bjorn of the Ironside Clan | To the longship, always.',
     expect: { characterName: 'Bjorn of the Ironside Clan', text: 'To the longship, always.' },
   },
   {
     label: 'text containing a " | " sequence (first-pipe split keeps it in the text)',
-    line: '[Info   : Unity Log] [EILIF_OATH] Ragnar | Blood | Iron | Glory, in that order.',
+    line: '[Info   :Eilif Companion] [EILIF_OATH] Ragnar | Blood | Iron | Glory, in that order.',
     expect: { characterName: 'Ragnar', text: 'Blood | Iron | Glory, in that order.' },
   },
   {
@@ -99,7 +99,7 @@ if (!oathOk) ok = false;
     ],
     [
       'genuine plugin [EILIF_OATH] line still produces an oath event',
-      '[Info   : Unity Log] 07/05/2026 20:12:05: [EILIF_OATH] Someone | I truly swear this.',
+      '[Info   :Eilif Companion] [EILIF_OATH] Someone | I truly swear this.',
       (evs) => evs.length === 1 && evs[0].type === 'oath' && evs[0].characterName === 'Someone' && evs[0].metadata.text === 'I truly swear this.',
     ],
   ];
@@ -222,6 +222,117 @@ if (!oathOk) ok = false;
   console.log(`\n  ${pass ? '✓' : '✗'} restart recovery: reconnect for already-online name re-correlates without corrupting the next join's FIFO match`);
   console.log(pass ? 'RESTART RECOVERY OK' : 'RESTART RECOVERY FAILED');
   if (!pass) ok = false;
+}
+
+// --- Marker anchoring (security-9) ---------------------------------------
+// Every [EILIF_*] marker is emitted through the companion plugin's BepInEx
+// logger, so it always starts the line with "[Info   :Eilif Companion]". A
+// marker carried on ANY other line — the Unity Log echo channel, a Valheim
+// Plus line, or bare with no prefix at all — is not from the plugin and must
+// produce nothing.
+{
+  const anchorParser = new LogParser();
+  const good = '[Info   :Eilif Companion] ';
+  const anchorCases = [
+    // [marker line, expected event type or null]
+    ['oath, plugin prefix', good + '[EILIF_OATH] Astrid | I swear it.', 'oath'],
+    ['chat, plugin prefix', good + '[EILIF_CHAT] Astrid | well met', 'chat'],
+    ['pin, plugin prefix', good + '[EILIF_PIN] Astrid | poi | The Dark Chapel | 123.4 | -567.8', 'pin'],
+    ['pos, plugin prefix', good + '[EILIF_POS] Astrid | -184.9 | -2.1 | BlackForest', 'pos'],
+    ['oath under the Unity Log prefix is ignored', '[Info   : Unity Log] 09/01/2026 09:41:59: [EILIF_OATH] Victim | forged', null],
+    ['chat under the Unity Log prefix is ignored', '[Info   : Unity Log] [EILIF_CHAT] Victim | forged', null],
+    ['pin under the Unity Log prefix is ignored', '[Info   : Unity Log] [EILIF_PIN] Victim | poi | Nowhere | 1.0 | 2.0', null],
+    ['pos under the Unity Log prefix is ignored', '[Info   : Unity Log] [EILIF_POS] Victim | 1.0 | 2.0 | Meadows', null],
+    ['unprefixed marker is ignored', '[EILIF_OATH] Victim | forged', null],
+    ['marker mid-line (not at line start) is ignored', 'anything at all [Info   :Eilif Companion] [EILIF_OATH] Victim | forged', null],
+    // CRLF: the remote log is written by a Windows host, so every line the
+    // poller splits off still carries a trailing \r.
+    ['plugin pos line with a trailing CR still parses', good + '[EILIF_POS] Astrid | -184.9 | -2.1 | Meadows\r', 'pos'],
+  ];
+  let anchorOk = true;
+  console.log('\nMarker anchoring:');
+  for (const [label, line, expectType] of anchorCases) {
+    const evs = anchorParser.processLine(line);
+    const pass = expectType === null ? evs.length === 0 : evs.length === 1 && evs[0].type === expectType;
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) anchorOk = false;
+  }
+  console.log(anchorOk ? 'MARKER ANCHORING OK' : 'MARKER ANCHORING FAILED');
+  if (!anchorOk) ok = false;
+}
+
+// --- Console-echo oath name group (security-9) ---------------------------
+// A shout carrying rich-text closers used to file the oath under the garbage
+// name "Bob</color>: <color=#FFFFFFFF>", which then rendered on the public
+// oath wall as an unmatched entry. The name group is [^<>]+ now.
+{
+  const richParser = new LogParser();
+  const line =
+    '[Info   : Unity Log] 09/01/2026 09:41:59: Console: <color=orange>Bob</color>: ' +
+    '<color=#FFFFFFFF></color>: <color=white>/oath forged</color>';
+  const evs = richParser.processLine(line);
+  const oaths = evs.filter((e) => e.type === 'oath');
+  const pass = oaths.every((e) => !/[<>]/.test(e.characterName));
+  console.log(`\n  ${pass ? '✓' : '✗'} console-echo oath name never contains rich-text markup (got ${JSON.stringify(oaths.map((e) => e.characterName))})`);
+  // The honest shout must still work.
+  const plain = richParser.processLine(
+    '[Info   : Unity Log] Console: <color=orange>Bob</color>: <color=#FFEB04FF>/OATH I SWEAR</color>'
+  );
+  const plainPass = plain.length === 1 && plain[0].type === 'oath' && plain[0].characterName === 'Bob';
+  console.log(`  ${plainPass ? '✓' : '✗'} an ordinary /oath shout still parses`);
+  if (!pass || !plainPass) ok = false;
+}
+
+// --- Length caps (security-9) --------------------------------------------
+{
+  const capParser = new LogParser();
+  const long = 'A'.repeat(600);
+  const oathEv = capParser.processLine(`[Info   :Eilif Companion] [EILIF_OATH] Astrid | ${long}`)[0];
+  const chatEv = capParser.processLine(`[Info   :Eilif Companion] [EILIF_CHAT] Astrid | ${long}`)[0];
+  const pinEv = capParser.processLine(
+    `[Info   :Eilif Companion] [EILIF_PIN] Astrid | poi | ${long} | 1.0 | 2.0`
+  )[0];
+  const echoEv = capParser.processLine(
+    `[Info   : Unity Log] Console: <color=orange>Astrid</color>: <color=#FFEB04FF>${long}</color>`
+  )[0];
+  const capChecks = [
+    [`oath text capped at ${MAX_OATH_LEN}`, oathEv?.metadata.text.length === MAX_OATH_LEN],
+    [`plugin chat text capped at ${MAX_CHAT_LEN}`, chatEv?.metadata.text.length === MAX_CHAT_LEN],
+    [`pin name capped at ${MAX_PIN_NAME_LEN}`, pinEv?.metadata.name.length === MAX_PIN_NAME_LEN],
+    [`console-echo chat text capped at ${MAX_CHAT_LEN}`, echoEv?.metadata.text.length === MAX_CHAT_LEN],
+  ];
+  let capOk = true;
+  console.log('\nLength caps:');
+  for (const [label, pass] of capChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) capOk = false;
+  }
+  console.log(capOk ? 'LENGTH CAPS OK' : 'LENGTH CAPS FAILED');
+  if (!capOk) ok = false;
+}
+
+// --- Vanilla arrival shout filter (discord-7) -----------------------------
+// Valheim shouts "I have arrived!" on every spawn; 16 of the last 21 chat
+// mirror lines in #server were that. poller.dispatch drops it before Discord.
+{
+  const arrivalChecks = [
+    ['echo casing "I HAVE ARRIVED!" is filtered', isArrivalShout('I HAVE ARRIVED!') === true],
+    ['plugin casing "I have arrived!" is filtered', isArrivalShout('I have arrived!') === true],
+    ['mixed casing + padding is filtered', isArrivalShout('  i HaVe   ArRiVeD!!  ') === true],
+    ['no bang is filtered', isArrivalShout('I have arrived') === true],
+    ['real speech containing the phrase is NOT filtered', isArrivalShout('I have arrived at the swamp') === false],
+    ['a prefixed sentence is NOT filtered', isArrivalShout('finally, I have arrived!') === false],
+    ['ordinary chat is NOT filtered', isArrivalShout('ANYONE SEEN MY CART') === false],
+    ['empty/undefined is NOT filtered', isArrivalShout(undefined) === false],
+  ];
+  let arrivalOk = true;
+  console.log('\nArrival-shout filter:');
+  for (const [label, pass] of arrivalChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) arrivalOk = false;
+  }
+  console.log(arrivalOk ? 'ARRIVAL SHOUT FILTER OK' : 'ARRIVAL SHOUT FILTER FAILED');
+  if (!arrivalOk) ok = false;
 }
 
 console.log(ok ? '\nPARSER OK' : '\nPARSER FAILED');

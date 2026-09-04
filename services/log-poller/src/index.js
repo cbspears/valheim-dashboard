@@ -62,11 +62,19 @@ if (config.source === 'sftp') {
 
 const poller = new Poller(config);
 
+// Graceful stop: wait (bounded, 20 s — well inside systemd's 90 s
+// TimeoutStopSec) for the in-flight tick to finish and save its state, instead
+// of killing it mid-dispatch and replaying the whole batch on the next start.
+let shuttingDown = false;
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
-    console.info(`[poller] received ${sig}, shutting down`);
-    poller.stop();
-    process.exit(0);
+    if (shuttingDown) return; // a second signal must not race the first stop
+    shuttingDown = true;
+    console.info(`[poller] received ${sig}, shutting down (waiting for the in-flight tick)`);
+    poller
+      .stop()
+      .catch((err) => console.warn(`[poller] stop: ${err.message}`))
+      .finally(() => process.exit(0));
   });
 }
 

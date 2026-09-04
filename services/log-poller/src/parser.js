@@ -34,6 +34,35 @@ const RAID_MESSAGES = {
   hildirboss1: 'A distant howl',
 };
 
+// Every [EILIF_*] marker is written by the companion plugin's BepInEx logger,
+// so it ALWAYS carries that logger's source prefix at the very start of the
+// line: "[Info   :Eilif Companion] [EILIF_POS] …" (BepInEx formats the source
+// as {Source,10}, so the 15-char name is unpadded — verified against the live
+// GTX LogOutput.log). Anchoring the markers to it is defence in depth behind
+// the console-echo guard in processLine: nothing a player can type — into
+// chat, a sign, an item name, anywhere — starts a log line, so an embedded
+// marker can no longer be mistaken for a plugin-emitted one even if a future
+// edit reorders the checks. Whitespace/level are matched leniently so a
+// BepInEx log-format change degrades to "marker ignored", never "marker
+// forged".
+const EILIF_PREFIX = String.raw`^\[\w+\s*:\s*Eilif Companion\]\s*`;
+
+// Valheim shouts this automatically whenever a character spawns — it is not
+// player speech, and mirroring it doubled every join in #server.
+const ARRIVAL_SHOUT_RE = /^\s*i\s+have\s+arrived\s*!*\s*$/i;
+
+/** True for Valheim's automatic spawn shout ("I have arrived!", any casing). */
+export function isArrivalShout(text) {
+  return ARRIVAL_SHOUT_RE.test(String(text ?? ''));
+}
+
+// Length caps applied before an event is dispatched. Chat was already clamped
+// downstream at 300; oath/pin text had no cap at all, so one very long shout
+// could hand the oath wall (and the Discord embed) an unbounded string.
+const MAX_OATH_LEN = 280;
+const MAX_PIN_NAME_LEN = 280;
+const MAX_CHAT_LEN = 300;
+
 const RE = {
   connection: /Got connection SteamID (\d+)/,
   zdoid: /Got character ZDOID from (.+?) : (-?\d+):(-?\d+)/,
@@ -41,46 +70,49 @@ const RE = {
   connections: /Connections (\d+) ZDOS/,
   randomEvent: /Random event set:(\S+)/,
   serverConnected: /Game server connected/,
-  // The Eilif companion plugin's /oath chat command. Marker can be embedded
-  // anywhere in the standard BepInEx log prefix; name/text split on the FIRST
-  // " | " so a text containing " | " itself stays intact.
-  // NOT anchored to line-start on its own — this marker (and pin/chat/pos
-  // below) is ONLY trusted because processLine tests RE.consoleShout FIRST
-  // and never lets a console-echoed line reach this check. A shout of the
-  // literal text "[EILIF_OATH] Victim | ..." would otherwise match here too
-  // and impersonate Victim (see the console-echo guard at the top of
-  // processLine before touching this).
-  oath: /\[EILIF_OATH\]\s*(.+)$/,
+  // The Eilif companion plugin's /oath chat command. Anchored to the plugin's
+  // own log prefix (EILIF_PREFIX above); name/text split on the FIRST " | " so
+  // a text containing " | " itself stays intact.
+  //   [Info   :Eilif Companion] [EILIF_OATH] Testman | I swear …
+  oath: new RegExp(EILIF_PREFIX + String.raw`\[EILIF_OATH\]\s*(.+)$`),
   // Shouted /oath as echoed by the server console — the mod-free capture path.
   // Shout text arrives display-uppercased; the oath keyword is matched case-
-  // insensitively and the sworn text is kept exactly as shouted.
+  // insensitively and the sworn text is kept exactly as shouted. The name group
+  // is [^<>]+ (not .+?): a shout whose text carries rich-text closers, e.g.
+  //   …<color=orange>Bob</color>: <color=#FFFFFFFF></color>: <color=white>/oath x</color>
+  // otherwise filed the oath under the name "Bob</color>: <color=#FFFFFFFF>".
   //   Console: <color=orange>Testman</color>: <color=#FFEB04FF>/OATH I SWEAR ...</color>
-  consoleOath: /Console:\s*<color=orange>(.+?)<\/color>:\s*<color=[^>]*>\/oath\s+(.+?)<\/color>/i,
+  consoleOath: /Console:\s*<color=orange>([^<>]+)<\/color>:\s*<color=[^>]*>\/oath\s+(.+?)<\/color>/i,
   // The Eilif companion plugin's /pin capture (Harmony patch on
   // Chat.OnNewChatMessage — unlike /oath this NEEDS the plugin, since a
-  // world position isn't available from the console echo alone). Same
-  // console-echo-guard caveat as `oath` above applies here too.
-  //   [EILIF_PIN] Testman | poi | The Dark Chapel | 123.4 | -567.8
-  pin: /\[EILIF_PIN\]\s*(.+?)\s*\|\s*(base|poi)\s*\|\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*$/,
+  // world position isn't available from the console echo alone).
+  //   [Info   :Eilif Companion] [EILIF_PIN] Testman | poi | The Dark Chapel | 123.4 | -567.8
+  pin: new RegExp(
+    EILIF_PREFIX +
+      String.raw`\[EILIF_PIN\]\s*(.+?)\s*\|\s*(base|poi)\s*\|\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*$`
+  ),
   // The Eilif companion plugin's shout-chat capture (raw casing, name/text
-  // split on the FIRST " | " like [EILIF_OATH]). Same console-echo-guard
-  // caveat as `oath` above applies here too.
-  //   [EILIF_CHAT] Testman | hello there
-  chat: /\[EILIF_CHAT\]\s*(.+)$/,
+  // split on the FIRST " | " like [EILIF_OATH]).
+  //   [Info   :Eilif Companion] [EILIF_CHAT] Testman | hello there
+  chat: new RegExp(EILIF_PREFIX + String.raw`\[EILIF_CHAT\]\s*(.+)$`),
   // The Eilif companion plugin's live position + biome (emitted ~60s per online
   // player). Explicit "|"-separated fields like [EILIF_PIN]; x/z are world
   // coords ("-184.9" style) and biome is a plain enum word (Meadows, BlackForest,
-  // …, or None) — matched leniently as a run of non-space chars. Same
-  // console-echo-guard caveat as `oath` above applies here too.
-  //   [EILIF_POS] Bjorn | -184.9 | -2.1 | BlackForest
-  pos: /\[EILIF_POS\]\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(\S+)\s*$/,
+  // …, or None) — matched leniently as a run of non-space chars.
+  //   [Info   :Eilif Companion] [EILIF_POS] Bjorn | -184.9 | -2.1 | BlackForest
+  pos: new RegExp(
+    EILIF_PREFIX + String.raw`\[EILIF_POS\]\s*(.+?)\s*\|\s*(-?[\d.]+)\s*\|\s*(-?[\d.]+)\s*\|\s*(\S+)\s*$`
+  ),
   // Any shouted chat as echoed by the server console — the mod-free capture
   // path (text arrives display-UPPERCASED). Command shouts (/oath, /pin, …)
   // are filtered out in processLine, and the consoleOath check runs first.
   // processLine tests THIS pattern before any [EILIF_*] marker regex, so a
   // shout containing a literal marker (e.g. "[EILIF_OATH] Victim | ...") is
   // always captured here as echoed oath/chat, never trusted as the real
-  // plugin-emitted marker (see processLine's console-echo guard).
+  // plugin-emitted marker (see processLine's console-echo guard). The markers
+  // being anchored to the plugin's log prefix is the second, independent
+  // guard: an echo line starts with "[Info   : Unity Log]", never with the
+  // companion's own prefix.
   //   Console: <color=orange>Testman</color>: <color=#FFEB04FF>HELLO THERE</color>
   consoleShout: /Console:\s*<color=orange>(.+?)<\/color>:\s*<color=[^>]*>(.+?)<\/color>/,
 };
@@ -129,19 +161,20 @@ export class LogParser {
     // A player can SHOUT the literal text "[EILIF_OATH] Victim | fake text"
     // (or [EILIF_PIN]/[EILIF_POS]/[EILIF_CHAT]) and the server console echoes
     // it back verbatim as "Console: <color=orange>Attacker</color>: <color=
-    // ...>[EILIF_OATH] Victim | fake text</color>". None of the marker regexes
-    // below are anchored to line-start, so if they ran over an echo line
-    // first they'd trust the embedded marker as if the plugin emitted it —
-    // impersonating (and overwriting) another player's real oath/pin/chat/
-    // position. So: any line matching the console-echo shape is handled ONLY
-    // as an echoed oath/chat, and is NEVER allowed to fall through to a
-    // marker check, no matter what marker text the shouter embedded.
+    // ...>[EILIF_OATH] Victim | fake text</color>". If a marker regex ran over
+    // an echo line first it would trust the embedded marker as if the plugin
+    // emitted it — impersonating (and overwriting) another player's real
+    // oath/pin/chat/position. So: any line matching the console-echo shape is
+    // handled ONLY as an echoed oath/chat, and is NEVER allowed to fall
+    // through to a marker check, no matter what marker text the shouter
+    // embedded. (The markers are also anchored to the plugin's own log prefix,
+    // which an echo line can never carry — two independent guards.)
     if (RE.consoleShout.test(line)) {
       // --- In-game sworn oath (shouted, via the server's console echo) ---
       const co = line.match(RE.consoleOath);
       if (co) {
         const name = co[1].trim();
-        const text = co[2].trim();
+        const text = co[2].trim().slice(0, MAX_OATH_LEN);
         if (name && text) {
           events.push({ type: 'oath', characterName: name, metadata: { text } });
         }
@@ -152,7 +185,7 @@ export class LogParser {
       const cs = line.match(RE.consoleShout);
       if (cs) {
         const name = cs[1].trim();
-        const text = cs[2].trim();
+        const text = cs[2].trim().slice(0, MAX_CHAT_LEN);
         // '/'-prefixed shouts are commands (/oath handled above, /pin via the
         // plugin, anything else is noise) — never mirror them as chat.
         if (name && text && !text.startsWith('/')) {
@@ -169,7 +202,7 @@ export class LogParser {
       const sep = rest.indexOf(' | ');
       if (sep !== -1) {
         const name = rest.slice(0, sep).trim();
-        const text = rest.slice(sep + ' | '.length).trim();
+        const text = rest.slice(sep + ' | '.length).trim().slice(0, MAX_OATH_LEN);
         if (name && text) {
           events.push({ type: 'oath', characterName: name, metadata: { text } });
         }
@@ -184,7 +217,7 @@ export class LogParser {
       const sep = rest.indexOf(' | ');
       if (sep !== -1) {
         const name = rest.slice(0, sep).trim();
-        const text = rest.slice(sep + ' | '.length).trim();
+        const text = rest.slice(sep + ' | '.length).trim().slice(0, MAX_CHAT_LEN);
         if (name && text && !text.startsWith('/')) {
           events.push({ type: 'chat', characterName: name, metadata: { text, source: 'plugin' } });
         }
@@ -200,7 +233,12 @@ export class LogParser {
         events.push({
           type: 'pin',
           characterName: name.trim(),
-          metadata: { kind, name: place.trim(), worldX: parseFloat(worldX), worldZ: parseFloat(worldZ) },
+          metadata: {
+            kind,
+            name: place.trim().slice(0, MAX_PIN_NAME_LEN),
+            worldX: parseFloat(worldX),
+            worldZ: parseFloat(worldZ),
+          },
         });
       }
       return events;
@@ -347,4 +385,4 @@ export class LogParser {
   }
 }
 
-export { RAID_MESSAGES, RE };
+export { RAID_MESSAGES, RE, MAX_OATH_LEN, MAX_PIN_NAME_LEN, MAX_CHAT_LEN };

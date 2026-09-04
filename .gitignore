@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...but the example templates carry no values and must ship with the repo
+!.env.local.example
+!**/.env.example
 
 # vercel
 .vercel
