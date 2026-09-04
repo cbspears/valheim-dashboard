@@ -6,6 +6,33 @@ byte-identical to that install — no drift found. dotnet SDK on this machine: *
 `~/.dotnet`. Offline NuGet restore succeeds in <1s (reference-assemblies package already cached —
 no network needed for NuGet on launch day). Full build (`dotnet build -c Release`) takes under 1s.
 
+## Launch-day sequence — do these BEFORE `refresh-libs.sh` (added 2026-09-04, audit plugins-9)
+
+`refresh-libs.sh` copies the game DLLs out of the **local Steam client install**
+(`~/snap/steam/.../Valheim/valheim_Data/Managed`). That install has `AutoUpdateBehavior 0`, i.e. it
+only updates while Steam is running — so on launch day it is entirely possible to rebuild every
+plugin against the **0.221.12** assemblies and ship them to a **1.0** server. Nothing in the build
+catches that; the symptom is eight plugins that silently fail to load.
+
+1. **Launch Steam and confirm Valheim shows the 1.0 build** before touching `refresh-libs.sh`.
+   Let the download finish; check the build id in Steam → Valheim → Properties → Updates.
+2. **Prove the server is on the same build.** SFTP-get the box's
+   `valheim_server_Data/Managed/assembly_valheim.dll` and md5-compare it with the local
+   `valheim_Data/Managed/assembly_valheim.dll`:
+
+   ```bash
+   md5sum ~/snap/steam/common/.local/share/Steam/steamapps/common/Valheim/valheim_Data/Managed/assembly_valheim.dll
+   # and the box's copy, fetched read-only:
+   #   sshpass -e sftp ... <<< 'get <nest>/valheim_server_Data/Managed/assembly_valheim.dll /tmp/srv.dll'
+   md5sum /tmp/srv.dll
+   ```
+
+   Client and dedicated-server builds are not always byte-identical across the whole Managed dir,
+   but `assembly_valheim.dll` is the one this plugin compiles against — a mismatch there means the
+   two are on different game builds and the rebuild is pointed at the wrong target. Stop and
+   reconcile before compiling.
+3. Only then run the build sequence below.
+
 ## Exact sequence, once the 1.0 game DLLs are live
 
 ```bash
@@ -15,13 +42,17 @@ cd plugins/eilif-companion-client
 dotnet build -c Release        # outputs + OVERWRITES dist/EilifCompanionClient.dll (intended — the deployable artifact)
 ```
 
-Then re-pack (this plugin ships inside the r2modman pack, not deployed directly to the server):
-1. Open r2modman → **Eilif** profile → **Settings → Import local mod** → pick the freshly-built
-   `dist/EilifCompanionClient.dll`, overwriting the previous import (see `PACK.md` for the exact
-   name/author/version prompts).
-2. Launch once from the profile, join the server, confirm `LogOutput.log` shows
-   `[EilifMap] posted …%` after the poll interval (or on logout).
-3. **Profile → Export → Export as code**, share the new pack code.
+
+## Re-packing a rebuilt client DLL
+
+1. Rebuild only after steps 1–3 above (Steam on 1.0, md5 match against the box).
+2. **Panel Stop → upload the rebuilt SERVER DLLs → Panel Start** first, and verify with
+   `bash scripts/verify-restart.sh <World>`. The server has to be up and correct before the pack is
+   minted — otherwise the pack pins client DLLs against a server nobody has proven.
+3. Import the new local DLL into the r2modman profile (or bump the pinned Thunderstore version if
+   it was published), launch once, join, confirm the plugin's boot lines.
+4. **Only then** export the pack code, and wait for the Thunderstore listing index if any pinned
+   version is newly published.
 
 ## Gotchas confirmed during this warm-check
 

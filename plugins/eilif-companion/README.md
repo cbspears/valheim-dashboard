@@ -1,8 +1,8 @@
 # Eilif Companion
 
 A deliberately tiny, **server-side-only** BepInEx 5 plugin for the Eilif Valheim server
-(BepInEx 5.4.2333 + ValheimPlus). No client installs, no gameplay changes — purely additive.
-Three halves:
+(BepInEx 5.4.2333 + ValheimPlus). No client installs. Four parts — three of them purely
+observational, one (WORLD KEYS, added in 0.3.0) that **does change the world's rules**:
 
 - **EARS** — captures in-game `/oath <text>` and `/pin <name>` chat commands and writes marker
   lines to the BepInEx log (our SFTP poller tails it).
@@ -10,8 +10,11 @@ Three halves:
   in global chat as an NPC ("Eilif").
 - **POSITION** — every 60s, if any players are online, emits one `[EILIF_POS]` marker line per
   connected player (name, world x/z, biome) for the live map layer.
+- **WORLD KEYS** (v0.3.0) — every 30s, asserts the global keys listed in
+  `[WorldKeys] EnforcedGlobalKeys` into the running world. Ships defaulting to `deathkeepequip`
+  (keep equipped gear on death). **This overrides the GTX panel** — see [World keys](#world-keys-v030).
 
-`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.2.0`.
+`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.0`.
 
 ---
 
@@ -77,6 +80,51 @@ clients — this is log-only, tailed by the SFTP poller.
 
 ---
 
+## World keys (v0.3.0)
+
+Every `30s` the plugin walks `EnforcedGlobalKeys` and, for any key where
+`ZoneSystem.GetGlobalKeyExact(key)` is false, calls `ZoneSystem.SetGlobalKey(key)`. The changed
+key list is logged once per change as `[EILIF_KEY] runtime world keys (N): …`, and each assertion
+as `[EILIF_KEY] enforced world key: <key>`. Connected clients get their key list re-synced on the
+same pass (`ZoneSystem.SendGlobalKeys`, idempotent client-side).
+
+**This exists because the panel's `-modifier deathpenalty` args do not grant keep-gear at the tier
+the server actually runs.** Decompile-verified against 0.221.12: the death-penalty tiers map to
+keys through Unity scene data, and `veryeasy` grants only `skillreductionrate 15`. Keep-gear is the
+`deathkeepequip` key, which **only the CASUAL tier** grants. On the live box the panel says
+`DeathPenalty->easy` and `deathkeepequip` exists solely because this plugin injects it.
+
+### Precedence — the plugin wins, by design
+
+- The panel and the in-game console are **second**, this config is **first**. A death-penalty
+  change in the panel, or a `removeglobalkey deathkeepequip` in the console, is undone within 30
+  seconds.
+- **To relax keep-gear you must blank the cfg value and restart** — changing the panel alone will
+  not do it.
+- The write is not just runtime. `SetGlobalKey` → `GlobalKeyAdd(canSaveToServerOptionKeys: true)`
+  also appends the key to `ZNet.World.m_startingGlobalKeys`, which is **persisted into the world's
+  `.fwl`** on the next world save. So the key outlives the plugin in the save file, and grepping the
+  `.fwl` for `deathkeepequip` can never tell you whether the panel or the plugin put it there.
+  `scripts/verify-restart.sh` reports the panel tier and the plugin's `[EILIF_KEY]` line as two
+  separate facts for exactly this reason.
+- Value keys work the same way: `GlobalKeyAdd` replaces a same-prefix entry, so putting
+  `skillreductionrate 15` in the cfg would override the panel's 50 on every boot.
+
+### The mixed-rules trap
+
+If the panel were ever set to **Hard** (`deathdeleteitems`) while this plugin still asserts
+`deathkeepequip`, `Player.CreateTombStone` produces mixed semantics: unequipped items deleted
+outright, equipped items kept. Set the panel and this list to say the same thing.
+
+### The fragility this is not a fix for
+
+Plugin-injected keep-gear survives exactly as long as the plugin loads. The first boot where it
+does not — which is what a Valheim 1.0 update does to an unrecompiled BepInEx plugin — everybody
+drops everything again, silently. **Panel tier Casual is the durable configuration**; treat this
+enforcement as belt-and-braces on top of it, not as a replacement for it.
+
+---
+
 ## Config (`BepInEx/config/media.blockspace.eilif.companion.cfg`, section `[Voice]`)
 
 | Key | Default | Notes |
@@ -85,11 +133,17 @@ clients — this is log-only, tailed by the SFTP poller.
 | `VoiceToken` | `` (empty) | sent as `x-voice-token`. **Empty ⇒ voice half stays dormant** (one info line logged); `/oath` capture still runs. |
 | `PollSeconds` | `120` | seconds between polls; clamped to `30..3600`; only polls while ≥1 player online |
 | `SpeakerName` | `Eilif` | fallback speaker when a line has no `speaker` |
-| `ChatType` | `shout` | `shout` (global, reliable) or `normal` (proximity-based — see caveat) |
+| `ChatType` | `center` | `center` (raid-banner style, most reliable — the shipped default), `shout` (chat, global) or `normal` (chat, proximity — see caveat) |
 
 > **`ChatType` caveat:** `shout` is broadcast globally and always reaches every player. `normal` is
 > **proximity-based on the client** and is sent from world origin (`Vector3.zero`), so distant players
 > may not see it. We ship `shout` and will A/B at the pilot.
+
+### Section `[WorldKeys]` (v0.3.0)
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `EnforcedGlobalKeys` | `deathkeepequip` | Comma-separated global keys re-asserted into the world whenever missing (checked every 30s). Value keys (`skillreductionrate 15`) work too. **Empty = feature off** — that is the switch for relaxing keep-gear, and it needs a restart. |
 
 ---
 
@@ -113,6 +167,9 @@ dotnet build -c Release    # outputs plugins/eilif-companion/dist/EilifCompanion
    restart once more to activate the voice half.
 5. Verify: a player types `/oath I will hold the north` in-game → `LogOutput.log` gets
    `[EILIF_OATH] <CharName> | I will hold the north`.
+6. Verify world keys (v0.3.0): `LogOutput.log` gets `[Eilif] World-key enforcement armed: …` at
+   boot and, within 30s, `[EILIF_KEY] runtime world keys (N): …`. `bash scripts/verify-restart.sh
+   <World>` prints the panel tier and the plugin's enforcement as two separate lines.
 
 ## After the Valheim 1.0 / Deep North update
 

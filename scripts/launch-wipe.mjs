@@ -10,12 +10,23 @@
 //   Preview:  node scripts/launch-wipe.mjs
 //   Wipe:     node scripts/launch-wipe.mjs --execute
 //
-// Why this exists (not a naive `delete from ...` pass): eilif-stats-parser
-// re-upserts player_stats from the local .fch profiles every ~15 minutes
-// (services/stats-parser). Wiping while it's running just gets repopulated
-// with the same test-world junk on its next sweep. So step 1 below refuses
-// --execute outright while it's active, and warns (but doesn't block) if the
-// log-poller or map-snapshot loops are still running too.
+// Why this exists (not a naive `delete from ...` pass): two services will undo
+// the wipe from underneath it, so step 1 below refuses --execute outright while
+// EITHER is active (and warns, but doesn't block, on the other two):
+//
+//   * eilif-discord-bot   -- its voice tick ends in an unconditional saveState()
+//     every 60 s, which recreates services/discord-bot/state.json with the SAME
+//     announcedBosses array. The wipe flips bosses.is_killed back to false but
+//     keeps the row ids, so a resurrected state.json makes bosses.tick() treat
+//     launch night's real Eikthyr kill as already announced: no @everyone, no
+//     skald retelling, freshKills empty. STOP THE BOT FIRST -- before the wipe,
+//     not after (audit discord-1 / launch-16, 2026-09-03).
+//   * eilif-stats-parser  -- re-upserts player_stats from the local .fch profiles
+//     every ~15 minutes (services/stats-parser), so a wipe while it runs gets
+//     repopulated with the same test-world junk on its next sweep. That unit was
+//     retired on 2026-08-23; the gate stays because a retired unit someone
+//     re-enables is exactly the surprise this script exists to prevent (an
+//     inactive/unknown unit is never blocked).
 //
 // Uses the same plain-PostgREST-over-fetch pattern as scripts/backfill-identity.js
 // and scripts/seed-milestones-backfill.mjs (supabase-js is flaky under bare
@@ -171,7 +182,16 @@ async function deleteObjects(bucket, paths) {
 }
 
 // ── systemd pre-flight ───────────────────────────────────────────────────────
-const HARD_GATE_UNIT = 'eilif-stats-parser'; // re-upserts player_stats ~every 15 min — MUST be stopped
+// HARD = --execute is refused while any of these is active, because each one
+// actively re-creates something the wipe just cleared.
+const HARD_GATE_UNITS = [
+  // Rewrites services/discord-bot/state.json (announcedBosses) within 60 s of the
+  // wipe deleting it -> launch night's first boss kill is silently swallowed.
+  'eilif-discord-bot',
+  // Re-upserts player_stats from local .fch profiles every ~15 min. Retired
+  // 2026-08-23; gate kept deliberately (see the header comment).
+  'eilif-stats-parser',
+];
 const SOFT_GATE_UNITS = ['eilif-log-poller', 'eilif-map-snapshot']; // should be stopped / world already switched
 
 function serviceStatus(unit) {
@@ -186,27 +206,35 @@ function serviceStatus(unit) {
 
 function preflightServices() {
   banner('Pre-flight: service liveness');
-  const hardStatus = serviceStatus(HARD_GATE_UNIT);
-  console.log(`  ${HARD_GATE_UNIT.padEnd(24)} ${hardStatus}`);
+  const hardStatuses = HARD_GATE_UNITS.map((u) => [u, serviceStatus(u)]);
+  for (const [u, st] of hardStatuses) console.log(`  ${u.padEnd(24)} ${st}   (hard gate)`);
   const softStatuses = SOFT_GATE_UNITS.map((u) => [u, serviceStatus(u)]);
-  for (const [u, s] of softStatuses) console.log(`  ${u.padEnd(24)} ${s}`);
+  for (const [u, st] of softStatuses) console.log(`  ${u.padEnd(24)} ${st}`);
 
-  const hardActive = hardStatus === 'active';
-  const softActive = softStatuses.filter(([, s]) => s === 'active').map(([u]) => u);
+  const hardActive = hardStatuses.filter(([, st]) => st === 'active').map(([u]) => u);
+  const softActive = softStatuses.filter(([, st]) => st === 'active').map(([u]) => u);
 
-  if (hardActive) {
-    console.log(`\n  ⛔ ${HARD_GATE_UNIT} is ACTIVE.`);
-    console.log('     It re-upserts player_stats from the local .fch profiles on its own cadence');
-    console.log('     (services/stats-parser) — wiping now just gets repopulated with the same');
-    console.log(`     test-world junk within ~15 minutes. Stop it first: sudo systemctl stop ${HARD_GATE_UNIT}`);
+  for (const unit of hardActive) {
+    console.log(`\n  ⛔ ${unit} is ACTIVE.`);
+    if (unit === 'eilif-discord-bot') {
+      console.log('     Its voice tick calls saveState() unconditionally every 60 s, so it will');
+      console.log('     re-create services/discord-bot/state.json with the SAME announcedBosses ids');
+      console.log('     this wipe is trying to clear. Result: launch night\u2019s first boss kill posts');
+      console.log('     nothing to Discord and the skald never retells it.');
+    } else {
+      console.log('     It re-upserts player_stats from the local .fch profiles on its own cadence');
+      console.log('     (services/stats-parser) — wiping now just gets repopulated with the same');
+      console.log('     test-world junk within ~15 minutes.');
+    }
+    console.log(`     Stop it first: sudo systemctl stop ${unit}`);
   }
   if (softActive.length) {
     console.log(`\n  ⚠️  still running: ${softActive.join(', ')}.`);
     console.log('     These should be stopped (or the world already switched over) before wiping —');
     console.log('     otherwise they keep writing chat/position/map data against the OLD world.');
   }
-  if (!hardActive && !softActive.length) {
-    console.log('\n  ✓ all three producer services are stopped.');
+  if (!hardActive.length && !softActive.length) {
+    console.log('\n  ✓ every producer service is stopped (bot, stats-parser, poller, map-snapshot).');
   }
   return { hardActive, softActive };
 }
@@ -214,6 +242,13 @@ function preflightServices() {
 // ── target definitions ──────────────────────────────────────────────────────
 // Plain delete-all-rows tables. pk must be a NOT NULL primary key column.
 const DELETE_TABLES = [
+  // title_history BEFORE players on purpose. Its player_id FK is `on delete
+  // cascade`, so deleting players would take these rows with it — but only
+  // silently, and only if the FK is still in place. Deleting it explicitly and
+  // first makes the "deleted N row(s)" line below honest and the Crowning Log's
+  // reset independent of the FK (audit launch-8: 10 pilot rows were still live
+  // in prod on 2026-09-03 while players.current_title was gone).
+  { table: 'title_history', pk: 'id' },
   { table: 'players', pk: 'id' },
   { table: 'sessions', pk: 'id' },
   { table: 'events', pk: 'id' },
@@ -267,6 +302,26 @@ const UPDATE_TARGETS = [
       retelling_generated_at: null,
     },
     label: 'killed bosses to reset',
+  },
+  {
+    table: 'server_status',
+    // Singleton row (id = 1). Not `not.is.null` like the others — this is the
+    // one table where the row itself must survive.
+    filter: 'id=eq.1',
+    // Why this is no longer "refreshes itself" (audit launch-8, proven on prod):
+    // scripts/map-snapshot.mjs reads the in-game day from /api/status, i.e. from
+    // this row. After the 2026-08-23 rehearsal wipe the row still held the OLD
+    // world's day 64, so the snapshotter framed `frames-by-day/day-0064.webp`
+    // four minutes after the wipe and the public timelapse manifest ends on a
+    // pre-wipe frame to this day. Zeroing it makes currentWorldDay() return null
+    // (map-snapshot.mjs guards on `worldDay > 0`), so no frame can be written
+    // until the Emitter reports the NEW world's day.
+    // world_day is 0 rather than null deliberately: 0 is valid for the column
+    // either way, every reader is `?? 0`, and the > 0 guard treats it as "no day
+    // yet". current_players must be [] (JSON array in the body — PostgREST
+    // converts it to text[]), never null.
+    patch: { world_day: 0, player_count: 0, current_players: [], is_online: false },
+    label: 'server_status singleton to zero (world_day/player_count/current_players/is_online)',
   },
 ];
 
@@ -324,7 +379,7 @@ async function main() {
     console.log(`  ${table.padEnd(20)} ${exists ? `${count} row(s)` : '(table not found — skipping)'}`);
   }
 
-  banner('State to reset — milestones / bosses (BEFORE)');
+  banner('State to reset — milestones / bosses / server_status (BEFORE)');
   const updateCounts = [];
   for (const t of UPDATE_TARGETS) {
     const { exists, count } = await countRows(t.table, t.filter);
@@ -354,8 +409,9 @@ async function main() {
   }
 
   // Hard refusal — only blocks an actual --execute run.
-  if (EXECUTE && hardActive) {
-    console.error(`\nRefusing --execute: ${HARD_GATE_UNIT} is active. Stop it and re-run.`);
+  if (EXECUTE && hardActive.length) {
+    console.error(`\nRefusing --execute: ${hardActive.join(', ')} active. Stop and re-run:`);
+    console.error(`  sudo systemctl stop ${hardActive.join(' ')}`);
     process.exit(1);
   }
 
@@ -372,7 +428,7 @@ async function main() {
   const totalRows = deleteCounts.filter((d) => d.exists).reduce((a, d) => a + d.count, 0);
   const totalObjects = bucketObjects.filter((b) => b.exists).reduce((a, b) => a + b.objects.length, 0);
   console.log(`\nThis will permanently delete ${totalRows} row(s) across ${deleteCounts.filter((d) => d.exists).length} table(s),`);
-  console.log(`reset ${updateCounts.reduce((a, u) => a + (u.exists ? u.count : 0), 0)} milestone/boss row(s), delete ${totalObjects}`);
+  console.log(`reset ${updateCounts.reduce((a, u) => a + (u.exists ? u.count : 0), 0)} milestone/boss/status row(s), delete ${totalObjects}`);
   console.log('storage object(s), and remove local service state files.');
   const answer = await rl.question('\nType WIPE to confirm (anything else aborts): ');
   rl.close();
@@ -392,7 +448,7 @@ async function main() {
     console.log(`  ${table.padEnd(20)} deleted ${before.count} row(s)`);
   }
 
-  banner('RESET — milestones / bosses achieved state');
+  banner('RESET — milestones / bosses / server_status');
   // Iterate updateCounts (not UPDATE_TARGETS) — exists/count only ever get
   // attached to the copies pushed into updateCounts above, never back onto
   // UPDATE_TARGETS itself. Iterating UPDATE_TARGETS here previously left
@@ -443,59 +499,94 @@ async function main() {
 function printPostWipeChecklist() {
   banner('POST-WIPE CHECKLIST (manual — not automated by this script)');
   console.log(`
-  These must all happen BEFORE the services are restarted against the new
-  launch world, in roughly this order:
+  Rewritten 2026-09-04 from the T-6 launch audit. Full cutover sequence with
+  owners: docs/LAUNCH-WIPE.md. Order matters — every constraint below was
+  learned the hard way in the 2026-08-23 rehearsal.
 
-  1. GTX game panel:
-     - Set World= to the real launch save (fresh world, seed of record).
-     - Confirm crossplay setting is what launch actually wants (it was left
-       ON through the pilot — see the repo CLAUDE.md "crossplay STILL ON" note).
+  BEFORE the wipe
+  ---------------
+  0. Stop eilif-discord-bot FIRST, then the poller and map-snapshot:
+       sudo systemctl stop eilif-discord-bot eilif-log-poller eilif-map-snapshot
+     The bot is a HARD gate now: while it runs it re-creates its state.json
+     (announcedBosses) within 60 s and the first launch-night boss kill would
+     post nothing. eilif-stats-parser was retired 2026-08-23 — it should read
+     'inactive' or 'unknown' above; if it reads 'active', someone re-enabled it.
 
-  2. GsValheimStats Emitter config on the game host (net.cproudlock.gsvalheimstats.cfg,
-     over SFTP) + the Eilif Companion plugin config — confirm neither still
-     references the pilot world "Dedicated" / seed "SuperSeed".
+  1. Backups, and they are the ONLY copies:
+       bash scripts/pull-world.sh <World>     (off-box world pair, keeps 14)
+       + a full Supabase dump (project is on the Free plan — no backups at all)
+     There is no undo once rows and storage objects are gone.
 
-  3. Vercel production env — GS_EXPECTED_WORLD: update to the new world's name
-     (this var is NOT in .env.local; it lives in Vercel's env only). If unset,
-     /api/gs-ingest accepts any world, so set it deliberately for launch.
+  AFTER the wipe, before any service is restarted
+  ----------------------------------------------
+  2. GTX panel, while STOPPED (loaded DLLs are file-locked on Windows):
+     - Sweep worlds_local of the old world's leftovers — Dedicated.*, *.old,
+       *_backup_auto-* (ALL worlds), map_data/<old world>/,
+       vplus-data/<old>_mapSync.dat, and <world>.json. Valheim auto-restores
+       from a leftover .old / backup_auto pair and resurrects the old world.
+       <world>.json also carries the SEED in plaintext.
+     - Upload the launch world's .fwl and .db TOGETHER; set Start.bat World=.
+     - Death penalty = Casual (the tier that actually grants deathkeepequip —
+       'easy'/'veryeasy' do not; today only the Companion plugin injects it).
+     - Combat = per the launch decision. V+ cfg [Chat] enabled=false (its NRE
+       is what kills the [EILIF_CHAT] hook). WebMap always_map=false unless the
+       GTX firewall ticket for TCP 3000 has closed.
+     - Only now swap any rebuilt plugin DLLs. Then Stop -> Start (never Restart).
 
-  4. services/stats-parser/.env (on this host):
-     - WORLD_UID -> the new world's UID (read from the server's
-       worlds_local/<World>.fwl, int64, may be negative).
-     - CHARACTERS -> the real launch roster allowlist (currently
-       Chærlie,Testman,Testmantwo — pilot testers).
+  3. Plugin configs on the box (SFTP): the Emitter cfg
+     (net.cproudlock.gsvalheimstats.cfg) and media.blockspace.eilif.companion.cfg
+     must not still name the old world. Rotate GS_EMITTER_TOKEN and
+     VOICE_API_TOKEN to fresh values in the cfgs + Vercel + .voice-token.
 
-  5. map-snapshot world path:
-     - Set MAP_WORLD=<new world name> (or MAP_REMOTE_DIR=<full path>) in the
-       env map-snapshot sources (services/log-poller/.env or .env.local) —
-       it defaults to the pilot world "Dedicated". The trailing segment of
-       '/194.50.234.131_5914/BepInEx/plugins/WebMap/map_data/<world>'
-       must match the new world's
-       WebMap folder name once the launch world exists on the host, or the
-       snapshotter will keep pulling (or fail to find) the old world's map.
+  4. Vercel production env — GS_EXPECTED_WORLD = the new world's name (it lives
+     in Vercel only, not .env.local). Unset means /api/gs-ingest accepts any
+     world. Env edits need a deploy to take effect.
 
-  6. services/discord-bot/.env — revert pilot overrides:
-     - RECAPS_START (pulled forward for the pilot demo)
-     - RECAP_CHANNEL (pilot override 'server' -> back to 'valheim')
-     - MILESTONE_CHANNEL (pilot override 'server' -> back to 'valheim')
+  5. services/log-poller/.env — MAP_REMOTE_DIR -> .../WebMap/map_data/<World>.
+     (This is where map-snapshot sources it from too; there is no separate
+     stats-parser env any more — that service was retired 2026-08-23.)
 
-  7. Backups FIRST, always (before this script ever runs with --execute):
-     GTX panel world backup + a worlds_local pull of the pilot save. There is
-     no undo once storage objects and rows are gone.
+  6. services/discord-bot/.env — revert the pilot overrides:
+     - RECAPS_START      -> 2026-09-09 (and DELETE the unit file's own
+                            RECAPS_START line so .env actually owns it)
+     - RECAP_CHANNEL     -> remove the 'server' override (back to 'valheim')
+     - MILESTONE_CHANNEL -> remove the 'server' override
+     - TITLE_CHANNEL / any other *_CHANNEL=server line -> remove
+     then 'sudo systemctl daemon-reload'.
 
-  8. Restart order once 1-6 are done: eilif-log-poller and eilif-stats-parser
-     first (repopulate players/sessions from the fresh world), then
-     eilif-discord-bot (relays/recaps/milestones), then eilif-map-snapshot
-     last (needs the new world's WebMap folder to already exist on the host).
+  7. Re-mint the modpack (World=<W>, Companion Client 0.3.0 if it shipped) and
+     verify the round trip before posting the code.
 
-  9. Verify: /admin/ops cockpit shows fresh heartbeats from all four
-     components; milestones show unachieved; bosses show not-killed; players
-     list starts empty and repopulates from real joins, not pilot testers.
+  RESTART ORDER (this is the part that bites)
+  -------------------------------------------
+  8. eilif-log-poller first — confirm a join line in its journal.
+  9. eilif-discord-bot second, and ONLY after:
+       - 'select name, is_killed from bosses' is all false, and
+       - services/discord-bot/state.json is ABSENT.
+     Read its startup log: it must not list any announced boss and must show the
+     new RECAPS_START with no channel overrides. Manual boss marking, if ever
+     needed, is:  cd services/discord-bot && node scripts/mark-boss.js "<Boss>"
+     (that file lives under services/discord-bot/scripts/, NOT repo-root scripts/).
+  10. eilif-map-snapshot LAST, and only after all three are true:
+       - map_data/<World>/ exists on the host (scripts/verify-restart.sh <W> lists it),
+       - MAP_REMOTE_DIR points at it,
+       - /api/status reports the NEW world's day (this wipe zeroed world_day, and
+         map-snapshot skips any day <= 0, so it cannot frame a stale day again).
+      Then watch the journal for 'day 1 framed' within 5 minutes and eyeball
+      current.webp against a spawn pin for the 10,000 m radius calibration.
 
-  Adjacent tables intentionally NOT touched by this script (out of the scope
-  given — flag to the coordinator if they also need clearing before launch):
-  server_status (singleton, id=1 — refreshes itself from the new world),
-  discord_events, roadmap, ops_heartbeats.
+  VERIFY
+  ------
+  11. bash scripts/verify-restart.sh <World> — Valheim version unchanged, all 8
+      plugins loaded, panel tier Casual, Emitter ingest 200, Boards scan,
+      [EILIF_KEY], port 3000 closed.
+  12. /admin/ops cockpit shows fresh heartbeats; milestones unachieved; bosses
+      not killed; the Crowning Log (title_history) is empty; players list starts
+      empty and repopulates from real joins.
+
+  Adjacent tables intentionally NOT touched by this script: discord_events,
+  roadmap, ops_heartbeats. (server_status IS reset now — see the note on that
+  target above for why "it refreshes itself" was wrong.)
 `);
 }
 

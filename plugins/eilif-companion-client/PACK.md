@@ -1,9 +1,17 @@
 # Adding Eilif Companion Client to the pinned r2modman pack
 
-This plugin is a **local custom DLL** (not published to Thunderstore), so it goes into the profile
-as an *imported local mod*. r2modman / Thunderstore Mod Manager fully support this, and local mods
-are included when you export the profile code. Do this once, re-export, share the new code — every
-pack player then gets automatic cartography with **no** extra steps.
+This plugin **is published on Thunderstore** (Eilif/EilifCompanionClient — 0.1.0 2026-08-22,
+0.2.0 2026-08-23), so the pack normally pins the published version rather than importing a local
+DLL. The local-import route below is still the correct one for testing an unpublished build, and
+is how 0.1.x got in before the listing existed.
+
+**Version state as of 2026-09-04:** Thunderstore latest = **0.2.0**, pack v11 pins **0.2.0**, and
+the repo's `dist/EilifCompanionClient.dll` is **0.3.0** (tombstone keep-list, built 2026-09-01).
+The 0.3.0 Thunderstore package is staged and zipped at
+`../thunderstore/EilifCompanionClient-0.3.0/` but **not uploaded** — see that directory's
+`UPLOAD.md` for the ship-now-vs-fold-into-1.0 decision. Until it is uploaded and the pack re-minted,
+the keep-list is dark for every player: r2modman reinstalls the pinned pack versions on every
+"Start modded", so a hand-copied DLL does not survive.
 
 ## Files you need
 
@@ -18,7 +26,7 @@ pack player then gets automatic cartography with **no** extra steps.
 3. Choose `dist/EilifCompanionClient.dll`. When prompted:
    - **Name:** `EilifCompanionClient`
    - **Author:** `BlockspaceMedia` (or any — local mods aren't namespaced on Thunderstore)
-   - **Version:** `0.2.0`
+   - **Version:** `0.3.0` (match `PluginVersion` in `src/EilifMapTrackerPlugin.cs`)
    The manager copies the DLL into `<profile>/BepInEx/plugins/EilifCompanionClient/`.
 4. **Enable** the mod if it isn't already, and make sure BepInEx + the other Eilif mods stay enabled.
 
@@ -33,6 +41,9 @@ in the exported pack from the first launch. Create
 Url = https://valheim-dashboard.vercel.app/api/gs-ingest
 Token =
 IntervalSeconds = 300
+
+[Death]
+KeepItemTypes = OneHandedWeapon, TwoHandedWeapon, TwoHandedWeaponLeft, Bow, Shield, Torch, Tool, Ammo, AmmoNonEquipable
 ```
 
 (BepInEx rewrites this with full comments on first launch; your values are preserved. Leave `Token`
@@ -50,9 +61,12 @@ blank for the pilot — the ingest accepts token-less `client-map` posts.)
 ## Sanity check before sharing
 
 Launch Valheim once from the profile, join the server, and confirm `LogOutput.log` shows
-`[EilifMap] … loaded …` **and** `[EilifDeath] death-cause reporter armed …` on boot, then
-`[EilifMap] posted …%` after the interval (or on logout). For the v0.2.0 death reporter, die once on
-the server and confirm a `[EilifDeath] … died in …: hitType=…` line. Then re-export.
+`[EilifMap] … loaded …`, `[EilifDeath] death-cause reporter armed …` **and** (v0.3.0)
+`[EilifDeath] tombstone keep-list armed …` on boot, then `[EilifMap] posted …%` after the interval
+(or on logout). Then die once on the server and confirm both a
+`[EilifDeath] … died in …: hitType=…` line (v0.2.0 reporter) and, on a `deathkeepequip` world, a
+`[EilifDeath] tombstone keep-list spared N item(s).` line with your tools and weapons still in
+inventory (v0.3.0). Then re-export.
 
 ## Notes
 
@@ -60,5 +74,8 @@ the server and confirm a `[EilifDeath] … died in …: hitType=…` line. Then 
   local disk (repo memory: NAS can't symlink). The DLL itself is fine anywhere once copied in.
 - **After a Valheim patch:** rebuild the DLL (`./refresh-libs.sh` + `dotnet build -c Release`),
   re-import the new `dist/EilifCompanionClient.dll` over the old one in the profile, re-export.
+- **Gameplay disclosure travels with the pack.** From 0.3.0 this plugin changes what a death
+  costs (the tombstone keep-list), so the pack notes and the Thunderstore README must both say so.
+  The full-disclosure README style is what got 0.1.1 and 0.2.0 approved after two rejections.
 - This does **not** replace GsValheimStatsClient — the two are complementary: GsClient posts combat
   / death / boss stats, this posts map exploration. Both target the same `…/api/gs-ingest`.

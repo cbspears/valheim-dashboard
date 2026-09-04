@@ -16,6 +16,22 @@ coordinates, no raw private chat lines (counts/summaries only), no secret
 values (tokens/keys are redacted before they're ever stored, see
 "Redaction" below).
 
+> **Roster changes, 2026-09-04.**
+> - **`stats-parser` is RETIRED** (2026-08-23). Its job — reading `.fch` profiles for
+>   `player_stats` — moved to the Emitter and the Companion Client. The `eilif-stats-parser`
+>   systemd unit is stopped and the component should read `unknown`/never-reported, not `stale`;
+>   its watchdog row is a leftover (see §7). Do not treat its silence as an incident, and do not
+>   restart the unit — `scripts/launch-wipe.mjs` still hard-gates on it precisely because a
+>   re-enabled retired service is the surprise nobody would expect.
+> - **Two components are being added** by the in-flight instrumentation work: **`boards-plugin`**
+>   (the in-game Living Boards sign writer, `plugins/eilif-boards/`) and **`companion-voice`** (the
+>   server-side Companion's voice pump, `plugins/eilif-companion/`). Both live *inside the Valheim
+>   server process*, so — exactly like `server-emitter` — their health is **inferred from what
+>   reaches the dashboard**, never measured at the source. Expect their rows to carry the same
+>   caveat: a stale signal is consistent with the plugin being dead, the server being down, or the
+>   network path to Vercel being down, and the cockpit cannot tell you which. Their registry
+>   entries, thresholds and this document's tables are the other agent's to fill in.
+
 ---
 
 ## 1. What each component's health signal means, and where it comes from
@@ -31,6 +47,8 @@ signal is explicitly labeled **inferred**, not measured.
 | **discord-bot** | `ops_heartbeats` row for `component='discord-bot'` | The bot process is running its main loop and could reach the dashboard's heartbeat endpoint within the last cadence window. |
 | **log-poller** | `ops_heartbeats` row for `component='log-poller'` | Same, for the SFTP log-tail service. |
 | **map-snapshot** | `ops_heartbeats` row for `component='map-snapshot'` | Same, for the periodic WebMap `map.png`/`fog.png` puller. |
+| **boards-plugin** *(being added)* | inferred from board writes reaching `/api/boards` | **Inferred, not measured** — same class as `server-emitter`. Runs inside the Valheim server process (`plugins/eilif-boards/`, EilifBoards 0.2.0). "Healthy" means the sign scan is still pulling board strings; silence cannot distinguish a dead plugin from a dead server. |
+| **companion-voice** *(being added)* | inferred from `/api/voice` queue drain | **Inferred, not measured.** The server-side Eilif Companion's voice pump polls the queue and speaks lines in-game; the cockpit sees the queue being consumed, not the plugin itself. Note the voice half stays **dormant** (a normal, not-broken state) whenever `VoiceToken` is empty in the plugin cfg. |
 | **dashboard-api** | the page itself rendered | Trivially "healthy" whenever the cockpit is being viewed at all — if this Server Component executed, the Next.js app is up. Its `version` is `process.env.VERCEL_GIT_COMMIT_SHA` (unset for `vercel deploy` CLI deploys — see below) falling back to a build-time constant; shows **"unknown"** rather than fabricating a version when neither is available. |
 | **supabase** | a lightweight service-role query issued during this render | "Healthy" = Supabase answered a real query just now. This is a point-in-time check, not a heartbeat — there's no history, just this render's result. |
 | **events-sync, gallery-ingest, oath-ingest, identity-link, identity-confirm, voice-queue, title-evaluator, milestone-evaluator** | the **discord-bot's own heartbeat `metrics.subLoops`** object, keyed by loop label | These are sub-loops inside the single discord-bot process, **not separate processes** — there is no way to observe them independently of the bot. Each entry carries `{ enabled, lastRunAt, ok, error }` as last recorded by that loop's own tick. If the discord-bot heartbeat itself is missing/stale, every sub-loop's state is **unknown** (not "disabled", not "healthy") — you cannot infer a sub-loop is fine just because the parent used to be. If a sub-loop's `enabled` flag is false, its state is **disabled**, which is a normal, not-broken state (e.g. `gallery-ingest` is intentionally off until `GALLERY_INGEST=1`). |
@@ -257,7 +275,7 @@ only the thresholds differ:
 | discord-bot | 60s | 20 min |
 | log-poller | 60s | 20 min |
 | map-snapshot | 300s | 45 min |
-| stats-parser | 300s | 45 min |
+| ~~stats-parser~~ | — | **retired 2026-08-23** — the unit is stopped for good, so this row can only ever produce a false alarm or a permanent `neverReported` entry. Drop it from the registry at the next touch; until then, ignore it. |
 | game-server (`server_status` freshness + `is_online`) | 120s | 20 min |
 
 These are **looser than the cockpit's** on purpose. The cockpit's 180s bot

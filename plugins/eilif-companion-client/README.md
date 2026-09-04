@@ -2,9 +2,9 @@
 
 A deliberately tiny, **client-side** BepInEx 5 plugin for the Eilif Valheim server
 (BepInEx 5.4.2333 + ValheimPlus). The client twin of [`../eilif-companion`](../eilif-companion):
-same toolchain, same repo conventions, no gameplay changes — purely additive.
+same toolchain, same repo conventions.
 
-**Two jobs, both purely observational.**
+**Three jobs. Two are observational; the third (v0.3.0) changes what your death costs you.**
 
 1. **Automatic cartography.** While you're connected to a multiplayer server it periodically reads
    your local minimap fog, computes your explored-map percentage, and POSTs it to the dashboard.
@@ -16,7 +16,11 @@ same toolchain, same repo conventions, no gameplay changes — purely additive.
    destroyed at its source. This plugin reads the killing `HitData` out of the game and reports the
    exact cause instead.
 
-`BepInPlugin` GUID: `net.eilif.companionclient` — name `Eilif Companion Client` — v`0.2.0`.
+3. **Tombstone keep-list** (v0.3.0, see [Tombstone keep-list](#tombstone-keep-list-v030)). Tools,
+   weapons, shield, torch and ammo stay on you when you die instead of going into the grave —
+   but only on a world whose `deathkeepequip` global key is set. Everywhere else it is inert.
+
+`BepInPlugin` GUID: `net.eilif.companionclient` — name `Eilif Companion Client` — v`0.3.0`.
 
 ---
 
@@ -102,6 +106,67 @@ only) reads it and fires a fire-and-forget POST:
 Nothing here touches gameplay: everything is wrapped, the POST is off-thread, and any failure ends
 in a Warning line and nothing else. No stats are written — only the death `events` row.
 
+## Tombstone keep-list (v0.3.0)
+
+The server's death rules — vanilla `deathkeepequip`, asserted by the server-side
+[`../eilif-companion`](../eilif-companion) 0.3.0 — only spare items that are **equipped** at the
+moment of death. Charlie's house rule goes further: everything you fight and build with stays on
+you (spare arrows and bolts, the hammer, the hoe, backup weapons), while resources, food and loot
+still drop, so a death remains a corpse run without being a re-gearing chore.
+
+**This has to live in the client plugin.** Tombstone contents are decided client-side:
+`Player.CreateTombStone` → `Inventory.MoveInventoryToGrave`, which skips quest items and anything
+with `m_equipped` set. The server never gets a say.
+
+### How the patch works, and why it is shaped this way
+
+`src/TombstoneKeeper.cs` patches `Inventory.MoveInventoryToGrave` with a **Prefix** and a
+**Finalizer** rather than reimplementing the method:
+
+- **Prefix**: for each non-equipped, non-quest item whose `m_shared.m_itemType` is on the keep
+  list, set `item.m_equipped = true` and remember it. Vanilla's own grave filter then spares it.
+  Logs `[EilifDeath] tombstone keep-list spared N item(s).`
+- **Finalizer** (not a Postfix, deliberately): clear the flag on every item it set, so the flag
+  never survives past that one call **even if the patched method throws mid-move**.
+
+Reimplementing `MoveInventoryToGrave` would mean private-field access plus fresh drift risk at
+every game patch; borrowing the game's own filter for the length of one call does not. And if the
+Harmony patch ever fails to apply, the game degrades to **exact vanilla behaviour** — the failure
+mode is "your stuff drops", never a crash or a corrupted inventory.
+
+### The gate
+
+```csharp
+if (ZoneSystem.instance == null ||
+    !ZoneSystem.instance.GetGlobalKey(GlobalKeys.DeathKeepEquip)) return;
+```
+
+On a world that has not opted into gentle deaths — every public server someone might carry this
+profile onto — the keep-list does nothing at all. This is a deliberate constraint, not an
+optimisation: a client mod that silently changed death rules on other people's servers is exactly
+what gets a Thunderstore listing rejected.
+
+### Config
+
+```ini
+[Death]
+KeepItemTypes = OneHandedWeapon, TwoHandedWeapon, TwoHandedWeaponLeft, Bow, Shield, Torch, Tool, Ammo, AmmoNonEquipable
+```
+
+`ItemDrop.ItemData.ItemType` names, comma-separated, parsed case-insensitively; an unrecognised
+name logs `[EilifDeath] unknown item type '<x>' in KeepItemTypes - ignored.` and is skipped.
+**Blank the value to disable the feature entirely**, even on a `deathkeepequip` world.
+
+### 1.0 re-verification
+
+A third hook to re-check, alongside the two below: `Inventory.MoveInventoryToGrave` (name and
+signature), `ItemDrop.ItemData.m_equipped`, `m_shared.m_questItem` / `m_itemType`, and
+`GlobalKeys.DeathKeepEquip`. All are compile-time symbols except the method name, which Harmony
+resolves by string — a rename is a **silent no-op** (vanilla tombstones), so confirm the boot line
+`[EilifDeath] tombstone keep-list armed (N item types; …)` and then a real death.
+
+---
+
 ## Config (`BepInEx/config/net.eilif.companionclient.cfg`, section `[Map]`)
 
 | Key | Default | Notes |
@@ -109,6 +174,12 @@ in a Warning line and nothing else. No stats are written — only the death `eve
 | `Url` | `https://valheim-dashboard.vercel.app/api/gs-ingest` | ingest endpoint (`source:'client-map'`) |
 | `Token` | `` (empty) | optional; when set, sent as `Authorization: Bearer <token>`. Empty is fine (pilot) |
 | `IntervalSeconds` | `300` | seconds between posts while on a server; clamped `60..3600` |
+
+Section `[Death]` (v0.3.0):
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `KeepItemTypes` | `OneHandedWeapon, TwoHandedWeapon, TwoHandedWeaponLeft, Bow, Shield, Torch, Tool, Ammo, AmmoNonEquipable` | Item types kept out of the tombstone on a `deathkeepequip` world. Blank = feature off. |
 
 The defaults already point at prod, so a fresh install works with **zero** config edits.
 
@@ -144,6 +215,11 @@ dotnet build -c Release    # outputs plugins/eilif-companion-client/dist/EilifCo
    `[EilifDeath] <Char> died in <World>: hitType=Burning, attacker=(none), biome=Meadows`
    followed by `[EilifDeath] reported Burning for <Char>`. The Saga / How We Die should read
    "lost to the flames", **not** "struck down by an unseen foe".
+5. On boot (v0.3.0): `[EilifDeath] tombstone keep-list armed (N item types; active only where
+   deathkeepequip is set).` On a real death on a keep-gear world:
+   `[EilifDeath] tombstone keep-list spared N item(s).` — then check the corpse: weapons, shield,
+   torch, tools and ammo should still be in your inventory, resources and food in the grave.
+   **Not yet exercised on a live server as of 2026-09-04** — this is the test to run at Session Zero.
 
 ## After the Valheim 1.0 / Deep North update
 

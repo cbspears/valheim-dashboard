@@ -1,0 +1,18 @@
+[Unit]
+# REFERENCE COPY — NOT INSTALLED. Install instructions are in eilif-world-backup.service.
+Description=Eilif off-box world backup every 6 hours
+Requires=eilif-world-backup.service
+
+[Timer]
+# Six-hour cadence, anchored to the wall clock (00:00, 06:00, 12:00, 18:00 local).
+OnCalendar=*-*-* 00,06,12,18:00:00
+# Catch up after a reboot / suspend — this PC is a desktop, not a server, so a missed window
+# is the normal case, not the exception.
+Persistent=true
+# Spread the load a little so a pull never lands exactly on the poller's minute boundary.
+RandomizedDelaySec=300
+AccuracySec=1m
+Unit=eilif-world-backup.service
+
+[Install]
+WantedBy=timers.target

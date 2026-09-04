@@ -6,6 +6,33 @@ Steam under `~/snap/steam/...`). dotnet SDK on this machine: **8.0.422** at `~/.
 `Microsoft.NETFramework.ReferenceAssemblies` 1.0.3 package is already in the local cache), so a
 launch-day rebuild needs no network for NuGet.
 
+## Launch-day sequence — do these BEFORE `refresh-libs.sh` (added 2026-09-04, audit plugins-9)
+
+`refresh-libs.sh` copies the game DLLs out of the **local Steam client install**
+(`~/snap/steam/.../Valheim/valheim_Data/Managed`). That install has `AutoUpdateBehavior 0`, i.e. it
+only updates while Steam is running — so on launch day it is entirely possible to rebuild every
+plugin against the **0.221.12** assemblies and ship them to a **1.0** server. Nothing in the build
+catches that; the symptom is eight plugins that silently fail to load.
+
+1. **Launch Steam and confirm Valheim shows the 1.0 build** before touching `refresh-libs.sh`.
+   Let the download finish; check the build id in Steam → Valheim → Properties → Updates.
+2. **Prove the server is on the same build.** SFTP-get the box's
+   `valheim_server_Data/Managed/assembly_valheim.dll` and md5-compare it with the local
+   `valheim_Data/Managed/assembly_valheim.dll`:
+
+   ```bash
+   md5sum ~/snap/steam/common/.local/share/Steam/steamapps/common/Valheim/valheim_Data/Managed/assembly_valheim.dll
+   # and the box's copy, fetched read-only:
+   #   sshpass -e sftp ... <<< 'get <nest>/valheim_server_Data/Managed/assembly_valheim.dll /tmp/srv.dll'
+   md5sum /tmp/srv.dll
+   ```
+
+   Client and dedicated-server builds are not always byte-identical across the whole Managed dir,
+   but `assembly_valheim.dll` is the one this plugin compiles against — a mismatch there means the
+   two are on different game builds and the rebuild is pointed at the wrong target. Stop and
+   reconcile before compiling.
+3. Only then run the build sequence below.
+
 ## Exact sequence, once the 1.0 game DLLs are live
 
 ```bash
@@ -15,8 +42,6 @@ cd plugins/eilif-boards
 dotnet build -c Release        # outputs + OVERWRITES dist/EilifBoards.dll (intended — that's the deployable artifact)
 ```
 
-Then deploy per `README.md` ("Deploy"): DLL into `BepInEx/plugins/`, prefilled cfg into
-`BepInEx/config/`, **Stop → Start**, then the greps.
 
 ## What a 1.0 rebuild MUST re-verify (none of these are compile errors)
 
@@ -83,6 +108,23 @@ Then deploy per `README.md` ("Deploy"): DLL into `BepInEx/plugins/`, prefilled c
    (`ZDOMan.ForceSendZDO`) or take ownership *only* for the frame of the write.
 
    **Symptom in-game:** the log says `updated N/M boards` but clients never see the new text.
+
+## Deploying a rebuilt server DLL (the DLL is file-locked while the server runs)
+
+The GTX host is Windows: a loaded plugin DLL cannot be overwritten in place. The swap only works
+inside a stopped window, and it must be the same window as the game update:
+
+1. **Panel Stop.**
+2. Upload every rebuilt server-side DLL over SFTP into `BepInEx/plugins/` (retrying-upload pattern
+   — the lock can linger a few seconds after the process exits), plus the prefilled cfg into
+   `BepInEx/config/` per `README.md` ("Deploy").
+3. Do the rest of the stopped-window work at the same time (world upload, `Start.bat` fields,
+   `worlds_local` sweep, V+ / WebMap cfg edits) — see `docs/LAUNCH-WIPE.md`.
+4. **Panel Start** (Stop → Start, never Restart).
+5. `bash scripts/verify-restart.sh <World>` — the Valheim version line, the plugin list, and the
+   plugin's own boot line are the proof it loaded against the new build.
+6. **Only then re-mint the modpack.** Minting before the server is proven up means publishing a
+   pack code that pins DLLs nobody has confirmed load.
 
 ## Gotchas confirmed while building this plugin
 

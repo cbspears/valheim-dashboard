@@ -1,0 +1,51 @@
+[Unit]
+# REFERENCE COPY — NOT INSTALLED. See the install block at the bottom of this file.
+#
+# Off-box world backup: pulls worlds_local/<World>.db + .fwl (or the 1.0 chunked
+# worlds_local/<World>/ folder) off the GTX box over read-only SFTP into
+# ~/valheim-world-backups/<World>-<YYYYmmdd-HHMM>/, keeping the newest 14.
+#
+# Why (audit gtx-3 / launch-14, 2026-09-03): the GTX panel only writes Backups/*.7z at a
+# Stop/Start, the in-game autobackup writes to the SAME disk, and before 2026-09-04 the only
+# off-box copy in existence was the retired Dedicated world. Valheim saves are forward-only —
+# the copy taken BEFORE a 1.0 boot is the only rollback that exists.
+Description=Eilif off-box world backup (read-only SFTP pull of the live world)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cbspears
+WorkingDirectory=/home/cbspears/Projects/valheim-dashboard
+# Pass the world name as the argument. Change it at cutover to the launch world.
+ExecStart=/usr/bin/bash /home/cbspears/Projects/valheim-dashboard/scripts/pull-world.sh EilifRehearsal
+Environment=TZ=America/Chicago
+# KEEP=<n> overrides the 14-copy retention; DEST=<dir> overrides ~/valheim-world-backups.
+#Environment=KEEP=14
+# Hardening (audit services-9 pattern). No MemoryMax needed — this is a short oneshot, but a
+# runaway sftp should not be able to eat the box.
+MemoryMax=512M
+TimeoutStartSec=600
+Nice=10
+IOSchedulingClass=idle
+# The script reads the SFTP password out of services/log-poller/.env and never echoes it; it
+# only ever issues sftp `get` and `ls`. Never give this unit write access to the box.
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+
+# ── INSTALL (Charlie, needs sudo — deliberately NOT done by the agent) ──────────────────────
+#   sudo install -m 0644 services/eilif-world-backup.service /etc/systemd/system/
+#   sudo install -m 0644 services/eilif-world-backup.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now eilif-world-backup.timer
+#   systemctl list-timers eilif-world-backup.timer      # next run
+#   systemctl start eilif-world-backup.service          # force one now
+#   journalctl -u eilif-world-backup -n 40 --no-pager   # what it pulled
+#
+# AT CUTOVER: edit ExecStart's world argument to the launch world name, then
+#   sudo systemctl daemon-reload && sudo systemctl start eilif-world-backup.service
+#
+# UNINSTALL:
+#   sudo systemctl disable --now eilif-world-backup.timer
+#   sudo rm /etc/systemd/system/eilif-world-backup.{service,timer} && sudo systemctl daemon-reload
