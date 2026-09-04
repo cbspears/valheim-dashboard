@@ -42,6 +42,7 @@ import { summarizeMilestones } from '@/lib/milestones';
 import { describeEvent } from '@/lib/events';
 import { timeAgo, formatEventWhen } from '@/lib/format';
 import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/config/server';
+import { LaunchNotice } from '@/components/LaunchNotice';
 
 export const dynamic = 'force-dynamic';
 
@@ -177,6 +178,9 @@ export default async function HomePage() {
   return (
     <div className="space-y-10">
       <AutoRefresh />
+
+      {/* Only rendered when config/server.ts LAUNCH_NOTICE is set. */}
+      <LaunchNotice />
 
       {/* ───────────────────────── HERO BANNER ───────────────────────── */}
       <HomeHero fallback={heroFallback} footer={heroFooter} />

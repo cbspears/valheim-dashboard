@@ -24,13 +24,13 @@ import {
 } from '@/components/ui';
 import { PageHeader } from '@/components/art/PageHeader';
 import { MODS, MOD_CATEGORIES, type Mod, type ModCategory } from '@/config/mods';
-import { MODPACK_PROFILE_CODE } from '@/config/server';
+import { MODPACK_PROFILE_CODE, MODPACK_VERSION_LABEL, SERVER_NAME } from '@/config/server';
 import { CopyChip } from '@/components/get-started/CopyChip';
 
 // Static page — reads only the curated mod config, no live DB.
 export const metadata: Metadata = {
   title: 'Mods',
-  description: 'Every mod running on The Fractured Realms, and which ones you must install to join.',
+  description: `Every mod running on ${SERVER_NAME}, and which ones you must install to join.`,
 };
 
 const CATEGORY_META: Record<
@@ -182,7 +182,10 @@ export default function ModsPage() {
                   <span className="mt-2 inline-block">
                     Or skip the list entirely: the one-click Eilif modpack installs every
                     client mod, pre-configured. r2modman → Import profile → From code:{' '}
-                    <CopyChip value={MODPACK_PROFILE_CODE} />
+                    <span className="inline-flex flex-wrap items-center gap-2 align-middle">
+                      <CopyChip value={MODPACK_PROFILE_CODE} />
+                      <span className="text-xs text-muted">{MODPACK_VERSION_LABEL}</span>
+                    </span>
                   </span>
                 </>
               ) : null}

@@ -2,13 +2,12 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { format, isToday, isYesterday } from 'date-fns';
 import { clsx } from 'clsx';
 import { ScrollText } from 'lucide-react';
 import type { GameEvent, EventType } from '@/lib/types';
 import { describeEvent, EVENT_FILTERS } from '@/lib/events';
 import { Card, Badge, EmptyState } from '@/components/ui';
-import { timeAgo, shortDate } from '@/lib/format';
+import { timeAgo, shortDate, centralDayIndex, centralDayKey } from '@/lib/format';
 import { bossPath } from '@/lib/slug';
 
 type BadgeTone = 'gold' | 'online' | 'offline' | 'death' | 'raid' | 'frost' | 'neutral';
@@ -63,11 +62,15 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
   }, [events, active]);
 
   // Group the filtered feed by calendar day, preserving newest-first order.
+  // Days are Central, not the machine's: this component renders on the server
+  // (UTC on Vercel) and again in the browser (whatever the reader's clock says),
+  // and an evening session runs past midnight UTC. Grouping in CT keeps the
+  // Chronicle agreeing with the Episodes and keeps both renders identical.
   const groups = useMemo<DayGroup[]>(() => {
+    const today = centralDayIndex(new Date());
     const map = new Map<string, GameEvent[]>();
     for (const e of filtered) {
-      const d = new Date(e.created_at);
-      const key = Number.isNaN(d.getTime()) ? 'unknown' : format(d, 'yyyy-MM-dd');
+      const key = centralDayKey(e.created_at);
       const bucket = map.get(key);
       if (bucket) bucket.push(e);
       else map.set(key, [e]);
@@ -75,8 +78,8 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
     return Array.from(map.entries()).map(([key, evs]) => {
       let label = 'Long ago';
       if (key !== 'unknown') {
-        const d = new Date(evs[0].created_at);
-        label = isToday(d) ? 'Today' : isYesterday(d) ? 'Yesterday' : shortDate(evs[0].created_at);
+        const gap = today - centralDayIndex(new Date(evs[0].created_at));
+        label = gap === 0 ? 'Today' : gap === 1 ? 'Yesterday' : shortDate(evs[0].created_at);
       }
       return { key, label, events: evs };
     });

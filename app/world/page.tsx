@@ -68,7 +68,7 @@ export default async function WorldPage() {
 
           <section className="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid lg:items-start">
             <SectionHeader
-              title="Great Deeds earned"
+              title="Milestones earned"
               subtitle={earnedSubtitle}
               icon={<Trophy size={22} />}
             />
@@ -77,7 +77,7 @@ export default async function WorldPage() {
 
           <section className="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid lg:items-start">
             <SectionHeader
-              title="On the horizon"
+              title="Milestones ahead"
               subtitle={horizonSubtitle}
               icon={<CircleDashed size={22} />}
             />

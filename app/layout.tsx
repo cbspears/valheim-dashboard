@@ -12,6 +12,10 @@ import { toNextGathering } from '@/lib/next-gathering';
 // then art() returns null and we keep the current /og-eilif.jpg exactly.
 const ogArt = art(HEADER_ART.og);
 const ogImageUrl = ogArt?.src ?? '/og-eilif.jpg';
+// Declared at the image's REAL size. The reference art is 1536x614; the
+// pre-art fallback is a 1200x630 card. Cards crop a wide image gracefully but
+// letterbox one whose declared ratio is a lie, so these must track the file.
+const OG_DIMENSIONS = ogArt ? { width: 1536, height: 614 } : { width: 1200, height: 630 };
 
 const cinzel = Cinzel({
   subsets: ['latin'],
@@ -39,7 +43,7 @@ export const metadata: Metadata = {
     siteName: SERVER_NAME,
     type: 'website',
     images: [
-      { url: ogImageUrl, width: 1200, height: 630, alt: `${SERVER_NAME} · ${SERVER_TAGLINE}` },
+      { url: ogImageUrl, ...OG_DIMENSIONS, alt: `${SERVER_NAME} · ${SERVER_TAGLINE}` },
     ],
   },
   twitter: {

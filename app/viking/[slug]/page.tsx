@@ -386,7 +386,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           className="gold-ring inline-flex items-center gap-1.5 font-display text-sm text-muted transition-colors hover:text-gold-light"
         >
           <ChevronLeft size={15} />
-          Back to the Warband
+          Back to the Vikings
         </Link>
       </div>
     </div>

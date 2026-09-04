@@ -1,4 +1,9 @@
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+
+// The community's timezone — event times are shown in Central regardless of
+// where the server renders (Vercel runs in UTC). Intl handles the conversion
+// deterministically, so server and client agree (no hydration mismatch).
+const EVENT_TZ = 'America/Chicago';
 
 /** "5 minutes ago" — safe on null. */
 export function timeAgo(iso: string | null | undefined): string {
@@ -10,11 +15,22 @@ export function timeAgo(iso: string | null | undefined): string {
   }
 }
 
-/** "Jun 24, 2026" — safe on null. */
+/**
+ * "Jun 24, 2026" — safe on null. Dated in Central, like every other date on the
+ * site: Vercel renders in UTC, and a 9 PM CT boss kill is already the next day
+ * there, so a naive format would put the evening's deeds on tomorrow's date.
+ */
 export function shortDate(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
-    return format(new Date(iso), 'MMM d, yyyy');
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: EVENT_TZ,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(d);
   } catch {
     return '—';
   }
@@ -49,11 +65,6 @@ export function formatDistance(meters: number | null | undefined): string {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
   return `${Math.round(meters)} m`;
 }
-
-// The community's timezone — event times are shown in Central regardless of
-// where the server renders (Vercel runs in UTC). Intl handles the conversion
-// deterministically, so server and client agree (no hydration mismatch).
-const EVENT_TZ = 'America/Chicago';
 
 /** ISO -> "Sat, Jun 27 · 7:00 PM CT". */
 export function formatEventWhen(iso: string | null | undefined): string {
@@ -93,10 +104,14 @@ export function eventCountdown(iso: string | null | undefined): string {
   return `in ${Math.round(days / 7)} weeks`;
 }
 
-// Which calendar day (in Central) a moment falls on, as a plain day number so
-// two moments can be compared. "en-CA" formats as YYYY-MM-DD, which parses
-// cleanly; Date.UTC then flattens it to a day index.
-function centralDayIndex(d: Date): number {
+/**
+ * Which calendar day (in Central) a moment falls on, as a plain day number so
+ * two moments can be compared. "en-CA" formats as YYYY-MM-DD, which parses
+ * cleanly; Date.UTC then flattens it to a day index. Exported so the Chronicle
+ * can group by the same day the Episodes do — and so a server render and a
+ * browser render agree.
+ */
+export function centralDayIndex(d: Date): number {
   const [y, m, day] = new Intl.DateTimeFormat('en-CA', {
     timeZone: EVENT_TZ,
     year: 'numeric',
@@ -107,6 +122,22 @@ function centralDayIndex(d: Date): number {
     .split('-')
     .map(Number);
   return Math.floor(Date.UTC(y, m - 1, day) / 86_400_000);
+}
+
+/**
+ * "2026-08-27" — the Central calendar day a moment falls on, as a stable key.
+ * Returns 'unknown' for a missing or unparseable timestamp.
+ */
+export function centralDayKey(iso: string | null | undefined): string {
+  if (!iso) return 'unknown';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'unknown';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: EVENT_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
 }
 
 /** Hour of the day (0-23) in Central. */

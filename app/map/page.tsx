@@ -128,7 +128,7 @@ export default async function MapPage() {
             />
             <p className="mt-3 text-center text-xs text-muted">
               The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it,
-              refreshed from the server every ~10 minutes
+              refreshed from the server every 5 minutes
               {liveMap.updatedAt ? ` · last charted ${new Date(liveMap.updatedAt).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })} CT` : ''}.
               The unexplored dark is real: nobody has been there yet.
             </p>
@@ -151,7 +151,7 @@ export default async function MapPage() {
           <History size={14} className="mt-0.5 shrink-0 text-gold-dim" />
           <span>
             How it works: the server tracks everywhere the warband has been and renders the charted
-            world; the dashboard pulls a fresh masked snapshot every half hour and archives one
+            world; the dashboard pulls a fresh masked snapshot every 5 minutes and archives one
             frame per in-game day. Watching the light spread across the dark is the story of the
             season, and press play above to replay it. The finale gets the full replay.
           </span>

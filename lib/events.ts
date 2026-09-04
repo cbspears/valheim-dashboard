@@ -31,7 +31,8 @@ export const EVENT_FILTERS: { key: string; label: string; types: EventType[] }[]
   { key: 'boss', label: 'Boss Kills', types: ['boss'] },
   { key: 'session', label: 'Joins & Leaves', types: ['join', 'leave'] },
   { key: 'raid', label: 'Raids', types: ['raid'] },
-  { key: 'chat', label: 'Chat', types: ['chat'] },
+  // No 'Chat' pill: shouted chat is mirrored to Discord and stored in
+  // `chat_lines`, never in `events`, so the filter could only ever show 0.
 ];
 
 function str(meta: Record<string, unknown>, key: string): string | undefined {

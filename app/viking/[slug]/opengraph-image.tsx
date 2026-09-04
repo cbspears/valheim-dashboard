@@ -75,7 +75,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
               marginBottom: 18,
             }}
           >
-            The Warband of Eilif
+            Vikings of Eilif
           </div>
           <div style={{ fontSize: 96, fontWeight: 700, lineHeight: 1.02, color: ASH }}>{name}</div>
           <div style={{ fontSize: 52, color: GOLD_LIGHT, marginTop: 12 }}>{epithet}</div>

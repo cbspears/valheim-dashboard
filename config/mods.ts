@@ -61,7 +61,7 @@ export const MODS: Mod[] = [
     version: '1.4.0',
     category: 'QoL',
     clientRequired: true,
-    url: 'https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-paths',
+    url: 'https://thunderstore.io/c/valheim/p/Eilif/EilifPaths/',
   },
 
   // ── Server-only, confirmed (nothing for players to install) ───────────────
@@ -146,7 +146,7 @@ export const MODS: Mod[] = [
     version: '0.2.0',
     category: 'Content',
     clientRequired: true,
-    url: 'https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-companion-client',
+    url: 'https://thunderstore.io/c/valheim/p/Eilif/EilifCompanionClient/',
   },
 ];
 

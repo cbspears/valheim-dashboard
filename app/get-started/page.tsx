@@ -13,7 +13,6 @@ import {
   Laptop,
   Terminal,
   MapPin,
-  UserRound,
   RefreshCcw,
   Wrench,
   MessageCircle,
@@ -25,6 +24,7 @@ import {
 import { Card, CardBody, SectionHeader, Badge } from '@/components/ui';
 import { PageHeader } from '@/components/art/PageHeader';
 import { CopyChip } from '@/components/get-started/CopyChip';
+import { LaunchNotice } from '@/components/LaunchNotice';
 import {
   SERVER_NAME,
   SERVER_ADDRESS,
@@ -32,6 +32,7 @@ import {
   DISCORD_URL,
   DISCORD_BOT_HANDLE,
   MODPACK_PROFILE_CODE,
+  MODPACK_VERSION_LABEL,
 } from '@/config/server';
 
 export const metadata: Metadata = {
@@ -56,6 +57,11 @@ const R2MODMAN_ALL_URL = 'https://github.com/ebkr/r2modmanPlus/releases/latest';
 const MACHEIM_APPLE_SILICON_URL =
   'https://github.com/lofcgi/macheim/releases/download/v1.0.1/Macheim_1.0.0_aarch64.dmg';
 const MACHEIM_ALL_URL = 'https://github.com/lofcgi/macheim/releases/latest';
+
+// The pack's seven .cfg files, zipped, for the Mac path: Macheim cannot read an
+// r2modman profile code, so a hand install gets none of the pack's settings.
+// Re-cut this zip out of the pack export whenever the pack code is re-minted.
+const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v11.zip';
 
 /* ── small presentational helpers ─────────────────────────────────────────── */
 
@@ -142,6 +148,22 @@ function Ext({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
+/**
+ * The modpack code with its version label. The label is the whole point: a bare
+ * UUID tells a returning player nothing about whether they are current.
+ */
+function PackCode() {
+  if (!MODPACK_PROFILE_CODE) {
+    return <span className="text-ash">shared in Discord</span>;
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2 align-middle">
+      <CopyChip value={MODPACK_PROFILE_CODE} />
+      <span className="text-xs text-muted">{MODPACK_VERSION_LABEL}</span>
+    </span>
+  );
+}
+
 function SectionTitle({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
     <h2 className="mb-4 flex items-center gap-2 font-display text-lg tracking-wide text-ash">
@@ -159,6 +181,9 @@ export default function GetStartedPage() {
 
   return (
     <div className="flex flex-col gap-12">
+      {/* Only rendered when config/server.ts LAUNCH_NOTICE is set. */}
+      <LaunchNotice />
+
       <PageHeader slot="get-started">
         <SectionHeader
           title="Get Started"
@@ -193,7 +218,11 @@ export default function GetStartedPage() {
             <div>
               <p className="text-xs uppercase tracking-wider text-muted">How to connect</p>
               <p className="mt-1 text-sm text-ash">
-                Steam PC only, <span className="text-ash-dim">crossplay is off</span>
+                Steam only (Windows, Mac, Linux).{' '}
+                <span className="text-ash-dim">
+                  Xbox, PlayStation, Switch and Game Pass can&apos;t join: the mods need Steam and
+                  crossplay is off.
+                </span>
               </p>
             </div>
           </CardBody>
@@ -251,8 +280,9 @@ export default function GetStartedPage() {
               <Step n={2} title="Point it at Valheim" icon={<Gamepad2 size={16} />}>
                 <p>
                   In r2modman, choose <span className="text-ash">Valheim</span> from the game list
-                  and click <span className="text-ash">Select game</span>. That lands you on the
-                  profile screen. Stay there, the next step happens on it.
+                  and click <span className="text-ash">Select game</span>. If it asks which store,
+                  pick <span className="text-ash">Steam</span>. That lands you on the profile
+                  screen. Stay there, the next step happens on it.
                 </p>
               </Step>
 
@@ -262,22 +292,24 @@ export default function GetStartedPage() {
                     <p>
                       On the profile screen choose <span className="text-ash">Import / Update</span>,
                       pick <span className="text-ash">Import new profile</span>, then{' '}
-                      <span className="text-ash">From code</span>. Paste this code:
+                      <span className="text-ash">From code</span>. Paste this code and click{' '}
+                      <span className="text-ash">Continue</span>:
                     </p>
                     <div className="py-0.5">
-                      <CopyChip value={MODPACK_PROFILE_CODE} />
+                      <PackCode />
                     </div>
                     <p>
-                      When it asks you to name the new profile, call it{' '}
-                      <span className="text-ash">Eilif</span> and click{' '}
-                      <span className="text-ash">Import</span>. That installs the whole pack at the
+                      It lists the mods it is about to install. Click{' '}
+                      <span className="text-ash">Import</span>. When it asks for a profile name,
+                      type <span className="text-ash">Eilif</span> and click{' '}
+                      <span className="text-ash">Create</span>. That installs the whole pack at the
                       exact right versions and pre-configures everything. Nothing to edit, and
                       you&apos;re done here.
                     </p>
                     <p className="text-xs text-muted">
-                      Updating to a newer pack code later? Select your Eilif profile first, then
-                      choose <span className="text-ash">Update existing profile → From code</span>{' '}
-                      so it stays one profile.
+                      Updating to a newer pack code later? Use{' '}
+                      <span className="text-ash">How to update your mods</span> further down this
+                      page. It is a different button, and it keeps you on one profile.
                     </p>
                   </>
                 ) : (
@@ -373,22 +405,29 @@ export default function GetStartedPage() {
                 under Rosetta).
               </li>
               <li>
-                <span className="font-mono text-xs text-gold-light">4.</span> Add the pack. If
-                Macheim offers <span className="text-ash">import from code</span>, paste the{' '}
-                {SERVER_NAME} code:
-                {MODPACK_PROFILE_CODE ? (
-                  <span className="mt-1.5 block">
-                    <CopyChip value={MODPACK_PROFILE_CODE} />
-                  </span>
-                ) : (
-                  <span> shared in Discord.</span>
-                )}
-                <span className="mt-1 block">
-                  If it doesn&apos;t, add each mod from the{' '}
-                  <Link href="/mods" className="text-gold-light hover:underline">
-                    Mods page
-                  </Link>{' '}
-                  in Macheim&apos;s Thunderstore browser — match the versions exactly.
+                <span className="font-mono text-xs text-gold-light">4.</span> Add the mods.
+                Macheim can&apos;t read r2modman codes. Open the{' '}
+                <span className="text-ash">Mods</span> tab and install these seven, latest version:
+                <span className="mt-1 block text-ash">
+                  BepInExPack Valheim, ValheimPlus (Grantapher), PlantEverything, AzuCraftyBoxes,
+                  GsValheimStatsClient, Eilif Paths, Eilif Companion Client
+                </span>
+                <span className="mt-2 block">
+                  Then download the{' '}
+                  <a
+                    href={CONFIG_BUNDLE_URL}
+                    download
+                    className="gold-ring rounded font-medium text-gold-light hover:underline"
+                  >
+                    {SERVER_NAME} config bundle
+                  </a>{' '}
+                  and drop its files into <span className="text-ash">Macheim → Config</span>{' '}
+                  (BepInEx/config). Without them you can play but your stats won&apos;t reach the
+                  site.
+                </span>
+                <span className="mt-1 block text-xs text-muted">
+                  The bundle matches {MODPACK_VERSION_LABEL}. When a new pack code is announced in
+                  Discord, come back and download it again.
                 </span>
               </li>
               <li>
@@ -423,30 +462,65 @@ export default function GetStartedPage() {
       {/* ══════════════ PART TWO — NOW THAT YOU'RE ASHORE ══════════════ */}
       <section>
         <SectionTitle icon={<ScrollText size={20} />}>
-          Once you&apos;re in, do these three things!
+          Once you&apos;re in, do these two things!
         </SectionTitle>
 
         <Card>
           <CardBody>
             <ol className="space-y-6">
-              <Step n={1} title="Swear the Oath" icon={<ScrollText size={16} />}>
+              <Step
+                n={1}
+                title="Swear your oath and bind your viking"
+                icon={<ScrollText size={16} />}
+              >
                 <p>
-                  Every age begins with a vow. In-game you must{' '}
-                  <strong className="text-ash-dim">shout</strong> it. Open chat, lead with{' '}
-                  <span className="font-mono text-xs text-ash">/s</span>:
+                  One rite, three moves. It puts your vow on the wall and ties your Discord to your
+                  viking, so your deeds, photos and title all gather under one name.
                 </p>
-                <div className="py-0.5">
-                  <CopyChip value="/s /oath " label="/s /oath <your vow, one line>" />
-                </div>
-                <p>Or swear it in Discord instead:</p>
-                <div className="py-0.5">
-                  <CopyChip
-                    value={`${bot} oath — `}
-                    label={`${bot} oath — YourVikingName: your vow`}
-                  />
-                </div>
+                <ol className="space-y-3">
+                  <li>
+                    <span className="font-mono text-xs text-gold-light">1.</span> In Discord, type{' '}
+                    <span className="font-mono text-xs text-ash">@</span> and pick{' '}
+                    <span className="text-ash">{SERVER_NAME}</span> from the popup that appears,
+                    then finish the line:
+                    <span className="mt-1.5 block">
+                      <span className="rounded bg-gold/15 px-2 py-1 font-mono text-xs font-semibold text-gold-light">
+                        I am YourVikingName
+                      </span>
+                    </span>
+                    <span className="mt-1 block text-xs text-muted">
+                      Picking {SERVER_NAME} from the popup is what makes it a real mention. Typing
+                      the letters {bot} by hand looks the same but does nothing. Use your in-game
+                      name, spelled exactly as it appears.
+                    </span>
+                  </li>
+                  <li>
+                    <span className="font-mono text-xs text-gold-light">2.</span> {SERVER_NAME}{' '}
+                    sends you a private message with a 6-letter rune. Keep it to yourself.
+                    <span className="mt-1 block text-xs text-muted">
+                      The sender shows as <span className="text-ash-dim">Valheim Server Bot</span>.
+                      That is {SERVER_NAME}. No message? Allow direct messages for this server and
+                      ask again.
+                    </span>
+                  </li>
+                  <li>
+                    <span className="font-mono text-xs text-gold-light">3.</span> In game, open chat
+                    and <strong className="text-ash-dim">shout</strong> it, rune first:
+                    <span className="mt-1.5 block">
+                      <CopyChip value="/s /oath " label="/s /oath RUNE your vow, one line" />
+                    </span>
+                    <span className="mt-1 block text-xs text-muted">
+                      It must be a shout, so lead with{' '}
+                      <span className="font-mono text-xs">/s</span>. Plain chat never leaves the
+                      campfire.
+                    </span>
+                  </li>
+                </ol>
                 <p className="text-xs text-muted">
-                  Read the charter and see who&apos;s sworn on the{' '}
+                  Re-swear anytime with{' '}
+                  <span className="font-mono text-xs text-ash-dim">/s /oath your new vow</span> in
+                  game. Your latest oath replaces the last. Read the charter and see who&apos;s
+                  sworn on the{' '}
                   <Link href="/oath" className="text-gold-light hover:underline">
                     Oath page
                   </Link>
@@ -454,21 +528,7 @@ export default function GetStartedPage() {
                 </p>
               </Step>
 
-              <Step n={2} title="Link your name to the saga" icon={<UserRound size={16} />}>
-                <p>
-                  Tell the bot which viking is you, so the photos you post and your stats gather on
-                  your own saga page. In Discord:
-                </p>
-                <div className="py-0.5">
-                  <CopyChip value={`${bot} I am `} label={`${bot} I am <YourCharacterName>`} />
-                </div>
-                <p className="text-xs text-muted">
-                  Use your <span className="text-ash-dim">in-game name</span>, spelled exactly as it
-                  appears. That&apos;s how the link lands on the right viking.
-                </p>
-              </Step>
-
-              <Step n={3} title="Turn on your location" icon={<MapPin size={16} />}>
+              <Step n={2} title="Turn on your location" icon={<MapPin size={16} />}>
                 <p>
                   Open the map (<span className="font-mono text-xs text-ash">M</span>) and enable{' '}
                   <span className="text-ash">Share position</span> (bottom-left) so the warband can
@@ -490,14 +550,15 @@ export default function GetStartedPage() {
                 </h2>
               </div>
               <p className="text-sm leading-relaxed text-ash-dim">
-                Every so often we announce a mod update in Discord.{' '}
+                Every so often we announce a mod update in Discord. A new code is posted on launch
+                day because the world changes.{' '}
                 <span className="font-semibold text-ash">To update your mods and modpack, do
                 this</span> (takes about a minute):
               </p>
               <ol className="mt-3 space-y-1.5 text-sm leading-relaxed text-ash-dim">
                 <li>
-                  <span className="font-mono text-xs text-gold-light">1.</span> Open r2modman and
-                  select your <span className="text-ash">Eilif</span> profile.
+                  <span className="font-mono text-xs text-gold-light">1.</span> Open r2modman. If
+                  you land inside a profile, go back to the profile list.
                 </li>
                 <li>
                   <span className="font-mono text-xs text-gold-light">2.</span> Choose{' '}
@@ -505,19 +566,22 @@ export default function GetStartedPage() {
                 </li>
                 <li>
                   <span className="font-mono text-xs text-gold-light">3.</span> Paste the current
-                  code:{' '}
-                  {MODPACK_PROFILE_CODE ? (
-                    <CopyChip value={MODPACK_PROFILE_CODE} />
-                  ) : (
-                    <span className="text-ash">shared in Discord</span>
-                  )}
+                  code, click <span className="text-ash">Continue</span>, then{' '}
+                  <span className="text-ash">Import</span>: <PackCode />
                 </li>
                 <li>
-                  <span className="font-mono text-xs text-gold-light">4.</span> Click{' '}
-                  <span className="text-ash">Import</span>, wait for it to finish, then{' '}
-                  <span className="text-ash">Start modded</span> as usual.
+                  <span className="font-mono text-xs text-gold-light">4.</span> Pick{' '}
+                  <span className="text-ash">Eilif</span> in the dropdown and click{' '}
+                  <span className="text-ash">Update profile: Eilif</span>. Wait for it to finish,
+                  then <span className="text-ash">Start modded</span> as usual.
                 </li>
               </ol>
+              <p className="mt-3 text-xs text-muted">
+                Not sure whether you are current? In r2modman open your{' '}
+                <span className="text-ash-dim">Eilif</span> profile and look at{' '}
+                <span className="text-ash-dim">Installed</span>: Eilif Paths 1.4.0 and
+                GsValheimStatsClient 0.2.12 means you are on {MODPACK_VERSION_LABEL}.
+              </p>
               <p className="mt-3 text-xs text-muted">
                 Never update mods one by one from r2modman&apos;s own &quot;update available&quot;
                 badges. The pack pins the exact versions the server runs, and a solo update can
@@ -549,15 +613,20 @@ export default function GetStartedPage() {
             tone="gold"
           >
             <p>
-              Valheim runs natively. Use the r2modman AppImage, then in Steam set the game&apos;s
-              launch options so the loader hooks in:
+              Valheim runs natively. Download the r2modman AppImage and make it executable
+              (right-click → Properties → Permissions → Allow executing, or{' '}
+              <span className="font-mono text-[11px]">chmod +x</span>), then run it and import the
+              code exactly as above.
             </p>
-            <code className="block rounded bg-surface-raised px-2 py-1 font-mono text-[11px] text-gold-light">
-              WINEDLLOVERRIDES=&quot;winhttp=n,b&quot; %command%
-            </code>
+            <p>
+              The first time you click <span className="text-ash">Start modded</span>, r2modman
+              shows a launch-options line with a copy button. Paste that into Steam → Library →
+              Valheim → Properties → Launch Options. Copy it from r2modman, not from here: it
+              contains a folder path that is specific to your machine.
+            </p>
             <p className="text-xs text-muted">
-              On Steam Deck, do this in Desktop Mode. r2modman&apos;s Valheim instructions cover the
-              exact steps.
+              Playing through Proton instead of the native build? Nothing extra to set, r2modman
+              handles it. On Steam Deck, do all of this in Desktop Mode.
             </p>
           </Platform>
 
@@ -582,6 +651,10 @@ export default function GetStartedPage() {
         <SectionTitle icon={<Wrench size={18} />}>When something won&apos;t cooperate</SectionTitle>
         <Card>
           <CardBody>
+            <Trouble symptom="“Incompatible version” during launch week (Sept 9 to 12)">
+              That almost always means the game version, not the mods. Check the notice at the top
+              of this page before re-installing anything.
+            </Trouble>
             <Trouble symptom="“Incompatible version” or the join is refused">
               Your mods don&apos;t match the server. Re-import the modpack code (step 3) so every
               version lines up, and make sure nobody added an extra mod. This is by far the most
@@ -589,14 +662,16 @@ export default function GetStartedPage() {
             </Trouble>
             <Trouble symptom="Game launches but no mods are loaded">
               You started vanilla. Always launch with <span className="text-ash">Start modded</span>{' '}
-              from r2modman. On Linux/Proton, double-check the{' '}
-              <span className="font-mono text-xs">WINEDLLOVERRIDES</span> launch option is set.
+              from r2modman. On the native Linux build, also check that the launch-options line
+              r2modman gave you is pasted into Steam → Library → Valheim → Properties → Launch
+              Options.
             </Trouble>
             <Trouble symptom="My oath or pin didn't show up">
               Both must be <span className="text-ash">shouted</span>, so lead with{' '}
               <span className="font-mono text-xs">/s</span> (e.g.{' '}
               <span className="font-mono text-xs">/s /oath …</span>). A normal chat line gets
-              swallowed. Or use the Discord form instead.
+              swallowed. A first oath also needs the rune {SERVER_NAME} sent you, right after{' '}
+              <span className="font-mono text-xs">/oath</span>.
             </Trouble>
             <Trouble symptom="My weapon stats show fights that weren't mine">
               Starting a brand-new character on the server can make your weapon breakdown
@@ -613,8 +688,11 @@ export default function GetStartedPage() {
               System Settings → Privacy &amp; Security → Open Anyway. Still stuck? Ask in Discord.
             </Trouble>
             <Trouble symptom="“Failed to connect” / can't reach the server">
-              The server may be mid-restart (it cycles every few hours). Wait a minute and retry.
-              Otherwise double-check the address and that you&apos;ve got the current password.
+              An admin may be restarting it (check{' '}
+              <span className="font-mono text-xs">#server</span> in Discord), or your game version
+              does not match the server (see the notice at the top of this page). Double-check the
+              address and that the password is exactly{' '}
+              <span className="text-ash">{SERVER_PASSWORD}</span> (capital L).
             </Trouble>
           </CardBody>
         </Card>

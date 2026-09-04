@@ -310,7 +310,7 @@ export default async function PlayersPage() {
           subtitle="Every warrior who has set foot on these shores: the warband that carves its saga into the world."
           icon={<Users size={22} />}
           action={
-            <Badge tone="neutral">{roster.length} sworn</Badge>
+            <Badge tone="neutral">{roster.length} vikings</Badge>
           }
         />
       </PageHeader>

@@ -43,20 +43,24 @@ export default async function OathPage() {
               </h2>
             </div>
             <p className="text-sm leading-relaxed text-ash-dim">
-              Two steps, once. Your first oath also binds your Discord to your viking, so your
-              deeds, photos, and title gather under one name.
+              One rite, three moves, once. Your first oath also binds your Discord to your viking,
+              so your deeds, photos, and title gather under one name.
             </p>
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm leading-relaxed text-ash-dim">
               <span className="flex h-5 w-5 flex-none translate-y-0.5 items-center justify-center rounded-full bg-gold/20 font-mono text-xs font-bold text-gold-light">
                 1
               </span>
-              <span>In Discord:</span>
+              <span>
+                In Discord, type <span className="font-mono text-xs text-ash">@</span> and pick{' '}
+                <span className="text-ash">{SERVER_NAME}</span> from the popup, then finish the
+                line:
+              </span>
               <span className="rounded bg-gold/15 px-2 py-0.5 font-mono text-xs font-semibold text-gold-light">
-                {DISCORD_BOT_HANDLE} I am YourVikingName
+                I am YourVikingName
               </span>
               <span>
-                Then the bot DMs you a one-time rune. Keep it private. (No DM? Allow direct
-                messages for this server and ask again.)
+                Picking {SERVER_NAME} from the popup is what makes it a real mention. Typing the
+                letters {DISCORD_BOT_HANDLE} by hand looks the same but does nothing.
               </span>
             </div>
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm leading-relaxed text-ash-dim">
@@ -64,10 +68,21 @@ export default async function OathPage() {
                 2
               </span>
               <span>
-                In game, <span className="font-semibold text-ash">shout</span> it:
+                {SERVER_NAME} sends you a private message with a 6-letter rune. Keep it to
+                yourself. The sender shows as <span className="text-ash-dim">Valheim Server Bot</span>;
+                that is {SERVER_NAME}. (No message? Allow direct messages for this server and ask
+                again.)
+              </span>
+            </div>
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm leading-relaxed text-ash-dim">
+              <span className="flex h-5 w-5 flex-none translate-y-0.5 items-center justify-center rounded-full bg-gold/20 font-mono text-xs font-bold text-gold-light">
+                3
+              </span>
+              <span>
+                In game, open chat and <span className="font-semibold text-ash">shout</span> it:
               </span>
               <span className="rounded bg-gold/15 px-2 py-0.5 font-mono text-xs font-semibold text-gold-light">
-                /s /oath YOURRUNE — your vow, one line
+                /s /oath RUNE your vow, one line
               </span>
               <span>
                 It must be a shout (<span className="font-mono text-xs">/s</span>); plain chat
@@ -75,15 +90,11 @@ export default async function OathPage() {
               </span>
             </div>
             <p className="text-xs leading-relaxed text-muted">
-              Re-swear anytime:{' '}
+              Re-swear anytime in game with{' '}
               <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-gold-light">
                 /s /oath your new vow
-              </span>{' '}
-              in-game, or{' '}
-              <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-gold-light">
-                {DISCORD_BOT_HANDLE} oath — your new vow
-              </span>{' '}
-              in Discord. Your latest oath replaces the last.
+              </span>
+              . Your latest oath replaces the last.
             </p>
           </CardBody>
         </Card>
