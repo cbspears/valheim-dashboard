@@ -34,6 +34,7 @@ import { serviceClient } from './supabase.js';
 const TICK_MS = 60_000;                 // the caller ticks us every 60s
 const CADENCE_MINUTES = 120;            // one ambient line per ~2h online-time
 const STALE_MS = 24 * 3600 * 1000;      // queued-but-unspoken lines expire after 24h
+const POTY_STALE_MS = 3 * 3600 * 1000;  // the crown says "tonight": 3h and it is stale
 const RECENT_KEEP = 5;                  // no template repeats within its last 5 uses
 const DEFAULT_MIN_GAP_MS = 1_800_000;   // VOICE_MIN_GAP_MS default — ambient only
 const DAWN_EVERY_DAYS = 3;              // dawn line on every 3rd world day
@@ -552,22 +553,51 @@ export function createVoiceEngine({
   }
 
   // ── housekeeping: expire stale queued lines (never flood on server return) ─
+  //
+  // Expired lines get status 'expired' with spoken_at left NULL, so an unspoken
+  // line can never look delivered (it used to be written as 'spoken', which hid
+  // a silent Companion). /api/voice only ever serves status='queued', so the
+  // in-game side is unchanged.
+  //
+  // TTLs by kind: the POTY coronation says "tonight", so it goes stale in 3
+  // hours instead of 24. PARTIAL FIX for the wider POTY problem (voice-2): the
+  // decision still owed from Charlie is whether to queue the crown at all when
+  // the hall is empty at 23:00, or to reword it for the morning after.
   async function expireStale() {
-    if (!writeDb) return;
-    const cutoff = new Date(Date.now() - STALE_MS).toISOString();
-    const { error } = await writeDb
-      .from('voice_lines')
-      .update({ status: 'spoken', spoken_at: new Date().toISOString() })
-      .eq('status', 'queued')
-      .lt('queued_at', cutoff);
-    if (error) log.error?.(`[voice] expire stale: ${error.message}`);
+    if (!writeDb) return 0;
+    let expired = 0;
+
+    const sweep = async (label, ageMs, narrow) => {
+      const cutoff = new Date(Date.now() - ageMs).toISOString();
+      let q = writeDb
+        .from('voice_lines')
+        .update({ status: 'expired' })
+        .eq('status', 'queued')
+        .lt('queued_at', cutoff);
+      if (narrow) q = narrow(q);
+      const { data, error } = await q.select('id');
+      if (error) {
+        log.error?.(`[voice] expire stale (${label}): ${error.message}`);
+        return;
+      }
+      expired += Array.isArray(data) ? data.length : 0;
+    };
+
+    // POTY first (the tighter window), then everything else at 24h.
+    await sweep('poty', POTY_STALE_MS, (q) => q.eq('meta->>source', 'poty'));
+    await sweep('all', STALE_MS, null);
+
+    if (expired > 0) log.info?.(`[voice] expired ${expired} stale line(s)`);
+    return expired;
   }
 
   // ── the 60s tick ──────────────────────────────────────────────────────────
   async function tick() {
     if (!writeDb) return;
     const v = st();
-    await expireStale();
+    // NOTE: expireStale() is NOT called here. It runs on its own timer in
+    // index.js so housekeeping keeps going while the hall is empty and while a
+    // voice tick is stuck on a slow read.
 
     const status = await readStatus();
 
@@ -600,7 +630,24 @@ export function createVoiceEngine({
     await saveState();
   }
 
-  // ── puppet mode: `@Eilif say: <line>` from an Administrator ────────────────
+  // ── puppet mode: `@Eilif say: <line>` from an admin ────────────────────────
+  //
+  // No role in the live guild actually carries the Administrator bit, so the
+  // owner was the only operator. Manage Server counts too, and ADMIN_ROLE_IDS
+  // (comma-separated role ids) is the escape hatch for a guild whose "Admin"
+  // role carries neither.
+  const ADMIN_ROLE_IDS = String(process.env.ADMIN_ROLE_IDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  function mayPuppet(member) {
+    if (!member) return false;
+    if (member.permissions?.has?.('Administrator')) return true;
+    if (member.permissions?.has?.('ManageGuild')) return true;
+    return ADMIN_ROLE_IDS.some((id) => member.roles?.cache?.has?.(id));
+  }
+
   async function handleMessage(message) {
     try {
       if (!writeDb) return;
@@ -615,8 +662,12 @@ export function createVoiceEngine({
       const m = stripped.match(/^say\s*:\s*([\s\S]+)$/i);
       if (!m) return;
 
-      const isAdmin = message.member?.permissions?.has?.('Administrator');
-      if (!isAdmin) return; // non-admins: ignore silently
+      if (!mayPuppet(message.member)) {
+        // Say why, instead of the old silence: a co-admin who cannot use it
+        // should learn that in one line, not by wondering.
+        await message.reply('(admins only)').catch(() => {});
+        return;
+      }
 
       const line = m[1].trim();
       if (!line) return;
@@ -646,6 +697,7 @@ export function createVoiceEngine({
 
   return {
     tick,
+    expireStale,
     attach,
     announcePoty,
     handleMessage,

@@ -1,7 +1,10 @@
-// One-off LIVE preview → posts the twice-daily recap format to #server so you
-// can see it rendered in real Discord (keeps #valheim pristine). Shows a normal
-// evening crown AND the new 🌟 Unsung Hero spotlight. Read-only: crafts sample
-// stats through the REAL formatRecap + selectPlayerOfDay, writes no state/DB.
+// One-off LIVE preview → posts the nightly recap format to #server so you can
+// see it rendered in real Discord (keeps #valheim pristine). Shows a normal
+// evening crown AND the 🌟 Unsung Hero spotlight. Writes no state/DB: it crafts
+// sample stats through the REAL formatRecap + selectPlayerOfDay.
+//
+// ⚠️ THIS POSTS FOR REAL. It logs in to Discord and writes three messages to
+// #server. It is NOT a dry run: `npm run dry-run` is the non-posting preview.
 //   node scripts/preview-recap-live.js   (runs from anywhere; loads ../.env)
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
@@ -20,7 +23,7 @@ const post = (p) => poster.post('server', p);
 // Intro — clearly mark this as a preview so the channel isn't confused.
 await post({
   content:
-    '🔎 **Preview — Player of the Day.** (Pilot: recaps currently post here to **#server** at 8 AM & 10 PM; will move to #valheim at launch.) Two samples below: a normal evening, then the new **🌟 Unsung Hero** spotlight that occasionally crowns a quieter viking.',
+    '🔎 **Preview: Player of the Day.** (Pilot: the nightly recap currently posts here to **#server** at 11 PM CT; it moves to #valheim at launch.) Two samples below: a normal evening, then the **🌟 Unsung Hero** spotlight that occasionally crowns a quieter viking.',
 });
 
 // Sample 1 — a normal evening → 💀 The Bold (most deaths).

@@ -85,15 +85,29 @@ async function runLive() {
   recap.schedule();
 
   let stopped = false;
-  const safe = (label, fn) => async () => {
-    if (stopped) return;
-    try {
-      await fn();
-      recordLoopResult(label, true);
-    } catch (e) {
-      console.error(`[${label}]`, e.message);
-      recordLoopResult(label, false, e.message);
-    }
+  // One tick at a time, per loop. setInterval fires on the clock, not on
+  // completion: without this guard a slow Discord or Supabase call lets the
+  // next tick start on the SAME cursor and post the same events twice (the
+  // relay reads `> lastEventAt` and only advances it after each post).
+  const safe = (label, fn) => {
+    let running = false;
+    return async () => {
+      if (stopped) return;
+      if (running) {
+        console.log(`[${label}] previous tick still running, skipping this one`);
+        return;
+      }
+      running = true;
+      try {
+        await fn();
+        recordLoopResult(label, true);
+      } catch (e) {
+        console.error(`[${label}]`, e.message);
+        recordLoopResult(label, false, e.message);
+      } finally {
+        running = false;
+      }
+    };
   };
 
   const relayLoop = safe('relay', () => relay.tick());
@@ -157,6 +171,12 @@ async function runLive() {
     const voiceLoop = safe('voice', () => voice.tick());
     await voiceLoop();
     timers.push(setInterval(voiceLoop, 60000));
+    // Expiring stale queued lines rides its OWN timer, not the voice tick: it
+    // must keep running while the hall is empty AND while a voice tick is stuck
+    // on a slow read (the in-flight guard above would otherwise skip it too).
+    const expireLoop = safe('voice-expire', () => voice.expireStale());
+    await expireLoop();
+    timers.push(setInterval(expireLoop, 300000));
     extra += ', voice engine on';
   }
 
@@ -170,6 +190,9 @@ async function runLive() {
       writeDb,
       apiUrl: process.env.TITLES_API_URL || 'https://valheim-dashboard.vercel.app/api/titles',
       dryRun: process.env.TITLES_DRY === '1',
+      // Titles have always proclaimed in #server, so 'server' stays the default.
+      // Launch value is 'valheim' if titles should follow deeds/oaths/recaps.
+      channel: process.env.TITLE_CHANNEL === 'valheim' ? 'valheim' : 'server',
     });
     const interval = parseInt(process.env.TITLES_INTERVAL_MS || '600000', 10);
     const titlesLoop = safe('titles', () => titles.tick());
@@ -216,26 +239,41 @@ async function runLive() {
   const heartbeatTick = async () => {
     if (stopped) return;
     const snapshot = loopsSnapshot();
-    const subLoopEnabled = {
-      relay: true,
-      bosses: true,
-      'events-sync': process.env.EVENTS_SYNC === '1',
-      'gallery-ingest': process.env.GALLERY_INGEST === '1',
-      'oath-ingest': process.env.OATH_INGEST === '1',
-      'identity-link': process.env.IDENTITY_LINK !== '0',
-      'identity-confirm': process.env.IDENTITY_LINK !== '0',
-      'voice-queue': Boolean(voice),
-      'title-evaluator': process.env.TITLES_ANNOUNCE !== '0',
-      'milestone-evaluator': process.env.MILESTONES_ANNOUNCE !== '0',
+    // Cockpit chip key -> { enabled, loop } where `loop` is the safe() label
+    // that records results for it (null = an event handler with no loop of its
+    // own, so it only ever reports `enabled`).
+    const subLoopSpec = {
+      relay: { enabled: true, loop: 'relay' },
+      bosses: { enabled: true, loop: 'bosses' },
+      'events-sync': { enabled: process.env.EVENTS_SYNC === '1', loop: 'events' },
+      'gallery-ingest': { enabled: process.env.GALLERY_INGEST === '1', loop: null },
+      'oath-ingest': { enabled: process.env.OATH_INGEST === '1', loop: null },
+      'identity-link': { enabled: process.env.IDENTITY_LINK !== '0', loop: null },
+      'identity-confirm': { enabled: process.env.IDENTITY_LINK !== '0', loop: 'identity-confirm' },
+      'voice-queue': { enabled: Boolean(voice), loop: 'voice' },
+      'title-evaluator': { enabled: process.env.TITLES_ANNOUNCE !== '0', loop: 'titles' },
+      'milestone-evaluator': { enabled: process.env.MILESTONES_ANNOUNCE !== '0', loop: 'milestones' },
     };
     const subLoops = {};
-    for (const [key, enabled] of Object.entries(subLoopEnabled)) {
-      subLoops[key] = { enabled, ...(snapshot[key] || {}) };
+    let anyLoopFailing = false;
+    for (const [key, { enabled, loop }] of Object.entries(subLoopSpec)) {
+      const last = (loop && snapshot[loop]) || snapshot[key] || null;
+      subLoops[key] = { enabled, ...(last || {}) };
+      if (enabled && last && last.ok === false) anyLoopFailing = true;
     }
+    // Gateway health: a bot whose REST still posts but whose gateway is down
+    // (or the reverse) must not read as healthy.
+    const gatewayReady = Boolean(poster.client?.isReady?.());
+    const wsStatus = poster.client?.ws?.status ?? null;
     await sendHeartbeat({
-      status: 'ok',
+      status: !gatewayReady || anyLoopFailing ? 'degraded' : 'ok',
       metrics: {
         subLoops,
+        // Same object under both keys: `subLoops` is what the cockpit has always
+        // read, `loops` is the newer name. Keep both until every reader moves.
+        loops: subLoops,
+        gatewayReady,
+        wsStatus,
         // Non-secret pilot flags the cockpit warns about before launch.
         recapChannelIsServer: (process.env.RECAP_CHANNEL || 'valheim') === 'server',
         milestoneChannelIsServer: (process.env.MILESTONE_CHANNEL || 'valheim') === 'server',

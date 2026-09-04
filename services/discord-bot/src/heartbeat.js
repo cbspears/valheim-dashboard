@@ -5,12 +5,28 @@
 
 const loops = new Map();
 
-/** Record one sub-loop tick result (called by the `safe()` wrapper in index.js). */
+// undici has no default timeout; a stalled heartbeat socket must not pile up
+// behind the 60s heartbeat interval.
+const FETCH_TIMEOUT_MS = 20000;
+
+/**
+ * Record one sub-loop tick result (called by the `safe()` wrapper in index.js).
+ *
+ * Field names matter: the cockpit's sub-loop chips (lib/ops/health.ts,
+ * interface LoopMetric) read `lastSuccessAt` / `lastRunAt` / `lastError`, so a
+ * failing loop only shows red if `lastError` is set and `lastSuccessAt` stops
+ * moving. `ok` / `error` are kept for older readers.
+ */
 export function recordLoopResult(label, ok, errorMessage) {
+  const now = new Date().toISOString();
+  const prev = loops.get(label) || {};
+  const error = ok ? null : sanitize(errorMessage);
   loops.set(label, {
-    lastRunAt: new Date().toISOString(),
+    lastRunAt: now,
+    lastSuccessAt: ok ? now : prev.lastSuccessAt,
     ok,
-    error: ok ? null : sanitize(errorMessage),
+    error,
+    lastError: error,
   });
 }
 
@@ -62,6 +78,7 @@ export function createHeartbeatSender(component, logger = console) {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
         body: JSON.stringify({ component, instance, version, status, error: sanitize(error), metrics }),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       if (!res.ok) logger.warn?.(`[heartbeat] ${component} POST HTTP ${res.status}`);
     } catch (e) {

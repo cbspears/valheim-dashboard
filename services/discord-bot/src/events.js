@@ -7,6 +7,7 @@
 // GuildScheduledEvents gateway intent (added in discord.js).
 
 const STATUS = { 1: 'scheduled', 2: 'active', 3: 'completed', 4: 'canceled' };
+const FETCH_TIMEOUT_MS = 20000;
 
 // Map Discord's recurrence rule to a display label + a roll-forward interval
 // (days) the dashboard uses to keep weekly events from going stale. Only the
@@ -68,6 +69,9 @@ export function createEventsSync({ client, guildId, webhookUrl, webhookSecret, l
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-webhook-secret': webhookSecret },
       body: JSON.stringify({ type: 'events_sync', metadata: { events } }),
+      // undici has no default timeout: a stalled socket would otherwise hold
+      // this loop open forever (and block the next tick).
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');

@@ -77,6 +77,20 @@ function distances(row) {
 }
 const sumStats = (rows, key) => rows.reduce((t, r) => t + num(r[key]), 0);
 
+// Catches, summed from a viking's per-species fish breakdown in gs_stats — there
+// is no dedicated column. Mirrors fishCount() in lib/milestones.ts, including
+// its fallback for a bare `{ prefabId: count }` map.
+function fishCount(row) {
+  const list = row?.gs_stats?.fish;
+  if (Array.isArray(list)) {
+    return list.reduce((t, f) => t + (f && typeof f === 'object' ? num(f.count) : 0), 0);
+  }
+  if (list && typeof list === 'object') {
+    return Object.values(list).reduce((t, v) => t + num(v), 0);
+  }
+  return 0;
+}
+
 // Total playtime minutes per character, from sessions — mirrors
 // lib/data.playtimeMinutesByCharacter (open sessions only count for the live,
 // currently-online character; earlier dangling opens are dropped).
@@ -116,6 +130,7 @@ function computeAggregates({ stats, sessions, onlineNames }) {
     resources_total: sumStats(stats, 'resources_harvested'),
     crafts_total: sumStats(stats, 'items_crafted'),
     builds_total: sumStats(stats, 'structures_built'),
+    fish_total: stats.reduce((t, r) => t + fishCount(r), 0),
     playtime_total_hours: playtimeMinutes(sessions, onlineNames) / 60,
     explored_avg_pct: (() => {
       const p = stats.map((r) => r.map_explored_pct).filter((v) => typeof v === 'number' && Number.isFinite(v));

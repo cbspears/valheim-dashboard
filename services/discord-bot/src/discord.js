@@ -2,6 +2,16 @@
 // Two implementations: the real gateway client, and a dry-run console printer.
 import { Client, GatewayIntentBits, Events, Partials } from 'discord.js';
 
+// Discord's hard limits. Anything longer is rejected outright (a 400), which
+// would otherwise stall whichever loop was posting it, so we trim instead.
+const MAX_CONTENT = 2000;
+const MAX_EMBED_DESCRIPTION = 4096;
+
+function clip(s, max) {
+  if (typeof s !== 'string' || s.length <= max) return s;
+  return `${s.slice(0, max - 1)}…`;
+}
+
 /**
  * Connect to Discord and resolve the target channels.
  * @param {object} opts
@@ -32,6 +42,19 @@ export async function createDiscordPoster({ token, channels }) {
     client.once(Events.Error, reject);
   });
 
+  // Gateway flaps used to leave no trace in the journal; these four lines are
+  // the whole post-mortem trail for "the bot went quiet for ten minutes".
+  client.on(Events.ShardDisconnect, (event, id) =>
+    console.warn(`[discord] shard ${id} disconnected (code ${event?.code ?? '?'})`)
+  );
+  client.on(Events.ShardError, (error, id) =>
+    console.error(`[discord] shard ${id} error: ${error?.message ?? error}`)
+  );
+  client.on(Events.ShardReconnecting, (id) => console.warn(`[discord] shard ${id} reconnecting`));
+  client.on(Events.ShardResume, (id, replayed) =>
+    console.log(`[discord] shard ${id} resumed, ${replayed} event(s) replayed`)
+  );
+
   try {
     await client.login(token);
   } catch (err) {
@@ -55,9 +78,14 @@ export async function createDiscordPoster({ token, channels }) {
   const post = async (channelKey, payload) => {
     const ch = resolved[channelKey];
     if (!ch) throw new Error(`unknown channel key "${channelKey}"`);
+    const embeds = (payload.embeds || []).map((e) =>
+      typeof e?.description === 'string' && e.description.length > MAX_EMBED_DESCRIPTION
+        ? { ...e, description: clip(e.description, MAX_EMBED_DESCRIPTION) }
+        : e
+    );
     await ch.send({
-      content: payload.content,
-      embeds: payload.embeds,
+      content: clip(payload.content, MAX_CONTENT),
+      embeds,
       // Only ever ping @everyone when explicitly asked; otherwise suppress all
       // mentions so a stray "@name" in chat can't ping the server.
       allowedMentions: payload.mentionEveryone ? { parse: ['everyone'] } : { parse: [] },

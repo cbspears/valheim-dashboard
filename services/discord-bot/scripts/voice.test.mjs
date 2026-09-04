@@ -3,6 +3,7 @@
 // pool swap. Run:
 //   node scripts/voice.test.mjs   (from services/discord-bot)
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import {
   createVoiceEngine,
   deathTier,
@@ -511,6 +512,46 @@ const firstNames = (rows) => rows.map((r) => r.character_name.split(' ')[0]);
   const dashed = playerVisible.filter((s) => s.includes('—'));
   ok(dashed.length === 0, `no em-dash in player-visible copy, found: ${JSON.stringify(dashed.slice(0, 3))}`);
   ok(QUIET_RECAP_LINES.length >= 3, `the quiet day has more than one variant, got ${QUIET_RECAP_LINES.length}`);
+}
+
+// ── 12. Same rule for the identity + oath replies a newcomer actually reads ──
+// Those two modules build their DM/reply copy inline, so there is nothing to
+// import: scan the sources instead. Comments, journal lines (log.*) and the
+// parser's own dash tokens (the regex classes, the DASH constant, the `lead`
+// comparisons) are developer-facing, not player-visible.
+{
+  const isNotPlayerCopy = (line) =>
+    /^\s*(\/\/|\*|\/\*)/.test(line) ||                       // comment line
+    /log\.(info|warn|error)\?\./.test(line) ||               // journal copy
+    /\.match\(|\.replace\(|RegExp|const DASH|lead ===/.test(line); // parser tokens
+
+  const offenders = [];
+  for (const file of ['identity.js', 'oaths.js']) {
+    const src = readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+    src.split('\n').forEach((raw, i) => {
+      if (isNotPlayerCopy(raw)) return;
+      const code = raw.replace(/(^|[^:])\/\/.*$/, '$1'); // drop trailing comments
+      if (/[—–]/.test(code)) offenders.push(`${file}:${i + 1}: ${code.trim()}`);
+    });
+  }
+  ok(offenders.length === 0,
+    `no em/en dash in identity + oath reply copy, found: ${JSON.stringify(offenders.slice(0, 3))}`);
+}
+
+// ── 13. The boss embed's war party credits FIGHTERS, not bystanders ─────────
+// Mirrors recap.js: fight_stats.fighters wins, players_present is the fallback
+// for legacy rows recorded before fighters were captured.
+{
+  const party = (boss) =>
+    formatBossKill(boss).embeds[0].fields.find((f) => f.name.includes('War party'))?.value ?? null;
+
+  ok(party({ name: 'Bonemass', biome: 'Swamp', players_present: ['Bren', 'Steve', 'Lurker'], fight_stats: { fighters: ['Bren', 'Steve'] } })
+    === 'Bren, Steve', 'fighters win over players_present');
+  ok(party({ name: 'Bonemass', biome: 'Swamp', players_present: ['Bren', 'Steve'], fight_stats: { fighters: [] } })
+    === 'Bren, Steve', 'an empty fighters list falls back to players_present');
+  ok(party({ name: 'Bonemass', biome: 'Swamp', players_present: ['Bren'] }) === 'Bren',
+    'a legacy row with no fight_stats still names the party');
+  ok(party({ name: 'Bonemass', biome: 'Swamp' }) === null, 'no names, no war party field');
 }
 
 console.log(`voice.test: ${passed} assertions passed`);

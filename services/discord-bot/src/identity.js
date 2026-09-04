@@ -217,7 +217,7 @@ export function createIdentityLink({ client, log = console }) {
           `That links your Discord to your viking and leaves your oath exactly as it stands. No second ceremony. ` +
           `The rune fades in 20 minutes. Ask again if it does.`
         : `Carve this rune and **shout** it in-game. Open chat and type it exactly like this, starting with \`/s\`:\n` +
-          `\`/s /oath ${res.code} — your vow, one line\`\n\n` +
+          `\`/s /oath ${res.code} your vow, one line\`\n\n` +
           `The \`/s\` is what makes it a shout. A plain chat line never leaves the campfire, so the Hall will not hear it.\n` +
           `Whatever viking you are playing when you swear it becomes yours, bound to this voice in the Hall. ` +
           `The rune fades in 20 minutes. Ask again if it does.`;

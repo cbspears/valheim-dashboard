@@ -6,7 +6,7 @@
 // endpoint (~every 10 min), compares each viking's computed title to the one the
 // hall currently knows them by (players.current_title), and when it CHANGES:
 //   • records it — players.current_title + title_updated_at + a title_history row,
-//   • proclaims it in #server (one in-tone line, no @everyone),
+//   • proclaims it in TITLE_CHANNEL (default #server, one in-tone line, no @everyone),
 //   • and queues an in-game voice line for Eilif to speak center-screen (the same
 //     voice_lines queue the Companion plugin already polls).
 //
@@ -29,6 +29,10 @@
 
 const firstName = (s) => String(s || '').trim().split(/\s+/)[0] || 'viking';
 
+// undici has no default timeout, so a stalled dashboard socket would hold this
+// loop open indefinitely and block the next tick.
+const FETCH_TIMEOUT_MS = 20000;
+
 // Postgres "column does not exist" (registry not migrated yet).
 function isMissingColumn(error) {
   if (!error) return false;
@@ -43,12 +47,19 @@ export function createTitlesAnnouncer({
   apiUrl,
   log = console,
   dryRun = false,
+  // Where proclamations go. 'server' is the historical (and pilot) behaviour;
+  // index.js reads TITLE_CHANNEL, whose launch value is 'valheim' if titles
+  // should follow deeds/oaths/recaps out of #server.
+  channel = 'server',
 }) {
   let warnedMissing = false;
   let warnedNoWrite = false;
 
   async function fetchComputed() {
-    const res = await fetch(apiUrl, { headers: { accept: 'application/json' } });
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) throw new Error(`GET ${apiUrl} -> ${res.status}`);
     const body = await res.json();
     const players = Array.isArray(body?.players) ? body.players : [];
@@ -69,12 +80,12 @@ export function createTitlesAnnouncer({
       log.info?.(`[titles] (dry) would announce: ${name} -> "${title}"`);
       return;
     }
-    // Proclaim in #server, then let Eilif speak it in-game. Neither failure
-    // should block the registry write below (handled by the caller's try).
+    // Proclaim in the title channel, then let Eilif speak it in-game. Neither
+    // failure should block the registry write below (the caller's try).
     try {
-      await post('server', { content: line });
+      await post(channel, { content: line });
     } catch (e) {
-      log.error?.(`[titles] #server post failed for ${name}: ${e.message}`);
+      log.error?.(`[titles] #${channel} post failed for ${name}: ${e.message}`);
     }
     try {
       const { error: vErr } = await writeDb.from('voice_lines').insert({

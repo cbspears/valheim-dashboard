@@ -1,13 +1,13 @@
 # Eilif Discord Bot
 
-Posts Valheim server activity to Discord and runs daily recaps. Reads from the same Supabase the
+Posts Valheim server activity to Discord and runs the nightly recap. Reads from the same Supabase the
 dashboard uses; the SFTP log poller (and later the DiscordConnector mod) feed events in.
 
 ## Channel routing
 | Channel | Posts | @everyone? |
 |---------|-------|-----------|
 | **#server** (`CHANNEL_SERVER`) | joins, leaves, deaths, raids — compact activity feed | no |
-| **#valheim** (`CHANNEL_VALHEIM`) | **first** boss kills, two daily recaps, manual announcements | boss kills ✅, announcements ✅, recaps ❌ |
+| **#valheim** (`CHANNEL_VALHEIM`) | **first** boss kills, the nightly recap, manual announcements | boss kills ✅, announcements ✅, recaps ❌ |
 
 A boss is announced only the **first** time it's felled (tracked in `state.json`). Already-killed
 bosses are seeded on first run so nothing is retro-announced.
@@ -20,13 +20,21 @@ npm install
 cp .env.example .env  # fill DISCORD_TOKEN + Supabase keys
 ```
 The bot must be **invited** to the server first (View Channels, Send Messages, Embed Links,
-Mention Everyone). Intents: Guilds only — no privileged intents needed.
+Mention Everyone). Intents (all non-privileged, declared in `src/discord.js`): **Guilds**,
+**GuildScheduledEvents** (the events sync), **GuildMessages** (gallery/oath/identity/`say:` ingest via
+@mentions) and **GuildMessageReactions** (the 🗑️ gallery trash react).
 
 ## Run
 ```bash
 npm start              # live
 npm run dry-run        # no Discord login; prints what it WOULD post (validates formatting)
+npm test               # voice + titles + milestones unit tests (no network)
 ```
+
+> ⚠️ **`npm run dry-run` is the only safe preview.** It never logs in to Discord and never writes
+> (reads Supabase, prints to the console). `scripts/preview.js` and `scripts/preview-recap-live.js`
+> log in and **POST live to #server** — they are demo tools for a channel you don't mind writing to,
+> not dry runs. `scripts/announce.js` and `scripts/mark-boss.js` also write for real.
 
 ## Operator scripts
 ```bash
@@ -39,10 +47,12 @@ node scripts/mark-boss.js "Bonemass" "Bjorn Ironside,Astrid Shieldmaiden" "Took 
 ```
 There are **no slash commands** by design — boss kills are marked with the script above.
 
-## Daily recaps
-Two cron jobs (08:00 and 22:00 `America/Chicago`) post an activity embed to #valheim: vikings
-active, hours logged, deaths, boss kills, who's online, and the world day — over the window since
-the last recap.
+## Daily recap
+**One** cron job (23:00 `America/Chicago` by default; `RECAP_EVENING_HOUR` moves the hour) posts an
+activity embed to `RECAP_CHANNEL` (default #valheim): vikings active, hours logged, deaths, boss
+kills, who's online, the world day, the day boards and the Player of the Day — over the trailing 24
+hours. The old 08:00 morning recap is retired; `postRecap('morning')` still exists for previews.
+Recaps stay silent until `RECAPS_START`.
 
 ## The Oath ingest (`OATH_INGEST=1`, off by default)
 When enabled, the bot records **oaths** posted in Discord that @mention it onto the dashboard's
@@ -109,15 +119,20 @@ below the gap, or the loop — not the gap — paces the drain). Nothing is ever
 thresholds' job. Channel: `MILESTONE_CHANNEL` (default `valheim`).
 
 **Titles**: the loop polls `/api/titles` and, whenever a viking's computed title **changes**, posts a
-⚔️ line to #server and queues the matching voice line — no rate limiting, the API's hysteresis makes
-changes rare. A viking's first-ever title is recorded silently.
+⚔️ line to `TITLE_CHANNEL` (default `server`, i.e. unchanged) and queues the matching voice line — no
+rate limiting, the API's hysteresis makes changes rare. A viking's first-ever title is recorded
+silently. Set `TITLE_CHANNEL=valheim` at launch if titles should follow deeds/oaths/recaps.
 
-**Puppet mode:** a member with **Administrator** permission can say `@Eilif say: <line>` to queue a
-`manual` line (reacts **🗣️**). Non-admins are ignored silently; ordinary oath/bio/role messages pass
-straight through to the oath ingest.
+**Puppet mode:** a member with **Administrator** or **Manage Server**, or any role id listed in
+`ADMIN_ROLE_IDS`, can say `@Eilif say: <line>` to queue a `manual` line (reacts **🗣️**). Anyone else
+gets a one-line `(admins only)` reply; ordinary oath/bio/role messages pass straight through to the
+oath ingest untouched.
 
-**Housekeeping:** queued-but-unspoken lines older than 24h are marked spoken on each tick, so stale
-ambience can't flood the hall when the server comes back. Needs `SUPABASE_SERVICE_ROLE_KEY`.
+**Housekeeping:** queued-but-unspoken lines are marked **`expired`** (status `expired`, `spoken_at`
+left NULL, so an unspoken line can never look delivered) after **24h** — except the POTY coronation,
+which says "tonight" and expires after **3h**. This runs on its own 5-minute timer, independent of
+the voice tick and of anyone being online. `GET /api/voice` only ever serves `status='queued'`, so
+the in-game side is unaffected. Needs `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## Run as a service
 ```bash
@@ -139,6 +154,9 @@ journalctl -u eilif-discord-bot -f
 | `VOICE_MIN_GAP_MS` | min quiet before an **ambient** line (default `1800000` = 30 min; 0 disables). Dawn/event lines ignore it |
 | `MILESTONE_MIN_GAP_MS` | quiet between two Great Deed announcements (default `60000` = 1 min) |
 | `MILESTONES_INTERVAL_MS` | how often the deed announcer polls (keep ≤ the gap; live `.env` is `60000`) |
+| `TITLE_CHANNEL` | where title proclamations go: `server` (default, unchanged behaviour) or `valheim` |
+| `ADMIN_ROLE_IDS` | comma-separated role ids allowed to use `@Eilif say:` on top of Administrator / Manage Server |
+| `RECAP_EVENING_HOUR` | hour of the nightly recap, local `TZ` (default `23`) |
 | `TZ` | recap timezone (`America/Chicago`) |
 
 Full annotated list: `.env.example`.

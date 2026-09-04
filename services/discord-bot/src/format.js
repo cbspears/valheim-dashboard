@@ -269,15 +269,17 @@ export function formatFeedEvent(event) {
   const meta = event.metadata || {};
   switch (event.type) {
     case 'join':
-      return { content: `🛡️ **${name}** entered the realm` };
+      return { content: `🛡️ **${nameMd(name)}** entered the realm` };
     case 'leave':
-      return { content: `🚪 **${name}** left the realm` };
+      return { content: `🚪 **${nameMd(name)}** left the realm` };
     case 'death': {
       const cause = str(meta, 'cause');
       return { content: `💀 ${buildDeathMessage(`**${nameMd(name)}**`, cause)}` };
     }
     case 'raid':
-      return { content: `⚔️ ${str(meta, 'event') || 'A raid has begun'}` };
+      // No name in a raid line, but the label is free text from the log, so it
+      // gets the same markdown escaping (without the 24-char name cap).
+      return { content: `⚔️ ${escapeMd(str(meta, 'event') || 'A raid has begun')}` };
     default:
       return null; // chat / boss / sync / anything else: not for the feed
   }
@@ -286,8 +288,18 @@ export function formatFeedEvent(event) {
 /** Big @everyone embed for #valheim when a boss is felled for the first time. */
 export function formatBossKill(boss) {
   const fields = [];
-  if (Array.isArray(boss.players_present) && boss.players_present.length > 0) {
-    fields.push({ name: '⚔️ War party', value: boss.players_present.join(', ') });
+  // The war party is who actually FOUGHT (fight_stats.fighters), mirroring
+  // recap.js and the skald; players_present is the fallback for legacy rows
+  // recorded before fighters were captured, and can name bystanders.
+  const warParty =
+    boss.fight_stats && Array.isArray(boss.fight_stats.fighters) && boss.fight_stats.fighters.length > 0
+      ? boss.fight_stats.fighters
+      : Array.isArray(boss.players_present)
+        ? boss.players_present
+        : [];
+  const names = warParty.map((n) => String(n || '').trim()).filter(Boolean);
+  if (names.length > 0) {
+    fields.push({ name: '⚔️ War party', value: names.join(', ') });
   }
   if (boss.notes) {
     fields.push({ name: '📜 Notes', value: boss.notes });
