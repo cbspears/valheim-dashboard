@@ -22,6 +22,7 @@
 
 import { getPlayersWithStats, getMilestones } from '@/lib/data';
 import { safeEqual } from '@/lib/ops/auth';
+import { recordRouteHeartbeat } from '@/lib/ops/route-heartbeat';
 import { buildBoards, buildLeaders, type BoardPlayer, type Boards, type DeedsSummary, type Leaders } from '@/lib/boards';
 
 export const dynamic = 'force-dynamic';
@@ -104,6 +105,16 @@ export async function GET(request: Request) {
   if (!provided || !safeEqual(provided, expected)) {
     return Response.json({ error: 'unauthorized' }, { status: 401, headers: NO_STORE });
   }
+
+  // ---- 1b. Liveness for the in-game signs ---------------------------------
+  // The Boards plugin cannot heartbeat for itself, but an AUTHED poll is proof it
+  // is running and still holds the token — the one thing that goes silently wrong
+  // (a 401 after a rotation logs once to LogOutput.log and leaves stale numbers on
+  // the signs forever). Recorded only after the token check, throttled to once a
+  // minute per instance, and never allowed to fail the response. Awaited rather
+  // than fire-and-forget: a serverless invocation can be frozen the moment the
+  // response returns, and a dropped write would read as "the signs are dead".
+  await recordRouteHeartbeat('boards-plugin');
 
   // ---- 2. Serve from cache unless asked for a fresh read -------------------
   const fresh = new URL(request.url).searchParams.get('fresh') === '1';

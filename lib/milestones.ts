@@ -60,6 +60,25 @@ export interface AggregateInput {
   sessions: GameSession[];
   /** character_names currently online — decides which open session counts live. */
   onlineNames: ReadonlySet<string>;
+  /**
+   * DISTINCT Forsaken felled — `count(*) from bosses where is_killed`.
+   *
+   * The collective deed is "the Forsaken felled, one by one" (boss-half at 4,
+   * boss-all at 8), i.e. a count of the EIGHT bosses. It used to be derived by
+   * summing player_stats.boss_kills, which is GsValheimStatsClient's cumulative
+   * per-player `bossKills` counter — a completely different quantity:
+   *   • it counts REPEAT kills (re-summoning Eikthyr or The Elder for antlers,
+   *     trophies and forsaken powers is routine, and each one increments it), and
+   *   • it counts PER PLAYER, so one boss felled by five vikings could add five.
+   * Either way the ladder could read 8 with three bosses standing. bosses.is_killed
+   * is the authoritative flip (written by the server milestone payload), so this
+   * reads that instead.
+   *
+   * Optional so a caller that has not fetched the bosses table simply scores 0
+   * rather than silently reviving the old sum. Per-viking boss feats still read
+   * player_stats.boss_kills — this changes only the collective count.
+   */
+  bossesKilled?: number;
 }
 
 function num(v: unknown): number {
@@ -150,7 +169,7 @@ export const METRICS: Record<string, (a: AggregateInput) => number> = {
   // Straight sums over the player_stats cumulative columns.
   deaths_total: (a) => sumStats(a.stats, 'deaths'),
   kills_total: (a) => sumStats(a.stats, 'kills'),
-  boss_kills_total: (a) => sumStats(a.stats, 'boss_kills'),
+  boss_kills_total: (a) => num(a.bossesKilled), // distinct bosses felled — NOT sum(player_stats.boss_kills)
   damage_total: (a) => sumStats(a.stats, 'damage_dealt'),
   resources_total: (a) => sumStats(a.stats, 'resources_harvested'),
   crafts_total: (a) => sumStats(a.stats, 'items_crafted'),
@@ -396,10 +415,12 @@ export async function evaluateAndRecord(
   if (defs.length === 0) return { crossed: 0 }; // all earned — nothing to do
 
   // 2. One batch of reads → the aggregate map.
-  const [statsRes, sessionsRes, onlineRes] = await Promise.all([
+  const [statsRes, sessionsRes, onlineRes, bossesRes] = await Promise.all([
     client.from('player_stats').select('*'),
     client.from('sessions').select('*'),
     client.from('players').select('character_name, is_online'),
+    // The authoritative "which Forsaken are down" — see AggregateInput.bossesKilled.
+    client.from('bosses').select('is_killed'),
   ]);
   const stats = (statsRes.data ?? []) as Record<string, unknown>[];
   const sessions = (sessionsRes.data ?? []) as GameSession[];
@@ -408,8 +429,11 @@ export async function evaluateAndRecord(
       .filter((p) => p.is_online && p.character_name)
       .map((p) => p.character_name),
   );
+  const bossesKilled = ((bossesRes.data ?? []) as { is_killed?: unknown }[]).filter(
+    (b) => b.is_killed === true,
+  ).length;
 
-  const aggregates = computeAggregates({ stats, sessions, onlineNames });
+  const aggregates = computeAggregates({ stats, sessions, onlineNames, bossesKilled });
   const crossed = evaluateMilestones(defs, aggregates);
   if (crossed.length === 0) return { crossed: 0 };
 

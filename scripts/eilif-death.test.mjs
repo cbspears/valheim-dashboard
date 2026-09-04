@@ -195,9 +195,97 @@ assert.ok(!('pos' in parseEilifDeath({ ...goodBody, pos: { x: 'nope', z: 3 } }).
 //   insert(row|row[])                            → appended
 //   update({metadata}).eq('id', …)               → patched in place
 //   delete().eq…is()                             → removed
+//   rpc('ingest_death', …)                       → see makeIngestDeathRpc
 // Filters accumulate into a predicate list, so a query with a filter the real
 // code stops applying would show up as extra rows rather than pass silently.
-function makeDb(state) {
+//
+// TWO MODES, and every dedupe case below runs in BOTH (see runDedupeSuite):
+//   'rpc'     — db/2026-09-04_ingest_death.sql IS applied: the atomic function
+//               answers, and lib/deaths.ts takes the rpc path.
+//   'missing' — the migration is NOT applied yet: every rpc comes back 42883
+//               (undefined_function) and lib/deaths.ts must fall back to the old
+//               select-then-insert path and behave EXACTLY as it does today.
+// That pairing is the deploy-safety contract: the code can ship before or after
+// the migration and neither order loses a death.
+/**
+ * An in-memory stand-in for the Postgres function db/2026-09-04_ingest_death.sql
+ * defines, mirroring its logic statement for statement (the ±3-min window, the
+ * causeSource=\'eilif\' exclusion, the nearest-in-time pick, the metadata patch
+ * that never touches `source`, and the gs 1:1 pairing that stamps gsDeathId onto
+ * the eilif row it consumed).
+ *
+ * It runs to completion without awaiting anything, which is exactly the property
+ * pg_advisory_xact_lock buys in the real thing: two reports of one death can
+ * never interleave their check and their write. The concurrency case below leans
+ * on that.
+ */
+function makeIngestDeathRpc(state) {
+  const WINDOW_MS = 3 * 60_000;
+  const deathRows = () => state.events.filter((e) => e.type === 'death');
+  const meta = (r) => r.metadata ?? {};
+  const nearest = (rows, at) =>
+    [...rows].sort((a, b) => Math.abs(Date.parse(a.created_at) - at) - Math.abs(Date.parse(b.created_at) - at))[0];
+
+  return ({ p_name, p_player_id, p_at, p_metadata, p_mode }) => {
+    const m = p_metadata ?? {};
+    const at = Date.parse(p_at);
+    if (!p_name || !p_name.trim() || Number.isNaN(at)) return { data: 'ignored', error: null };
+
+    const inWindow = deathRows().filter(
+      (r) => r.character_name === p_name && Math.abs(Date.parse(r.created_at) - at) <= WINDOW_MS,
+    );
+
+    if (p_mode === 'eilif') {
+      if (m.eilifDeathId && deathRows().some((r) => meta(r).eilifDeathId === m.eilifDeathId)) {
+        return { data: 'duplicate', error: null };
+      }
+      const candidate = nearest(inWindow.filter((r) => meta(r).causeSource !== 'eilif'), at);
+      if (candidate) {
+        candidate.metadata ??= {};
+        for (const k of ['eilifDeathId', 'causeSource', 'cause', 'hitType', 'attacker', 'biome']) {
+          if (m[k] != null) candidate.metadata[k] = m[k];
+        }
+        return { data: 'upgraded', error: null };
+      }
+      if (!p_player_id) return { data: 'ignored', error: null };
+      state.events.push({
+        id: `rpc-${state.events.length}`,
+        type: 'death',
+        player_id: p_player_id,
+        character_name: p_name,
+        metadata: { ...m },
+        created_at: p_at,
+      });
+      return { data: 'inserted', error: null };
+    }
+
+    if (p_mode !== 'gs') return { data: 'ignored', error: null };
+    if (m.gsDeathId && deathRows().some((r) => meta(r).gsDeathId === m.gsDeathId)) {
+      return { data: 'duplicate', error: null };
+    }
+    // An UNPAIRED eilif row in the window is this same death.
+    const twin = nearest(
+      inWindow.filter((r) => meta(r).causeSource === 'eilif' && meta(r).gsDeathId == null),
+      at,
+    );
+    if (twin) {
+      if (m.gsDeathId) (twin.metadata ??= {}).gsDeathId = m.gsDeathId;
+      return { data: 'dropped', error: null };
+    }
+    if (!p_player_id) return { data: 'ignored', error: null };
+    state.events.push({
+      id: `rpc-${state.events.length}`,
+      type: 'death',
+      player_id: p_player_id,
+      character_name: p_name,
+      metadata: { ...m },
+      created_at: p_at,
+    });
+    return { data: 'inserted', error: null };
+  };
+}
+
+function makeDb(state, mode = 'rpc') {
   let nextId = 1000;
 
   /** PostgREST's `metadata->>key` addressing, plus plain columns. */
@@ -206,12 +294,16 @@ function makeDb(state) {
       ? ((row.metadata ?? {})[col.slice('metadata->>'.length)] ?? null)
       : (row[col] ?? null);
 
-  /** Chainable filter builder shared by select / update / delete. */
-  function filters(onResolve) {
+  // Chainable filter builder shared by select / update / delete. The TABLE is
+  // captured per query (not read off a shared "current table" slot at resolve
+  // time) — the concurrency cases below run two ingests through this stub at
+  // once, and a shared slot would silently answer one query from the other
+  // query's table.
+  function filters(table, onResolve) {
     const preds = [];
     let orderCol = null;
     const matching = () => {
-      let out = state.__table.filter((r) => preds.every((p) => p(r)));
+      let out = state[table].filter((r) => preds.every((p) => p(r)));
       if (orderCol) out = [...out].sort((a, b) => String(a[orderCol]).localeCompare(String(b[orderCol])));
       return out;
     };
@@ -229,28 +321,38 @@ function makeDb(state) {
     return b;
   }
 
+  const ingestDeath = makeIngestDeathRpc(state);
+
   return {
     state,
+    mode,
+    async rpc(fn, args) {
+      if (mode === 'missing') {
+        // Exactly what Postgres/PostgREST answer when the function isn't there.
+        return { data: null, error: { code: '42883', message: `function public.${fn}(...) does not exist` } };
+      }
+      if (fn !== 'ingest_death') throw new Error(`unexpected rpc ${fn}`);
+      state.rpcCalls = (state.rpcCalls ?? 0) + 1;
+      return ingestDeath(args);
+    },
     from(table) {
       state[table] ??= [];
-      state.__table = state[table];
       return {
-        select: () => filters((rows) => ({ data: rows.map((r) => ({ ...r })), error: null })),
+        select: () => filters(table, (rows) => ({ data: rows.map((r) => ({ ...r })), error: null })),
         insert(row) {
           for (const r of Array.isArray(row) ? row : [row]) state[table].push({ id: `id-${nextId++}`, ...r });
           return Promise.resolve({ data: null, error: null });
         },
         update(patch) {
-          return filters((rows) => {
+          return filters(table, (rows) => {
             for (const r of rows) Object.assign(r, patch);
             return { data: rows.map((r) => ({ ...r })), error: null };
           });
         },
         delete() {
-          return filters((rows) => {
+          return filters(table, (rows) => {
             const doomed = new Set(rows);
             state[table] = state[table].filter((r) => !doomed.has(r));
-            state.__table = state[table];
             return { data: null, error: null };
           });
         },
@@ -270,150 +372,273 @@ const gsDeathEvents = [{ playerName: 'Testman', killer: 'enemyhit', biome: 'Mead
 const freshState = () => ({ events: [], players: [{ id: 'p1', character_name: 'Testman' }] });
 const deaths = (db) => db.state.events.filter((e) => e.type === 'death');
 
-// ── 5. plain insert (nothing else has reported this death) ──────────────────
-{
-  const db = makeDb(freshState());
-  const r = await ingestEilifDeath(db, eilifBody);
-  assert.equal(r.status, 'inserted');
-  assert.equal(r.cause, 'burning');
-  assert.equal(deaths(db).length, 1, 'exactly one death row');
-  const row = deaths(db)[0];
-  assert.equal(row.player_id, 'p1');
-  assert.equal(row.character_name, 'Testman');
-  assert.equal(row.metadata.cause, 'burning');
-  assert.equal(row.metadata.hitType, 'Burning');
-  assert.equal(row.metadata.causeSource, EILIF_CAUSE_SOURCE);
-  assert.equal(row.created_at, T);
+// ── 5-14. cross-producer dedupe, run TWICE ──────────────────────────────────
+//
+// Once with the atomic function in place ('rpc') and once with it missing
+// ('missing', every call answering 42883). Identical assertions both times: that
+// is the whole deploy-safety claim — lib/deaths.ts may ship before or after
+// db/2026-09-04_ingest_death.sql and neither order changes what lands in
+// `events`. The rpc mode additionally CANNOT race; the fallback mode can, which
+// is exactly why the migration exists (see the concurrency case afterwards).
+async function runDedupeSuite(mode) {
+  // ── 5. plain insert (nothing else has reported this death) ──────────────────
+  {
+    const db = makeDb(freshState(), mode);
+    const r = await ingestEilifDeath(db, eilifBody);
+    assert.equal(r.status, 'inserted');
+    assert.equal(r.cause, 'burning');
+    assert.equal(deaths(db).length, 1, 'exactly one death row');
+    const row = deaths(db)[0];
+    assert.equal(row.player_id, 'p1');
+    assert.equal(row.character_name, 'Testman');
+    assert.equal(row.metadata.cause, 'burning');
+    assert.equal(row.metadata.hitType, 'Burning');
+    assert.equal(row.metadata.causeSource, EILIF_CAUSE_SOURCE);
+    assert.equal(row.created_at, T);
+  }
+
+  // ── 6. idempotent: the same report twice is one row ─────────────────────────
+  {
+    const db = makeDb(freshState(), mode);
+    await ingestEilifDeath(db, eilifBody);
+    const again = await ingestEilifDeath(db, eilifBody);
+    assert.equal(again.status, 'duplicate');
+    assert.equal(deaths(db).length, 1, 'a retried report never adds a second row');
+  }
+
+  // ── 7. ORDER A — gs first, eilif second: the gs row is UPGRADED in place ────
+  // This is the headline case: gs already wrote "enemyhit" (its flat catch-all for
+  // a campfire), then our plugin's real cause arrives and must replace it WITHOUT
+  // creating a second death.
+  {
+    const db = makeDb(freshState(), mode);
+    await ingestDeathEvents(db, gsDeathEvents, 'Testman');
+    assert.equal(deaths(db).length, 1, 'gs wrote its row');
+    assert.equal(deaths(db)[0].metadata.cause, 'enemyhit', 'and it is the useless generic cause');
+
+    const r = await ingestEilifDeath(db, eilifBody);
+    assert.equal(r.status, 'upgraded', 'the eilif report upgrades rather than inserts');
+    assert.equal(deaths(db).length, 1, 'STILL exactly one death — never double-counted');
+    const row = deaths(db)[0];
+    assert.equal(row.metadata.cause, 'burning', 'the cause now comes from the eilif report');
+    assert.equal(row.metadata.hitType, 'Burning');
+    assert.equal(row.metadata.causeSource, EILIF_CAUSE_SOURCE);
+    assert.equal(row.metadata.source, 'gs', 'who CREATED the row is preserved');
+    assert.equal(row.metadata.gsDeathId, `Testman|${gsTs}`, 'gs dedupe key preserved');
+    assert.equal(row.metadata.lifeSec, 900, 'gs-only detail preserved');
+    assert.equal(describeDeath(row.character_name, row.metadata.cause), 'Testman was lost to the flames');
+  }
+
+  // ── 8. ORDER B — eilif first, gs second: the later gs death is DROPPED ──────
+  {
+    const db = makeDb(freshState(), mode);
+    await ingestEilifDeath(db, eilifBody);
+    assert.equal(deaths(db).length, 1);
+
+    await ingestDeathEvents(db, gsDeathEvents, 'Testman');
+    assert.equal(deaths(db).length, 1, 'the gs report did NOT add a second death');
+    assert.equal(deaths(db)[0].metadata.cause, 'burning', 'the eilif cause still stands');
+    assert.equal(deaths(db)[0].metadata.causeSource, EILIF_CAUSE_SOURCE);
+
+    // And re-POSTing the cumulative gs snapshot (every ~120 s) stays a no-op.
+    await ingestDeathEvents(db, gsDeathEvents, 'Testman');
+    assert.equal(deaths(db).length, 1, 'the cumulative gs re-POST is still a no-op');
+  }
+
+  // ── 9. a causeless POLLER row is upgraded, not duplicated ───────────────────
+  {
+    const db = makeDb(freshState(), mode);
+    db.state.events.push({
+      id: 'poller-1', type: 'death', player_id: 'p1', character_name: 'Testman',
+      metadata: {}, created_at: '2026-08-22T21:01:10.000Z',
+    });
+    const r = await ingestEilifDeath(db, eilifBody);
+    assert.equal(r.status, 'upgraded');
+    assert.equal(deaths(db).length, 1, 'the poller row was upgraded, not joined by a second');
+    const row = deaths(db)[0];
+    assert.equal(row.id, 'poller-1');
+    assert.equal(row.metadata.cause, 'burning');
+    assert.equal(row.metadata.causeSource, EILIF_CAUSE_SOURCE);
+    assert.ok(!('source' in row.metadata), 'a poller row gains no creator it never had');
+  }
+
+  // ── 10. a genuinely SEPARATE death (outside the window) is its own row ──────
+  // The dedupe must not be so eager that a second death minutes later vanishes.
+  {
+    const db = makeDb(freshState(), mode);
+    await ingestEilifDeath(db, eilifBody);
+    const later = new Date(Date.parse(T) + DEDUPE_WINDOW_MS + 60_000).toISOString();
+    const r = await ingestEilifDeath(db, { ...eilifBody, tsUtc: later, hitType: 'Drowning' });
+    assert.equal(r.status, 'inserted');
+    assert.equal(deaths(db).length, 2, 'two real deaths, two rows');
+    assert.deepEqual(deaths(db).map((e) => e.metadata.cause).sort(), ['burning', 'drowning']);
+  }
+
+  // ── 11. a gs death for ANOTHER viking is untouched by our eilif row ─────────
+  {
+    const db = makeDb(freshState(), mode);
+    db.state.players.push({ id: 'p2', character_name: 'Bjorn' });
+    await ingestEilifDeath(db, eilifBody);
+    await ingestDeathEvents(db, [{ playerName: 'Bjorn', killer: '$enemy_serpent', tsUtc: gsTs }], 'Bjorn');
+    assert.equal(deaths(db).length, 2, 'different vikings never collapse into each other');
+    const bjorn = deaths(db).find((e) => e.character_name === 'Bjorn');
+    assert.equal(bjorn.metadata.cause, 'Serpent', 'and gs killers still humanize');
+  }
+
+  // ── 12. no players row yet → nothing is written (self-heals next cycle) ─────
+  {
+    const db = makeDb({ events: [], players: [] }, mode);
+    const r = await ingestEilifDeath(db, eilifBody);
+    assert.equal(r.ok, false);
+    assert.equal(r.status, 'ignored');
+    assert.match(r.reason, /players row/);
+    assert.equal(deaths(db).length, 0, 'never auto-create a player from a client payload');
+  }
+
+  // ── 13. a junk payload writes nothing and claims no precedence ──────────────
+  {
+    const db = makeDb(freshState(), mode);
+    const r = await ingestEilifDeath(db, { ...eilifBody, hitType: 'Sharknado' });
+    assert.equal(r.ok, false);
+    assert.equal(r.status, 'ignored');
+    assert.equal(deaths(db).length, 0);
+
+    // Crucially: the gs report for that same death still lands, so an unknown
+    // HitType degrades to today's behaviour instead of losing the death entirely.
+    await ingestDeathEvents(db, gsDeathEvents, 'Testman');
+    assert.equal(deaths(db).length, 1, 'the gs death is NOT suppressed by a rejected eilif report');
+    assert.equal(deaths(db)[0].metadata.cause, 'enemyhit');
+  }
+
+  // ── 14. gs path regressions (it moved file, it must still behave) ──────────
+  {
+    const db = makeDb(freshState(), mode);
+    // A client may only report its OWN deaths.
+    await ingestDeathEvents(db, [{ playerName: 'SomeoneElse', killer: 'Troll', tsUtc: gsTs }], 'Testman');
+    assert.equal(deaths(db).length, 0, 'a reporter cannot author another viking\'s death');
+
+    // Duplicates within one payload collapse.
+    await ingestDeathEvents(db, [gsDeathEvents[0], gsDeathEvents[0]], 'Testman');
+    assert.equal(deaths(db).length, 1, 'same gsDeathId twice in one payload → one row');
+
+    // Non-array / empty input is a silent no-op.
+    await ingestDeathEvents(db, null, 'Testman');
+    await ingestDeathEvents(db, [], 'Testman');
+    assert.equal(deaths(db).length, 1);
+  }
 }
 
-// ── 6. idempotent: the same report twice is one row ─────────────────────────
+for (const mode of ['rpc', 'missing']) {
+  await runDedupeSuite(mode);
+}
+
+// ── 15. THE RACE, and the lock that closes it ───────────────────────────────
+//
+// Both client mods Harmony-patch Player.OnDeath and POST immediately, so the two
+// reports of ONE death land within milliseconds — the interleaving that put four
+// duplicate ChÆrleif rows in prod (2026-08-28 02:44:21.895/.899, 09-01
+// 01:32:41.104/.114, 01:44:00.475/.476, 01:52:45.438/.441).
+//
+// With the function applied, each report's check-and-write is one indivisible
+// call (pg_advisory_xact_lock in the real thing; a synchronous body here), so
+// whichever wins the race, the loser SEES its row. Both orders are driven
+// concurrently below and both must collapse to a single death.
 {
-  const db = makeDb(freshState());
+  const db = makeDb(freshState(), 'rpc');
+  await Promise.all([
+    ingestEilifDeath(db, eilifBody),
+    ingestDeathEvents(db, gsDeathEvents, 'Testman'),
+  ]);
+  assert.equal(deaths(db).length, 1, 'simultaneous eilif + gs reports of one death → ONE row');
+  assert.equal(deaths(db)[0].metadata.cause, 'burning', 'and the eilif cause is the one that survives');
+  assert.ok(db.state.rpcCalls > 0, 'the atomic path was actually exercised');
+}
+{
+  // Same, gs first in the microtask queue.
+  const db = makeDb(freshState(), 'rpc');
+  await Promise.all([
+    ingestDeathEvents(db, gsDeathEvents, 'Testman'),
+    ingestEilifDeath(db, eilifBody),
+  ]);
+  assert.equal(deaths(db).length, 1, 'reversed order — still ONE row');
+  assert.equal(deaths(db)[0].metadata.causeSource, EILIF_CAUSE_SOURCE, 'eilif precedence holds either way');
+}
+
+// ── 16. the dropped gs twin is PAIRED, not merely discarded ─────────────────
+// Dropping the gs report stamps its gsDeathId onto the eilif row it matched.
+// Two consequences, both load-bearing: the next ~120 s cumulative re-POST sees
+// the key already recorded and does nothing at all, and the eilif row can never
+// be used to swallow a SECOND gs death (the corpse-run double death).
+{
+  const db = makeDb(freshState(), 'rpc');
   await ingestEilifDeath(db, eilifBody);
-  const again = await ingestEilifDeath(db, eilifBody);
-  assert.equal(again.status, 'duplicate');
-  assert.equal(deaths(db).length, 1, 'a retried report never adds a second row');
-}
-
-// ── 7. ORDER A — gs first, eilif second: the gs row is UPGRADED in place ────
-// This is the headline case: gs already wrote "enemyhit" (its flat catch-all for
-// a campfire), then our plugin's real cause arrives and must replace it WITHOUT
-// creating a second death.
-{
-  const db = makeDb(freshState());
   await ingestDeathEvents(db, gsDeathEvents, 'Testman');
-  assert.equal(deaths(db).length, 1, 'gs wrote its row');
-  assert.equal(deaths(db)[0].metadata.cause, 'enemyhit', 'and it is the useless generic cause');
-
-  const r = await ingestEilifDeath(db, eilifBody);
-  assert.equal(r.status, 'upgraded', 'the eilif report upgrades rather than inserts');
-  assert.equal(deaths(db).length, 1, 'STILL exactly one death — never double-counted');
-  const row = deaths(db)[0];
-  assert.equal(row.metadata.cause, 'burning', 'the cause now comes from the eilif report');
-  assert.equal(row.metadata.hitType, 'Burning');
-  assert.equal(row.metadata.causeSource, EILIF_CAUSE_SOURCE);
-  assert.equal(row.metadata.source, 'gs', 'who CREATED the row is preserved');
-  assert.equal(row.metadata.gsDeathId, `Testman|${gsTs}`, 'gs dedupe key preserved');
-  assert.equal(row.metadata.lifeSec, 900, 'gs-only detail preserved');
-  assert.equal(describeDeath(row.character_name, row.metadata.cause), 'Testman was lost to the flames');
-}
-
-// ── 8. ORDER B — eilif first, gs second: the later gs death is DROPPED ──────
-{
-  const db = makeDb(freshState());
-  await ingestEilifDeath(db, eilifBody);
   assert.equal(deaths(db).length, 1);
+  assert.equal(deaths(db)[0].metadata.gsDeathId, `Testman|${gsTs}`, 'the consumed gs id is recorded on the eilif row');
 
-  await ingestDeathEvents(db, gsDeathEvents, 'Testman');
-  assert.equal(deaths(db).length, 1, 'the gs report did NOT add a second death');
-  assert.equal(deaths(db)[0].metadata.cause, 'burning', 'the eilif cause still stands');
-  assert.equal(deaths(db)[0].metadata.causeSource, EILIF_CAUSE_SOURCE);
-
-  // And re-POSTing the cumulative gs snapshot (every ~120 s) stays a no-op.
-  await ingestDeathEvents(db, gsDeathEvents, 'Testman');
-  assert.equal(deaths(db).length, 1, 'the cumulative gs re-POST is still a no-op');
+  // A genuinely separate death 20 s later, reported only by gs: the already-paired
+  // eilif row must NOT cover it.
+  const secondTs = new Date(Date.parse(gsTs) + 20_000).toISOString();
+  await ingestDeathEvents(db, [{ playerName: 'Testman', killer: '$enemy_troll', tsUtc: secondTs }], 'Testman');
+  assert.equal(deaths(db).length, 2, 'one eilif report covers at most ONE gs death');
+  assert.ok(deaths(db).some((e) => e.metadata.cause === 'Troll'), 'the uncovered gs twin still lands');
 }
 
-// ── 9. a causeless POLLER row is upgraded, not duplicated ───────────────────
+// ── 17. an rpc that fails for a REAL reason still writes the death ──────────
+// 42883 means "migration not applied" and is silent; anything else is a genuine
+// failure that gets logged — but either way the fallback runs, because losing a
+// death is worse than writing it the old way.
 {
-  const db = makeDb(freshState());
-  db.state.events.push({
-    id: 'poller-1', type: 'death', player_id: 'p1', character_name: 'Testman',
-    metadata: {}, created_at: '2026-08-22T21:01:10.000Z',
-  });
+  const db = makeDb(freshState(), 'rpc');
+  db.rpc = async () => ({ data: null, error: { code: '57014', message: 'statement timeout' } });
   const r = await ingestEilifDeath(db, eilifBody);
-  assert.equal(r.status, 'upgraded');
-  assert.equal(deaths(db).length, 1, 'the poller row was upgraded, not joined by a second');
-  const row = deaths(db)[0];
-  assert.equal(row.id, 'poller-1');
-  assert.equal(row.metadata.cause, 'burning');
-  assert.equal(row.metadata.causeSource, EILIF_CAUSE_SOURCE);
-  assert.ok(!('source' in row.metadata), 'a poller row gains no creator it never had');
-}
-
-// ── 10. a genuinely SEPARATE death (outside the window) is its own row ──────
-// The dedupe must not be so eager that a second death minutes later vanishes.
-{
-  const db = makeDb(freshState());
-  await ingestEilifDeath(db, eilifBody);
-  const later = new Date(Date.parse(T) + DEDUPE_WINDOW_MS + 60_000).toISOString();
-  const r = await ingestEilifDeath(db, { ...eilifBody, tsUtc: later, hitType: 'Drowning' });
-  assert.equal(r.status, 'inserted');
-  assert.equal(deaths(db).length, 2, 'two real deaths, two rows');
-  assert.deepEqual(deaths(db).map((e) => e.metadata.cause).sort(), ['burning', 'drowning']);
-}
-
-// ── 11. a gs death for ANOTHER viking is untouched by our eilif row ─────────
-{
-  const db = makeDb(freshState());
-  db.state.players.push({ id: 'p2', character_name: 'Bjorn' });
-  await ingestEilifDeath(db, eilifBody);
-  await ingestDeathEvents(db, [{ playerName: 'Bjorn', killer: '$enemy_serpent', tsUtc: gsTs }], 'Bjorn');
-  assert.equal(deaths(db).length, 2, 'different vikings never collapse into each other');
-  const bjorn = deaths(db).find((e) => e.character_name === 'Bjorn');
-  assert.equal(bjorn.metadata.cause, 'Serpent', 'and gs killers still humanize');
-}
-
-// ── 12. no players row yet → nothing is written (self-heals next cycle) ─────
-{
-  const db = makeDb({ events: [], players: [] });
-  const r = await ingestEilifDeath(db, eilifBody);
-  assert.equal(r.ok, false);
-  assert.equal(r.status, 'ignored');
-  assert.match(r.reason, /players row/);
-  assert.equal(deaths(db).length, 0, 'never auto-create a player from a client payload');
-}
-
-// ── 13. a junk payload writes nothing and claims no precedence ──────────────
-{
-  const db = makeDb(freshState());
-  const r = await ingestEilifDeath(db, { ...eilifBody, hitType: 'Sharknado' });
-  assert.equal(r.ok, false);
-  assert.equal(r.status, 'ignored');
-  assert.equal(deaths(db).length, 0);
-
-  // Crucially: the gs report for that same death still lands, so an unknown
-  // HitType degrades to today's behaviour instead of losing the death entirely.
-  await ingestDeathEvents(db, gsDeathEvents, 'Testman');
-  assert.equal(deaths(db).length, 1, 'the gs death is NOT suppressed by a rejected eilif report');
-  assert.equal(deaths(db)[0].metadata.cause, 'enemyhit');
-}
-
-// ── 14. gs path regressions (it moved file, it must still behave) ──────────
-{
-  const db = makeDb(freshState());
-  // A client may only report its OWN deaths.
-  await ingestDeathEvents(db, [{ playerName: 'SomeoneElse', killer: 'Troll', tsUtc: gsTs }], 'Testman');
-  assert.equal(deaths(db).length, 0, 'a reporter cannot author another viking\'s death');
-
-  // Duplicates within one payload collapse.
-  await ingestDeathEvents(db, [gsDeathEvents[0], gsDeathEvents[0]], 'Testman');
-  assert.equal(deaths(db).length, 1, 'same gsDeathId twice in one payload → one row');
-
-  // Non-array / empty input is a silent no-op.
-  await ingestDeathEvents(db, null, 'Testman');
-  await ingestDeathEvents(db, [], 'Testman');
+  assert.equal(r.status, 'inserted', 'a failing rpc falls through to the select-then-insert path');
   assert.equal(deaths(db).length, 1);
 }
 
-console.log(`OK — eilif-death: all ${HIT_TYPES.length} HitTypes phrase cleanly, both dedupe orders collapse to one row`);
+// ── 18. client text is capped, de-tagged and control-char free ──────────────
+//
+// Client payloads carry NO token (they run on players' PCs), so `attacker`,
+// `biome` and the derived `cause` are attacker-chosen strings that end up in a
+// Discord message, an in-game voice line, the Saga and the boards signs. An
+// oversized cause is not cosmetic: >~1,900 chars makes Discord answer 400 to the
+// relay's post, and the relay advances its cursor only after a successful send,
+// so ONE poison row stalls the whole #server feed until somebody deletes it.
+{
+  const long = 'A'.repeat(500);
+  const p = parseEilifDeath({ ...eilifBody, hitType: 'EnemyHit', attacker: long, biome: long });
+  assert.equal(p.attacker.length, 48, 'attacker capped at 48');
+  assert.equal(p.biome.length, 48, 'biome capped at 48');
+  assert.ok(p.cause.length <= 48, `cause capped at 48 (got ${p.cause.length})`);
+
+  // "the hand of <name>" must not smuggle the cause past the cap.
+  const pvp = parseEilifDeath({ ...eilifBody, hitType: 'PlayerHit', attacker: 'B'.repeat(60) });
+  assert.ok(pvp.cause.length <= 48, `PlayerHit cause capped too (got ${pvp.cause.length})`);
+  assert.ok(pvp.cause.startsWith('the hand of '), 'and still reads as a PvP death');
+
+  // Rich text is stripped, the words it wrapped are kept.
+  assert.equal(humanizeKiller('<color=red>Serpent</color>'), 'Serpent', 'Unity/Discord tags stripped');
+  assert.equal(humanizeKiller('<size=99><b>$enemy_troll</b>'), 'Troll', 'tags stripped before the token lookup');
+  // Control characters (a newline that would break a Discord line, a NUL, an
+  // ANSI escape that would colour the ops logs) go too.
+  assert.equal(humanizeKiller('Sea\nSerpent'), 'Sea Serpent', 'newline folded to a space');
+  assert.equal(humanizeKiller('Neck\u0000'), 'Neck', 'a trailing NUL is dropped');
+  assert.equal(humanizeKiller('Sea\u0007Serpent'), 'Sea Serpent', 'a bell byte folds to a space');
+  assert.equal(humanizeKiller('<b></b>'), null, 'nothing legible left → treated as a missing field');
+  assert.equal(humanizeKiller('   '), null);
+
+  // The gs deathEvents path gets the same treatment (same producer risk).
+  const db = makeDb(freshState(), 'rpc');
+  await ingestDeathEvents(
+    db,
+    [{ playerName: 'Testman', killer: `<color=red>${'C'.repeat(200)}</color>`, biome: 'Meadows'.padEnd(300, 'x'), tsUtc: gsTs }],
+    'Testman',
+  );
+  const row = deaths(db)[0];
+  assert.ok(row.metadata.cause.length <= 48, 'gs cause capped');
+  assert.ok(row.metadata.killer.length <= 48, 'the raw gs killer is capped too');
+  assert.ok(row.metadata.biome.length <= 48, 'gs biome capped');
+  assert.ok(!/[<>]/.test(row.metadata.cause), 'no rich-text markup survives');
+}
+
+console.log(`OK — eilif-death: all ${HIT_TYPES.length} HitTypes phrase cleanly, both dedupe orders collapse to one row (atomic rpc AND fallback), simultaneous reports collapse too`);

@@ -7,6 +7,8 @@
 // until spoken). Guarded by a shared secret (`x-voice-token`).
 
 import { createClient } from '@supabase/supabase-js';
+import { safeEqual } from '@/lib/ops/auth';
+import { recordRouteHeartbeat } from '@/lib/ops/route-heartbeat';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,9 +26,20 @@ function serviceClient() {
 export async function GET(request: Request) {
   const provided = request.headers.get('x-voice-token');
   const expected = process.env.VOICE_API_TOKEN;
-  if (!expected || !provided || provided !== expected) {
+  // Constant-time compare (lib/ops/auth safeEqual), like every other secret in
+  // this codebase — it hashes both sides first, so it leaks neither content nor
+  // length. Fail closed when the env is unset.
+  if (!expected || !provided || !safeEqual(provided, expected)) {
     return Response.json({ error: 'unauthorized' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
   }
+
+  // The in-game half's only liveness signal. EilifCompanion cannot POST a
+  // heartbeat, but an AUTHED poll proves the plugin loaded and is running — the
+  // failure this catches is a Companion that silently stops loading after a game
+  // update, which today shows up nowhere except queued voice lines quietly
+  // expiring. Recorded only after the token check and throttled to once a minute
+  // per instance (this route is polled every few seconds), and it cannot throw.
+  await recordRouteHeartbeat('companion-voice');
 
   const db = serviceClient();
 

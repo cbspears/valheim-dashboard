@@ -6,8 +6,22 @@
 
 import { sanitize, sanitizeMetrics } from './redact';
 
-/** Only these components may heartbeat. Anything else is a 400. */
-export const HEARTBEAT_ALLOWLIST = ['discord-bot', 'log-poller', 'map-snapshot', 'stats-parser'] as const;
+/**
+ * Only these components may heartbeat. Anything else is a 400.
+ *
+ * 'stats-parser' was removed on 2026-09-04: eilif-stats-parser.service was
+ * retired on 2026-08-23 and nothing has POSTed since, so accepting a beat from it
+ * would only put a stale row back into a cockpit that no longer renders one.
+ * Its existing ops_heartbeats row is deliberately left in the database — a deploy
+ * does not delete rows — and Charlie can clear it with
+ *   delete from ops_heartbeats where component = 'stats-parser';
+ *
+ * 'boards-plugin' and 'companion-voice' are NOT here on purpose: neither in-game
+ * plugin can POST anything. Their rows are written straight to the table by the
+ * routes they poll (lib/ops/route-heartbeat), which never goes through this
+ * validator.
+ */
+export const HEARTBEAT_ALLOWLIST = ['discord-bot', 'log-poller', 'map-snapshot'] as const;
 export type HeartbeatComponent = (typeof HEARTBEAT_ALLOWLIST)[number];
 
 export type HeartbeatStatus = 'ok' | 'degraded' | 'error';

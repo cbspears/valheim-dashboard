@@ -10,7 +10,7 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { HeartbeatRow } from './health';
-import type { BotPilotFlags } from './consistency';
+import { extractBotFlags, type BotPilotFlags } from './consistency';
 
 const REQUIRED_TABLES = ['identity_claims', 'chat_lines', 'player_positions', 'ops_heartbeats'];
 
@@ -49,6 +49,8 @@ export interface OpsData {
   expiredUnconsumedClaims: number;
   statPoisonReporters: string[];
   botFlags: BotPilotFlags | null;
+  /** Age (s) of the oldest queued voice line while players are online; null otherwise. */
+  voiceQueueOldestSec: number | null;
   demoDiscordEvents: number;
   tablePresence: Record<string, boolean>;
 }
@@ -92,6 +94,7 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
     expiredUnconsumedClaims: 0,
     statPoisonReporters: [],
     botFlags: null,
+    voiceQueueOldestSec: null,
     demoDiscordEvents: 0,
     tablePresence: Object.fromEntries(REQUIRED_TABLES.map((t) => [t, true])),
   };
@@ -218,6 +221,38 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
     return out;
   }, []);
 
+  // Voice queue depth: the age of the OLDEST still-queued line, but only while
+  // somebody is actually on the server — with nobody online there is no one to
+  // speak to and a waiting queue is correct, not broken. One tiny read (oldest
+  // queued row) plus the player count we already hold from server_status.
+  data.voiceQueueOldestSec = await safe(async () => {
+    if ((data.serverCurrentPlayers?.length ?? 0) === 0) return null;
+    const { data: rows, error } = await client
+      .from('voice_lines')
+      .select('queued_at')
+      .eq('status', 'queued')
+      .order('queued_at', { ascending: true })
+      .limit(1);
+    if (error) return null; // pre-migration / unreadable → honest unknown, never a false alarm
+    const oldest = rows?.[0]?.queued_at as string | undefined;
+    if (!oldest) return null;
+    const t = Date.parse(oldest);
+    return Number.isNaN(t) ? null : Math.max(0, (nowMs - t) / 1000);
+  }, null);
+
+  // Hand it to buildHealth through the component's own metrics as well as the
+  // top-level field. The cockpit page passes `heartbeats` wholesale but picks the
+  // other health inputs by name, so riding along in the row is what makes this
+  // check live without the page having to know about it — and it reads naturally
+  // in the cockpit's metric flags either way.
+  if (data.voiceQueueOldestSec !== null && data.heartbeats['companion-voice']) {
+    const hb = data.heartbeats['companion-voice'];
+    data.heartbeats['companion-voice'] = {
+      ...hb,
+      metrics: { ...(hb.metrics ?? {}), voiceQueueOldestSec: Math.round(data.voiceQueueOldestSec) },
+    };
+  }
+
   // Demo data: discord_events with a null discord_event_id (manually seeded).
   data.demoDiscordEvents = await safe(async () => {
     const { count } = await client
@@ -236,17 +271,4 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
   }, Object.fromEntries(REQUIRED_TABLES.map((t) => [t, true])));
 
   return data;
-}
-
-/** Pull the pilot/demo flags the bot reports in its heartbeat metrics.flags. */
-function extractBotFlags(metrics: Record<string, unknown> | null): BotPilotFlags | null {
-  const flags = (metrics?.flags ?? null) as Record<string, unknown> | null;
-  if (!flags || typeof flags !== 'object') return null;
-  const b = (k: string): boolean | undefined =>
-    typeof flags[k] === 'boolean' ? (flags[k] as boolean) : undefined;
-  return {
-    recapPilotChannel: b('recapPilotChannel'),
-    milestonePilotChannel: b('milestonePilotChannel'),
-    recapsStartPulledForward: b('recapsStartPulledForward'),
-  };
 }

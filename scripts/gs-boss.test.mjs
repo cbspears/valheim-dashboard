@@ -9,6 +9,7 @@ import {
   BOSS_MILESTONE_KEY_TO_NAME,
   BOSS_OBJECT_TO_NAME,
 } from '../lib/gs-client.ts';
+import { planBossKillUpdate } from '../lib/boss-damage.ts';
 import assert from 'node:assert';
 
 // ── 1. Milestone → bosses.name mapping (the seven real defeat keys) ──────────
@@ -126,4 +127,190 @@ assert.deepEqual(mvpOnly.Bonemass.sort(), ['Sigrid', 'Ulf'], 'MVPs union in for 
 // No fighters derivable → empty map (caller degrades to the online roster).
 assert.deepEqual(parseBossFighters({ onlinePlayers: ['A', 'B'] }), {}, 'roster alone yields no fighters');
 
-console.log('OK — all boss + distance parser assertions passed');
+
+// ── 4. What an UNAUTHENTICATED client bossKillEvents report may do ──────────
+//
+// /api/gs-ingest accepts `source:'client'` with NO token (the mod runs on
+// players' PCs and cannot hold a secret) and the POST URL ships in the public
+// Thunderstore pack. Before 2026-09-04 a single curl — no token, no reporter —
+// could name any string as firstBlood/topDamagePlayer and it went straight into
+// bosses.fight_stats.fighters and players_present: the war room renders those
+// verbatim and the Discord bot's Player-of-the-Day "boss-slayer" scorer reads
+// them. Worse, unfelled bosses were included in the read, so a ghost could be
+// pre-seeded and then promoted into the real war party at the kill flip.
+//
+// planBossKillUpdate is where every rule now lives, so each one is asserted here
+// rather than only in the route. (The reporter-required and reporter-must-resolve
+// gates live in the route itself — they decide whether we get this far at all.)
+const roster = new Map([
+  ['bren', 'Bren'],
+  ['chærleif', 'ChÆrleif'],
+  ['lóa', 'Lóa'],
+]);
+const kill = {
+  firstBlood: 'Bren',
+  topDamagePlayer: 'Lóa',
+  fightSec: 240,
+  topDamage: 201,
+  participants: 3,
+  tsUtc: '2026-09-01T20:00:00Z',
+};
+
+// (a) A SERVER report is trusted exactly as before — no roster needed, and it
+//     may describe a boss however it likes.
+{
+  const plan = planBossKillUpdate({
+    source: 'server',
+    isKilled: true,
+    existing: null,
+    priorPresent: [],
+    report: kill,
+    canonical: null,
+  });
+  assert.ok(plan.fightStats, 'a server report always lands');
+  assert.equal(plan.fightStats.source, 'server');
+  assert.equal(plan.fightStats.topDamagePlayer, 'Lóa');
+  assert.deepEqual(plan.playersPresent.sort(), ['Bren', 'Lóa'], 'MVPs union into players_present');
+}
+
+// (b) RULE 1 — a client may not touch a boss that is not felled yet. This is the
+//     pre-seeding hole: all 7 unfelled bosses have fight_stats null and
+//     players_present [], and the milestone flip later promotes whatever it finds.
+{
+  const plan = planBossKillUpdate({
+    source: 'client',
+    isKilled: false,
+    existing: null,
+    priorPresent: [],
+    report: kill,
+    canonical: roster,
+  });
+  assert.equal(plan.fightStats, null, 'client report on an unfelled boss is dropped');
+  assert.match(plan.note, /not felled/);
+}
+
+// (c) RULE 2 — a client may not rewrite the SERVER's record, however many
+//     participants it claims. The live Eikthyr row is source 'gs-milestone' with
+//     tsUtc null, so the old keepExisting test was false for ANY incoming report:
+//     one unauthenticated POST could have rewritten the only real fight record on
+//     the server.
+for (const priorSource of ['server', 'gs-milestone']) {
+  const plan = planBossKillUpdate({
+    source: 'client',
+    isKilled: true,
+    existing: { source: priorSource, topDamagePlayer: 'Lóa', fighters: ['Lóa'], tsUtc: null, participants: null },
+    priorPresent: ['Lóa'],
+    report: { ...kill, topDamagePlayer: 'Bren', participants: 99 },
+    canonical: roster,
+  });
+  assert.equal(plan.fightStats, null, `client report cannot overwrite a ${priorSource} record`);
+  assert.match(plan.note, /may not rewrite/);
+}
+
+// (d) …but it MAY fill a felled boss that has no server record (that is the
+//     whole point of accepting client reports).
+{
+  const plan = planBossKillUpdate({
+    source: 'client',
+    isKilled: true,
+    existing: null,
+    priorPresent: [],
+    report: kill,
+    canonical: roster,
+  });
+  assert.ok(plan.fightStats, 'a felled boss with no server record is fillable');
+  assert.equal(plan.fightStats.source, 'client');
+  assert.equal(plan.fightStats.firstBlood, 'Bren');
+}
+// A client's own earlier report is not a server record, so it may be refined.
+{
+  const plan = planBossKillUpdate({
+    source: 'client',
+    isKilled: true,
+    existing: { source: 'client', fighters: ['Bren'], tsUtc: '2026-09-01T19:00:00Z', participants: 1 },
+    priorPresent: ['Bren'],
+    report: kill,
+    canonical: roster,
+  });
+  assert.ok(plan.fightStats, 'a prior CLIENT record is still refinable');
+  assert.equal(plan.fightStats.participants, 3);
+}
+
+// (e) RULE 3 — names must canonicalize against the players roster. An unknown
+//     name is dropped and reported; a case-skewed one collapses onto the roster's
+//     own spelling instead of minting a second viking.
+{
+  const plan = planBossKillUpdate({
+    source: 'client',
+    isKilled: true,
+    existing: null,
+    priorPresent: [],
+    report: { ...kill, firstBlood: 'Ghost', topDamagePlayer: 'chærleif' },
+    canonical: roster,
+  });
+  assert.equal(plan.fightStats.firstBlood, null, 'a name the roster has never seen is dropped');
+  assert.equal(plan.fightStats.topDamagePlayer, 'ChÆrleif', 'a case skew collapses onto the roster spelling');
+  assert.deepEqual(plan.fightStats.fighters, ['ChÆrleif'], 'no phantom viking in the war party');
+  assert.deepEqual(plan.playersPresent, ['ChÆrleif']);
+  assert.match(plan.note, /Ghost/);
+}
+{
+  // Both names unknown → nothing is added at all (and players_present is left
+  // untouched, so the caller skips that write).
+  const plan = planBossKillUpdate({
+    source: 'client',
+    isKilled: true,
+    existing: { source: 'client', fighters: ['Bren'] },
+    priorPresent: ['Bren'],
+    report: { ...kill, firstBlood: 'Ghost', topDamagePlayer: 'Phantom' },
+    canonical: roster,
+  });
+  assert.deepEqual(plan.fightStats.fighters, ['Bren'], 'the honest war party is unchanged');
+  assert.equal(plan.playersPresent, undefined, 'players_present is not rewritten when nothing grew');
+}
+
+// (f) RULE 4 (the cap) is enforced at parse time, before any of this: a 500-char
+//     MVP name is truncated to 32 and rich-text markup is stripped, so nothing
+//     oversized or styled can reach a sign, an embed or the war room.
+{
+  const [parsed] = parseBossKillEvents([
+    {
+      boss: 'Eikthyr(Clone)',
+      tsUtc: ts,
+      firstBlood: 'X'.repeat(500),
+      topDamagePlayer: '<color=red>Bren</color>',
+      topDamage: 10,
+      participants: 2,
+      fightSec: 60,
+    },
+  ]);
+  assert.equal(parsed.firstBlood.length, 32, 'MVP names capped at 32 chars');
+  assert.equal(parsed.topDamagePlayer, 'Bren', 'rich-text markup stripped from MVP names');
+}
+
+// (g) The ledgers a report must never clobber: the client-damage map and the
+//     observed-damage high-water marks (dropping the latter would re-credit every
+//     observed blow on the next ~120s post), plus the kill-time online roster.
+{
+  const plan = planBossKillUpdate({
+    source: 'client',
+    isKilled: true,
+    existing: {
+      source: 'client',
+      fighters: ['Bren'],
+      damage: { Bren: 120 },
+      observed: { 'ChÆrleif': { Bren: 120 } },
+      onlineAtKill: ['Bren', 'Lóa'],
+      topDamageFrom: 'gs-client-damage',
+    },
+    priorPresent: ['Bren'],
+    report: kill,
+    canonical: roster,
+  });
+  assert.deepEqual(plan.fightStats.damage, { Bren: 120 }, 'the per-fighter damage map survives');
+  assert.deepEqual(plan.fightStats.observed, { 'ChÆrleif': { Bren: 120 } }, 'the observed ledger survives');
+  assert.deepEqual(plan.fightStats.onlineAtKill, ['Bren', 'Lóa'], 'the kill-time roster survives');
+  assert.equal(plan.fightStats.topDamageFrom, undefined, 'the fallback marker retires with the real verdict');
+}
+
+console.log('OK — all boss + distance parser assertions passed, and every client bossKillEvents rule holds');

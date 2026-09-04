@@ -420,14 +420,20 @@ export async function getMilestones(): Promise<Milestone[]> {
  * a wide window of sessions (for the playtime derivation), and the online roster.
  */
 export async function getMilestoneAggregates(): Promise<Aggregates> {
-  const [statsRes, sessions, online] = await Promise.all([
+  const [statsRes, sessions, online, bosses] = await Promise.all([
     db().from('player_stats').select('*'),
     getSessionsSince(400),
     getOnlinePlayers(),
+    // boss_kills_total counts DISTINCT Forsaken felled (bosses.is_killed), not
+    // the sum of each viking's repeatable boss-kill counter — see
+    // AggregateInput.bossesKilled. Fetched here so the /world progress bars show
+    // exactly the number the evaluator will fire on.
+    getBosses(),
   ]);
   const stats = (statsRes.data as Record<string, unknown>[] | null) ?? [];
   const onlineNames = new Set(online.map((p) => p.character_name));
-  return computeAggregates({ stats, sessions, onlineNames });
+  const bossesKilled = bosses.filter((b) => b.is_killed).length;
+  return computeAggregates({ stats, sessions, onlineNames, bossesKilled });
 }
 
 export async function getRoadmap(): Promise<RoadmapItem[]> {

@@ -23,12 +23,14 @@ import {
   bossDamageDeltas,
   foldClientDamage,
   foldObservedDamage,
+  planBossKillUpdate,
   CLIENT_DAMAGE_SOURCE,
   type FightStats,
 } from '@/lib/boss-damage';
 import { evaluateAndRecord } from '@/lib/milestones';
 import { ingestDeathEvents, ingestEilifDeath } from '@/lib/deaths';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
+import { safeEqual } from '@/lib/ops/auth';
 import type { GsClientStats } from '@/lib/types';
 
 // GsValheimStats ingest (v0) — the server-side Emitter POSTs here every ~120s
@@ -194,6 +196,30 @@ function parseOnline(v: unknown): { names: string[] | null; count: number | null
 // World guard uses the SAME GS_EXPECTED_WORLD convention as the client-stats path:
 // if set and the payload world doesn't match, ignore (the caller already gates
 // world mismatches too — this is defence in depth). Unset (pilot) = accept any.
+//
+// POISON CAP (2026-09-04). The presence check above proves the TARGET is online;
+// it does not prove the CALLER is the target — the payload has no reporter field
+// to bind against (the shipped EilifCompanionClient 0.2.0 sends only playerName),
+// and client payloads carry no token at all. So a single unauthenticated POST
+// naming any currently-online viking used to pin them at 100 % permanently:
+// GREATEST means it can never be walked back, and it feeds the "Far-Seer" title,
+// the in-game explored board and the explored_avg_pct Great Deed.
+//
+// The stats path already has this shape of guard (lib/gs-baseline POISON_CAPS:
+// detect, don't block — merge the value and stamp gs_stats._flags). Same rule
+// here: an increase of more than MAP_JUMP_MAX_PCT points per MAP_JUMP_WINDOW_MS
+// is clamped to the cap and flagged for review. Honest clients post every ~5 min
+// and gain a fraction of a point each time, so nothing real is ever clamped —
+// 15 points is roughly a third of a whole world's exploration.
+//
+// The per-player clock is module-level and therefore PER SERVERLESS INSTANCE,
+// best-effort, exactly like lib/rate-limit.ts: a cold instance simply allows the
+// full 15. The absolute per-report cap is the part that always holds; the timer
+// only stops one instance being hammered in a loop.
+const MAP_JUMP_MAX_PCT = 15;
+const MAP_JUMP_WINDOW_MS = 5 * 60_000;
+const lastMapRaiseAt = new Map<string, number>();
+
 async function ingestClientMap(body: Obj): Promise<{ ok: boolean; pct: number | null; player: string | null }> {
   const player = typeof body.playerName === 'string' ? body.playerName.trim() : '';
   const pctRaw = body.exploredPct;
@@ -210,13 +236,54 @@ async function ingestClientMap(body: Obj): Promise<{ ok: boolean; pct: number | 
   if (!pid) return { ok: false, pct, player };
 
   // GREATEST: never let a lower reading (different world, older snapshot) overwrite a higher one.
-  const { data: prevRows } = await client.from('player_stats').select('map_explored_pct').eq('player_id', pid).limit(1);
-  const prevPct = num((prevRows?.[0] as Obj | undefined)?.map_explored_pct);
-  const nextPct = Math.max(pct, prevPct);
-
-  await client
+  const { data: prevRows } = await client
     .from('player_stats')
-    .upsert({ player_id: pid, map_explored_pct: nextPct, updated_at: now }, { onConflict: 'player_id' });
+    .select('map_explored_pct, gs_stats')
+    .eq('player_id', pid)
+    .limit(1);
+  const prevRow = (prevRows?.[0] as Obj | undefined) ?? undefined;
+  const prevPct = num(prevRow?.map_explored_pct);
+
+  // How much of the allowance has refilled since this instance last let this
+  // player's reading rise. No record at all (cold instance, first report) = the
+  // full allowance; the cap is never tighter than a single honest report needs.
+  const lastRaise = lastMapRaiseAt.get(pid);
+  const elapsed = lastRaise === undefined ? MAP_JUMP_WINDOW_MS : Date.now() - lastRaise;
+  const allowance = MAP_JUMP_MAX_PCT * Math.min(1, Math.max(0, elapsed / MAP_JUMP_WINDOW_MS));
+  const ceiling = prevPct + allowance;
+
+  // Applied from the very first reading too — "prev is 0" is exactly the state a
+  // one-shot 0→100 write exploits. A genuine high first reading (a character who
+  // already explored this world before we started tracking) is not lost, only
+  // paced: it climbs by up to 15 points per 5-min cycle until it catches up.
+  const clamped = pct > ceiling;
+  const merged = clamped ? ceiling : pct;
+  const nextPct = Math.max(merged, prevPct); // never lower
+
+  const patch: Record<string, unknown> = { player_id: pid, map_explored_pct: nextPct, updated_at: now };
+
+  if (clamped) {
+    console.warn(
+      `[gs-ingest] MAP JUMP: "${player}" reported ${pct.toFixed(1)}% explored, up from ${prevPct.toFixed(1)}% ` +
+        `(+${(pct - prevPct).toFixed(1)}) — beyond the +${MAP_JUMP_MAX_PCT}%/${MAP_JUMP_WINDOW_MS / 60_000}min sanity cap. ` +
+        `Merged at ${nextPct.toFixed(1)}% and flagged in gs_stats._flags for review. ` +
+        `(client-map is unauthenticated: this may be someone else writing for them.)`,
+    );
+    // Mirror the stats path's marker so /admin/ops's stat-poison check sees it
+    // (lib/ops/db statPoisonReporters reads gs_stats._flags). Written ONLY on a
+    // flagged report, so the normal path never read-modify-writes the blob.
+    const gsStats = (prevRow?.gs_stats && typeof prevRow.gs_stats === 'object' ? { ...(prevRow.gs_stats as Obj) } : {}) as Obj;
+    const priorFlags = Array.isArray(gsStats._flags) ? (gsStats._flags as unknown[]) : [];
+    gsStats._flags = [...priorFlags, { field: 'map_explored_pct', kind: 'mapJump', prev: prevPct, next: pct, at: now }];
+    patch.gs_stats = gsStats;
+  }
+
+  const { error } = await client.from('player_stats').upsert(patch, { onConflict: 'player_id' });
+  if (error) {
+    console.error(`[gs-ingest] client-map upsert for "${player}" failed — ${error.message}`);
+    return { ok: false, pct: nextPct, player };
+  }
+  if (nextPct > prevPct) lastMapRaiseAt.set(pid, Date.now());
   return { ok: true, pct: nextPct, player };
 }
 
@@ -904,7 +971,7 @@ async function ingestBossMilestones(
 //
 // If the fight_stats column doesn't exist yet (pre-migration), fall back to
 // stashing the detail on the matching boss event row's metadata so nothing is lost.
-async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): Promise<void> {
+async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client', reporter = ''): Promise<void> {
   const events = parseBossKillEvents(raw);
   if (events.length === 0) return;
 
@@ -916,11 +983,51 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): 
   }
 
   const client = db();
+
+  // CLIENT REPORTS ARE UNAUTHENTICATED (the mod runs on players' PCs and carries
+  // no secret; the POST URL ships in the public pack). Two gates before any of it
+  // is believed, both mirroring ingestObservedBossDamage:
+  //   • a reporter is REQUIRED, and
+  //   • that reporter must RESOLVE to an existing players row.
+  // The presence check upstream is not enough on its own: confirmOnThisServer
+  // accepts a name with no join/leave history at all (deliberately one-sided), so
+  // "reporter":"Ghost" would sail through it. A genuine reporter has a players
+  // row within one poll cycle, so an unresolved one is DEFERRED, not lost — the
+  // next ~120s snapshot re-posts the same bossKillEvents.
+  let canonical: Map<string, string> | null = null;
+  if (source === 'client') {
+    if (!reporter.trim()) {
+      console.info('[gs-ingest] client bossKillEvents ignored — no reporter on the payload.');
+      return;
+    }
+    const { data: roster, error: rosterErr } = await client.from('players').select('character_name');
+    if (rosterErr) {
+      console.error(`[gs-ingest] client bossKillEvents: could not read the players roster — ${rosterErr.message}`);
+      return;
+    }
+    canonical = new Map<string, string>();
+    for (const r of roster ?? []) {
+      const nm = typeof r.character_name === 'string' ? r.character_name.trim() : '';
+      if (nm) canonical.set(identityKey(nm), nm);
+    }
+    if (!canonical.has(identityKey(reporter))) {
+      console.info(
+        `[gs-ingest] client bossKillEvents from "${reporter}" ignored — no players row for that reporter ` +
+          `(deferred; it lands once the poller's join path creates the row and the client re-posts).`,
+      );
+      return;
+    }
+  }
+
   const names = [...best.keys()];
-  const { data: rows } = await client
+  const { data: rows, error: readErr } = await client
     .from('bosses')
-    .select('id, name, fight_stats, players_present')
+    .select('id, name, fight_stats, players_present, is_killed')
     .in('name', names);
+  if (readErr) {
+    console.error(`[gs-ingest] bossKillEvents: could not read bosses rows — ${readErr.message}`);
+    return;
+  }
 
   for (const row of rows ?? []) {
     const bossName = row.name as string;
@@ -931,60 +1038,24 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client'): 
       ? ((row as { players_present: unknown[] }).players_present.filter((n): n is string => typeof n === 'string'))
       : [];
 
-    // Union the fighter set (monotonic — grows, never shrinks) with THIS fight's MVPs.
-    const fightersSet = new Set<string>(existing?.fighters ?? []);
-    if (e.firstBlood) fightersSet.add(e.firstBlood);
-    if (e.topDamagePlayer) fightersSet.add(e.topDamagePlayer);
-    const fightersOut = [...fightersSet];
+    // Every merge rule (including the four that gate a client report) lives in
+    // the pure planner so it can be unit-tested — see lib/boss-damage.
+    const plan = planBossKillUpdate({
+      source,
+      isKilled: (row as { is_killed?: unknown }).is_killed === true,
+      existing,
+      priorPresent,
+      report: e,
+      canonical,
+    });
+    if (plan.note) {
+      console.info(`[gs-ingest] ${source} bossKillEvents for "${bossName}": ${plan.note}.`);
+    }
+    if (!plan.fightStats) continue;
 
-    // Dedupe / prefer richer scalars: keep what we hold when it's this exact fight
-    // with at least as many participants; else take the incoming report.
-    const keepExisting = existing?.tsUtc === e.tsUtc && (existing?.participants ?? 0) >= e.participants;
-    const scalars: FightStats = keepExisting
-      ? {
-          fightSec: existing?.fightSec,
-          firstBlood: existing?.firstBlood ?? null,
-          topDamagePlayer: existing?.topDamagePlayer ?? null,
-          topDamage: existing?.topDamage,
-          participants: existing?.participants,
-          tsUtc: existing?.tsUtc,
-          source: existing?.source ?? source,
-        }
-      : {
-          fightSec: e.fightSec,
-          firstBlood: e.firstBlood,
-          topDamagePlayer: e.topDamagePlayer,
-          topDamage: e.topDamage,
-          participants: e.participants,
-          tsUtc: e.tsUtc,
-          source,
-        };
-
-    const nextFightStats: FightStats = {
-      ...scalars,
-      fighters: fightersOut,
-      onlineAtKill: existing?.onlineAtKill, // preserved (seeded at the milestone flip)
-      // Preserved too: the per-fighter damage the client-damage fallback banked
-      // (lib/boss-damage). `scalars` is a whitelist, so anything not named here is
-      // dropped — and dropping that map would delete the only record of who hit
-      // this boss for how much whenever a late MVP summary arrived.
-      ...(existing?.damage ? { damage: existing.damage } : {}),
-      // And the observed-damage LEDGER, for a harder reason than nostalgia: it is
-      // the high-water mark foldObservedDamage differences each ~120s re-post
-      // against. Dropping it here would reset every prev to 0, and the next
-      // bystander post would credit every observed blow all over again — the one
-      // way this feature can inflate a fight record.
-      ...(existing?.observed ? { observed: existing.observed } : {}),
-      // topDamageFrom is deliberately NOT carried: THIS is the real verdict, so
-      // the fallback's marker retires with it and we never recompute over it.
-    };
-
-    // Fold the MVPs into players_present (union — grow only, never blank/shrink).
-    const presentSet = new Set<string>(priorPresent);
-    if (e.firstBlood) presentSet.add(e.firstBlood);
-    if (e.topDamagePlayer) presentSet.add(e.topDamagePlayer);
+    const nextFightStats = plan.fightStats;
     const patch: Record<string, unknown> = { fight_stats: nextFightStats };
-    if (presentSet.size > priorPresent.length) patch.players_present = [...presentSet];
+    if (plan.playersPresent) patch.players_present = plan.playersPresent;
 
     const { error } = await client.from('bosses').update(patch).eq('id', row.id);
     if (!error) continue;
@@ -1039,7 +1110,9 @@ export async function POST(req: Request) {
   // on players' PCs) and fall through to the world + presence cross-checks.
   if (body.source === 'server') {
     const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-    if (!process.env.GS_EMITTER_TOKEN || token !== process.env.GS_EMITTER_TOKEN) {
+    // Constant-time, like every other secret compare in this codebase
+    // (lib/ops/auth safeEqual — hashes both sides so it never leaks length either).
+    if (!process.env.GS_EMITTER_TOKEN || !token || !safeEqual(token, process.env.GS_EMITTER_TOKEN)) {
       return Response.json({ error: 'bad token' }, { status: 401 });
     }
   }
@@ -1053,9 +1126,18 @@ export async function POST(req: Request) {
   // deaths and the stats merge so a client pointed at the wrong world can't
   // pollute this dashboard. Unset (pilot default) = accept any world.
   if (body.source !== 'server') {
+    //
+    // A MISSING world is a MISMATCH. It used to be a free pass (`expected &&
+    // payloadWorld && …`), so the whole guard was bypassed by simply omitting the
+    // key — verified live: a client payload with no `world` reached the presence
+    // check instead of being turned away. Both honest producers always send it
+    // (EilifCompanionClient DeathReporter.cs:124 and EilifMapTrackerPlugin.cs:235;
+    // GsValheimStatsClient's cfg carries `World =`), so an absent or non-string
+    // world is never legitimate. Unset GS_EXPECTED_WORLD still accepts any world
+    // (the pilot default) — this only tightens the case where it IS set.
     const expected = process.env.GS_EXPECTED_WORLD;
     const payloadWorld = typeof body.world === 'string' ? body.world : null;
-    if (expected && payloadWorld && payloadWorld !== expected) {
+    if (expected && payloadWorld !== expected) {
       return Response.json({ status: 'ignored', reason: 'world mismatch' });
     }
 
@@ -1150,7 +1232,7 @@ export async function POST(req: Request) {
 
     // Client payloads also carry bossKillEvents (this client's view of a fight)
     // — enrich, but never flip a boss from a client (the server milestone owns that).
-    await ingestBossKillEvents(body.bossKillEvents, 'client');
+    await ingestBossKillEvents(body.bossKillEvents, 'client', reporter);
 
     // Collective Milestones: re-evaluate the server-wide "Great Deeds" now the
     // per-player totals just advanced. Best-effort only — a milestone failure

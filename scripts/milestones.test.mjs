@@ -53,7 +53,14 @@ const sessions = [
 ];
 const onlineNames = new Set(); // nobody online → Bob's open session is dropped → deterministic
 
-const agg = computeAggregates({ stats, sessions, onlineNames });
+// Four of the eight Forsaken are down. THIS is what boss_kills_total counts —
+// distinct bosses felled (bosses.is_killed), not the sum of each viking's
+// repeatable per-player bossKills counter (which the two rows above still carry,
+// deliberately: re-summoning Eikthyr for antlers increments those and must not
+// move the collective ladder).
+const bossesKilled = 4;
+
+const agg = computeAggregates({ stats, sessions, onlineNames, bossesKilled });
 
 // Distance split: sail is its own mode; walk_run is walk + run (air excluded).
 assert.equal(agg.sail_total, 130000, 'sail_total = 60000 + 70000');
@@ -61,7 +68,12 @@ assert.equal(agg.walk_run_total, 4000, 'walk_run_total = (1000+2000) + (500+500)
 // Straight column sums.
 assert.equal(agg.deaths_total, 14);
 assert.equal(agg.kills_total, 1100);
-assert.equal(agg.boss_kills_total, 3);
+assert.equal(agg.boss_kills_total, 4, 'boss_kills_total = bosses felled, not 2+1 per-player kills');
+// The two are genuinely different numbers, which is the whole point of the fix.
+assert.notEqual(agg.boss_kills_total, stats.reduce((t, r) => t + (r.boss_kills ?? 0), 0));
+// A caller that did not fetch the bosses table scores 0 rather than silently
+// falling back to the old per-player sum.
+assert.equal(computeAggregates({ stats, sessions, onlineNames }).boss_kills_total, 0, 'no bosses input → 0, never the old sum');
 assert.equal(agg.damage_total, 180000);
 assert.equal(agg.resources_total, 110000);
 assert.equal(agg.crafts_total, 110);
@@ -204,6 +216,9 @@ function makeStubDb(state) {
       if (table === 'player_stats') return { select: () => Promise.resolve({ data: state.stats, error: null }) };
       if (table === 'sessions') return { select: () => Promise.resolve({ data: state.sessions, error: null }) };
       if (table === 'players') return { select: () => Promise.resolve({ data: state.players, error: null }) };
+      // boss_kills_total is derived from bosses.is_killed, so the orchestrator
+      // reads this table too (an absent/empty one simply scores 0).
+      if (table === 'bosses') return { select: () => Promise.resolve({ data: state.bosses ?? [], error: null }) };
       return {
         insert(row) {
           (inserts[table] ??= []).push(row);
@@ -229,18 +244,32 @@ const orchState = {
     { id: 'walk-ten-thousand', metric: 'walk_run_total', threshold: 10000000, sort: 300, title: 'The Ten Thousand', line: 'Ten thousand kilometers marched.', equivalence: null, achieved_at: null, achieved_value: null, announced_at: null, meta: {} },
     // Unknown metric — never fires, never errors.
     { id: 'ghost', metric: 'not_a_metric', threshold: 1, sort: 999, title: 'Ghost', line: '', equivalence: null, achieved_at: null, achieved_value: null, announced_at: null, meta: {} },
+    // Half the Forsaken. The two player_stats rows carry boss_kills 2 + 1 = 3,
+    // so under the OLD sum-the-players maths this would not have crossed; under
+    // the correct one (four bosses actually down) it does. The orchestrator has
+    // to read the bosses table for that, which is what this asserts.
+    { id: 'boss-half', metric: 'boss_kills_total', threshold: 4, sort: 200, title: 'Half the Forsaken', line: '{value} of the Forsaken have fallen.', equivalence: null, achieved_at: null, achieved_value: null, announced_at: null, meta: {} },
   ],
   stats,
   sessions,
   players: [],
+  bosses: [
+    { is_killed: true }, { is_killed: true }, { is_killed: true }, { is_killed: true },
+    { is_killed: false }, { is_killed: false }, { is_killed: false }, { is_killed: false },
+  ],
 };
 
 const orchDb = makeStubDb(orchState);
 const first = await evaluateAndRecord(orchDb, silent);
 
-assert.equal(first.crossed, 4, 'all four deeds crossing in one cycle are recorded');
+assert.equal(first.crossed, 5, 'every deed crossing in one cycle is recorded');
+assert.equal(
+  orchState.milestones.find((m) => m.id === 'boss-half').achieved_value,
+  4,
+  'boss_kills_total came from bosses.is_killed (4), not sum(player_stats.boss_kills) (3)',
+);
 const byId = Object.fromEntries(orchState.milestones.map((m) => [m.id, m]));
-for (const id of ['kills-thousand', 'deaths-bench', 'fish-hundred', 'sail-far']) {
+for (const id of ['kills-thousand', 'deaths-bench', 'fish-hundred', 'sail-far', 'boss-half']) {
   assert.ok(byId[id].achieved_at, `${id} stamped achieved_at`);
   assert.equal(byId[id].announced_at, null, `${id} left UNANNOUNCED for the bot to drain`);
 }
@@ -250,7 +279,7 @@ assert.equal(byId['walk-ten-thousand'].achieved_at, null, 'a far-off deed is unt
 assert.equal(byId['ghost'].achieved_at, null, 'an unknown metric never fires');
 
 // One Saga event per deed, carrying the rendered line.
-assert.equal((orchDb.inserts.events ?? []).length, 4, 'one Saga event per recorded deed');
+assert.equal((orchDb.inserts.events ?? []).length, 5, 'one Saga event per recorded deed');
 assert.ok(orchDb.inserts.events.every((e) => e.type === 'milestone'), 'events are type=milestone');
 const killsEvent = orchDb.inserts.events.find((e) => e.metadata.milestone === 'kills-thousand');
 assert.equal(killsEvent.metadata.line, 'A thousand corpses mark the road. (1,100)', '{value} interpolated');

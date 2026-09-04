@@ -44,6 +44,45 @@ export interface BotPilotFlags {
   recapsStartPulledForward?: boolean; // RECAPS_START pulled earlier for the demo
 }
 
+/**
+ * Pull the pilot/demo flags out of the bot's heartbeat metrics.
+ *
+ * THE BUG THIS FIXES. This read `metrics.flags.recapPilotChannel` &c. The bot has
+ * never sent a `flags` object: it puts three differently-named booleans at the
+ * TOP LEVEL of metrics (services/discord-bot/src/index.js ~240-242
+ * `recapChannelIsServer`, `milestoneChannelIsServer`, `recapsStartPulledForward`).
+ * So `flags` was always undefined, this returned null, and checkPilotFlags could
+ * never fire — the cockpit was structurally incapable of warning that the pilot
+ * channel overrides were still on, which is a launch-day checklist item.
+ *
+ * The bot runs on the host and is not edited from here, so this reads what it
+ * actually sends: top level first, under either spelling, with the old nested
+ * `flags` shape still accepted in case the bot is ever changed to match.
+ */
+export function extractBotFlags(metrics: Record<string, unknown> | null): BotPilotFlags | null {
+  if (!metrics || typeof metrics !== 'object') return null;
+  const nested = (metrics.flags ?? null) as Record<string, unknown> | null;
+
+  /** First of `keys` that is present as a boolean, at the top level or under flags. */
+  const b = (...keys: string[]): boolean | undefined => {
+    for (const k of keys) {
+      if (typeof metrics[k] === 'boolean') return metrics[k] as boolean;
+      if (nested && typeof nested === 'object' && typeof nested[k] === 'boolean') return nested[k] as boolean;
+    }
+    return undefined;
+  };
+
+  const out: BotPilotFlags = {
+    recapPilotChannel: b('recapChannelIsServer', 'recapPilotChannel'),
+    milestonePilotChannel: b('milestoneChannelIsServer', 'milestonePilotChannel'),
+    recapsStartPulledForward: b('recapsStartPulledForward'),
+  };
+  // All three absent = the bot told us nothing; say so rather than reporting
+  // three confident "false"s the cockpit would render as "all clear".
+  if (Object.values(out).every((v) => v === undefined)) return null;
+  return out;
+}
+
 const SERVER_STATUS_WARN_SEC = 10 * 60;
 const SERVER_STATUS_CRIT_SEC = 30 * 60;
 const OPEN_SESSION_STALE_SEC = 6 * 60 * 60;

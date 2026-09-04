@@ -406,3 +406,159 @@ export function foldObservedDamage(
   if (!credited || !next) return null;
   return { ...next, observed: ledger };
 }
+
+// ─── bossKillEvents: what one report is allowed to change ───────────────────
+
+/** A parsed bossKillEvents entry, as far as the merge rules care. */
+export interface BossKillReport {
+  firstBlood: string | null;
+  topDamagePlayer: string | null;
+  fightSec: number;
+  topDamage: number;
+  participants: number;
+  tsUtc: string;
+}
+
+export interface BossKillPlan {
+  /** null when this report must be ignored entirely. */
+  fightStats: FightStats | null;
+  /** Present only when the union actually grew (so the caller skips the write). */
+  playersPresent?: string[];
+  /** Why the report was dropped / trimmed — logged verbatim by the caller. */
+  note?: string;
+}
+
+/**
+ * Decide what ONE bossKillEvents entry may do to a boss row. Pure, so every rule
+ * below is unit-testable without a database (scripts/gs-boss.test.mjs).
+ *
+ * SERVER reports (source:'server') are trusted exactly as before: they carry the
+ * Emitter's Bearer token, they are the server-wide view, and they own the fight
+ * record.
+ *
+ * CLIENT reports are NOT authenticated — /api/gs-ingest accepts `source:'client'`
+ * with no token at all (the mod runs on players' PCs and cannot hold a secret),
+ * and the POST URL ships in the public Thunderstore pack. Before this, a single
+ * curl with no token and no reporter could name any string as `firstBlood` /
+ * `topDamagePlayer`; those went straight into fight_stats.fighters and
+ * players_present, which the war room renders verbatim and which the Discord
+ * bot's Player-of-the-Day "boss-slayer" scorer reads. Four rules close that:
+ *
+ *   1. A client report may only touch a boss that is ALREADY FELLED. A boss the
+ *      warband has not reached has fight_stats null and players_present [] — a
+ *      perfect place to pre-seed a ghost that the milestone flip would then
+ *      promote into the real war party.
+ *   2. A client report may not overwrite a record written by the SERVER
+ *      ('server' / 'gs-milestone'). It may only FILL a boss that has no server
+ *      record at all — so the authoritative fight detail can never be rewritten
+ *      by an unauthenticated caller, whatever its participants count says.
+ *   3. Both MVP names must CANONICALIZE against the players roster (the exact
+ *      rule ingestObservedBossDamage already applies to observed names). An
+ *      unknown name is dropped and reported, never written: that is what stops a
+ *      phantom viking being minted in the war party.
+ *   4. Nothing here can flip is_killed, and lengths were already capped at 32 by
+ *      parseBossKillEvents.
+ *
+ * `canonical` maps identityKey(name) → the roster's own spelling. Pass null for
+ * a server report to skip canonicalization entirely.
+ */
+export function planBossKillUpdate(input: {
+  source: 'server' | 'client';
+  isKilled: boolean;
+  existing: FightStats | null;
+  priorPresent: string[];
+  report: BossKillReport;
+  /** identityKey(name) → canonical roster spelling. Required for client reports. */
+  canonical?: Map<string, string> | null;
+}): BossKillPlan {
+  const { source, isKilled, existing, priorPresent, report } = input;
+
+  let firstBlood = report.firstBlood;
+  let topDamagePlayer = report.topDamagePlayer;
+  let note: string | undefined;
+
+  if (source === 'client') {
+    // Rule 1 — an unfelled boss is not a client's to describe.
+    if (!isKilled) {
+      return { fightStats: null, note: 'boss is not felled yet — a client report cannot pre-seed its war party' };
+    }
+    // Rule 2 — the server's record is final.
+    const priorSource = existing?.source ?? null;
+    if (priorSource === 'server' || priorSource === 'gs-milestone') {
+      return { fightStats: null, note: `a ${priorSource} record already stands — an unauthenticated client report may not rewrite it` };
+    }
+    // Rule 3 — names must be on the roster.
+    const canonical = input.canonical ?? new Map<string, string>();
+    const resolve = (n: string | null): string | null => {
+      if (!n) return null;
+      return canonical.get(n.trim().toLowerCase()) ?? null;
+    };
+    const fb = resolve(firstBlood);
+    const td = resolve(topDamagePlayer);
+    const unknown = [
+      firstBlood && !fb ? firstBlood : null,
+      topDamagePlayer && !td ? topDamagePlayer : null,
+    ].filter((n): n is string => n !== null);
+    if (unknown.length > 0) {
+      note = `no players row for ${unknown.map((n) => `"${n}"`).join(', ')} — dropped (a name the roster has never seen must not mint a phantom viking)`;
+    }
+    firstBlood = fb;
+    topDamagePlayer = td;
+  }
+
+  // Union the fighter set (monotonic — grows, never shrinks) with THIS fight's MVPs.
+  const fightersSet = new Set<string>(existing?.fighters ?? []);
+  if (firstBlood) fightersSet.add(firstBlood);
+  if (topDamagePlayer) fightersSet.add(topDamagePlayer);
+
+  // Dedupe / prefer richer scalars: keep what we hold when it's this exact fight
+  // with at least as many participants; else take the incoming report.
+  const keepExisting = existing?.tsUtc === report.tsUtc && (existing?.participants ?? 0) >= report.participants;
+  const scalars: FightStats = keepExisting
+    ? {
+        fightSec: existing?.fightSec,
+        firstBlood: existing?.firstBlood ?? null,
+        topDamagePlayer: existing?.topDamagePlayer ?? null,
+        topDamage: existing?.topDamage,
+        participants: existing?.participants,
+        tsUtc: existing?.tsUtc,
+        source: existing?.source ?? source,
+      }
+    : {
+        fightSec: report.fightSec,
+        firstBlood,
+        topDamagePlayer,
+        topDamage: report.topDamage,
+        participants: report.participants,
+        tsUtc: report.tsUtc,
+        source,
+      };
+
+  const fightStats: FightStats = {
+    ...scalars,
+    fighters: [...fightersSet],
+    onlineAtKill: existing?.onlineAtKill, // preserved (seeded at the milestone flip)
+    // Preserved too: the per-fighter damage the client-damage fallback banked.
+    // `scalars` is a whitelist, so anything not named here is dropped — and
+    // dropping that map would delete the only record of who hit this boss for
+    // how much whenever a late MVP summary arrived.
+    ...(existing?.damage ? { damage: existing.damage } : {}),
+    // And the observed-damage LEDGER, for a harder reason than nostalgia: it is
+    // the high-water mark foldObservedDamage differences each ~120s re-post
+    // against. Dropping it here would reset every prev to 0, and the next
+    // bystander post would credit every observed blow all over again.
+    ...(existing?.observed ? { observed: existing.observed } : {}),
+    // topDamageFrom is deliberately NOT carried: THIS is the real verdict, so
+    // the fallback's marker retires with it and we never recompute over it.
+  };
+
+  const presentSet = new Set<string>(priorPresent);
+  if (firstBlood) presentSet.add(firstBlood);
+  if (topDamagePlayer) presentSet.add(topDamagePlayer);
+
+  return {
+    fightStats,
+    ...(presentSet.size > priorPresent.length ? { playersPresent: [...presentSet] } : {}),
+    ...(note ? { note } : {}),
+  };
+}

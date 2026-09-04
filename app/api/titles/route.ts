@@ -6,6 +6,7 @@ import {
   playtimeMinutesByCharacter,
 } from '@/lib/data';
 import { epithetsFor } from '@/lib/epithets';
+import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import type { PlayerWithStats } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +32,34 @@ const CORS_HEADERS = {
  * title once a challenger clears a real margin, which is exactly the signal the
  * bot uses to announce.
  */
-export async function GET() {
+interface TitlesResponse {
+  players: { name: string; title: string; source: string }[];
+  count: number;
+  generatedAt: string;
+}
+
+// Module-level = per serverless instance, exactly like /api/boards. This route is
+// UNAUTHENTICATED and CORS-open by design (the bot and any status widget read it
+// from anywhere), and every hit costs FOUR Supabase reads — the full roster with
+// stats, the online set, 70 days of sessions and 70 days of death events — plus
+// the whole epithet engine. A 60 s window makes a flood cost at most one read
+// cycle a minute per instance while staying far fresher than the bot's own
+// titles loop (10 min). `?fresh=1` skips it for a manual check.
+const CACHE_TTL_MS = 60_000;
+let cache: { at: number; body: TitlesResponse } | null = null;
+
+export async function GET(request: Request) {
+  // Best-effort per-IP throttle (lib/rate-limit), the same first line of defence
+  // /api/webhook and /api/gs-ingest already use.
+  if (!rateLimit(ipFromRequest(request))) {
+    return Response.json({ error: 'rate limited' }, { status: 429, headers: CORS_HEADERS });
+  }
+
+  const fresh = new URL(request.url).searchParams.get('fresh') === '1';
+  if (!fresh && cache && Date.now() - cache.at < CACHE_TTL_MS) {
+    return Response.json(cache.body, { headers: CORS_HEADERS });
+  }
+
   const [withStats, online, sessions, deaths] = await Promise.all([
     getPlayersWithStats(),
     getOnlinePlayers(),
@@ -74,10 +102,13 @@ export async function GET() {
     };
   });
 
-  return Response.json(
-    { players, count: players.length, generatedAt: new Date().toISOString() },
-    { headers: CORS_HEADERS },
-  );
+  const body: TitlesResponse = {
+    players,
+    count: players.length,
+    generatedAt: new Date().toISOString(),
+  };
+  cache = { at: Date.now(), body };
+  return Response.json(body, { headers: CORS_HEADERS });
 }
 
 export async function OPTIONS() {

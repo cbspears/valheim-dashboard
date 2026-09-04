@@ -40,6 +40,50 @@ function isNum(v: unknown): boolean {
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null;
 }
+
+/** Longest free-text field (attacker, biome, cause) we will store from a client. */
+export const CLIENT_TEXT_MAX = 48;
+/** Longest character name we will store from a client payload. */
+export const CLIENT_NAME_MAX = 32;
+
+/**
+ * Clean one short free-text field that arrived from a CLIENT payload.
+ *
+ * Every string in a `source:'client'` / `'eilif-death'` body is attacker-chosen:
+ * /api/gs-ingest accepts client payloads with no token (they run on players' PCs
+ * and can't hold a secret), so a killer name, biome or MVP name is only as
+ * trustworthy as whoever posted it. Three concrete problems, all closed here:
+ *
+ *   • LENGTH. A death cause is rendered into a Discord message; a cause of
+ *     ~1,900+ characters makes Discord answer 400 to the relay's post, and
+ *     relay.tick advances its cursor only AFTER a successful send — so one
+ *     oversized row stalls the whole #server feed (joins, leaves, deaths) until
+ *     somebody deletes it. 48 chars is far above every real value ("Greydwarf
+ *     Brute" is 15, "$enemy_seekerbrute" 18) and far below any payload that
+ *     could wedge a downstream surface.
+ *   • CONTROL CHARACTERS. Newlines, NULs and terminal escapes travel through
+ *     jsonb into Discord embeds, in-game sign text and the ops logs.
+ *   • RICH TEXT. Valheim (and Discord) render `<color=red>`, `<size=…>`, `<b>`;
+ *     a name carrying tags can restyle or hide the text around it on the /tv
+ *     rail, the Saga and the boards signs.
+ *
+ * Tags are STRIPPED rather than escaped and the remainder is kept, so a hostile
+ * "<color=red>Serpent</color>" still records the honest killer. Returns null when
+ * nothing legible survives — callers treat that exactly like a missing field.
+ */
+export function sanitizeClientText(v: unknown, max: number = CLIENT_TEXT_MAX): string | null {
+  if (typeof v !== 'string') return null;
+  const cleaned = v
+    // Unity/Discord rich-text markup: drop the tag, keep the text it wrapped.
+    .replace(/<[^>]*>/g, '')
+    // C0/C1 control characters (newlines, NUL, escapes) → a single space.
+    .replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return null;
+  return cleaned.length > max ? cleaned.slice(0, max).trim() : cleaned;
+}
+
 function arr(v: unknown): Obj[] {
   return Array.isArray(v) ? (v.filter((x) => x && typeof x === 'object') as Obj[]) : [];
 }
@@ -556,8 +600,14 @@ export function parseBossKillEvents(raw: unknown): ParsedBossKill[] {
         bossName,
         boss,
         fightSec: Math.round(num(e.fightSec)),
-        firstBlood: str(e.firstBlood),
-        topDamagePlayer: str(e.topDamagePlayer),
+        // The two MVP names are unioned into fight_stats.fighters and
+        // players_present and rendered verbatim in the war room, so they get the
+        // client-text treatment (rich-text tags stripped, control characters
+        // dropped) and a 32-char cap — Valheim itself will not make a longer
+        // character name, and /api/gs-ingest additionally canonicalizes them
+        // against the players roster before they are ever written.
+        firstBlood: sanitizeClientText(e.firstBlood, CLIENT_NAME_MAX),
+        topDamagePlayer: sanitizeClientText(e.topDamagePlayer, CLIENT_NAME_MAX),
         topDamage: Math.round(num(e.topDamage)),
         participants: Math.round(num(e.participants)),
         tsUtc,
