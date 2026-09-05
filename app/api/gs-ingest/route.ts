@@ -85,6 +85,29 @@ function warnReporterlessDeathOnce() {
 }
 
 /**
+ * The same once-per-instance line for cartography (audit security-4).
+ *
+ * EilifCompanionClient 0.3.2 is the first version to send `reporter` on a
+ * client-map post; pack v11 still pins 0.2.0, so a reporter-less cartography
+ * post is the NORMAL case until the pack is re-minted. Same reasoning as the
+ * death line above: per-request logging would be pure noise, one line per cold
+ * instance answers the only question worth asking ("is anyone still posting
+ * unbound map readings?"), and when it stops appearing the reporter-less path
+ * can be tightened from "accepted" to "refused".
+ */
+let warnedReporterlessMap = false;
+function warnReporterlessMapOnce() {
+  if (warnedReporterlessMap) return;
+  warnedReporterlessMap = true;
+  console.warn(
+    '[gs-ingest] client-map accepted WITHOUT a reporter (EilifCompanionClient ≤0.3.1). ' +
+      'Presence is being checked against the named player, so the reading is not bound to its ' +
+      'sender and only the +15%/5min jump cap stands between a caller and someone else’s ' +
+      'exploration %. This line prints once per instance; it stops once every player runs 0.3.2+.',
+  );
+}
+
+/**
  * Guard against the Emitter's `onlinePlayers` roster going stale (real
  * incident 2026-07-04: a player relogged to a different character and the
  * Emitter kept reporting the OLD character name online for ~1h). The log
@@ -208,7 +231,9 @@ function parseOnline(v: unknown): { names: string[] | null; count: number | null
 //
 // The EilifCompanionClient BepInEx plugin (plugins/eilif-companion-client) posts
 // the local player's explored-map % every ~5 min while on the server:
-//   { schemaVersion:1, game:'valheim', source:'client-map', playerName, world, exploredPct }
+//   { schemaVersion:1, game:'valheim', source:'client-map', playerName, reporter, world, exploredPct }
+// (`reporter` since plugin 0.3.2; the POST handler requires reporter === playerName
+// and runs the presence check on the reporter — see the self-only block there.)
 // We write ONLY player_stats.map_explored_pct, with GREATEST semantics (exploration
 // only ever grows, and a stale/duplicate post must never roll it back). The
 // stats-parser webhook (app/api/webhook) also writes this column for the owner's
@@ -219,13 +244,16 @@ function parseOnline(v: unknown): { names: string[] | null; count: number | null
 // if set and the payload world doesn't match, ignore (the caller already gates
 // world mismatches too — this is defence in depth). Unset (pilot) = accept any.
 //
-// POISON CAP (2026-09-04). The presence check above proves the TARGET is online;
-// it does not prove the CALLER is the target — the payload has no reporter field
-// to bind against (the shipped EilifCompanionClient 0.2.0 sends only playerName),
-// and client payloads carry no token at all. So a single unauthenticated POST
-// naming any currently-online viking used to pin them at 100 % permanently:
-// GREATEST means it can never be walked back, and it feeds the "Far-Seer" title,
-// the in-game explored board and the explored_avg_pct Great Deed.
+// POISON CAP (2026-09-04). Client payloads carry no token at all, so a single
+// unauthenticated POST naming any currently-online viking used to pin them at
+// 100 % permanently: GREATEST means it can never be walked back, and it feeds the
+// "Far-Seer" title, the in-game explored board and the explored_avg_pct Great Deed.
+//
+// The self-binding `reporter` field (plugin 0.3.2, enforced in the POST handler)
+// closes that for updated clients — but the cap stays, and stays unconditional,
+// for two reasons: pack v11 still pins a client that sends no reporter at all, and
+// even a bound report can be wrong (a corrupted fog array, a replayed payload).
+// Defence in depth, not a duplicate of the identity check.
 //
 // The stats path already has this shape of guard (lib/gs-baseline POISON_CAPS:
 // detect, don't block — merge the value and stamp gs_stats._flags). Same rule
@@ -1175,8 +1203,10 @@ export async function POST(req: Request) {
     // mod never retry-storms. One-sided: no name, or no positive offline
     // evidence, always falls through and ingests.
     //
-    // The verified identity is the character the payload writes for: the map
-    // plugin reports `playerName`, the stats/deaths client reports `reporter`.
+    // The verified identity is the SENDER wherever the payload names one — every
+    // producer now reports a `reporter` (client stats always; eilif-death since
+    // plugin 0.3.1; client-map since 0.3.2) and the checks below prefer it. Only a
+    // pre-0.3.2 client falls back to the character the payload writes for.
     // (client-map used to run BEFORE this check — moved it under the guard so a
     // caller can't inflate an existing player's exploration % without proof.)
     //
@@ -1226,9 +1256,59 @@ export async function POST(req: Request) {
       if (!reporter) warnReporterlessDeathOnce();
     }
 
+    // SELF-ONLY CARTOGRAPHY (audit security-4). Exactly the death rule above, applied
+    // to the other unauthenticated write this endpoint accepts.
+    //
+    // A client-map post names the character whose explored-% it raises, and the
+    // presence check used to run on THAT name — proving the person being written
+    // about was online, never that the caller was them. One POST naming any online
+    // viking could pin them at 100 %: ingestClientMap keeps the GREATEST reading, so
+    // it can only be walked back with manual SQL, and it feeds the "Far-Seer" title,
+    // the in-game explored board and the explored_avg_pct Great Deed. The +15%/5min
+    // jump cap added earlier today slows that to a crawl and flags it, but it does
+    // not stop it.
+    //
+    // EilifCompanionClient 0.3.2 sends `reporter` = the local player's own name
+    // (EilifMapTrackerPlugin.Post — the same identity the death report binds on).
+    // Two rules, identical in shape to eilif-death:
+    //
+    //   • reporter present and NOT the named player → refuse. Nobody files another
+    //     viking's cartography, and no honest client would try.
+    //   • reporter present → run the presence check on the REPORTER, so the check
+    //     proves the SENDER is connected here.
+    //
+    // Reporter-less posts (client ≤0.3.1, which is what pack v11 pins) keep today's
+    // behaviour — refusing them would blank every player's exploration until the pack
+    // is re-minted — logged once per instance so the gap stays visible.
+    if (body.source === 'client-map') {
+      const target = typeof body.playerName === 'string' ? body.playerName.trim() : '';
+      // A reporter that isn't a string is neither producer: 0.3.2 sends the character name,
+      // ≤0.3.1 omits the field entirely. `reporter: 42` would otherwise normalise to '' and
+      // buy the permissive branch below by type juggling. `null` is the one non-string read
+      // as absent — serialisers emit it for a missing value, and refusing those would blank a
+      // real viking's exploration.
+      if (body.reporter !== undefined && body.reporter !== null && typeof body.reporter !== 'string') {
+        console.warn(
+          `[gs-ingest] BAD REPORTER: client-map for player "${target}" carries a ` +
+            `${typeof body.reporter} reporter, not a name. Ignoring.`,
+        );
+        return Response.json({ status: 'ignored', reason: 'bad reporter' });
+      }
+      if (reporter && identityKey(reporter) !== identityKey(target)) {
+        console.warn(
+          `[gs-ingest] REPORTER MISMATCH: client-map claims reporter "${reporter}" for player ` +
+            `"${target}" — a cartography reading may only be filed by the character it is about. Ignoring.`,
+        );
+        return Response.json({ status: 'ignored', reason: 'reporter mismatch' });
+      }
+      if (!reporter) warnReporterlessMapOnce();
+    }
+
     const presenceName =
       body.source === 'client-map'
-        ? (typeof body.playerName === 'string' ? body.playerName.trim() : '')
+        ? // 0.3.2+: prove the SENDER is here. Older clients fall back to the named
+          // player, which is what this check has always done for them.
+          reporter || (typeof body.playerName === 'string' ? body.playerName.trim() : '')
         : body.source === 'eilif-death'
           ? // 0.3.1+: prove the SENDER is here. Older clients fall back to the
             // victim, which is what this check has always done for them.

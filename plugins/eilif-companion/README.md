@@ -14,7 +14,7 @@ observational, one (WORLD KEYS, added in 0.3.0) that **does change the world's r
   `[WorldKeys] EnforcedGlobalKeys` into the running world. Ships defaulting to `deathkeepequip`
   (keep equipped gear on death). **This overrides the GTX panel** — see [World keys](#world-keys-v030).
 
-`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.1`.
+`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.2`.
 
 ---
 
@@ -46,6 +46,38 @@ inside `Chat.AddInworldText`, and `AddInworldText` is called from the **body** o
 `OnNewChatMessage` — so our Prefix has already run and already written its marker line before the
 NRE happens. The exception still kills the rest of that call (which is why the old postfix, one
 frame further out, never ran and never will), but it can no longer cost us the capture.
+
+**Whose name goes on the line (v0.3.2).** `<name>` is the name the SERVER holds for the sending
+peer — `ZNet.instance.GetPeer(senderID)?.m_playerName`, set during the handshake and the same name
+the server itself uses for kicks and the permitted list — never the `UserInfo.Name` inside the
+packet. `RPC_ChatMessage` forwards that field from the client unchecked, so a crafted ChatMessage
+RPC could otherwise sign anyone's name to an oath, mirror chat as them or plant pins under their
+name (audit security-3). When the two names differ the peer name wins and a warning is logged:
+
+```
+[EILIF_IDENT] mismatch peer=<server's name> claimed=<packet's name> uid=<sender uid>
+```
+
+A sender uid with no peer record is refused outright (`[EILIF_IDENT] unknown sender uid=… claimed=…
+- oath dropped`) rather than falling back to the claim — a healthy server logs **no `[EILIF_IDENT]`
+lines at all**, and these warnings are rate-limited to one a minute (with a `(+N suppressed …)`
+count) so a modified client cannot flood the log the poller tails. See `src/SpeakerIdentity.cs` for
+the decompiled evidence, the log-injection hardening that came with it, and the two impersonation
+routes it does NOT close (duplicate character names, which need a SteamID binding downstream; and a
+forged `m_senderPeerID`, which now only lets an attacker borrow a genuinely-connected peer's real
+name).
+
+**The name is only half of it (v0.3.2).** The poller reads a log line, so a shout's TEXT and a
+peer's NAME can forge identity without touching `UserInfo` at all. Shouting the literal string
+`Console: <color=orange>Victim</color>: <color=x>/oath …</color>` used to be reproduced verbatim on
+the raw-case `[EILIF_CHAT]` line and read back by the poller as a genuine console echo from Victim
+(its echo guard is an unanchored substring test that runs before the marker regexes), and a peer
+named `Bren | hello` shifted this line's own `" | "` fields to file chat, oaths and pins under
+`Bren`. `SpeakerIdentity.Safe` now defangs rich-text tag openers in text and `SafeName` flattens `|`
+in names, both verified by driving the real parser
+(`scripts/plugin-log-safety.test.mjs`). Ordinary punctuation (`<3`, `5 > 3`, `>_<`) is deliberately
+left alone, because the poller suppresses a shout's echo twin by comparing name + uppercased text
+and rewriting it would double-post those shouts to Discord.
 
 Both markers are emitted from this one Prefix. If `text` starts with `/oath ` (case-insensitive)
 and has non-empty oath text, we log, at Info level:
@@ -213,6 +245,12 @@ re-deploy. If Iron Gate changed the `ChatMessage` RPC shape, validate the two to
 - **`/oath` marker fires** with the exact character name (confirms the `ChatMessage` payload order
   `pos,int,UserInfo,text` and that our reimplemented `GetStableHashCode("ChatMessage")` matches the
   game's method hash on this build).
+- **No `[EILIF_IDENT]` lines** anywhere in a normal session (v0.3.2). `unknown sender` on every
+  shout would mean `ZNet.GetPeer(long)` / `ZNetPeer.m_playerName` moved in a game update, in which
+  case oaths, chat and pins are being dropped rather than misattributed — re-check both members
+  against `libs/assembly_valheim.dll` with `ilspycmd` before doing anything else. Pair this with the
+  positive check above: silence here only proves nothing was misattributed, not that the captures
+  ran.
 - **Voice send renders** in every client's chat as the speaker name (confirms the outbound
   `InvokeRoutedRPC("ChatMessage", …)` param order and that a server-built `UserInfo` serializes OK).
 - **`shout` vs `normal`** reach (A/B `ChatType`).

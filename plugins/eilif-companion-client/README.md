@@ -20,7 +20,7 @@ same toolchain, same repo conventions.
    weapons, shield, torch and ammo stay on you when you die instead of going into the grave —
    but only on a world whose `deathkeepequip` global key is set. Everywhere else it is inert.
 
-`BepInPlugin` GUID: `net.eilif.companionclient` — name `Eilif Companion Client` — v`0.3.1`.
+`BepInPlugin` GUID: `net.eilif.companionclient` — name `Eilif Companion Client` — v`0.3.2`.
 
 ---
 
@@ -45,11 +45,22 @@ Unity main thread:
 
    ```json
    { "schemaVersion": 1, "game": "valheim", "source": "client-map",
-     "playerName": "<char>", "world": "<world>", "exploredPct": 0.87 }
+     "playerName": "<char>", "reporter": "<char>", "world": "<world>", "exploredPct": 0.87 }
    ```
 
    to the ingest (default the prod `…/api/gs-ingest`). Success logs
    `[EilifMap] posted 0.87% for <Char> (<World>) [interval]`.
+
+   **`reporter`** (v0.3.2) is the same self-binding the death report has carried since 0.3.1, and
+   for the same reason. Both names here are read from `Player.m_localPlayer`, so for an honest
+   client they are necessarily the same string — the field exists so the server can *tell* that
+   instead of assuming it. Client payloads carry no secret by design, and the ingest keeps the
+   GREATEST reading, so before this a single unauthenticated POST naming any online viking pinned
+   them at 100 % explored permanently, handing out the Far-Seer title, the in-game explored board
+   and a collective Great Deed (audit security-4). `/api/gs-ingest` now requires
+   `reporter == playerName` and runs its "are you actually connected to this server right now"
+   cross-check on the **reporter**; a post from an older client (no `reporter`) is still accepted
+   and checked against the named player as before.
 
 **Timing detail.** Compute is cheap (a single pass over the 256² fog array) and runs on the main
 thread; all HTTP is off-thread via `Task.Run`, one request in flight at a time (`Interlocked`
@@ -218,6 +229,9 @@ dotnet build -c Release    # outputs plugins/eilif-companion-client/dist/EilifCo
    `[EilifMap] posted 0.87% for <Char> (Dedicated) [interval]` (or `[logout]`).
 2. The dashboard's Cartographer board / `player_stats.map_explored_pct` for that character updates.
 3. At the menu / in singleplayer there should be **no** `[EilifMap] posted` lines.
+3b. Server side (v0.3.2): that same post should produce **no**
+   `[gs-ingest] client-map accepted WITHOUT a reporter` line in the Vercel logs. That line prints
+   at most once per serverless instance and means someone is still on a build ≤0.3.1.
 4. On boot (v0.3.1): `[EilifDeath] patch classes applied: 3/3` — the one unambiguous grep that all
    three Harmony hooks (logout, death reporter, tombstone keep-list) went on. Anything other than
    `3/3` means read the `[EilifDeath] could not apply <Class>: <message>` line(s) just above it;

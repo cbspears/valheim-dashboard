@@ -6,11 +6,12 @@ DLL. The local-import route below is still the correct one for testing an unpubl
 is how 0.1.x got in before the listing existed.
 
 **Version state as of 2026-09-04:** Thunderstore latest = **0.2.0**, pack v11 pins **0.2.0**, and
-the repo's `dist/EilifCompanionClient.dll` is **0.3.1** (tombstone keep-list from 0.3.0, plus the
-0.3.1 self-binding `reporter` field on death reports and per-patch isolation). The Thunderstore
-package is staged and zipped at `../thunderstore/EilifCompanionClient-0.3.1/` but **not uploaded**
-— see that directory's `UPLOAD.md` for the ship-now-vs-fold-into-1.0 decision. **0.3.1 replaces the
-briefly-staged 0.3.0 package, which was never uploaded; the upload decision itself is unchanged.**
+the repo's `dist/EilifCompanionClient.dll` is **0.3.2** (tombstone keep-list from 0.3.0; the 0.3.1
+self-binding `reporter` on death reports plus per-patch isolation; and the 0.3.2 `reporter` on the
+map post). The Thunderstore package is staged and zipped at
+`../thunderstore/EilifCompanionClient-0.3.2/` but **not uploaded** — see that directory's
+`UPLOAD.md` for the ship-now-vs-fold-into-1.0 decision. **0.3.2 replaces the staged 0.3.1 package,
+which replaced 0.3.0; neither was ever uploaded and the upload decision itself is unchanged.**
 Until it is uploaded and the pack re-minted, the keep-list is dark for every player: r2modman
 reinstalls the pinned pack versions on every "Start modded", so a hand-copied DLL does not survive.
 
@@ -27,7 +28,7 @@ reinstalls the pinned pack versions on every "Start modded", so a hand-copied DL
 3. Choose `dist/EilifCompanionClient.dll`. When prompted:
    - **Name:** `EilifCompanionClient`
    - **Author:** `BlockspaceMedia` (or any — local mods aren't namespaced on Thunderstore)
-   - **Version:** `0.3.1` (match `PluginVersion` in `src/EilifMapTrackerPlugin.cs`)
+   - **Version:** `0.3.2` (match `PluginVersion` in `src/EilifMapTrackerPlugin.cs`)
    The manager copies the DLL into `<profile>/BepInEx/plugins/EilifCompanionClient/`.
 4. **Enable** the mod if it isn't already, and make sure BepInEx + the other Eilif mods stay enabled.
 

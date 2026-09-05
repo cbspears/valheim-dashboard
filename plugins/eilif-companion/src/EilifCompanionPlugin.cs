@@ -22,7 +22,7 @@ namespace EilifCompanion
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
         public const string PluginName = "Eilif Companion";
-        public const string PluginVersion = "0.3.1";
+        public const string PluginVersion = "0.3.2";
 
         internal static ManualLogSource Log;
 
@@ -393,6 +393,11 @@ namespace EilifCompanion
     // the sender's position at the moment they spoke. We log it in the same
     // tagged-line style as [EILIF_OATH] so the log poller can parse it with
     // zero extra transport.
+    //
+    // v0.3.2 (audit security-3): the pin is filed under the SERVER's name for the
+    // sending peer, not the client-supplied UserInfo.Name — otherwise a crafted
+    // ChatMessage RPC could plant, rename or move another viking's map pins under
+    // their name. See SpeakerIdentity.
     [HarmonyPatch(typeof(Chat), "OnNewChatMessage")]
     internal static class Patch_OnNewChatMessage_Pin
     {
@@ -407,14 +412,18 @@ namespace EilifCompanion
             try
             {
                 if (type != Talker.Type.Shout || string.IsNullOrEmpty(text)) return;
-                var m = PinRe.Match(text);
+                var m = PinRe.Match(SpeakerIdentity.Safe(text, SpeakerIdentity.MaxTextLen));
                 if (!m.Success) return;
 
                 string kind = m.Groups[1].Success ? "base" : "poi";
                 string name = m.Groups[2].Value.Trim();
                 if (string.IsNullOrEmpty(name)) return;
 
-                string who = sender?.Name ?? "unknown";
+                // The server's peer record, never the packet's claim. Null = a sender uid with no
+                // peer record: drop the pin rather than file it under an unverifiable name (the
+                // old code filed those as "unknown", which put a real pin on the map for nobody).
+                string who = SpeakerIdentity.Resolve(senderID, sender != null ? sender.Name : null, "pin");
+                if (who == null) return;
                 // world x/z only — the dashboard converts to map-fraction coords.
                 EilifCompanionPlugin.Log.LogInfo(
                     $"[EILIF_PIN] {who} | {kind} | {name} | {pos.x.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)} | {pos.z.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}");

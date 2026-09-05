@@ -25,7 +25,10 @@ namespace EilifCompanionClient
     /// pixels — the square's corners are endless ocean, so a full map reads ~100%, not >100%), and
     /// POSTs a tiny JSON to the dashboard ingest:
     ///
-    ///   { schemaVersion:1, game:'valheim', source:'client-map', playerName, world, exploredPct }
+    ///   { schemaVersion:1, game:'valheim', source:'client-map', playerName, reporter, world, exploredPct }
+    ///
+    /// (`reporter` since v0.3.2: the local player's own name, so the ingest can bind the report to
+    /// its sender instead of trusting whoever it names — see Post().)
     ///
     /// This supersedes the .fch-upload plan for pack players: the pack ships this DLL, so playing =
     /// tracked, no opt-in. Constraints honoured: never blocks the main thread (compute is cheap,
@@ -37,7 +40,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.3.1";
+        public const string PluginVersion = "0.3.2";
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
@@ -250,7 +253,14 @@ namespace EilifCompanionClient
             return Math.Min(100f, pct);
         }
 
-        /// <summary>Fire-and-forget POST of the tiny JSON. Never blocks the main thread.</summary>
+        /// <summary>
+        /// Fire-and-forget POST of the tiny JSON. Never blocks the main thread.
+        ///
+        /// <paramref name="playerName"/> is ALWAYS the local player's name — it is read from
+        /// <c>Player.m_localPlayer</c> in ComputeAndPost, and the disconnect fallback replays the
+        /// value cached from that same read. There is no code path here that posts for anyone
+        /// else, which is what makes the `reporter` field below honest by construction.
+        /// </summary>
         private void Post(string playerName, string world, float pct, string reason)
         {
             if (string.IsNullOrEmpty(playerName)) return;
@@ -258,9 +268,24 @@ namespace EilifCompanionClient
 
             // Round to 2 dp (the ingest stores 0-100). Invariant culture so we never emit "0,87".
             float rounded = (float)Math.Round(pct, 2);
+
+            // v0.3.2 — WHO SENT THIS (audit security-4), the same self-binding the death report
+            // has carried since 0.3.1 (DeathReporter.cs). Client payloads carry no secret by
+            // design — they run on players' PCs — so before this field the only thing tying a
+            // cartography post to its sender was the server's presence check on the TARGET's
+            // name. That proved the person being written about was online; it proved nothing
+            // about the caller. One unauthenticated POST naming any online viking could pin them
+            // at 100 % explored for good (the ingest keeps the GREATEST reading), handing out the
+            // "Far-Seer" title, the in-game explored board and a collective Great Deed.
+            //
+            // For an honest client `reporter` and `playerName` are necessarily the same string
+            // (see the summary above); the field exists so the server can TELL that instead of
+            // assuming it, refuse the pair when they differ, and run its presence cross-check on
+            // the SENDER. Older clients omit it and the server keeps its previous behaviour.
             string json =
                 "{\"schemaVersion\":1,\"game\":\"valheim\",\"source\":\"client-map\"," +
                 "\"playerName\":" + JsonStr(playerName) + "," +
+                "\"reporter\":" + JsonStr(playerName) + "," +
                 "\"world\":" + JsonStr(world) + "," +
                 "\"exploredPct\":" + rounded.ToString("0.##", CultureInfo.InvariantCulture) + "}";
 

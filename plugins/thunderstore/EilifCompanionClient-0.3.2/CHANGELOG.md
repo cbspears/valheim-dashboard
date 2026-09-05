@@ -1,7 +1,10 @@
 # Changelog
 
+## 0.3.2
+- The map-percentage post now carries the **reporting character's own name** as well, exactly as death reports have since 0.3.1. It is the same name that was already in the message, sent a second time so the dashboard can confirm a reading came from the character it belongs to and refuse one posted for somebody else. Nothing new is collected and nothing changes for you.
+
 ## 0.3.1
-- Death reports now carry the **reporting character's own name** alongside the victim's, so the dashboard can tell a genuine self-report from one posted by somebody else. For you this changes nothing — the two names are always yours — but it lets the server refuse a death filed for a player who did not file it. Nothing new is collected: it is the same character name the map-percentage post has always sent.
+- Death reports now carry the **reporting character's own name** alongside the victim's, so the dashboard can tell a genuine self-report from one posted by somebody else. For you this changes nothing, since the two names are always yours, but it lets the server refuse a death filed for a player who did not file it. Nothing new is collected: it is the same character name the map-percentage post has always sent.
 - Each Harmony patch is now applied on its own, in its own guard, and the plugin logs `patch classes applied: N/M` at startup. If a future Valheim update changes one of the three hooks, the other two keep working and the log says exactly which one failed instead of the plugin going quietly half-dead.
 
 ## 0.3.0

@@ -50,8 +50,36 @@ namespace EilifCompanion
     ///     [EILIF_CHAT] &lt;name&gt; | &lt;text&gt;
     ///
     /// Both are byte-identical to what 0.3.0 emitted. Only the hook they are emitted FROM changed,
-    /// so nothing downstream needs a matching edit — the poller keeps preferring this raw-case line
-    /// over its uppercased console-echo twin (poller.js) exactly as designed.
+    /// so nothing downstream needs a matching edit.
+    ///
+    /// ⚠ THE ECHO TWIN IS ONLY SUPPRESSED FOR CHAT. Every shout ALSO reaches the poller as the
+    /// server's console echo, and poller.js's batch dedupe (`ev.type === 'chat' &amp;&amp; source ===
+    /// 'echo'`) drops that twin only for chat lines — an oath's echo twin is dispatched too, and
+    /// the webhook's oath handler is delete-then-insert, so whichever arrives LAST wins. The echo
+    /// line is written by the game after this Prefix returns, i.e. second. Until the poller learns
+    /// to prefer the plugin's oath the same way it prefers its chat, the raw-case win claimed by
+    /// 0.3.1 — and the peer-name win added in 0.3.2 below — do not reach the oath wall. That fix
+    /// belongs in services/log-poller, not here; this comment exists so the next reader does not
+    /// assume the plugin half is the whole story.
+    ///
+    /// ── WHOSE NAME GOES ON THE LINE (v0.3.2, audit security-3) ──────────────────────────────
+    ///
+    /// &lt;name&gt; is now the SERVER's own name for the sending peer
+    /// (<c>ZNet.instance.GetPeer(senderID).m_playerName</c>), not the <c>UserInfo.Name</c> the
+    /// client put in the packet. The two are identical for every honest client; when they differ
+    /// the peer name wins and an <c>[EILIF_IDENT] mismatch …</c> warning is logged. See
+    /// <see cref="SpeakerIdentity"/> for why the packet's name could never be trusted, and for
+    /// the two impersonation routes this does NOT close. The line FORMAT is unchanged, so again
+    /// nothing downstream needs an edit.
+    ///
+    /// The name on the line is only half of it: the poller reads a log line, so the TEXT is an
+    /// identity surface too. A shout of the literal string
+    /// <c>Console: &lt;color=orange&gt;Victim&lt;/color&gt;: &lt;color=x&gt;/oath …&lt;/color&gt;</c> used to be
+    /// reproduced verbatim on this raw-case line and read back by the poller as a genuine console
+    /// echo from Victim — no modified client required. <see cref="SpeakerIdentity.Safe"/> defangs
+    /// the tag openers that shape needs, and <see cref="SpeakerIdentity.SafeName"/> flattens the
+    /// " | " a crafted peer name could use to shift this line's own fields. Both were verified by
+    /// driving the real parser (services/log-poller/src/parser.js) with the crafted lines.
     ///
     /// NOTE: normal "say" chat does not traverse ChatMessage and unknown /commands are swallowed
     /// client-side — oaths must be SHOUTED: `/s /oath I swear...` (documented on the Oath page).
@@ -95,10 +123,14 @@ namespace EilifCompanion
             try
             {
                 if (type == Talker.Type.Ping) return; // pings carry no chat text
-                string t = (text ?? "").Trim();
+                string t = SpeakerIdentity.Safe(text, SpeakerIdentity.MaxTextLen).Trim();
                 if (t.Length == 0) return;
 
-                string who = (sender != null ? sender.Name : null) ?? "";
+                // v0.3.2 — the speaker is resolved LAST, and only for a line we are actually
+                // about to emit. Resolving earlier would put an [EILIF_IDENT] line in the log for
+                // every ping, every whisper and every `/pin` (which the pin patch resolves for
+                // itself), so one impersonated pin would print the warning twice.
+                string claimed = sender != null ? sender.Name : null;
 
                 if (!t.StartsWith(OathPrefix, StringComparison.OrdinalIgnoreCase))
                 {
@@ -109,14 +141,24 @@ namespace EilifCompanion
                     // chat.
                     if (type != Talker.Type.Shout) return;
                     if (t.StartsWith("/", StringComparison.Ordinal)) return;
-                    if (RecentlyLogged("chat", who, t)) return;
-                    EilifCompanionPlugin.Log.LogInfo($"[EILIF_CHAT] {who} | {t}");
+                    string speaker = SpeakerIdentity.Resolve(senderID, claimed, "chat");
+                    if (speaker == null) return;
+                    if (RecentlyLogged("chat", speaker, t)) return;
+                    EilifCompanionPlugin.Log.LogInfo($"[EILIF_CHAT] {speaker} | {t}");
                     return;
                 }
 
                 if (t.Length <= OathPrefix.Length) return; // "/oath" with no text
                 string oath = t.Substring(OathPrefix.Length).Trim();
                 if (oath.Length == 0) return;
+
+                // v0.3.2 — the SERVER's name for the sending peer, never the display name carried
+                // in the packet (audit security-3). UserInfo travels inside the client's own
+                // ChatMessage RPC and nothing validates it, so an oath signed from userInfo.Name
+                // could carry anyone's name; a sender uid with no peer record is dropped rather
+                // than trusted. See SpeakerIdentity for the decompiled evidence and the residuals.
+                string who = SpeakerIdentity.Resolve(senderID, claimed, "oath");
+                if (who == null) return;
                 if (RecentlyLogged("oath", who, oath)) return;
 
                 // The one line our SFTP log poller tails from LogOutput.log.

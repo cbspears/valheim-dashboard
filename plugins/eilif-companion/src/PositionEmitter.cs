@@ -63,7 +63,12 @@ namespace EilifCompanion
                     // connected but their player ZDO hasn't spawned yet (no real position).
                     if (peer.m_characterID == ZDOID.None) continue;
 
-                    string name = peer.m_playerName ?? "";
+                    // Already the server's own peer record (never a client-supplied chat name), so
+                    // there is nothing to cross-check here — but m_playerName still ARRIVES from
+                    // the client during the handshake (ZNet.RPC_PeerInfo assigns it straight from
+                    // the packet), so it is flattened, de-piped and capped before it reaches a log
+                    // line the poller parses field by field (v0.3.2, SpeakerIdentity.SafeName).
+                    string name = SpeakerIdentity.SafeName(peer.m_playerName);
                     if (name.Length == 0) continue;
 
                     // Prefer the authoritative character ZDO position; fall back to the peer's

@@ -1,6 +1,6 @@
 {
   "name": "EilifCompanionClient",
-  "version_number": "0.3.1",
+  "version_number": "0.3.2",
   "website_url": "https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-companion-client",
   "description": "Eilif community server: sends your explored-map percentage and your own death causes to the community dashboard, and keeps your tools, weapons and ammo on you when the server allows it. Full disclosure in README.",
   "dependencies": [
