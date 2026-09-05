@@ -5,7 +5,7 @@ export const SERVER_TAGLINE = 'The Cozy Canon Playthrough';
 export const SERVER_DESCRIPTION =
   'A modded Valheim dedicated server. Bosses gate progression — no sailing ahead of the longship, vikings.';
 
-export const MAX_PLAYERS = 15;
+export const MAX_PLAYERS = 20; // matches ValheimPlus [Server] maxPlayers on the box (Charlie, 2026-09-05)
 export const SERVER_HOST = 'GTXGaming';
 export const WORLD_SEED = 'Yggdrasil'; // cosmetic — set to your real seed if you want it shown
 
