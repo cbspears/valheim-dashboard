@@ -17,6 +17,7 @@ import { createClient } from '@supabase/supabase-js';
 import { matchPinInCaption } from '@/lib/pin-match';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import { safeEqual } from '@/lib/ops/auth';
+import { decideIdentity } from '@/lib/identity-guard';
 
 // Always run on the Node.js runtime (we need the service role key + full SDK)
 // and never cache — every webhook mutates state and must execute on request.
@@ -42,6 +43,11 @@ interface WebhookPayload {
   x?: number;
   z?: number;
   biome?: string;
+  // The SteamID the log poller currently pairs with `characterName` (from the
+  // server log's "Got connection SteamID …" → "Got character ZDOID from …"
+  // sequence). Sent on join/leave/oath/pin when known, omitted when not — see
+  // §3b and lib/identity-guard.ts.
+  steamId?: string;
 }
 
 // A privileged client bound to the service role key. Created per request so we
@@ -52,6 +58,82 @@ function serviceClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }
+  );
+}
+
+type ServiceClient = ReturnType<typeof serviceClient>;
+
+// ---- Viking identity guard (audit security-3) -------------------------------
+// Valheim allows DUPLICATE character names and never verifies them, so "the
+// character called Alice" is not an identity: anyone can roll a second Alice
+// and every name-keyed write here would file it under the real one. The log
+// poller pairs each name with the SteamID that connected under it and sends
+// that as `steamId`; players.steam_id records the FIRST one seen for a name
+// (see §3b) and this looks the binding up for the write paths that must refuse
+// an impostor: `oath`, `pin`, and the /oath CODE Discord link.
+//
+// ADMIN RELEASE PROCEDURE. First sight binds and nothing in this route ever
+// overwrites a binding, so a viking that legitimately changes hands (a Steam
+// account change, an impostor who got there first, a mis-bind during testing)
+// has to be released by hand against the Supabase SQL editor:
+//
+//     update players set steam_id = null where character_name = '<name>';
+//
+// The next join under that name binds it fresh, and oaths/pins/the Discord link
+// unfreeze immediately. (Same shape as the discord_user_id release documented
+// in §2e's takeover guard; the two are independent — release both if a viking
+// is being handed over wholesale.)
+//
+// A failed lookup returns 'unknown' — this guard must never turn a database
+// blip into a refused oath.
+async function identityOf(
+  db: ServiceClient,
+  characterName: string,
+  seenSteamId: string | null
+): Promise<{ decision: ReturnType<typeof decideIdentity>; boundSteamId: string | null }> {
+  // No pairing means no decision to make, whatever the row says — skip the
+  // read entirely so a producer that never sends `steamId` (the Discord
+  // Connector mod, a shout captured before the join line) costs nothing.
+  if (!seenSteamId) return { decision: 'unknown', boundSteamId: null };
+  // players_character_name_key is case-SENSITIVE, so the same ilike + escape +
+  // limit(1) the rest of this route uses to find a viking by name.
+  const escaped = characterName.replace(/[%_]/g, (c) => `\\${c}`);
+  const { data, error } = await db
+    .from('players')
+    .select('steam_id')
+    .ilike('character_name', escaped)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error(`[webhook] identity lookup for "${characterName}" failed — ${error.message}`);
+    return { decision: 'unknown', boundSteamId: null };
+  }
+  const boundSteamId = (data?.steam_id as string | null) ?? null;
+  return {
+    decision: decideIdentity({ boundSteamId, seenSteamId, hasPairing: seenSteamId !== null }),
+    boundSteamId,
+  };
+}
+
+// A refusal the log poller can swallow. Deliberately HTTP 200: the poller
+// treats any non-2xx as a failed tick, rewinds its byte cursor and re-reads the
+// whole batch forever, so a permanently-refused oath would wedge the pipeline
+// (joins, deaths and chat included) rather than just dropping one write. The
+// refusal is in the body, and both sides log it.
+function identityRefusal(type: string, characterName: string, boundSteamId: string | null, seen: string | null) {
+  console.warn(
+    `[webhook] STEAM MISMATCH ${type} ${characterName}: bound ${boundSteamId ?? 'null'} saw ${seen ?? 'null'} — ` +
+      `write refused. Release it with: update players set steam_id = null where character_name = '${characterName}'`
+  );
+  return Response.json(
+    {
+      ok: false,
+      status: 'identity_mismatch',
+      character: characterName,
+      detail:
+        'That character is bound to a different Steam account. An admin has to release it (players.steam_id) first.',
+    },
+    { status: 200 }
   );
 }
 
@@ -99,6 +181,15 @@ export async function POST(request: Request) {
     typeof body.worldDay === 'number' && Number.isFinite(body.worldDay)
       ? Math.trunc(body.worldDay)
       : undefined;
+
+  // The SteamID the producer pairs with this character right now. Digits only
+  // (a Steam64 id is 17 of them) and length-capped, so nothing else can reach
+  // the players.steam_id column. Anything unparseable is treated as "no
+  // pairing" — the guard below then allows the write rather than guessing.
+  const steamId =
+    typeof body.steamId === 'string' && /^\d{1,32}$/.test(body.steamId.trim())
+      ? body.steamId.trim()
+      : null;
 
   // Honor an explicit event time if the producer supplies a valid ISO string;
   // otherwise stamp "now". Used for created_at, sessions, and last_seen.
@@ -297,6 +388,19 @@ export async function POST(request: Request) {
         );
       }
 
+      // ---- Identity gate (audit security-3) --------------------------------
+      // Checked BEFORE anything is written or consumed: the claim-code UPDATE
+      // below is an atomic check-and-consume, so an impostor's shout must be
+      // stopped here or it spends a code that was never theirs. Refuses only a
+      // positive mismatch (bound to a different Steam account); an unbound
+      // viking or a shout we have no pairing for still goes through.
+      {
+        const { decision, boundSteamId } = await identityOf(db, oathCharacterName, steamId);
+        if (decision === 'mismatch') {
+          return identityRefusal('oath', oathCharacterName, boundSteamId, steamId);
+        }
+      }
+
       // ---- Identity link (one-time claim code) -----------------------------
       // The FIRST whitespace-delimited token of the oath may be a one-time code
       // the Discord bot minted into identity_claims. If it matches the code
@@ -372,6 +476,13 @@ export async function POST(request: Request) {
               // The claim is already consumed (that UPDATE is the atomic
               // check-and-consume), so say so plainly: the bot surfaces this
               // status to the person who asked for the code.
+              //
+              // HTTP 200 with ok:false, not 409 — same reason as
+              // identityRefusal() above: the log poller treats any non-2xx as a
+              // failed tick, rewinds its byte cursor and re-reads the batch
+              // forever, so a permanently-refused relink would wedge the whole
+              // pipeline (joins, deaths, chat) instead of dropping one write.
+              // The refusal lives in the body; both sides log it.
               return Response.json(
                 {
                   ok: false,
@@ -381,7 +492,7 @@ export async function POST(request: Request) {
                   detail:
                     'That character is already linked to a different Discord account. An admin has to release it first.',
                 },
-                { status: 409 },
+                { status: 200 },
               );
             }
 
@@ -499,6 +610,17 @@ export async function POST(request: Request) {
           { error: "'pin' requires non-empty characterName, metadata.name, metadata.worldX, metadata.worldZ" },
           { status: 400 }
         );
+      }
+
+      // ---- Identity gate (audit security-3) --------------------------------
+      // Pins replace by name, so an impostor could move or rename another
+      // viking's landmark. Same rule as the oath gate: refuse only a positive
+      // Steam-account mismatch.
+      {
+        const { decision, boundSteamId } = await identityOf(db, pinCharacterName, steamId);
+        if (decision === 'mismatch') {
+          return identityRefusal('pin', pinCharacterName, boundSteamId, steamId);
+        }
       }
 
       const WORLD_RADIUS = 10000;
@@ -684,11 +806,16 @@ export async function POST(request: Request) {
 
     // ---- 3. Resolve / upsert the player ------------------------------------
     let playerId: string | null = null;
+    // Set by §3b when a join arrives under a Steam account that is not the one
+    // bound to this name: the event row is annotated and the poller is told, so
+    // it can alert once in #server.
+    let identityMismatch = false;
+    let identityMeta: Record<string, unknown> | null = null;
 
     if (characterName) {
       const { data: existing, error: existingErr } = await db
         .from('players')
-        .select('id')
+        .select('id, steam_id')
         .eq('character_name', characterName)
         .limit(1)
         .maybeSingle();
@@ -700,13 +827,18 @@ export async function POST(request: Request) {
         return Response.json({ error: 'internal_error' }, { status: 500 });
       }
 
+      let boundSteamId: string | null = null;
       if (existing?.id) {
         playerId = existing.id as string;
+        boundSteamId = (existing.steam_id as string | null) ?? null;
         const update: Record<string, unknown> = { last_seen_at: occurredIso };
         if (type === 'join') update.is_online = true;
         else if (type === 'leave') update.is_online = false;
         await db.from('players').update(update).eq('id', playerId);
       } else {
+        // A name nobody has ever seen still auto-creates its row, exactly as
+        // before. The SteamID is bound a moment later in §3b (a separate write
+        // on purpose — see there) so this insert can never fail on it.
         const { data: inserted } = await db
           .from('players')
           .insert({
@@ -719,20 +851,60 @@ export async function POST(request: Request) {
           .single();
         playerId = (inserted?.id as string) ?? null;
       }
+
+      // ---- 3b. Bind / check the Steam identity (audit security-3) ----------
+      // FIRST SIGHT BINDS: the first Steam account to join under a name owns
+      // that name. A join under a DIFFERENT account is never allowed to
+      // overwrite the binding — presence is still recorded (someone really is
+      // in the world) but the event is annotated, the response tells the poller
+      // to alert, and §2e/§2f freeze that name's oath, pin and Discord-link
+      // writes until an admin releases it:
+      //
+      //     update players set steam_id = null where character_name = '<name>';
+      //
+      // Only `join` binds: it is the one event the log correlates directly to a
+      // connection. Written on its own, NOT folded into the update above, so a
+      // rejected steam_id (e.g. the legacy players_steam_id_key UNIQUE
+      // constraint when one Steam account plays two characters — see
+      // db/2026-09-05_players_steam_id_guard.sql) can never take the
+      // last_seen_at / is_online update down with it.
+      if (type === 'join' && playerId) {
+        const decision = decideIdentity({ boundSteamId, seenSteamId: steamId, hasPairing: steamId !== null });
+        if (decision === 'bind') {
+          const { error: bindErr } = await db
+            .from('players')
+            .update({ steam_id: steamId })
+            .eq('id', playerId);
+          if (bindErr) {
+            console.warn(`[webhook] steam_id bind for "${characterName}" skipped — ${bindErr.message}`);
+          }
+        } else if (decision === 'mismatch') {
+          identityMismatch = true;
+          identityMeta = { identity: 'steam_mismatch', seenSteamId: steamId, boundSteamId };
+          console.warn(`[webhook] STEAM MISMATCH ${characterName}: bound ${boundSteamId} saw ${steamId}`);
+        }
+      }
     }
 
     // A redelivered presence event stops here: the row and the session already
     // exist, and section 3 has just re-asserted the (idempotent) presence state.
     if (isPresenceReplay) {
-      return Response.json({ ok: true, duplicate: true }, { status: 200 });
+      // Still report the mismatch: a redelivered join is the same impostor, and
+      // the poller's alert is deduped by (name, SteamID) on its own side.
+      return Response.json(
+        identityMismatch ? { ok: true, duplicate: true, identityMismatch: true } : { ok: true, duplicate: true },
+        { status: 200 }
+      );
     }
 
     // ---- 4. Record the event ------------------------------------------------
+    // A mismatched join carries the evidence in its metadata, so the row itself
+    // says which account was bound and which one showed up (§3b).
     await db.from('events').insert({
       type,
       player_id: playerId,
       character_name: characterName,
-      metadata,
+      metadata: identityMeta ? { ...metadata, ...identityMeta } : metadata,
       created_at: occurredIso,
     });
 
@@ -821,7 +993,9 @@ export async function POST(request: Request) {
       await db.from('server_status').update(statusUpdate).eq('id', 1);
     }
 
-    return Response.json({ ok: true }, { status: 200 });
+    return Response.json(identityMismatch ? { ok: true, identityMismatch: true } : { ok: true }, {
+      status: 200,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unexpected error';
     console.error('[webhook] failed to process event:', message);

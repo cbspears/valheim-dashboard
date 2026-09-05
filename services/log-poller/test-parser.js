@@ -335,5 +335,178 @@ if (!oathOk) ok = false;
   if (!arrivalOk) ok = false;
 }
 
+// --- SteamID pairing carried on events (security-3) -----------------------
+// Valheim allows duplicate character names, so every name-keyed write
+// downstream needs the connecting SteamID to check against players.steam_id.
+// The parser already correlates "Got connection SteamID" with the following
+// ZDOID line; these cases pin down that it SHIPS that pairing on the events.
+{
+  const P = (p) => `[Info   : Unity Log] 09/05/2026 12:00:00: ${p}`;
+  const STEAM_A = '76561198000000001';
+  const STEAM_B = '76561198000000002';
+  const idChecks = [];
+
+  // (1) The whole sample fixture: joins, the death in between, and both leaves.
+  {
+    const p = new LogParser();
+    const evs = [];
+    for (const line of readFileSync(new URL('./fixtures/sample-session.log', import.meta.url), 'utf8').split('\n')) {
+      evs.push(...p.processLine(line));
+    }
+    const first = (type, name) => evs.find((e) => e.type === type && e.characterName === name);
+    idChecks.push(
+      ['join carries the connecting SteamID', first('join', 'Bjorn Ironside')?.steamId === STEAM_A],
+      ['a second join carries its own SteamID', first('join', 'Astrid Shieldmaiden')?.steamId === STEAM_B],
+      ['death carries the pairing too', first('death', 'Bjorn Ironside')?.steamId === STEAM_A],
+      ['leave carries the closing socket’s SteamID', first('leave', 'Astrid Shieldmaiden')?.steamId === STEAM_B],
+      ['the last leave still carries its SteamID', first('leave', 'Bjorn Ironside')?.steamId === STEAM_A],
+      ['steamIdFor() is empty once everyone has left', p.steamIdFor('Bjorn Ironside') === null]
+    );
+  }
+
+  // (2) Relog to a different character on ONE connection: the synthesized
+  //     leave and the new join must both name that one SteamID.
+  {
+    const p = new LogParser();
+    const evs = [];
+    for (const line of readFileSync(new URL('./fixtures/relog-session.log', import.meta.url), 'utf8').split('\n')) {
+      evs.push(...p.processLine(line));
+    }
+    const relogLeave = evs.find((e) => e.type === 'leave' && e.characterName === 'Testman');
+    const relogJoin = evs.find((e) => e.type === 'join' && e.characterName === 'Testmantwo');
+    idChecks.push(
+      ['relog: synthesized leave carries the SteamID', relogLeave?.steamId === '76561198099999999'],
+      ['relog: the new character joins under the same SteamID', relogJoin?.steamId === '76561198099999999']
+    );
+  }
+
+  // (3) Oath / pin / chat / pos for an online viking carry that viking's
+  //     pairing — this is what lets the webhook refuse an impostor's write.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Astrid : 12345:1'));
+    const oathEv = p.processLine('[Info   :Eilif Companion] [EILIF_OATH] Astrid | I hold the Hearth.')[0];
+    const pinEv = p.processLine('[Info   :Eilif Companion] [EILIF_PIN] Astrid | poi | Dark Chapel | 1.0 | 2.0')[0];
+    const chatEv = p.processLine('[Info   :Eilif Companion] [EILIF_CHAT] Astrid | hello there')[0];
+    const posEv = p.processLine('[Info   :Eilif Companion] [EILIF_POS] Astrid | -184.9 | -2.1 | BlackForest')[0];
+    const echoEv = p.processLine(
+      '[Info   : Unity Log] Console: <color=orange>Astrid</color>: <color=#FFEB04FF>/OATH I SWEAR IT</color>'
+    )[0];
+    idChecks.push(
+      ['oath carries the shouter’s pairing', oathEv?.steamId === STEAM_A],
+      ['pin carries the pinner’s pairing', pinEv?.steamId === STEAM_A],
+      ['chat carries the pairing', chatEv?.steamId === STEAM_A],
+      ['pos carries the pairing', posEv?.steamId === STEAM_A],
+      ['a console-echoed oath carries it as well', echoEv?.steamId === STEAM_A],
+      ['steamIdFor() reports the live pairing', p.steamIdFor('Astrid') === STEAM_A]
+    );
+
+    // An IMPOSTOR: a second character called Astrid is impossible in one
+    // session, but a shout from a name we have no connection for must simply
+    // arrive WITHOUT a pairing — the webhook then allows it rather than
+    // inventing a mismatch.
+    const strangerOath = p.processLine('[Info   :Eilif Companion] [EILIF_OATH] Nobody | who am I')[0];
+    idChecks.push(
+      ['an unknown name carries no steamId', strangerOath?.steamId === undefined],
+      ['steamIdFor() on an unknown name is null', p.steamIdFor('Nobody') === null]
+    );
+  }
+
+  // (4) A join with no preceding connection line (poller started mid-session)
+  //     must not borrow anyone else's SteamID.
+  {
+    const p = new LogParser();
+    const joinEv = p.processLine(P('Got character ZDOID from Orphan : 999:1'))[0];
+    idChecks.push(
+      ['an uncorrelated join carries no steamId', joinEv?.type === 'join' && joinEv.steamId === undefined]
+    );
+  }
+
+  // (5) The pairing survives a restart: it is in snapshot() and restored by the
+  //     constructor, so post-restart oaths are still checkable.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_B}`));
+    p.processLine(P('Got character ZDOID from Bjorn : 4242:1'));
+    const resumed = new LogParser(p.snapshot());
+    const oathEv = resumed.processLine('[Info   :Eilif Companion] [EILIF_OATH] Bjorn | still me')[0];
+    idChecks.push(
+      ['snapshot() persists the pairing', p.snapshot().connections.some(([s, n]) => s === STEAM_B && n === 'Bjorn')],
+      ['a resumed parser still pairs the name', oathEv?.steamId === STEAM_B]
+    );
+  }
+
+  let idOk = true;
+  console.log('\nSteamID pairing:');
+  for (const [label, pass] of idChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) idOk = false;
+  }
+  console.log(idOk ? 'STEAMID PAIRING OK' : 'STEAMID PAIRING FAILED');
+  if (!idOk) ok = false;
+}
+
+// --- Dispatch: what actually reaches the webhook (security-3) -------------
+// The parser can carry the pairing perfectly and still be useless if dispatch
+// drops it, so drive the real Poller.dispatch with a stubbed webhook + alert.
+// (Lives here rather than in its own file so it stays inside `npm test`.)
+{
+  const { Poller } = await import('./src/poller.js');
+  const posted = [];
+  const alerts = [];
+  const quiet = { info: () => {}, warn: () => {}, error: () => {} };
+  const p = new Poller({ webhookUrl: 'stub', webhookSecret: 'stub' }, quiet);
+  // The webhook answers `identityMismatch` for Alice's joins and nothing else.
+  p.postEvent = async (payload) => {
+    posted.push(payload);
+    return payload.type === 'join' && payload.characterName === 'Alice'
+      ? { ok: true, identityMismatch: true }
+      : { ok: true };
+  };
+  p.postAlert = async (content) => alerts.push(content);
+
+  const STEAM_A = '76561198000000001';
+  await p.dispatch({ type: 'join', characterName: 'Alice', steamId: '76561198000000009', metadata: {} });
+  await p.dispatch({ type: 'join', characterName: 'Alice', steamId: '76561198000000009', metadata: {} });
+  await p.dispatch({ type: 'join', characterName: 'Alice', steamId: '76561198000000010', metadata: {} });
+  await p.dispatch({ type: 'join', characterName: 'Bjorn', steamId: STEAM_A, metadata: {} });
+  await p.dispatch({ type: 'leave', characterName: 'Bjorn', steamId: STEAM_A, metadata: {} });
+  await p.dispatch({ type: 'oath', characterName: 'Bjorn', steamId: STEAM_A, metadata: { text: 'I swear' } });
+  await p.dispatch({
+    type: 'pin',
+    characterName: 'Bjorn',
+    steamId: STEAM_A,
+    metadata: { name: 'Dark Chapel', kind: 'poi', worldX: 1, worldZ: 2 },
+  });
+  await p.dispatch({ type: 'raid', metadata: { event: 'The forest is moving…' } });
+  await p.dispatch({ type: 'join', characterName: 'Ghost', metadata: {} });
+
+  const wire = (e) => JSON.parse(JSON.stringify(e)); // what JSON.stringify actually sends
+  const sent = (type) => posted.find((e) => e.type === type);
+  const dispatchChecks = [
+    ['join forwards the steamId', sent('join').steamId === '76561198000000009'],
+    ['leave forwards the steamId', sent('leave').steamId === STEAM_A],
+    ['oath forwards the steamId', sent('oath').steamId === STEAM_A],
+    ['pin forwards the steamId', sent('pin').steamId === STEAM_A],
+    ['a server-wide event sends no steamId key at all', !('steamId' in wire(sent('raid')))],
+    ['a join with no pairing sends no steamId key', !('steamId' in wire(posted.at(-1)))],
+    ['identityMismatch alerts once per (name, SteamID) pair', alerts.length === 2],
+    [
+      'the alert names the viking and the release',
+      alerts[0].includes('Alice') && alerts[0].includes('players.steam_id'),
+    ],
+    ['a clean join raises no alert', !alerts.some((a) => a.includes('Bjorn'))],
+  ];
+  let dispatchOk = true;
+  console.log('\nDispatch → webhook:');
+  for (const [label, pass] of dispatchChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) dispatchOk = false;
+  }
+  console.log(dispatchOk ? 'DISPATCH OK' : 'DISPATCH FAILED');
+  if (!dispatchOk) ok = false;
+}
+
 console.log(ok ? '\nPARSER OK' : '\nPARSER FAILED');
 process.exit(ok ? 0 : 1);

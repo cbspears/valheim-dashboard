@@ -149,11 +149,42 @@ export class LogParser {
   }
 
   /**
+   * The SteamID currently paired with a character name, or null if we have
+   * none. This is the ONLY stable identity the dedicated server hands us:
+   * Valheim allows duplicate character names and never verifies them, so the
+   * dashboard's name-keyed writes (oath, pin, the /oath CODE Discord link) are
+   * impersonable without it (audit security-3). Never authoritative — a pairing
+   * we simply haven't seen yet (a shout before the join line, a poller restart)
+   * reads the same as "no such player", so downstream treats null as "allow".
+   */
+  steamIdFor(name) {
+    return this.nameToSteam.get(name) ?? null;
+  }
+
+  /**
    * Feed one log line. Returns an array of event objects (possibly empty):
-   *   { type, characterName?, metadata, raid?, count? }
-   * `type` is one of: join | leave | death | raid | heartbeat.
+   *   { type, characterName?, steamId?, metadata, raid?, count? }
+   * `type` is one of: join | leave | death | raid | heartbeat | oath | pin |
+   * chat | pos.
+   *
+   * Every event that names a character also carries the `steamId` we currently
+   * pair with that name, when we have one — attached HERE, in one place, so no
+   * individual rule can forget it. `leave` sets its own before the pairing is
+   * torn down; anything already carrying a steamId is left alone.
    */
   processLine(line) {
+    const events = this.parseLine(line);
+    for (const ev of events) {
+      if (ev.characterName && ev.steamId === undefined) {
+        const steamId = this.steamIdFor(ev.characterName);
+        if (steamId) ev.steamId = steamId;
+      }
+    }
+    return events;
+  }
+
+  /** The rule table itself. Use processLine() — it adds the SteamID pairing. */
+  parseLine(line) {
     const events = [];
     if (!line) return events;
 
@@ -302,7 +333,9 @@ export class LogParser {
               // Testmantwo, 2026-07-04).
               this.online.delete(prevName);
               this.nameToSteam.delete(prevName);
-              events.push({ type: 'leave', characterName: prevName, metadata: {} });
+              // Stamped here, not by processLine: the pairing this leave
+              // belongs to has just been torn down above.
+              events.push({ type: 'leave', characterName: prevName, steamId, metadata: {} });
             }
             this.steamToName.set(steamId, name);
             this.nameToSteam.set(name, steamId);
@@ -336,7 +369,9 @@ export class LogParser {
         this.steamToName.delete(steamId);
         this.nameToSteam.delete(name);
         if (this.online.delete(name)) {
-          events.push({ type: 'leave', characterName: name, metadata: {} });
+          // Same as the relog case: stamp the closing socket's SteamID before
+          // processLine can look for a pairing that no longer exists.
+          events.push({ type: 'leave', characterName: name, steamId, metadata: {} });
         }
       }
       return events;

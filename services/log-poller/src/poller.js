@@ -41,6 +41,9 @@ export class Poller {
     // Recently-mirrored chat, key -> posted-at ms. The same shout can surface
     // twice (plugin [EILIF_CHAT] line + console echo); this suppresses the twin.
     this.recentChat = new Map();
+    // "<name>|<steamId>" pairs already alerted on for an identity mismatch, so
+    // the warning fires once per impostor per process, not once per rejoin.
+    this.identityAlerts = new Set();
     // Ops-cockpit bookkeeping: last tick outcome + last time a new log line
     // was actually seen (as opposed to just an empty poll).
     this.lastTickAt = 0;
@@ -501,6 +504,15 @@ export class Poller {
     }
   }
 
+  // --- Send one parsed event onward -----------------------------------------
+  // IDENTITY (audit security-3): Valheim allows duplicate character names and
+  // never verifies them, so every name-keyed write downstream is impersonable.
+  // The parser pairs each name with the SteamID that connected under it, and
+  // dispatch forwards that pairing as `steamId` on join/leave/oath/pin. The
+  // webhook binds it on first sight and refuses name-keyed writes that arrive
+  // under a different account. When there is no pairing (a shout captured
+  // before the join line, a restart mid-session) the field is simply absent and
+  // the webhook allows the write — we never guess an identity.
   async dispatch(ev) {
     if (ev.type === 'chat') {
       const configured = this.cfg.chatWebhookUrl || (this.cfg.discordToken && this.cfg.chatChannelId);
@@ -523,13 +535,32 @@ export class Poller {
     }
     if (ev.type === 'oath') {
       // Oath payload carries `text` at the top level (not nested in metadata).
+      // `steamId` rides along so the webhook can refuse an oath (and the /oath
+      // CODE identity link) shouted by a different Steam account than the one
+      // bound to that viking — see the identity guard note above dispatch().
       this.log.info?.(`[event] oath ${ev.characterName}`);
-      await this.postEvent({ type: 'oath', characterName: ev.characterName, text: ev.metadata.text });
+      const res = await this.postEvent({
+        type: 'oath',
+        characterName: ev.characterName,
+        text: ev.metadata.text,
+        steamId: ev.steamId,
+      });
+      if (res?.status === 'identity_mismatch') {
+        this.log.warn?.(`[identity] oath from ${ev.characterName} refused — steam id does not match the binding`);
+      }
       return;
     }
     if (ev.type === 'pin') {
       this.log.info?.(`[event] pin ${ev.characterName} -> ${ev.metadata.name} (${ev.metadata.kind})`);
-      await this.postEvent({ type: 'pin', characterName: ev.characterName, metadata: ev.metadata });
+      const res = await this.postEvent({
+        type: 'pin',
+        characterName: ev.characterName,
+        metadata: ev.metadata,
+        steamId: ev.steamId,
+      });
+      if (res?.status === 'identity_mismatch') {
+        this.log.warn?.(`[identity] pin from ${ev.characterName} refused — steam id does not match the binding`);
+      }
       return;
     }
     if (ev.type === 'pos') {
@@ -557,7 +588,31 @@ export class Poller {
       return;
     }
     this.log.info?.(`[event] ${type}${characterName ? ` ${characterName}` : ''}${metadata?.event ? ` (${metadata.event})` : ''}`);
-    await this.postEvent({ type, characterName, metadata });
+    const res = await this.postEvent({ type, characterName, metadata, steamId: ev.steamId });
+    // The webhook binds players.steam_id on first sight and flags a join that
+    // arrives under a different Steam account than the one already bound. It
+    // still records the presence (someone really is in the world), but every
+    // name-keyed write for that viking is frozen until an admin clears the
+    // binding — so say so out loud, once.
+    if (type === 'join' && res?.identityMismatch) {
+      await this.alertIdentityMismatch(characterName, ev.steamId);
+    }
+  }
+
+  // --- Identity mismatch alert (audit security-3) ---------------------------
+  // Once per (character name, SteamID) pair for the life of this process: the
+  // same impostor rejoining every five minutes must not turn #server into a
+  // siren. Best-effort — postAlert never throws.
+  async alertIdentityMismatch(name, steamId) {
+    const key = `${name}|${steamId ?? '?'}`;
+    if (this.identityAlerts.has(key)) return;
+    this.identityAlerts.add(key);
+    this.log.warn?.(`[identity] STEAM MISMATCH on join: ${name} (seen ${steamId ?? 'unknown'})`);
+    await this.postAlert(
+      `⚠️ Identity check: ${name} just joined under a different Steam account than the one bound ` +
+        `to that viking. Oaths, pins and the Discord link for that name are frozen until an admin ` +
+        `clears players.steam_id.`
+    );
   }
 
   async start() {

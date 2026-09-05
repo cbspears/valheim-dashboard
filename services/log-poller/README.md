@@ -99,6 +99,26 @@ Slash-command shouts (`/oath`, `/pin`, …) are never mirrored as chat. Chat is
 posted straight to Discord — it never touches the dashboard webhook/events
 table (the site is public; chat is not). Mentions are hard-disabled.
 
+## Viking identity (SteamID pairing)
+Valheim allows **duplicate character names** and never verifies them, so a name on its own is not
+an identity — anyone can roll a second "Alice" and, before this, take over her oath, her pins and
+her Discord link (audit security-3). The parser already correlates `Got connection SteamID <id>`
+with the following `Got character ZDOID from <name>` line, and the poller now forwards that pairing
+as `steamId` on `join` / `leave` / `oath` / `pin`. The webhook binds it to `players.steam_id` on
+**first sight** (the first Steam account to join under a name owns that name), never overwrites a
+binding, and refuses oath / pin / `/oath CODE` link writes that arrive under a different account —
+while still recording presence, because someone really is in the world. A join under the wrong
+account also makes the poller post one `⚠️ Identity check:` alert per (name, SteamID) pair.
+Events we have no pairing for (a shout captured before the join line, a restart mid-session) carry
+no `steamId` and are allowed through, so the guard never invents a false positive.
+**Admin release procedure:** first sight binds and nothing clears a binding automatically, so a
+viking that legitimately changes hands — a new Steam account, a mis-bind during testing, an
+impostor who got there first — must be released by hand in the Supabase SQL editor with
+`update players set steam_id = null where character_name = '<name>'`. The next join under that name
+binds it fresh and unfreezes that name's oaths, pins and Discord link immediately. (The Discord
+link has its own separate release, `update players set discord_user_id = null where …` — clear both
+if a viking is being handed over wholesale.)
+
 ## Notes / future
 - Boss kills are **not** in the log — tracked manually for now (no parser rule).
 - The `Connections N` server heartbeat is only emitted ~every 10 min; join/leave events are
