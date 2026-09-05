@@ -45,8 +45,4 @@ export const MODPACK_VERSION_LABEL = 'Pack v11 · Aug 27';
 //    old version until the mods are rebuilt. Before you play, switch Valheim
 //    back: Steam, Library, right-click Valheim, Properties, Betas. Do not
 //    re-install the pack.'
-export const LAUNCH_NOTICE =
-  'Sept 9: Valheim 1.0 arrives in the morning and Eilif moves to 1.0 the same day, ' +
-  'with kickoff at 5:30 PM CT. Do not update your mods or re-import the pack until the ' +
-  'new pack code is posted in Discord that afternoon. If Steam already updated you to ' +
-  '1.0, that is fine, just wait for the code.';
+export const LAUNCH_NOTICE = ''; // Charlie 2026-09-05: no site banner for launch week. The drafted text lives in the vault note 10-Launch-Comms-2026-09-09.md.
