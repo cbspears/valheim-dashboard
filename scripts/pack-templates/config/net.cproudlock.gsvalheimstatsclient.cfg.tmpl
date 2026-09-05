@@ -1,0 +1,27 @@
+## Settings file was created by plugin GsValheimStatsClient v{{GS_CFG_VERSION}}
+## Plugin GUID: net.cproudlock.gsvalheimstatsclient
+
+[General]
+
+## World name to file your stats under (must match the server's world).
+# Setting type: String
+# Default value: vhserver3
+World = {{WORLD}}
+
+## How often to POST your stats.
+# Setting type: Int32
+# Default value: 120
+EmitIntervalSeconds = 120
+
+[Ingest]
+
+## gs dashboard ingest endpoint.
+# Setting type: String
+# Default value: https://gs.proudtech.net/api/valheim/ingest
+Url = {{INGEST_URL}}
+
+## Bearer token from the dashboard owner.
+# Setting type: String
+# Default value: 
+Token = 
+

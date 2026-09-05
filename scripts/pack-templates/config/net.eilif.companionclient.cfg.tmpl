@@ -1,0 +1,21 @@
+## Settings file was created by plugin Eilif Companion Client v{{COMPANION_CFG_VERSION}}
+## Plugin GUID: net.eilif.companionclient
+
+[Map]
+
+## Dashboard ingest endpoint. The explored-map % is POSTed here as source:'client-map'.
+# Setting type: String
+# Default value: https://valheim-dashboard.vercel.app/api/gs-ingest
+Url = {{INGEST_URL}}
+
+## Optional Bearer token. If set it is sent as 'Authorization: Bearer <token>'. Blank is fine (pilot).
+# Setting type: String
+# Default value: 
+Token = 
+
+## Seconds between map-% posts while connected to a server.
+# Setting type: Int32
+# Default value: 300
+# Acceptable value range: From 60 to 3600
+IntervalSeconds = 300
+

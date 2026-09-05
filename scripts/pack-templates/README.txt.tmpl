@@ -1,0 +1,45 @@
+{{BUNDLE_TITLE}}
+{{BUNDLE_TITLE_RULE}}
+
+What this is
+------------
+The seven settings files the Eilif modpack normally installs for you. r2modman
+puts them in place automatically when you import the pack code. Macheim cannot
+read a pack code, so if you installed the mods by hand on a Mac, you need these.
+
+Without them you can still play, but your kills, deaths and weapon records will
+not reach the dashboard, and Alt+O stays bound to a hotkey that silently turns
+off crafting from nearby chests.
+
+Where they go
+-------------
+Drop all seven .cfg files (not this README) into Macheim's config folder:
+
+  Macheim -> Config
+
+which on disk is your Valheim install's BepInEx/config folder. Overwrite any
+file that is already there. Then launch the game from Macheim once so the mods
+read them.
+
+If you use r2modman instead, you do not need this bundle at all. Import the
+pack code from the Get Started page and you get these files automatically.
+
+What is in here
+---------------
+  net.cproudlock.gsvalheimstatsclient.cfg   points your stats at the Eilif
+                                            dashboard and names the world
+  net.eilif.companionclient.cfg             explored-map % and death causes
+  net.eilif.paths.cfg                       path and road movement values
+  Azumatt.AzuCraftyBoxes.cfg                unbinds the Alt+O chest-pulling
+                                            hotkey so it cannot bite you
+  advize.PlantEverything.cfg                farming settings, synced by server
+  valheim_plus.cfg                          the server overrides most of this
+  BepInEx.cfg                               mod loader settings
+
+Version
+-------
+These match Eilif modpack v{{PACK_NUMBER}} (published {{PACK_DATE}}) exactly. When a new pack
+code is announced in Discord, come back to the Get Started page and grab the
+bundle again: the settings change with the pack.
+
+Questions: ask in Discord.
