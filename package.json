@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "find scripts lib -name '*.test.mjs' -not -path '*/node_modules/*' -print0 | xargs -0 -n1 npx tsx"
+    "test": "find scripts lib -name '*.test.mjs' -not -path '*/node_modules/*' -print0 | xargs -0 -n1 npx tsx",
+    "smoke": "node scripts/smoke/run.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

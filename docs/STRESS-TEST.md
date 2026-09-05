@@ -14,6 +14,197 @@ refuses to start if `DISCORD_TOKEN` is set.
 - `scripts/stress/run.mjs` — the load generator and the invariant checker.
 - `scripts/stress/bot-dryrun.mjs` — a long-running Discord bot with no Discord.
 - `scripts/stress/ratelimit-probe.mjs` — measures the real per-IP request budget.
+- `scripts/smoke/run.mjs` — `npm run smoke`: the stack, the repointed build, the
+  first two of those scripts and the bot's own dry run, assembled by the machine
+  and cut to a three-minute scenario. Start here.
+
+---
+
+## The pre-deploy check: `npm run smoke`
+
+Everything below this section is the rehearsal assembled by hand. `npm run smoke`
+is the same rehearsal assembled by the machine and cut to a scenario that fits
+inside a code review: twenty vikings, ninety simulated minutes, three real
+minutes of load, the same invariant table. **This is the check to run before
+asking for a deploy.**
+
+```bash
+export NVM_DIR=~/.config/nvm; . $NVM_DIR/nvm.sh; nvm use 20
+npm run smoke
+```
+
+One command, no arguments, nothing to prepare. It exits non-zero if anything
+fails, and prints a one-screen summary either way.
+
+### What it does
+
+1. **Its own Supabase stack** — project `eilifsmoke`, the default ports shifted
+   to 544xx. Started if it is not up, reused if it is, and stopped afterwards
+   only if this run started it.
+2. **Rebuilds that database** from `db/*.sql` through `supabase db reset`, then
+   re-creates the `gallery` and `map` buckets the reset drops. The migration
+   order is derived here, not maintained by hand: files sort lexicographically
+   (which is why `2026-07-04_a_pins.sql` carries that `a_`), the undated initial
+   schema is stamped first, and `2026-08-24_loa_zero_baseline.sql` is skipped
+   because it was never applied to production.
+3. **Copies the repo to scratch and builds it** with the local Supabase in the
+   environment. That is what "repointed" means here: `NEXT_PUBLIC_*` is inlined
+   at build time (§2), so building the copy against the local stack is the only
+   repointing an environment variable cannot undo. The copy excludes every
+   `.env`, and `node_modules` is hardlinked rather than symlinked — Turbopack
+   refuses a symlink that leaves the project root.
+4. **Serves the copy** and requires `/api/status` to answer `players 0, world
+   day 0` before anything is written.
+5. **Runs `scripts/stress/bot-dryrun.mjs`** beside it at `BOT_COMPRESSION` =
+   `60000/TICK_MS`, so the deed, title and voice loops keep the production ratio
+   between their anti-spam gaps and the simulated clock (§3).
+6. **Runs `scripts/stress/run.mjs`** and asserts the same invariants. No flag was
+   added to it: the smoke scenario is `SIM_MINUTES=90 TICK_MS=2000` through the
+   options it already had.
+7. **Runs the bot's own one-shot dry run** against what the evening produced —
+   `DRY_RUN=1 node src/index.js`, one tick of every loop, formatting real rows,
+   and a failure in any loop fails the smoke test. `DOTENV_CONFIG_PATH` points at
+   an empty file, because `index.js` does `import 'dotenv/config'` and would
+   otherwise load `services/discord-bot/.env`: the live Discord token and the
+   production service-role key.
+8. **Tears down what it started.**
+
+### What it refuses
+
+- Anything but loopback. The database host is not configurable at all — only
+  `SMOKE_SUPABASE_PORT` is — and an inherited `SUPABASE_URL`,
+  `NEXT_PUBLIC_SUPABASE_URL` or `DATABASE_URL` naming a hosted database is a
+  refusal rather than a variable this run quietly ignores: a green result must
+  not be readable as evidence about a system it never touched. A `DISCORD_TOKEN`
+  in the environment is a refusal too.
+- A build that still carries a hosted Supabase project ref. The `.next` tree is
+  grepped for `[a-z0-9]{20}\.supabase\.co`. The width is what separates a real
+  project ref from supabase-js's own ten-character `xyzcompany.supabase.co`
+  documentation strings; the class has to include digits, because project refs
+  are alphanumeric and a letters-only class would wave a ref with a digit in it
+  straight through. The local URL then has to appear in the compiled server
+  chunks, so the check proves the repoint rather than merely failing to disprove
+  it.
+- A second `npm run smoke` on the same workspace or the same database. Both are
+  taken as exclusive locks before anything is touched (`$SMOKE_DIR/run.lock` and
+  `/tmp/eilif-smoke-stack-<port>.lock`), and the refusal names the other run's
+  pid, workspace and ports. Without them a peer run is the one thing neither
+  foreign-thing check can see: its server's cwd is under `$SMOKE_DIR`, so it
+  reads as "a previous smoke server" and gets killed, and its containers carry
+  this project's label, so its database reads as "already up" and gets reset
+  underneath it. A lock whose pid is gone is stale and cleared automatically.
+- A site whose `/api/status` reports a world day or players before the run.
+- And then `run.mjs`'s own preflight stamps a sentinel world day into the local
+  database and requires the site to echo it back (§"The preflight").
+
+Four refusals for one accident, because the accident is twelve thousand rows in
+production. The fifth, the locks, is for the cheaper accident: two runs on one
+box quietly deleting each other's evidence.
+
+### Why its own stack, and what it will not touch
+
+`db reset` rebuilds the database from empty, and the hand-assembled stack on the
+543xx ports is usually the middle of somebody's evening. A pre-deploy check that
+destroys the environment it finds is a check nobody runs twice, so this one sits
+beside that stack rather than on top of it and owns its own database completely —
+no leftover row from another run can turn an invariant green.
+
+For the same reason it stops a leftover dry-run bot **only** when that bot's
+`SUPABASE_URL` is this database. Two announcers against one database make "one
+saga row per deed" a coin flip, but a dry-run bot on the stress stack is somebody
+else's rehearsal, and killing it because it shares a filename is the same mistake
+as `pkill -f "node src/index.js"` against the bot and the poller.
+
+### Knobs
+
+| Variable / flag | Default | What it does |
+|---|---|---|
+| `SMOKE_DIR` | `/tmp/eilif-smoke` | workspace: Supabase project, site copy, logs, `results.json` |
+| `SMOKE_PORT` | 3402 | the port the site copy serves on |
+| `SMOKE_SUPABASE_PORT` | 54421 | the smoke stack's API port |
+| `SIM_MINUTES` | 90 | simulated minutes |
+| `TICK_MS` | 2000 | real milliseconds per simulated minute |
+| `SETTLE_MS` | 45000 | how long the bot's loops run before the invariants read |
+| `SEED` / `PLAYERS` | 20260909 / 20 | passed straight through to `run.mjs` |
+| `--keep` | off | leave the database and the built copy behind (the server still stops) |
+| `--reuse-build` | off | skip `next build`; the summary then says the build is stale |
+
+To run two at once, move **all three** of `SMOKE_DIR`, `SMOKE_PORT` and
+`SMOKE_SUPABASE_PORT`. Moving only the directory keeps the second run on the
+first one's database, which is what the stack lock refuses.
+
+The scenario knobs are for experiments, not for a faster pre-deploy check. The
+invariant table asserts on things a ninety-minute evening produces, so a shorter
+one fails honestly rather than passing quickly: `SIM_MINUTES=2 PLAYERS=3` scores
+21 passed, 7 failed, 4 skipped. A red run at a non-default scenario is the
+scenario, not a regression.
+
+Ninety simulated minutes at 2 s each is three real minutes of load **at exactly
+the per-address request rate the baseline below was measured at**. Shortening the
+tick instead would multiply that rate and quietly turn the smoke test into a
+rate-limit test.
+
+`--keep` is the one flag that leaves something behind: the stack stays up and the
+built copy stays in `$SMOKE_DIR/site`, so the rows a failure produced can be read
+afterwards. The site server itself always stops. To bring it back, and to clear
+the stack when you are done:
+
+```bash
+cd /tmp/eilif-smoke/site && ./node_modules/.bin/next start -p 3402   # if you need the pages
+cd /tmp/eilif-smoke/supabase-project && npx supabase@2.116.0 stop
+```
+
+Studio is on the same shift: <http://127.0.0.1:54423>.
+
+### What it does not cover
+
+The full 360-minute evening, the single-address rate-limit probe
+(`ratelimit-probe.mjs`) and `--verify-only` are all still manual, and the sections
+below are how to run them. The smoke test is a regression check, not the
+measurement: when the question is "how does the pipeline behave at launch size",
+run the long version.
+
+### Measured, 2026-09-05
+
+Four consecutive runs on the workstation, each from a **cold** stack (started
+and stopped by the run), with the 543xx stress stack and another builder's
+servers up the whole time:
+
+| Step | run 1 | run 2 | run 3 | run 4 |
+|---|---|---|---|---|
+| supabase stack | 27s | 26s | 26s | 26s |
+| database reset | 27s | 26s | 26s | 26s |
+| site copy + `next build` | 10s | 7.8s | 7.8s | 7.8s |
+| site up and proved empty | 1.0s | 1.0s | 1.0s | 1.0s |
+| dry-run bot up | 3.0s | 2.5s | 2.5s | 2.5s |
+| load + settle + invariants | 224s | 224s | 224s | 224s |
+| bot dry-run tick | 0.4s | 0.4s | 0.6s | 0.6s |
+| teardown | 13s | 12s | 13s | 12s |
+| **total** | **5m04s** | **5m00s** | **5m00s** | **5m00s** |
+
+**32 of 32 invariants passed, 0 failed, 0 skipped, every time.** 3,162 requests
+in 178 s of load, **no 5xx, no non-2xx of any kind, no retries**, every time.
+Worst p95 was the roster sync, between 257 and 359 ms; a `next start` and a
+Postgres share one box here, so read these as relative costs, not as
+Vercel-to-Supabase numbers.
+
+What the short evening produced, identical every time: 101 `events` rows, 38
+deaths in 38 rows (4 of them corpse-run doubles), 24 sessions all closed, 20
+`players` and 20 `player_stats`, both boss scenarios, 12 Great Deeds announced
+exactly once each, 20 unique titles, 26 voice lines, 102 mirrored chat lines and
+13 matched oaths. Diffing runs 1 and 2 row by row, the **only** two differences
+among the 32 evidence strings were Eikthyr's and The Elder's `killed_at`, which
+are wall-clock. That is what "deterministic enough to diff two runs" means here:
+a change in any other number is a change you made.
+
+Runs 3 and 4 applied **31** migrations rather than 30 — a new `db/*.sql` landed
+in the repo between run 2 and run 3, and the reset picked it up with no edit to
+anything. That is the intended behaviour: the migration list is derived from
+`db/` on every run, never maintained alongside it.
+
+Do not quote the latency table above as a capacity measurement. Three real
+minutes at 20 vikings is a regression check; the numbers that describe launch
+night are the 360-minute baseline further down.
 
 ---
 
