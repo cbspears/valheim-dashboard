@@ -1,4 +1,6 @@
 -- ============================================================================
+-- REPLAY ORDER NOTE (2026-09-05): apply db/*.sql in filename order; 2026-07-04_a_pins.sql was renamed so it sorts before
+-- 2026-07-04_gallery_pin_link.sql, which references public.pins. Verified by replaying all 30 files into a local stack (docs/STRESS-TEST.md).
 -- BASE SCHEMA — EXPORTED FROM PRODUCTION 2026-09-04. DISASTER RECOVERY ONLY.
 -- ============================================================================
 --

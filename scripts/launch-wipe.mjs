@@ -534,7 +534,7 @@ function printPostWipeChecklist() {
      - Upload the launch world's .fwl and .db TOGETHER; set Start.bat World=.
      - Death penalty = Casual (the tier that actually grants deathkeepequip —
        'easy'/'veryeasy' do not; today only the Companion plugin injects it).
-     - Combat = per the launch decision. V+ cfg [Chat] enabled=false (its NRE
+     - Combat = per the launch decision. leave V+ cfg [Chat] ENABLED (server-wide /s shouts; the Companion 0.3.x chat/oath hook no longer depends on it)
        is what kills the [EILIF_CHAT] hook). WebMap always_map=false unless the
        GTX firewall ticket for TCP 3000 has closed.
      - Only now swap any rebuilt plugin DLLs. Then Stop -> Start (never Restart).

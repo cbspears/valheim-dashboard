@@ -9,6 +9,11 @@ Last refreshed **2026-09-04** from the T−6 launch audit (findings launch-8,
 discord-1, launch-16, launch-17, gtx-7, mods-6). The cutover step table with
 owners lives in the audit report; this file is the wipe's own procedure.
 
+Two companion scripts check the steps below rather than replacing them:
+`scripts/launch-preflight.mjs` (read-only; one PASS/FAIL/WARN line per T-0
+precondition, run once per phase) and `scripts/rebuild-plugins.sh` (rebuilds all
+four custom plugins for the 1.0 recompile and prints what to stage where).
+
 ## When to run it
 
 **Launch day, after the fresh world exists but before real players are let back
@@ -34,6 +39,13 @@ you'd be wiping real launch data along with the pilot's.
    `--execute` outright** while `eilif-discord-bot` **or** `eilif-stats-parser`
    is active (both are hard gates), and warns without blocking on
    `eilif-log-poller` / `eilif-map-snapshot`.
+
+   Wider gate, same moment (units, pilot overrides, world wiring, Vercel env
+   names, site, prod counts, the box, port 3000, the pack pins):
+
+   ```bash
+   node scripts/launch-preflight.mjs --world <World> --phase pre-wipe
+   ```
 
    > `eilif-stats-parser` was **retired 2026-08-23** — it should report
    > `inactive`/`unknown`. The gate stays deliberately: a retired unit that
@@ -69,10 +81,17 @@ you'd be wiping real launch data along with the pilot's.
    ```
 
    Still refuses while a hard-gate unit is active, and additionally requires
-   typing `WIPE` at a confirmation prompt before touching anything.
+   typing `WIPE` at a confirmation prompt before touching anything. Its own
+   summary is the proof for this step; the `--phase post-wipe` check comes at the
+   end of step 6, not here — run it now and roughly ten of its checks FAIL for
+   the sole reason that their step has not happened yet.
 
 5. **Sweep the box while it is STOPPED** (loaded plugin DLLs are file-locked on
-   the Windows host, so this is also the only DLL-swap window). Valheim
+   the Windows host, so this is also the only DLL-swap window). Rebuilt DLLs for
+   that swap come from `bash scripts/rebuild-plugins.sh` (`--dry-run` first; it
+   prints the staging summary and refuses anything that references
+   `System.ValueTuple`. The real run overwrites the four tracked `dist/` DLLs, so
+   it asks you to type `REBUILD`, or takes `--yes`). Valheim
    **auto-restores from leftover `.old` / `*_backup_auto-*` files and resurrects
    the old world** — the runbook gotcha that makes this step mandatory, not
    cosmetic. Delete, in `worlds_local/`:
@@ -95,9 +114,23 @@ you'd be wiping real launch data along with the pilot's.
    `Start.bat World=`, panel death penalty = **Casual**, Combat per the launch
    decision, leave V+ `[Chat]` ENABLED (it is what makes /s shouts server-wide; the Companion 0.3.1 chat/oath hook no longer depends on it), Emitter/Companion cfgs off the old
    world, `GS_EXPECTED_WORLD` in Vercel, `MAP_REMOTE_DIR` in the poller `.env`,
+   Note (2026-09-05): `NEXT_PUBLIC_SUPABASE_URL` and the anon key are baked into the build at `next build` time, so any Vercel env change needs a REDEPLOY, not just a restart; a local `next start` cannot be repointed at another database without a rebuild (see docs/STRESS-TEST.md).
    and the bot `.env` pilot overrides `RECAPS_START` / `RECAP_CHANNEL` /
    `MILESTONE_CHANNEL` / any `*_CHANNEL=server`). None of it is automated — it
    is printed by the script itself so it can't be missed.
+
+   Then, with the checklist done and the box **still stopped**, this is the last
+   gate before the panel Start:
+
+   ```bash
+   node scripts/launch-preflight.mjs --world <World> --phase post-wipe
+   ```
+
+   It expects all of the above to be finished: zero rows, `world_day` zeroed,
+   local state files gone, the launch world in `worlds_local`, the poller's
+   `MAP_REMOTE_DIR` and the bot `.env` reverted, and the pack pins live on
+   Thunderstore. Any FAIL here is a real one. On a GO-B (vanilla) night add
+   `--posture GO-B` so the mod-dependent checks report instead of failing.
 
 7. **Restart the services in this order:**
 
@@ -116,6 +149,9 @@ you'd be wiping real launch data along with the pilot's.
 
 8. **Verify:** `bash scripts/verify-restart.sh <World>` (version unchanged, all
    8 plugins, panel tier Casual, `[EILIF_KEY]`, ingest 200, port 3000 closed),
+   then `node scripts/launch-preflight.mjs --world <World> --phase post-start`
+   (which also re-checks the pilot overrides, the poller's `MAP_REMOTE_DIR`, the
+   Vercel env names and the pack pins; add `--posture GO-B` on a vanilla night),
    then the `/admin/ops` cockpit.
 
 ## What it wipes
