@@ -105,7 +105,7 @@ const DEEDS = [
   ok(h.posts.length === 1 && h.posts[0].ch === 'valheim', 'posts to the configured channel');
 
   const embed = h.posts[0].p.embeds[0];
-  ok(embed.title === '🏆 Milestone: The First Marathon', `embed title, got: ${embed.title}`);
+  ok(embed.title === '🏆 Great Deed: The First Marathon', `embed title, got: ${embed.title}`);
   ok(embed.description === 'On foot the warband has covered a marathon. 42,400 metres of mud and bad decisions.',
     `ceremonial line is the description, {value} interpolated, got: ${embed.description}`);
   ok(embed.fields.some((f) => f.name === 'That is' && f.value === 'about 42 km of walking'), 'equivalence field kept');
@@ -139,7 +139,7 @@ const DEEDS = [
   h.state.lastMilestonePostAt = new Date(Date.now() - 601_000).toISOString();
   const n3 = await h.announcer.tick();
   ok(n3 === 1 && h.posts.length === 2, 'gap elapsed -> the next deed announces');
-  ok(h.posts[1].p.embeds[0].title === '🏆 Milestone: Crossing the Skagerrak', 'oldest-unannounced first');
+  ok(h.posts[1].p.embeds[0].title === '🏆 Great Deed: Crossing the Skagerrak', 'oldest-unannounced first');
   ok(h.queued.length === 2 && h.queued[1].meta.id === 'sail-skagerrak', 'and its voice line fires with it');
 
   const n4 = await h.announcer.tick();

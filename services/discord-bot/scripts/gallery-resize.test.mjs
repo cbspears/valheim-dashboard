@@ -7,7 +7,7 @@
 //   node scripts/gallery-resize.test.mjs   (from services/discord-bot)
 import sharp from 'sharp';
 import assert from 'node:assert';
-import { resizeForGallery } from '../src/gallery.js';
+import { resizeForGallery, decodeExclusively, MAX_INPUT_PIXELS } from '../src/gallery.js';
 
 let passed = 0;
 const ok = (c, m) => { assert.ok(c, m); passed++; };
@@ -95,5 +95,62 @@ try {
   threw = true;
 }
 ok(threw, 'an undecodable buffer throws rather than silently passing through');
+
+// ── 8. the decompression bomb (red-team, 2026-09-05) ────────────────────────
+// The 12 MB attachment cap is a BYTE cap and a decoded image's memory cost has
+// nothing to do with its compressed size. A flat 16000x16000 PNG is 256
+// megapixels and weighs 0.71 MB on the wire, so it sailed past that cap — and
+// past libvips' own ~268 MP default, which the code used to name as the guard.
+// Measured peak RSS decoding one: 198 MB, against a unit with MemoryMax=512M;
+// three arriving together OOM-killed the bot.
+//
+// The bomb itself is not built here (256 MP costs ~200 MB and several seconds to
+// generate, which is a poor trade in a suite that runs on every change). The
+// ceiling is exercised at a small size instead — the rule is identical, and the
+// two assertions on the constant are what pin the real budget.
+ok(MAX_INPUT_PIXELS <= 40_000_000, `the pixel ceiling is at most 40 MP (is ${MAX_INPUT_PIXELS})`);
+ok(MAX_INPUT_PIXELS >= 20_000_000, 'and comfortably above any real screenshot — a 4K grab is 8.3 MP');
+{
+  // 2000x2000 = 4 MP, offered to a 1 MP ceiling: refused before it allocates.
+  const fourMp = await sharp({
+    create: { width: 2000, height: 2000, channels: 3, background: { r: 10, g: 10, b: 10 } },
+  }).png().toBuffer();
+  ok(fourMp.length < 200 * 1024, `a flat 4 MP png is tiny on the wire (${kb(fourMp.length)}) — bytes are not pixels`);
+
+  let refused = false;
+  try {
+    await resizeForGallery(fourMp, { limitInputPixels: 1_000_000 });
+  } catch {
+    refused = true;
+  }
+  ok(refused, 'an image over the pixel ceiling is refused, not decoded');
+
+  // …and the very same buffer is fine under the real ceiling, so the guard
+  // rejects bombs rather than photographs.
+  const fine = await resizeForGallery(fourMp);
+  ok(fine.width <= 1600 && fine.height <= 1600, 'the same image passes under the shipped ceiling');
+}
+
+// ── 9. decodes are serialised, and one failure does not wedge the queue ─────
+// handleMessage is an un-serialised messageCreate handler, so without this the
+// pixel ceiling would still be multiplied by however many photos land together.
+{
+  let inFlight = 0;
+  let peak = 0;
+  const work = async () => {
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    await new Promise((r) => setTimeout(r, 5));
+    inFlight--;
+    return true;
+  };
+  await Promise.all([decodeExclusively(work), decodeExclusively(work), decodeExclusively(work)]);
+  ok(peak === 1, `only one decode runs at a time (peak was ${peak})`);
+
+  let wedged = false;
+  await decodeExclusively(async () => { throw new Error('corrupt attachment'); }).catch(() => {});
+  await decodeExclusively(async () => { wedged = true; });
+  ok(wedged, 'a failed decode does not wedge every photo posted after it');
+}
 
 console.log(`gallery-resize: ${passed} assertions passed`);

@@ -193,7 +193,10 @@ export function createMilestonesAnnouncer({
     return {
       embeds: [
         {
-          title: `🏆 Milestone: ${deed.title}`,
+          // "Great Deed", not "Milestone": the site, the in-game boards and the
+          // ledger all call these Great Deeds, and the embed is the one place a
+          // player met the internal word.
+          title: `🏆 Great Deed: ${deed.title}`,
           description: line,
           color: GOLD,
           fields,

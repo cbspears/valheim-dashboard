@@ -30,6 +30,7 @@
 // Gated behind VOICE_ENGINE=1 (see index.js), like GALLERY_INGEST.
 
 import { serviceClient } from './supabase.js';
+import { causeNoun } from './format.js';
 
 const TICK_MS = 60_000;                 // the caller ticks us every 60s
 const CADENCE_MINUTES = 120;            // one ambient line per ~2h online-time
@@ -66,19 +67,20 @@ export const ATMOSPHERE = [
   'Rain on the roof and wolves at the treeline. The realm keeps its own counsel tonight.',
   'The forge has gone cold, but the coals are still muttering about the blades to come.',
   'Out on the black water the serpents wait, patient as a grudge.',
-  'A hundred oaths have been sworn over the stones round the longfire. The stones kept all of them.',
+  'Every oath sworn at this longfire goes into the stones. Stone is patient about that sort of thing.',
   'Quiet in the hall. That usually means a good story or a bad death is on its way.',
 ];
 
 // (c) Callbacks — dated deaths from ~1/2/4 weeks ago, phrased darkly. {span}
-// is the time-ago label, {name}/{cause} come from the archived event. {cause}
-// is always a NOUN PHRASE (see findCallbackEvent's fallback) so it can sit
-// inside a sentence without breaking the grammar.
+// is the time-ago label ("a week ago", and every label ends the same way so it
+// reads in any of these sentences), {name}/{cause} come from the archived
+// event. {cause} is always a NOUN PHRASE (causeNoun, plus findCallbackEvent's
+// fallback) so it can sit inside a sentence without breaking the grammar.
 export const CALLBACK_TEMPLATES = [
-  '{span} tonight the dark took {name}. Cause of death, {cause}. The thing that did it remembers too.',
-  '{span} this hall lost {name} to {cause}. A saga is only the deaths we bother to tell twice.',
-  'Cast your horn back {span}. {name} fell to {cause}, and the ravens ate well.',
-  '{span} {name} went into the void courtesy of {cause}. The gods keep a stool warm for the bold. The careless get a cold one.',
+  '{Span} tonight, {name} was taken by {cause}. The hall marked it and got on with the evening.',
+  '{Span} this hall lost {name} to {cause}. A saga is only the deaths we bother to tell twice.',
+  'Raise a horn for {name}, who fell to {cause} {span}. The ravens ate well that night.',
+  'It was {span} that {cause} put {name} in the ground. The gods keep a stool warm for the bold. The careless get a cold one.',
 ];
 
 // (d) Whispers on quiet nights — the ambient pool SWAP for a near-empty hall.
@@ -96,7 +98,7 @@ export const SOLO_WHISPERS = [
 // these name a viking; some let the whole crew feel watched.
 export const CREW_WHISPERS = [
   'No deeds tonight. Just work and the dark and whatever is counting you from the treeline.',
-  'Odin sees you too, {firstName}. Especially you.',
+  'Odin is watching the hall tonight, {firstName}. You in particular.',
   'Heads down, hammers busy. The ravens take notes on the quiet ones.',
   'A small crew and a long night. Eilif has known both to end well, though not often.',
   'Nothing has gone wrong yet, {firstName}. Eilif finds that suspicious.',
@@ -242,12 +244,19 @@ export function createVoiceEngine({
     if (cat === 'callback') {
       const ev = await findCallbackEvent(rand);
       if (!ev) return [];
+      // {Span} is the same label at the head of a sentence, so a callback
+      // never opens with a lowercase "a week ago".
+      const Span = ev.span.charAt(0).toUpperCase() + ev.span.slice(1);
+      // Function replacers, not strings: a character name is player-chosen and
+      // "$&" or "$'" in a string replacement is a substitution pattern, not
+      // text. Same for the cause, which carries a creature name.
       return CALLBACK_TEMPLATES.map((t, i) => ({
         id: `cb:${i}`,
         text: t
-          .replace(/\{span\}/g, ev.span)
-          .replace(/\{name\}/g, ev.name)
-          .replace(/\{cause\}/g, ev.cause),
+          .replace(/\{Span\}/g, () => Span)
+          .replace(/\{span\}/g, () => ev.span)
+          .replace(/\{name\}/g, () => ev.name)
+          .replace(/\{cause\}/g, () => ev.cause),
       }));
     }
     return [];
@@ -255,10 +264,12 @@ export function createVoiceEngine({
 
   // Find a death from ~1/2/4 weeks ago (spans tried in a seeded order).
   async function findCallbackEvent(rand) {
+    // Every label ends in "ago" so it reads the same way in all four callback
+    // templates ("four weeks past tonight …" did not).
     const spans = [
       { days: 7, label: 'a week ago' },
       { days: 14, label: 'a fortnight ago' },
-      { days: 28, label: 'four weeks past' },
+      { days: 28, label: 'four weeks ago' },
     ];
     // seeded shuffle so the chosen span/event varies without repeating patterns
     for (let i = spans.length - 1; i > 0; i--) {
@@ -278,10 +289,12 @@ export function createVoiceEngine({
       const rows = (data || []).filter((r) => (r.character_name || '').trim());
       if (rows.length) {
         const r = rows[Math.floor(rand() * rows.length)];
-        // Noun phrase, always: the callback templates drop {cause} mid-sentence.
-        const cause = typeof r.metadata?.cause === 'string' && r.metadata.cause.trim()
-          ? r.metadata.cause.trim()
-          : 'something nobody wrote down';
+        // Noun phrase, always: the callback templates drop {cause} mid-sentence,
+        // and the stored cause is a raw HitType word ("Tree", "EnemyHit") or a
+        // creature name, neither of which reads as English on its own.
+        // markdown:false — this line is SPOKEN in-game, where an escape
+        // backslash would be read out as a backslash.
+        const cause = causeNoun(r.metadata?.cause, { markdown: false }) || 'something nobody wrote down';
         return { span: span.label, name: (r.character_name || '').trim(), cause };
       }
     }

@@ -16,6 +16,8 @@ import { createIdentityLink, createIdentityConfirmations } from './identity.js';
 import { createVoiceEngine } from './voice.js';
 import { createTitlesAnnouncer } from './titles.js';
 import { createMilestonesAnnouncer } from './milestones.js';
+import { createChronicle } from './chronicle.js';
+import { createBossPolls, createDiscordPollAdapter, createDryRunPollAdapter } from './bosspoll.js';
 import { recordLoopResult, loopsSnapshot, createHeartbeatSender } from './heartbeat.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
@@ -40,6 +42,20 @@ const db = readClient();
 // `--loop` keeps the DRY RUN running instead of exiting after one tick of each
 // loop. It means nothing in live mode (the live bot always loops).
 const DRY_LOOP = process.argv.includes('--loop');
+
+// ── Two engagement features, both OFF unless their flag is exactly '1' ───────
+// Nothing about launch night changes until Charlie flips them. Each prints ONE
+// startup line saying which way it is set, in live mode and in the dry run.
+const CHRONICLE_ON = process.env.WEEKLY_CHRONICLE === '1';
+const BOSS_POLLS_ON = process.env.BOSS_POLLS === '1';
+const CHRONICLE_CHANNEL = process.env.CHRONICLE_CHANNEL === 'server' ? 'server' : 'valheim';
+const BOSS_POLL_CHANNEL = process.env.BOSS_POLL_CHANNEL === 'server' ? 'server' : 'valheim';
+// Sunday 20:00 local, hour tunable the way RECAP_EVENING_HOUR is.
+const CHRONICLE_HOUR = (() => {
+  const n = parseInt(process.env.CHRONICLE_HOUR || '20', 10);
+  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : 20;
+})();
+const CHRONICLE_WEEKDAY = 0; // Sunday
 
 async function main() {
   if (DRY) return runDryRun({ loop: DRY_LOOP });
@@ -249,6 +265,82 @@ async function runLive() {
     extra += `, milestones every ${interval}ms (min gap ${milestoneMinGapMs}ms)`;
   }
 
+  // The Skald's Chronicle: one weekly embed (Sunday 20:00 local by default).
+  // OFF unless WEEKLY_CHRONICLE=1. Reads only; the sole write is state.json
+  // (the weekly kill baseline + the last week it posted). It honours the same
+  // RECAPS_START launch gate the nightly recap does, so flipping the flag on
+  // before the world opens cannot publish a week of pre-launch demo rows.
+  if (CHRONICLE_ON) {
+    const chronicle = createChronicle({
+      db,
+      post,
+      state,
+      saveState,
+      tz: TZ,
+      channel: CHRONICLE_CHANNEL,
+      hour: CHRONICLE_HOUR,
+      weekday: CHRONICLE_WEEKDAY,
+      startsAt: recapsStart,
+    });
+    // Through safe() like every other loop: a weekly post that throws is then
+    // recorded for the ops cockpit instead of vanishing into a console line for
+    // seven days, and the in-flight guard covers a hand-triggered second run.
+    chronicle.schedule(safe('chronicle', () => chronicle.runScheduled()));
+  }
+  console.log(
+    `[chronicle] ${
+      CHRONICLE_ON
+        ? `ON — Sundays ${String(CHRONICLE_HOUR).padStart(2, '0')}:00 ${TZ} to #${CHRONICLE_CHANNEL}` +
+          (recapsStart ? ` (begins ${recapsStart.toISOString().slice(0, 10)})` : '')
+        : 'off (set WEEKLY_CHRONICLE=1 to enable)'
+    }`
+  );
+
+  // Boss polls: one native Discord poll per next objective, one follow-up line
+  // when that boss falls. OFF unless BOSS_POLLS=1.
+  let bossPollsStarted = false;
+  if (BOSS_POLLS_ON) {
+    const bossPolls = createBossPolls({
+      db,
+      post,
+      adapter: createDiscordPollAdapter({
+        client: poster.client,
+        channelIds: { server: process.env.CHANNEL_SERVER, valheim: process.env.CHANNEL_VALHEIM },
+      }),
+      state,
+      saveState,
+      channel: BOSS_POLL_CHANNEL,
+    });
+    // Seeding the already-felled set is a HARD PREREQUISITE, not a nicety: an
+    // unseeded cursor makes every boss felled this season look fresh, and the
+    // first tick would open a poll behind a kill from weeks ago. It is also the
+    // one Supabase call on this path that is not inside safe(), so a blip must
+    // not take the live bot down with it. Both answers are the same: log it and
+    // leave the feature asleep for this run. The next restart tries again.
+    try {
+      await bossPolls.init();
+      bossPollsStarted = true;
+    } catch (e) {
+      console.error(`[boss-polls] could not seed the already-felled bosses, polls stay off this run: ${e.message}`);
+    }
+    if (bossPollsStarted) {
+      const interval = intervalMs(process.env.BOSS_POLLS_INTERVAL_MS, 60000);
+      const bossPollsLoop = safe('boss-polls', () => bossPolls.tick());
+      await bossPollsLoop();
+      timers.push(setInterval(bossPollsLoop, interval));
+      extra += `, boss polls every ${interval}ms`;
+    }
+  }
+  console.log(
+    `[boss-polls] ${
+      !BOSS_POLLS_ON
+        ? 'off (set BOSS_POLLS=1 to enable)'
+        : bossPollsStarted
+          ? `ON — first-blood polls to #${BOSS_POLL_CHANNEL}`
+          : 'ON but not started (the felled-boss seed failed); restart the bot to try again'
+    }`
+  );
+
   // Ops cockpit heartbeat: reports this bot's liveness + its gated sub-loops'
   // last-run/last-error/enabled state, plus non-secret pilot-flag booleans the
   // cockpit needs to flag before launch. Best-effort — sendHeartbeat never
@@ -271,6 +363,14 @@ async function runLive() {
       'voice-queue': { enabled: Boolean(voice), loop: 'voice' },
       'title-evaluator': { enabled: process.env.TITLES_ANNOUNCE !== '0', loop: 'titles' },
       'milestone-evaluator': { enabled: process.env.MILESTONES_ANNOUNCE !== '0', loop: 'milestones' },
+      // Both off by default; the cockpit iterates its OWN list (lib/ops/health.ts
+      // BOT_SUBLOOPS), so these extra keys are simply ignored until it adds them.
+      // 'chronicle' is the safe() label the weekly cron files its result under.
+      'weekly-chronicle': { enabled: CHRONICLE_ON, loop: 'chronicle' },
+      // `enabled` is what actually RUNS, not what the flag asked for: a failed
+      // seed leaves the flag on and the loop asleep, and the cockpit should see
+      // the second fact rather than wait forever for a tick that never comes.
+      'boss-polls': { enabled: BOSS_POLLS_ON && bossPollsStarted, loop: 'boss-polls' },
     };
     const subLoops = {};
     let anyLoopFailing = false;
@@ -461,6 +561,22 @@ async function runDryRun({ loop = false } = {}) {
       `titles ${titlesOn ? 'on' : 'OFF (TITLES_ANNOUNCE=0)'}, ` +
       `milestones ${milestonesOn ? 'on' : 'OFF (MILESTONES_ANNOUNCE=0)'}`
   );
+  // Same two startup lines the live bot prints, so a rehearsal says out loud
+  // which way each flag is set.
+  console.log(
+    `[chronicle] ${
+      CHRONICLE_ON
+        ? `ON — Sundays ${String(CHRONICLE_HOUR).padStart(2, '0')}:00 ${TZ} to #${CHRONICLE_CHANNEL} (rehearsed below, the cron is not started)`
+        : 'off (set WEEKLY_CHRONICLE=1 to enable)'
+    }`
+  );
+  console.log(
+    `[boss-polls] ${
+      BOSS_POLLS_ON
+        ? `ON — first-blood polls to #${BOSS_POLL_CHANNEL} (rehearsed below; the poll is PRINTED, never sent)`
+        : 'off (set BOSS_POLLS=1 to enable)'
+    }`
+  );
   console.log(
     '[dry-run] not rehearsed: events-sync (needs a live gateway, and POSTs to the webhook), ' +
       'identity-confirm (builds its own service-role client and DMs real users), ' +
@@ -524,6 +640,37 @@ async function runDryRun({ loop = false } = {}) {
       })
     : null;
 
+  // The weekly Chronicle. The cron is NOT scheduled here (a dry run would have
+  // to wait for Sunday); postChronicle is ticked once below instead, which is
+  // the same read → format → post path the cron takes.
+  const chronicle = CHRONICLE_ON
+    ? createChronicle({
+        db,
+        post,
+        state,
+        saveState,
+        tz: TZ,
+        channel: CHRONICLE_CHANNEL,
+        hour: CHRONICLE_HOUR,
+        weekday: CHRONICLE_WEEKDAY,
+      })
+    : null;
+
+  // Boss polls, with the printing adapter: the poll is rendered to stdout and
+  // nothing is sent. `state` here is the ephemeral dry-run object, so the seed
+  // starts empty and every already-felled boss looks fresh (like the boss
+  // watcher above), which is exactly what makes the poll visible.
+  const bossPolls = BOSS_POLLS_ON
+    ? createBossPolls({
+        db,
+        post,
+        adapter: createDryRunPollAdapter(),
+        state,
+        saveState,
+        channel: BOSS_POLL_CHANNEL,
+      })
+    : null;
+
   // Proves the `@Eilif say:` wiring constructs and attaches; the stub never emits.
   if (voice) voice.attach();
 
@@ -554,6 +701,19 @@ async function runDryRun({ loop = false } = {}) {
       : []),
     ...(milestones
       ? [['milestones', 'Great Deeds (milestones)', () => milestones.tick(), (n) => `${n} deed(s) announced`]]
+      : []),
+    ...(bossPolls
+      ? [
+          [
+            'boss-polls',
+            'Boss polls (first blood)',
+            async () => (await bossPolls.tick()) + (await bossPolls.rehearseFollowUp()),
+            (n) => `${n} poll message(s) would be sent`,
+          ],
+        ]
+      : []),
+    ...(chronicle
+      ? [["chronicle", "The Skald's Chronicle (weekly)", () => chronicle.postChronicle(), null]]
       : []),
     ['recap', 'Daily recap (evening — the one that posts nightly)', () => recap.postRecap('evening'), null],
     ['recap-morning', 'Daily recap (morning — preview only)', () => recap.postRecap('morning'), null],
@@ -592,6 +752,14 @@ async function runDryRun({ loop = false } = {}) {
       setInterval(safe('milestones', () => milestones.tick()), intervalMs(process.env.MILESTONES_INTERVAL_MS, 120000))
     );
   }
+  if (bossPolls) {
+    timers.push(
+      setInterval(safe('boss-polls', () => bossPolls.tick()), intervalMs(process.env.BOSS_POLLS_INTERVAL_MS, 60000))
+    );
+  }
+  // The Chronicle has no steady-state timer on purpose: it is a weekly cron, and
+  // a rehearsal that waited until Sunday 20:00 would rehearse nothing. Its one
+  // tick above is the whole path the cron takes.
 
   console.log(`\n=== DRY RUN steady state — ${timers.length} loops at production cadence, Ctrl-C to stop ===`);
   console.log(

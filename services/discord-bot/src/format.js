@@ -26,12 +26,18 @@ function nameMd(s) {
 // only always-present fields, so the missing/zero guard can always fall back to
 // it. Placeholders: {name} {boss} {biome} {deaths} {cause} {hours} {kills}
 // {resources} {items} {newBiome}. {boss}/{biome}/{newBiome} are pre-bolded here.
+//
+// COUNT TOKENS carry their own noun so a tally of one never reads "1 times":
+// {deathsTimes} "once / twice / 4 times", {gravesCount} "1 fresh grave",
+// {killsCount} "1 foe", {corpsesCount} "1 corpse", {piecesCount} "1 piece",
+// {worksCount} "1 work". Each is backed by a raw number in COUNT_TOKEN_SOURCE
+// below, so the missing/zero guard still sees the value behind the phrase.
 export const POTY_TEMPLATES = {
   boss_kill: [
     '{name} stood over **{boss}** while the **{biome}** went quiet. Skål.',
     'The **{biome}** bows. {name} put **{boss}** in the dirt and walked back into the hall.',
     '**{boss}** is done, and {name} was there at the kill. The mead is on the gods tonight.',
-    '{name} bled {deaths} times wrestling **{boss}** down and took its head anyway.',
+    '{name} bled {deathsTimes} wrestling **{boss}** down and took its head anyway.',
   ],
   most_explored: [
     '{name} put a prow into the **{newBiome}** for the first time and lived to tell it.',
@@ -39,30 +45,30 @@ export const POTY_TEMPLATES = {
     '{name} crossed into the **{newBiome}** and the unknown blinked first.',
   ],
   most_deaths: [
-    '{name} found {deaths} fresh ways to die today and laughed at most of them.',
-    '{name} met the void {deaths} times, the last one courtesy of {cause}. The Allfather keeps a stool warm.',
-    "{deaths} tombstones bear {name}'s name tonight. Valhalla's doorman knows them by sight.",
-    'Death came for {name} {deaths} times. {cause} got the last word, and {name} sailed back for more.',
+    '{name} died {deathsTimes} today and laughed off most of it.',
+    '{name} met the void {deathsTimes}. {causeCap} had the last word, and the Allfather keeps a stool warm.',
+    "{name}'s name is on {gravesCount} tonight. Valhalla's doorman knows it by sight.",
+    'Death came for {name} {deathsTimes}. {causeCap} got the last word, and {name} sailed back for more.',
   ],
   most_kills: [
-    '{name} cut down {kills} foes today. The crows of the realm follow them now, fat and grateful.',
-    "{kills} beasts fell to {name}'s blade. The forest learned a name to fear.",
-    '{name} left {kills} corpses in their wake and barely broke a sweat.',
+    '{name} cut down {killsCount} today. The crows of the realm follow them now, fat and grateful.',
+    "The forest learned a name to fear: {killsCount} fell to {name}'s blade.",
+    '{name} left {corpsesCount} in their wake and barely broke a sweat.',
   ],
   most_resources: [
-    "{name} hauled {resources} of the realm's bounty home. The storehouse sings.",
-    '{name} gathered {resources} while the saga rested. Cozy and unstoppable.',
-    '{name} stripped {resources} from the land today, hauling like a draugr with a grudge.',
+    "{name} hauled {piecesCount} of the realm's bounty home. The storehouse sings.",
+    '{name} gathered {piecesCount} while the saga rested. Cozy and unstoppable.',
+    '{name} stripped {piecesCount} out of the land today, hauling like a draugr with a grudge.',
   ],
   most_crafted: [
-    '{name} bent {items} works from anvil and flame today. Even Brokkr the dwarf would nod.',
-    'The forge never cooled for {name}. {items} pieces hammered true, and the clan walks better-armed.',
-    "{items} blades, nails and trinkets left {name}'s anvil this day. A smith of true worth.",
+    '{name} bent {worksCount} out of anvil and flame today. Even Brokkr the dwarf would nod.',
+    'The forge never cooled for {name}. {worksCount} came off the anvil true, and the clan walks better armed.',
+    "Blades, nails and trinkets: {worksCount} left {name}'s anvil this day. A smith of true worth.",
   ],
   most_hours: [
     '{name} held the hall for {hours}h while the rest slept. No glory in it. Somebody has to.',
     '{name} kept the longfire burning {hours}h.',
-    '{hours} hours of honest toil from {name} today. The longhouse grows because someone refuses to rest.',
+    '{hours}h of honest toil from {name} today. The longhouse grows because someone refuses to rest.',
   ],
   // Unsung Hero (underdog spotlight). Every blurb uses ONLY {name} — a quiet
   // viking may have ~0 of every stat, so these must never reach for one.
@@ -101,6 +107,37 @@ function renderFallenToday(board) {
   return renderBoard(board, (row) => `💀 **${nameMd(row.name)}** ×${row.count}`);
 }
 
+/** "once" / "twice" / "7 times" — a tally that never reads "1 times". */
+function times(n) {
+  const v = Math.round(Number(n) || 0);
+  if (v === 1) return 'once';
+  if (v === 2) return 'twice';
+  return `${v.toLocaleString()} times`;
+}
+
+/** "a falling tree" -> "A falling tree", for a sentence-initial token. */
+function capitalize(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+/** "1 foe" / "60 foes" — a count that carries its own noun. */
+function counted(n, one, many) {
+  const v = Math.round(Number(n) || 0);
+  return `${v.toLocaleString()} ${v === 1 ? one : many}`;
+}
+
+// Which raw number backs each count token, so the missing/zero guard below can
+// still see the value behind the phrase it renders.
+const COUNT_TOKEN_SOURCE = {
+  causeCap: 'cause',
+  deathsTimes: 'deaths',
+  gravesCount: 'deaths',
+  killsCount: 'kills',
+  corpsesCount: 'kills',
+  piecesCount: 'resources',
+  worksCount: 'items',
+};
+
 // Deterministically pick + fill a POTY blurb from poty.{key,name,fields,seed}.
 function renderPotyBlurb(poty) {
   const templates = POTY_TEMPLATES[poty.key] || [];
@@ -113,18 +150,30 @@ function renderPotyBlurb(poty) {
     hours: f.hours, kills: f.kills, resources: f.resources, items: f.items,
     newBiome: f.newBiome,
   };
+  for (const [token, source] of Object.entries(COUNT_TOKEN_SOURCE)) raw[token] = raw[source];
   const intStr = (v) => (v == null ? '' : Math.round(v).toLocaleString());
   const disp = {
     name: `**${nameMd(poty.name)}**`,
     boss: f.boss ? escapeMd(f.boss) : '',
     biome: f.biome ? escapeMd(f.biome) : '',
     deaths: f.deaths != null ? String(f.deaths) : '',
-    cause: f.cause ? escapeMd(f.cause) : '',
+    // The cause arrives raw (a bare HitType word like "Tree" or a creature
+    // name), so it is turned into a noun phrase before it lands mid-sentence.
+    cause: f.cause ? causeNoun(f.cause) : '',
+    // The same noun phrase where a template OPENS on it ("A falling tree had
+    // the last word."), which is not the same string as mid-sentence.
+    causeCap: f.cause ? capitalize(causeNoun(f.cause)) : '',
     hours: f.hours != null ? Number(f.hours).toFixed(1) : '',
     kills: intStr(f.kills),
     resources: intStr(f.resources),
     items: intStr(f.items),
     newBiome: f.newBiome ? escapeMd(f.newBiome) : '',
+    deathsTimes: times(f.deaths),
+    gravesCount: counted(f.deaths, 'fresh grave', 'fresh graves'),
+    killsCount: counted(f.kills, 'foe', 'foes'),
+    corpsesCount: counted(f.kills, 'corpse', 'corpses'),
+    piecesCount: counted(f.resources, 'piece', 'pieces'),
+    worksCount: counted(f.items, 'work', 'works'),
   };
 
   let idx = (hashString(poty.name) + (poty.seed || 0)) % templates.length;
@@ -157,6 +206,15 @@ function article(word) {
   return /^[aeiou]/i.test(word) ? 'an' : 'a';
 }
 
+// OWN-PROPERTY lookup for every cause-keyed map below. `cause` is
+// attacker-reachable (a modded client picks the killer name it reports), and a
+// bare `MAP[low]` walks Object.prototype: a viking "killed by constructor" made
+// ENV_DEATH_POOLS hand back the Object function, and buildDeathMessage threw on
+// it — a crash in the #server relay, from a death line.
+function own(map, key) {
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
+}
+
 function fillTemplate(tpl, vars) {
   return tpl.replace(/\{(\w+)\}/g, (_, k) => (vars[k] != null ? vars[k] : ''));
 }
@@ -183,10 +241,19 @@ export const ENV_DEATH_POOLS = {
   stalagtite: ['{name} was skewered from above.'],
   impact: ['{name} was broken by the fall.'],
   cartcollision: ['{name} was run down by their own cart. Embarrassing.'],
+  cart: ['{name} was run down by their own cart. Embarrassing.'],
   structural: ['{name} was crushed under falling timber.'],
   turret: ['{name} was shot down by a ballista. Friendly fire, perhaps?'],
-  boat: ['{name} went down with their ship.'],
+  // HitType.Boat is a hull hitting a viking, not a sinking. "Went down with
+  // their ship" blamed the wrong thing entirely.
+  boat: ['{name} was run down by a longship.', '{name} was caught between hull and shore.'],
   self: ["{name} was undone by their own hand. We don't ask questions."],
+  catapult: ['{name} was smashed flat by a catapult stone.'],
+  cinderfire: ['{name} was caught in a rain of burning cinders.'],
+  // Another viking landed the killing blow. Never dressed up as an unseen foe.
+  playerhit: ['{name} was cut down by one of their own.', 'One of the clan put {name} in the ground. It happens.'],
+  // The client had no HitType to report at all.
+  undefined: ['{name} fell to something that left no name behind.'],
   // Valheim's catch-all HitType for a killer the client couldn't name (an
   // off-screen projectile, a despawned attacker, a mod-spawned foe). Mirrors
   // lib/episodes.ts — without it the feed reads "killed by an Enemyhit".
@@ -207,7 +274,7 @@ const BOSS_NAMES = new Set(['eikthyr', 'the elder', 'bonemass', 'moder', 'yaglut
 
 export const BOSS_TEMPLATES = [
   '{name} fell in battle against {cause}.',
-  '{cause} sent {name} to Valhalla.',
+  '{causeCap} sent {name} to Valhalla.',
   '{name} did not rise again after facing {cause}.',
   'Only ash remains where {name} met {cause}.',
 ];
@@ -215,11 +282,58 @@ export const BOSS_TEMPLATES = [
 // Plain creature names (e.g. "Neck", "Greydwarf", "Deathsquito").
 export const CREATURE_TEMPLATES = [
   '{name} was killed by {article} {cause}.',
-  '{name} tragically fell to {article} {cause}.',
+  '{name} fell to {article} {cause}.',
   '{name} met their end at the claws of {article} {cause}.',
   '{articleCap} {cause} put {name} in the ground.',
   "{name} didn't see the {cause} coming.",
 ];
+
+// A raw cause turned into a NOUN PHRASE, for the surfaces that drop it into the
+// middle of a sentence (the POTY blurb, the voice engine's callbacks) rather
+// than building a whole line around it. Without this the evening recap says
+// "Tree got the last word" or "the last one courtesy of enemyhit".
+const CAUSE_NOUNS = {
+  fall: 'a long drop', falling: 'a long drop',
+  drowning: 'dark water', drowned: 'dark water', drown: 'dark water', water: 'dark water',
+  tree: 'a falling tree',
+  fire: 'fire', burning: 'fire',
+  smoke: 'hearth smoke',
+  freezing: 'the cold', cold: 'the cold',
+  poison: 'poison', poisoned: 'poison',
+  stalagmite: 'a spike of rock', stalagtite: 'a spike of rock',
+  impact: 'a hard landing',
+  cartcollision: 'their own cart', cart: 'their own cart',
+  structural: 'falling timber',
+  turret: 'a ballista bolt',
+  boat: 'a longship hull',
+  self: 'their own hand',
+  enemyhit: 'something they never saw',
+  edgeofworld: 'the edge of the world',
+  ashlandsocean: 'the boiling sea', ashlandsoceanfloor: 'the boiling sea',
+  lava: 'molten rock',
+  undefined: 'something that left no name',
+  playerhit: 'another viking',
+  catapult: 'a catapult stone',
+  cinderfire: 'falling cinders',
+};
+
+/**
+ * Noun phrase for a raw cause: a HitType word becomes plain English, a named
+ * forsaken one keeps its name, and anything else is read as a creature
+ * ("a Greydwarf"). Returns '' for an absent cause so callers can guard on it.
+ * `markdown: false` for the in-game voice line, where an escape backslash would
+ * be read out as a backslash.
+ */
+export function causeNoun(rawCause, { markdown = true } = {}) {
+  const cause = typeof rawCause === 'string' ? rawCause.trim() : '';
+  if (!cause) return '';
+  const low = cause.toLowerCase();
+  const noun = own(CAUSE_NOUNS, low);
+  if (noun) return noun;
+  const shown = markdown ? escapeMd(cause) : cause;
+  if (BOSS_NAMES.has(low) || /^the\s/i.test(cause)) return shown;
+  return `${article(cause)} ${shown}`;
+}
 
 // No cause at all — legacy log-derived deaths (unmodded players) carry empty
 // metadata, since the server log never records what killed you.
@@ -243,12 +357,19 @@ export function buildDeathMessage(boldName, rawCause) {
   const low = cause.toLowerCase();
   const escapedCause = escapeMd(cause);
 
-  if (ENV_DEATH_POOLS[low]) {
-    return fillTemplate(pickOne(ENV_DEATH_POOLS[low]), { name: boldName });
+  const envPool = own(ENV_DEATH_POOLS, low);
+  if (envPool) {
+    return fillTemplate(pickOne(envPool), { name: boldName });
   }
 
   if (BOSS_NAMES.has(low) || /^the\s/i.test(cause)) {
-    return fillTemplate(pickOne(BOSS_TEMPLATES), { name: boldName, cause: escapedCause });
+    // A PlayerHit with a named attacker arrives as "the hand of Bjorn", so the
+    // cause has to be capitalized where a template opens on it.
+    return fillTemplate(pickOne(BOSS_TEMPLATES), {
+      name: boldName,
+      cause: escapedCause,
+      causeCap: escapedCause.charAt(0).toUpperCase() + escapedCause.slice(1),
+    });
   }
 
   const art = article(cause);
@@ -310,7 +431,7 @@ export function formatBossKill(boss) {
     embeds: [
       {
         title: `👑 ${boss.name} has fallen!`,
-        description: `The **${boss.biome}** bows to the clan. A new stretch of the realm just opened up, so sail on.`,
+        description: `The **${boss.biome}** bows to the clan. The way onward is open, so sail while the mead is warm.`,
         color: GOLD,
         fields,
         footer: { text: FOOTER },
@@ -397,7 +518,7 @@ export function formatRecap(stats) {
       {
         title,
         description: morning
-          ? 'Everything the last day turned up, told at sunrise.'
+          ? 'What the last day turned up, read out at sunrise.'
           : 'The day’s saga, set down before the fires dim.',
         color: GOLD,
         fields,

@@ -7,7 +7,7 @@ dashboard uses; the SFTP log poller (and later the DiscordConnector mod) feed ev
 | Channel | Posts | @everyone? |
 |---------|-------|-----------|
 | **#server** (`CHANNEL_SERVER`) | joins, leaves, deaths, raids — compact activity feed | no |
-| **#valheim** (`CHANNEL_VALHEIM`) | **first** boss kills, the nightly recap, manual announcements | boss kills ✅, announcements ✅, recaps ❌ |
+| **#valheim** (`CHANNEL_VALHEIM`) | **first** boss kills, the nightly recap, manual announcements, and (off by default) the weekly Chronicle + boss polls | boss kills ✅, announcements ✅, recaps ❌, Chronicle ❌, polls ❌ |
 
 A boss is announced only the **first** time it's felled (tracked in `state.json`). Already-killed
 bosses are seeded on first run so nothing is retro-announced.
@@ -29,17 +29,29 @@ Mention Everyone). Intents (all non-privileged, declared in `src/discord.js`): *
 npm start                    # live
 npm run dry-run              # rehearse every loop once, print what it WOULD post, exit
 npm run dry-run -- --loop    # same, but keep the loops running at production cadence
-npm test                     # voice + titles + milestones + gallery-resize unit tests (no network)
+npm test                     # voice + titles + milestones + gallery-resize + recap + chronicle + boss-poll
+                             # unit tests (no network)
 ```
 
 ### What the dry run rehearses
 
 It is a **rehearsal of the live bot, not a subset of it**: it builds the same loops `runLive`
 builds, out of the same modules, honouring the same env gates (`VOICE_ENGINE`, `TITLES_ANNOUNCE`,
-`MILESTONES_ANNOUNCE`, `RECAP_CHANNEL`, `MILESTONE_CHANNEL`, the gap and interval vars), and ticks
-each one once — relay, boss watch, the **voice engine** (plus its stale-queue expiry), the
-**living-titles announcer**, the **Great Deeds announcer**, and both recaps. It closes with the
-per-loop pass/fail table the ops cockpit would have been sent. `--loop` keeps them all running.
+`MILESTONES_ANNOUNCE`, `WEEKLY_CHRONICLE`, `BOSS_POLLS`, `RECAP_CHANNEL`, `MILESTONE_CHANNEL`, the
+gap and interval vars), and ticks each one once — relay, boss watch, the **voice engine** (plus its
+stale-queue expiry), the **living-titles announcer**, the **Great Deeds announcer**, the **boss
+polls**, the **weekly Chronicle**, and both recaps. It closes with the per-loop pass/fail table the
+ops cockpit would have been sent. `--loop` keeps them all running.
+
+The two off-by-default engagement features print **one line each** saying which way their flag is
+set, in the dry run and live, so "is the Chronicle on?" is answered by the first ten lines of the
+journal. With the flags off they are silent beyond that line. With them on, the dry run prints the
+Chronicle embed and the poll it would send (`[dry-run poll → #channel]`, question, answers, duration)
+through a **printing adapter** — the gateway is never touched, so no poll can escape a rehearsal. The
+Chronicle's weekly cron is not started under a dry run (it would rehearse nothing until Sunday); its
+one tick takes the identical read → format → post path. The boss-poll rehearsal also renders the
+follow-up line against the most recent kill on record, with no votes read (there is no gateway), so
+the other branches of that copy are covered by `scripts/bosspoll.test.mjs` instead.
 
 Two guarantees, and neither is a matter of convention:
 
@@ -193,6 +205,66 @@ which says "tonight" and expires after **3h**. This runs on its own 5-minute tim
 the voice tick and of anyone being online. `GET /api/voice` only ever serves `status='queued'`, so
 the in-game side is unaffected. Needs `SUPABASE_SERVICE_ROLE_KEY`.
 
+## The Skald's Chronicle (`WEEKLY_CHRONICLE=1`, off by default)
+One embed a week to `CHRONICLE_CHANNEL` (default `#valheim`), **Sunday 20:00 local** (`CHRONICLE_HOUR`
+moves the hour; the day is fixed). It covers the **trailing seven days**: the week's arrivals, hours
+by viking (top 5), deaths and their causes (top 3), kills, deeds earned, bosses felled with their war
+party, titles that changed, the Player-of-the-Day winners, and one "next on the horizon" line naming
+the first boss still standing. Every section is omitted when it is empty, and a week with nothing in
+it renders as one short paragraph instead of a wall of zeroes.
+
+It honours the same **`RECAPS_START` launch gate** the nightly recap does, so turning the flag on
+before the world opens cannot publish a week of pre-launch demo rows.
+
+**Supabase reads only, and no LLM** (the Skald *retelling* is a different thing — that one calls a
+local model per boss). The only state it writes is `state.json`: the last local date it posted on (so
+a restart inside the posting minute cannot send the week twice) and a **weekly kill baseline**.
+`player_stats.kills` is cumulative, so a week only has a real number once there is a previous
+snapshot to diff against — the **first** Chronicle says `Counting starts this week` rather than
+publishing a lifetime total dressed up as a week.
+
+Three things it will not do, because supabase-js *resolves* `{data, error}` rather than throwing and
+a failed read otherwise looks exactly like an empty table:
+
+- a week whose counters could not be read says `Not counted this week` and **does not roll the
+  baseline forward** (rolling an empty snapshot would make the following week diff every lifetime
+  total against zero and publish a career kill count as one week's work);
+- an unreadable `bosses` table gets an honest "the ladder could not be read" horizon line, never
+  "every boss on the ladder has fallen";
+- a database outage is never published as "a quiet seven days".
+
+Every optional board shrinks evenly if a very busy week would push the embed past Discord's
+6000-character ceiling, so a rejected post can never cost the week.
+
+## Boss polls (`BOSS_POLLS=1`, off by default)
+When a boss flips to felled and another is still on the ladder, the bot posts **one native Discord
+poll** (the v14 message `poll` option, not reactions) in `BOSS_POLL_CHANNEL` (default `#valheim`):
+
+> **First blood: Bonemass**
+> Vote for the viking you think draws it. The book records who was right.
+> ❓ *Who lands first blood on Bonemass?* — single choice, 7 days, up to 10 answers
+
+The answers are the vikings with the most **hours in the last 7 days** (the same ranking the
+Chronicle's hours board uses). The poll message id is persisted in `state.json`, so a given boss is
+polled **once, ever** — restarts included. When that boss later falls, one follow-up line names who
+actually drew first blood (`bosses.fight_stats.firstBlood`) and whether the hall called it:
+
+> ⚔️ First blood on **Bonemass**: **Astrid**. The hall called it, with 5 of 7 votes.
+
+Three behaviours worth knowing: it watches the `bosses` table on its **own** cursor rather than
+hooking `bosses.js` (the boss watcher owns exactly-once `@everyone` delivery and should not carry a
+second dedupe question), the already-felled set is **seeded on first run** so flipping the flag on
+mid-season never polls for a boss felled last month, and if fewer than two vikings would appear on
+the ballot the question is **held** in `state.json` and asked on a later tick rather than dropped.
+Nothing ends the poll early; it expires on its own after seven days, and the follow-up reads the
+live counts.
+
+The ballot gate counts **answers, not candidates**: blank names are dropped and two long names can
+clip to the same 55-character string, so a two-viking week can still build a one-answer poll, which
+Discord rejects outright. If the seed itself fails at startup (Supabase unreachable), the loop is
+**not started at all** for that run and the journal says so — an unseeded cursor would make every
+boss felled this season look fresh and open a retro poll on the first tick.
+
 ## Run as a service
 ```bash
 sudo cp eilif-discord-bot.service /etc/systemd/system/
@@ -217,6 +289,10 @@ journalctl -u eilif-discord-bot -f
 | `GALLERY_MAX_EDGE` | longest edge (px) of a stored gallery photo before WebP re-encode (default `1600`) |
 | `ADMIN_ROLE_IDS` | comma-separated role ids allowed to use `@Eilif say:` on top of Administrator / Manage Server |
 | `RECAP_EVENING_HOUR` | hour of the nightly recap, local `TZ` (default `23`) |
+| `WEEKLY_CHRONICLE` | `1` turns the weekly Chronicle on (default off) |
+| `CHRONICLE_CHANNEL` / `CHRONICLE_HOUR` | where the Chronicle posts (default `valheim`) and the Sunday hour, local `TZ` (default `20`) |
+| `BOSS_POLLS` | `1` turns the first-blood polls on (default off) |
+| `BOSS_POLL_CHANNEL` / `BOSS_POLLS_INTERVAL_MS` | where polls post (default `valheim`) and how often the watcher looks (default `60000`) |
 | `TZ` | recap timezone (`America/Chicago`) |
 
 Full annotated list: `.env.example`.

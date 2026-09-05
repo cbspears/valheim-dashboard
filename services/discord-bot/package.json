@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "node scripts/voice.test.mjs && node scripts/titles.test.mjs && node scripts/milestones.test.mjs && node scripts/gallery-resize.test.mjs && node scripts/recap.test.mjs",
+    "test": "node scripts/voice.test.mjs && node scripts/titles.test.mjs && node scripts/milestones.test.mjs && node scripts/gallery-resize.test.mjs && node scripts/recap.test.mjs && node scripts/chronicle.test.mjs && node scripts/bosspoll.test.mjs && node scripts/future-events.test.mjs",
     "dry-run": "DRY_RUN=1 node src/index.js",
     "announce": "node scripts/announce.js",
     "mark-boss": "node scripts/mark-boss.js"

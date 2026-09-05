@@ -15,7 +15,15 @@
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3.6:27b';
 const OLLAMA_TIMEOUT_MS = parseInt(process.env.OLLAMA_TIMEOUT_MS || '150000', 10);
-const MAX_CHARS = 900;
+// Hard ceiling on the MODEL's output. The prompt asks for 90 words at the most
+// and the bench came in at 200 to 400 characters; 700 leaves headroom without
+// letting a runaway model onto the war-room page.
+//
+// It does NOT govern the template fallback, which is ours and is bounded by
+// construction (3 to 5 sentences) rather than by a count. A full 20-viking war
+// party names all twenty, which can run past 700 on its own — deliberately: the
+// saga names everyone who fought, and the war-room paragraph is unclamped.
+const MAX_CHARS = 700;
 const DEATH_WINDOW_MS = 10 * 60 * 1000; // ±10 min around the kill
 
 // Small, pure 31-multiplier string hash (stable across runs) — mirrors format.js
@@ -46,13 +54,17 @@ function nameList(names) {
 function fightLength(sec) {
   if (typeof sec !== 'number' || !Number.isFinite(sec) || sec < 0) return null;
   const s = Math.round(sec);
-  if (s < 60) return `${s} heartbeats`;
+  if (s < 60) return `${s} heartbeat${s === 1 ? '' : 's'}`;
   const m = Math.floor(s / 60);
   const r = s % 60;
   return r ? `${m} minute${m === 1 ? '' : 's'} and ${r} second${r === 1 ? '' : 's'}` : `${m} minute${m === 1 ? '' : 's'}`;
 }
 
 // Saga phrasing for a death cause (mirrors the spirit of lib/episodes.ts).
+// EVERY HitData.HitType word must resolve here: our own client plugin sends the
+// enum name verbatim, and anything missing falls through to the creature branch
+// and reaches the skald's prompt as "was taken by a playerhit". lib/deaths.ts
+// HIT_TYPES is the list of record; scripts/voice.test.mjs walks it.
 const ENV_DEATHS = {
   fall: 'fell to their death', falling: 'fell to their death',
   drowning: 'was claimed by dark water', drowned: 'was claimed by dark water',
@@ -66,15 +78,45 @@ const ENV_DEATHS = {
   // Valheim's catch-all HitType for an unnamed killer — mirrors lib/episodes.ts.
   // Without it the skald is handed "was taken by an enemyhit".
   enemyhit: 'was struck down by an unseen foe',
+  stalagmite: 'was skewered from above', stalagtite: 'was skewered from above',
+  cartcollision: 'was run down by their own cart', cart: 'was run down by their own cart',
+  structural: 'was crushed under falling timber',
+  turret: 'was shot down by a ballista',
+  boat: 'was run down by a longship',
+  edgeofworld: 'sailed off the edge of the world',
+  ashlandsocean: 'was boiled alive in the Ashlands sea',
+  ashlandsoceanfloor: 'was boiled alive in the Ashlands sea',
+  catapult: 'was smashed flat by a catapult stone',
+  cinderfire: 'was caught in a rain of burning cinders',
+  playerhit: 'was cut down by one of their own',
+  undefined: 'fell to something that left no name',
 };
-function phraseDeath(name, cause) {
+// Named forsaken ones read as "felled by Eikthyr", never "taken by an eikthyr"
+// — and this is the ONE list that matters most, because the heroes who fall in
+// a boss fight are usually killed by the boss the saga is about. Mirrors
+// lib/episodes.ts BOSSES and format.js BOSS_NAMES.
+const BOSSES = new Set(['eikthyr', 'the elder', 'bonemass', 'moder', 'yagluth', 'the queen', 'fader']);
+
+// Own-property lookup: `cause` is attacker-reachable (a modded client names its
+// own killer) and a bare ENV_DEATHS[low] walks Object.prototype, so a viking
+// "killed by constructor" put `function Object() { [native code] }` into the
+// skald's fact list.
+function own(map, key) {
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
+}
+
+export function phraseDeath(name, cause) {
   const nm = firstName(name);
-  if (!cause) return `${nm} fell in the fray`;
-  const low = String(cause).toLowerCase();
-  if (ENV_DEATHS[low]) return `${nm} ${ENV_DEATHS[low]}`;
-  if (/^the\s/i.test(cause)) return `${nm} was felled by ${cause}`;
-  const art = /^[aeiou]/i.test(cause) ? 'an' : 'a';
-  return `${nm} was taken by ${art} ${low}`;
+  const c = typeof cause === 'string' ? cause.trim() : '';
+  if (!c) return `${nm} fell in the fray`;
+  const low = c.toLowerCase();
+  const env = own(ENV_DEATHS, low);
+  if (env) return `${nm} ${env}`;
+  if (BOSSES.has(low) || /^the\s/i.test(c)) return `${nm} was felled by ${c}`;
+  const art = /^[aeiou]/i.test(c) ? 'an' : 'a';
+  // The creature keeps its own casing ("a Deathsquito"), like lib/episodes.ts:
+  // a lowercased name in the fact list teaches the model to lowercase it back.
+  return `${nm} was taken by ${art} ${c}`;
 }
 
 // ── fact gathering ────────────────────────────────────────────────────
@@ -131,7 +173,10 @@ async function gatherFacts(db, boss) {
     biome: boss.biome,
     killedAt,
     worldDay,
-    players: warParty.filter(Boolean),
+    // Strings only. fight_stats is free-form jsonb written by the game client;
+    // an object in `fighters` would reach the prompt as "[object Object]",
+    // which is the one shape of fight_stats leak the prompt cannot survive.
+    players: warParty.filter((n) => typeof n === 'string' && n.trim()),
     fightSec: typeof fs.fightSec === 'number' && Number.isFinite(fs.fightSec) ? fs.fightSec : null,
     firstBlood: typeof fs.firstBlood === 'string' && fs.firstBlood.trim() ? fs.firstBlood.trim() : null,
     topDamagePlayer:
@@ -142,8 +187,39 @@ async function gatherFacts(db, boss) {
   };
 }
 
+// A boss night with a full hall can put a dozen deaths inside the ±10 min
+// window. Every one of them in the fact list would break BOTH consumers: the
+// prompt asks the model to use every fact it is given inside 90 words, and the
+// template would run to a 1,200-character wall of names in what is meant to be
+// three to five sentences. So the list is capped and the rest are counted.
+const MAX_FALLEN_NAMED = 6;
+function fallenPhrases(fallen) {
+  const named = fallen.slice(0, MAX_FALLEN_NAMED).map((d) => phraseDeath(d.name, d.cause));
+  const rest = fallen.length - named.length;
+  if (rest > 0) named.push(`${rest} more fell beside them`);
+  return named;
+}
+
+/** "A", "A and B", "A, B and C" — nameList's grammar without its de-duping,
+ *  which would silently drop the second of two vikings who share a first name
+ *  and died the same way. */
+function listJoin(items) {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 // ── LLM path ──────────────────────────────────────────────────────────
-function buildPrompt(f) {
+//
+// PROMPT, rewritten 2026-09-05 after a bench of five variants against the live
+// Eikthyr record (qwen3:14b). The old prompt asked for "flowing, evocative"
+// prose and, with only four facts to work from, the model filled the gap: a
+// bench run invented howling winds, an axe, a cleaved spine and "their names
+// etched into the saga", at 117 words. What fixed it was not more prohibitions
+// but a SHAPE — a sentence plan, an explicit word ceiling, permission to write
+// less when the facts are few, and the warriors' names quoted back verbatim.
+// The bench is in the session notes; the current shape holds at 38 to 71 words
+// with zero invented facts on both a thin and a rich fight record.
+export function buildPrompt(f) {
   const lines = [`- The beast felled: ${f.name}, a forsaken one of the ${f.biome}.`];
   if (f.worldDay != null) lines.push(`- It fell on the ${ordinal(f.worldDay)} day of the world.`);
   if (f.players.length) lines.push(`- The war party: ${nameList(f.players)}.`);
@@ -152,27 +228,40 @@ function buildPrompt(f) {
   if (f.firstBlood) lines.push(`- First to draw blood: ${f.firstBlood}.`);
   if (f.topDamagePlayer)
     lines.push(
-      `- Struck the hardest blows: ${f.topDamagePlayer}${f.topDamage != null ? ` (${f.topDamage} damage dealt)` : ''}.`
+      `- Struck the hardest blows: ${f.topDamagePlayer}${f.topDamage != null ? ` (${f.topDamage} wounds dealt)` : ''}.`
     );
   if (f.participants != null) lines.push(`- Warriors in the fray: ${f.participants}.`);
-  if (f.fallen.length)
-    lines.push(`- Heroes who fell in the fight: ${f.fallen.map((d) => phraseDeath(d.name, d.cause)).join('; ')}.`);
+  if (f.fallen.length) lines.push(`- Heroes who fell in the fight: ${fallenPhrases(f.fallen).join('; ')}.`);
+
+  const names = f.players.length ? nameList(f.players) : 'the war party';
 
   return [
-    "You are a Norse skald composing the saga of a battle for a Viking clan's mead-hall.",
-    'Recount the fall of the beast in 3 to 5 sentences of flowing, past-tense prose.',
+    'You are the skald of a Viking hall. Set down the record of a battle so it can be read aloud at the longfire.',
+    '',
+    'Write 3 to 5 sentences of past-tense prose, 90 words at the most, in this order:',
+    '1. The beast, the country it haunted and the day it fell.',
+    '2. The warriors who went after it, named exactly as given.',
+    '3. How the fight went and who fell, using every fact that is given. This may take two sentences.',
+    '4. One short line about the hall or the road onward. It must add no new events.',
+    'Write fewer sentences when the facts are few. Never pad.',
     '',
     'Rules:',
-    '- Use ONLY the facts listed below. Never invent names, numbers, places, weapons, or events that are not given.',
-    '- The warriors are real people playing Vikings. Refer to them ONLY by the character names given, never invent others.',
-    '- Grand and evocative, but grounded. No modern words, no anachronisms.',
-    '- Never use em-dashes; use plain sentences.',
-    '- Output prose ONLY: no title, no headers, no markdown, no bullet points, no quotation marks, and no preamble such as "Here is". Begin directly with the saga.',
+    '- Every fact must come from the list below. Do not invent weapons, wounds, weather, places, numbers, speeches, or other creatures.',
+    '- Name no place beyond the one given.',
+    '- A number may be used only for the exact thing it is given for.',
+    `- The warriors are real people. Their names are exactly: ${names}. Copy the spelling and the accents. Use no other names.`,
+    '- Give a warrior a deed only where the facts give them one. Naming the rest is enough.',
+    '- Tell it, do not list it. Never write that a war party consisted of anyone, and use no other report language.',
+    '- Plain, concrete language. One idea per sentence. No stacked adjectives. No modern words.',
+    '- Use ordinary punctuation, including commas between names in a list. Never use a dash of any kind.',
+    '- Do not use these words: tapestry, testament, annals, sinew, ichor, whispers, echo, ages, legend, forever, unyielding.',
+    '- Nothing echoes through the ages, and nothing is etched into anything.',
+    '- Output the prose only. No title, no headers, no markdown, no bullet points, no quotation marks, and no preamble such as "Here is".',
     '',
     'Facts:',
     ...lines,
     '',
-    'Write the saga now:',
+    'Write it now:',
   ].join('\n');
 }
 
@@ -205,7 +294,7 @@ async function callOllama(prompt) {
   }
 }
 
-function sanitize(raw) {
+export function sanitize(raw) {
   if (!raw) return '';
   let t = String(raw);
   // Strip complete <think>...</think> blocks (qwen3.6 may emit reasoning).
@@ -216,16 +305,58 @@ function sanitize(raw) {
   t = t.trim();
   // Strip surrounding quotes/backticks the model sometimes wraps prose in.
   t = t.replace(/^[`"'“”‘’]+/, '').replace(/[`"'“”‘’]+$/, '').trim();
-  // Collapse excess blank lines.
-  t = t.replace(/\n{3,}/g, '\n\n').trim();
+  // Strip the "Here is the saga:" preamble the prompt forbids but a model still
+  // volunteers. Narrow on purpose: only an opener that announces itself and
+  // ends in a colon. Nothing a skald would write starts that way.
+  t = t.replace(/^(?:sure|certainly|of course|here(?:'s| is| are))\b[^\n:]{0,60}:[ \t]*\n*/i, '').trim();
+  // DASHES: the doctrine is no em/en dash in player-visible text, and the
+  // prompt says so. Rewriting beats rejecting — a saga that is right about
+  // everything except its punctuation should not be thrown away for it, and
+  // the em-dash is the single most common thing a model ignores. isValid still
+  // rejects a dash afterwards, so this is a repair, not the only guard.
+  t = t.replace(/(\d)\s*[—–]\s*(\d)/g, '$1 to $2'); // "10–20" is a range
+  t = t.replace(/^[\s—–]+/, '').replace(/[\s—–]+$/, ''); // a dash at either end is just noise
+  t = t.replace(/([\n.!?])\s*[—–]\s*/g, '$1 '); // and one opening a sentence takes no comma
+  t = t.replace(/\s*[—–]\s*/g, ', ');
+  t = t.replace(/,\s*,/g, ',').replace(/,\s*([.!?,;:])/g, '$1');
+  // Collapse excess blank lines and runs of spaces (the war-room renders this
+  // in one <p>, so a double space is only ever a mistake).
+  t = t.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+  // Close the sentence. A model that trailed off on a dash (now stripped) or
+  // ran out of tokens leaves the page looking unfinished.
+  if (/[A-Za-z0-9]$/.test(t)) t += '.';
   return t;
 }
 
-function isValid(t) {
+// The prompt asks for no dashes and no AI tells; this is the enforcement. A
+// rejected attempt is retried once and then falls back to the template, which
+// is written to the same rules, so a stubborn model can never put an em-dash or
+// a "testament to their valor" on the war-room page.
+//
+// The word list MIRRORS the prompt's own list, minus the four words that are
+// also ordinary English ("echo", "ages", "legend", "forever") — banning those
+// outright would reject an honest sentence and cost us a good saga. The ones
+// kept here are pure tell: no skald of ours needs "ichor". The stock phrases
+// are matched whole so "the annals" alone is not a hanging offence.
+const BANNED =
+  /[—–]|tapestry|testament|\bannals\b|\bsinew\b|\bichor\b|\bunyielding\b|whispers of|through the ages|etched into/i;
+
+export function isValid(t) {
   if (!t) return false;
   if (t.length > MAX_CHARS) return false;
   if (/^\s*#{1,6}\s/m.test(t)) return false; // markdown header line
+  if (BANNED.test(t)) return false;
   return true;
+}
+
+/** Why isValid said no — for the log line, so a rejection is diagnosable. */
+function rejection(t) {
+  if (!t) return 'empty';
+  if (t.length > MAX_CHARS) return `over ${MAX_CHARS} chars (${t.length})`;
+  if (/^\s*#{1,6}\s/m.test(t)) return 'markdown header';
+  const hit = t.match(BANNED);
+  if (hit) return `banned: ${JSON.stringify(hit[0])}`;
+  return 'unknown';
 }
 
 // ── template fallback (hash-seeded, same 3–5 sentence shape) ───────────
@@ -242,7 +373,7 @@ const PARTY = [
 ];
 const BLOW = [
   'It was {first} who drew first blood, and {top} who struck the hardest, {dmg} wounds carved into the beast.',
-  '{first} landed the opening blow, while {top} rained the fiercest strikes, dealing {dmg} damage.',
+  '{first} landed the opening blow, while {top} rained the fiercest strikes, dealing {dmg} wounds.',
   'First blood fell to {first}, and {top} dealt the deepest wounds, {dmg} in all.',
 ];
 const BLOW_NODMG = [
@@ -281,28 +412,31 @@ function buildTemplate(f) {
     top: f.topDamagePlayer ? firstName(f.topDamagePlayer) : null,
     dmg: f.topDamage != null ? f.topDamage : null,
     len: fightLength(f.fightSec),
-    fallen: f.fallen.length ? f.fallen.map((d) => phraseDeath(d.name, d.cause)).join(', and ') : null,
+    // List grammar, not a ", and " chain: six fallen used to read "A, and B,
+    // and C, and D, and E, and F".
+    fallen: f.fallen.length ? listJoin(fallenPhrases(f.fallen)) : null,
   };
 
-  const sentences = [fill(pick(OPENERS, seed, 0), vars)];
-  if (f.players.length) sentences.push(fill(pick(PARTY, seed, 1), vars));
-  if (vars.len) sentences.push(fill(pick(LENGTH, seed, 2), vars));
+  // The middle clauses in NARRATIVE order, each carrying how badly it is wanted
+  // (1 = kept first). Opener and closer are mandatory.
+  const middle = [];
+  if (f.players.length) middle.push({ keep: 3, text: fill(pick(PARTY, seed, 1), vars) });
+  if (vars.len) middle.push({ keep: 4, text: fill(pick(LENGTH, seed, 2), vars) });
   if (vars.first && vars.top) {
-    sentences.push(fill(pick(vars.dmg != null ? BLOW : BLOW_NODMG, seed, 3), vars));
+    middle.push({ keep: 2, text: fill(pick(vars.dmg != null ? BLOW : BLOW_NODMG, seed, 3), vars) });
   }
-  if (vars.fallen) sentences.push(fill(pick(FALLEN, seed, 4), vars));
-  sentences.push(fill(pick(CLOSERS, seed, 5), vars));
+  if (vars.fallen) middle.push({ keep: 1, text: fill(pick(FALLEN, seed, 4), vars) });
 
-  // Keep to a tight 3–5 sentence shape: opener + closer are mandatory; trim
-  // the middle if we overran, but always keep the most colorful clause.
-  let out = sentences;
-  if (out.length > 5) {
-    const opener = out[0];
-    const closer = out[out.length - 1];
-    const middle = out.slice(1, -1).slice(0, 3);
-    out = [opener, ...middle, closer];
-  }
-  return out.join(' ');
+  // Keep to a tight 3 to 5 sentence shape. With all four middles present we are
+  // one over, so the LEAST interesting clause goes. The old slice took the TAIL
+  // instead, which is who fell: the one line a reader remembers, dropped on
+  // exactly the busy boss nights that earned it.
+  const kept = new Set([...middle].sort((a, b) => a.keep - b.keep).slice(0, 3));
+  return [
+    fill(pick(OPENERS, seed, 0), vars),
+    ...middle.filter((m) => kept.has(m)).map((m) => m.text),
+    fill(pick(CLOSERS, seed, 5), vars),
+  ].join(' ');
 }
 
 // ── DB write (service role); tolerate failure pre-migration ────────────
@@ -360,9 +494,7 @@ export function createSkald({ db, writeDb }) {
         source = 'llm';
         break;
       }
-      console.warn(
-        `[skald] ollama attempt ${attempt} rejected (empty/markdown/over ${MAX_CHARS} chars); len=${cleaned.length}`
-      );
+      console.warn(`[skald] ollama attempt ${attempt} rejected (${rejection(cleaned)}); len=${cleaned.length}`);
     }
 
     if (!text) {

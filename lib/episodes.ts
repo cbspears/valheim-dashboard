@@ -375,7 +375,7 @@ const OPENERS = {
     '{names} took to the realm together{day}.',
   ],
   crowd: [
-    'A full hall — {names} — answered the horn{day}.',
+    'The hall was full. {names} answered the horn{day}.',
     'The mead-benches filled as {names} sailed{day}.',
     '{names} crowded the realm{day}.',
   ],
@@ -388,11 +388,11 @@ const OPENERS = {
 const BOSS_DESC = [
   '{boss} fell this day, and a new region opened to the clan.',
   'The forsaken {boss} was cut down at last.',
-  '{boss} met its end — skål to the war-party that took its head.',
+  '{boss} met its end. Skål to the war party that took its head.',
 ];
 
 const CREATURE_DESC = [
-  '{name} learned to fear the humble {Cause}.',
+  '{name} learned to fear the {Cause}.',
   '{name} met their end at the claws of {article} {cause}.',
   'A single {cause} sent {name} to Valhalla.',
   '{name} will not soon forget the {cause} that felled them.',
@@ -417,10 +417,10 @@ const ENV_DESC: Record<string, string[]> = {
   stalagmite: ['{name} was skewered from above.'],
   stalagtite: ['{name} was skewered from above.'],
   impact: ['{name} was broken by a merciless fall.'],
-  cartcollision: ['{name} was run down by their own cart — a death without honor.'],
+  cartcollision: ['{name} was run down by their own cart. No honor in that one.'],
   structural: ['{name} was crushed beneath falling timber.'],
-  turret: ['{name} was shot down by a ballista, friendly fire perhaps.'],
-  boat: ['{name} went down with their ship.'],
+  turret: ['{name} was shot down by a ballista. Friendly fire, perhaps.'],
+  boat: ['{name} was run down by a longship.'],
   self: ['{name} was undone by their own hand; the hall asks no questions.'],
   // Mirrors the ENV_DEATHS entry — and it must exist HERE too, because ENV_KEYS
   // (derived from this map) is what tells featuredDeath a cause is an
@@ -439,14 +439,14 @@ const ENV_DESC: Record<string, string[]> = {
   // in ENV_DEATHS — scripts/eilif-death.test.mjs asserts the whole enum).
   undefined: ['{name} fell to something that left no name behind.'],
   playerhit: ['{name} was cut down by one of their own.'],
-  cart: ['{name} was run down by their own cart — a death without honor.'],
+  cart: ['{name} was run down by their own cart. No honor in that one.'],
   catapult: ['{name} was smashed flat by a catapult stone.'],
   cinderfire: ['{name} was caught in a rain of burning cinders.'],
 };
 
 const DEADLY_DESC = [
   'Blood was spilled {n} times before the fires dimmed.',
-  'The realm claimed {n} lives this day — none for long.',
+  'The realm claimed {n} lives this day, none of them for long.',
   '{n} deaths darkened the day’s saga.',
 ];
 
@@ -462,7 +462,7 @@ const DISCOVERY_DESC = [
 
 const RAID_DESC = [
   'The hall weathered a raid and held.',
-  'A raid tested the walls — the walls won.',
+  'A raid tested the walls, and the walls won.',
   'The clan stood against a siege before the dawn.',
 ];
 
@@ -472,7 +472,7 @@ const PLACES_ONE_DESC = [
 ];
 
 const PLACES_MANY_DESC = [
-  'New ground was named — {places}.',
+  'New ground was named: {places}.',
   '{places} were marked upon the map.',
 ];
 
@@ -488,9 +488,18 @@ const OATHS_MANY_DESC = [
 
 const QUIET_DESC = [
   'Wood was chopped, mead was drunk, and the longhouse grew a little.',
-  'Quiet work by firelight — stone laid, nets mended, no blood spilled.',
+  'Quiet work by firelight: stone laid, nets mended, no blood spilled.',
   'A calm stretch; the fires were fed and the hall kept warm.',
 ];
+
+// OWN-PROPERTY lookup for the cause-keyed maps. A cause is attacker-reachable
+// (a modded client names its own killer), and a bare `MAP[low]` walks
+// Object.prototype: a death "caused by constructor" handed ENV_DESC the Object
+// function, and buildEpisodes threw on it — a 500 on every page that renders
+// the saga. `toString` was quieter and worse: it rendered.
+function lookup<T>(map: Record<string, T>, key: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
+}
 
 // Cause categories (mirror phraseDeath). "the wilds" is the no-cause fallback.
 const ENV_KEYS = new Set(Object.keys(ENV_DESC));
@@ -515,7 +524,8 @@ function deathSentence(deaths: EpisodeDeath[], seed: number): string | null {
   if (feat) {
     const low = feat.cause.toLowerCase();
     const nm = firstName(feat.name);
-    if (ENV_DESC[low]) return fill(pick(ENV_DESC[low], seed, 5), { name: nm });
+    const envPool = lookup(ENV_DESC, low);
+    if (envPool) return fill(pick(envPool, seed, 5), { name: nm });
     if (!isBossCause(low)) {
       return fill(pick(CREATURE_DESC, seed, 5), {
         name: nm,
@@ -532,7 +542,7 @@ function deathSentence(deaths: EpisodeDeath[], seed: number): string | null {
 function daySpanClause(range: [number, number] | null): string {
   if (!range) return '';
   const [lo, hi] = range;
-  return lo === hi ? `, the world at day ${lo}` : `, across world-days ${lo}–${hi}`;
+  return lo === hi ? `, the world at day ${lo}` : `, across world days ${lo} to ${hi}`;
 }
 
 function describeEpisode(e: EpisodeCore, seed: number): string {
@@ -554,29 +564,39 @@ function describeEpisode(e: EpisodeCore, seed: number): string {
     day,
   });
 
-  // Primary headline clause — highest-priority happening of the day.
+  // Primary headline clause — highest-priority happening of the day. `kind` is
+  // kept so the color clause below never tells the same event a second time
+  // ("The clan stood against a siege. A raid tested the walls, and the walls
+  // won." was two sentences about one raid).
   let primary: string | null = null;
+  let kind = 'quiet';
   if (e.bossKills.length > 0) {
     primary = fill(pick(BOSS_DESC, seed, 1), { boss: e.bossKills[0] });
+    kind = 'boss';
   } else if (e.deaths.length > 0) {
     primary = deathSentence(e.deaths, seed);
+    kind = 'death';
   } else if (e.discoveries.length > 0) {
     primary = pick(DISCOVERY_DESC, seed, 1);
+    kind = 'discovery';
   } else if (e.raids.length > 0) {
     primary = pick(RAID_DESC, seed, 1);
+    kind = 'raid';
   } else if (e.places.length > 0) {
     primary = placesClause(e.places, seed);
+    kind = 'places';
   } else if (e.oaths.length > 0) {
     primary = oathsClause(e.oaths, seed);
+    kind = 'oaths';
   } else {
     primary = pick(QUIET_DESC, seed, 1);
   }
 
   // One "color" clause — a different flavor than the headline, when present.
   const secondaries: string[] = [];
-  const placeS = e.places.length > 0 ? placesClause(e.places, seed) : null;
-  const oathS = e.oaths.length > 0 ? oathsClause(e.oaths, seed) : null;
-  const raidS = e.raids.length > 0 ? pick(RAID_DESC, seed, 3) : null;
+  const placeS = e.places.length > 0 && kind !== 'places' ? placesClause(e.places, seed) : null;
+  const oathS = e.oaths.length > 0 && kind !== 'oaths' ? oathsClause(e.oaths, seed) : null;
+  const raidS = e.raids.length > 0 && kind !== 'raid' ? pick(RAID_DESC, seed, 3) : null;
   for (const s of [oathS, placeS, raidS]) {
     if (s && s !== primary && !secondaries.includes(s)) secondaries.push(s);
   }
@@ -626,7 +646,7 @@ const ENV_DEATHS: Record<string, string> = {
   cartcollision: 'run down by their own cart',
   structural: 'crushed by falling timber',
   turret: 'shot down by a ballista',
-  boat: 'wrecked with their ship',
+  boat: 'run down by a longship',
   self: 'undone by their own hand',
   // Valheim's catch-all HitType for damage from a creature the client couldn't
   // name (an off-screen projectile, a despawned attacker, a mod-spawned foe).
@@ -664,7 +684,8 @@ const BOSSES = new Set([
 export function phraseDeath(cause: string): string {
   const c = cause.trim();
   const low = c.toLowerCase();
-  if (ENV_DEATHS[low]) return ENV_DEATHS[low];
+  const env = lookup(ENV_DEATHS, low);
+  if (env) return env;
   if (BOSSES.has(low) || /^the\s/i.test(c)) return `felled by ${c}`;
   const article = /^[aeiou]/i.test(c) ? 'an' : 'a';
   // Preserve the creature's own casing (gs-ingest sends Title Case, e.g.

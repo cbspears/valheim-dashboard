@@ -252,6 +252,13 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     const windowStart = new Date(now - 24 * 3600 * 1000);
     const startMs = windowStart.getTime();
     const startIso = windowStart.toISOString();
+    // Both ends, not just the start. A row dated in the FUTURE would otherwise
+    // fall inside every window from now until that date arrives — so one
+    // forged death (the /api/gs-ingest paths are unauthenticated by design; see
+    // lib/event-time.ts) inflated the Fallen board and the "The Bold"
+    // Player-of-the-Day tally every single day, forever. The clamp at ingest is
+    // the real fix; this is the second lock on the same door.
+    const endIso = new Date(now).toISOString();
 
     // Lazy-init POTY state so dry-run (state = {}) / first boot never throw.
     const snap = state.potyStatsSnapshot || {};
@@ -304,6 +311,7 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
       .select('character_name, created_at, metadata')
       .eq('type', 'death')
       .gte('created_at', startIso)
+      .lte('created_at', endIso)
       .limit(10000);
 
     // One death reported by both producers is ONE death on the boards: fold the
@@ -345,7 +353,8 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
       .from('bosses')
       .select('name, biome, killed_at, players_present, fight_stats')
       .eq('is_killed', true)
-      .gte('killed_at', startIso);
+      .gte('killed_at', startIso)
+      .lte('killed_at', endIso);
 
     const bossKills = (bossRows || []).map((b) => b.name);
     const bossesPresent = {};
