@@ -1,3 +1,4 @@
+-- APPLIED TO PROD 2026-09-06 (Supabase MCP execute_sql; three deed lines, none achieved at the time).
 -- Collective Milestones ("Great Deeds") — three copy corrections.
 --
 -- ⚠️ UNAPPLIED. Hand-apply against Supabase (project syuwavxpmtdmxupxjzje) when
