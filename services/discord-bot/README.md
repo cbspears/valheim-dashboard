@@ -28,7 +28,7 @@ Mention Everyone). Intents (all non-privileged, declared in `src/discord.js`): *
 ```bash
 npm start              # live
 npm run dry-run        # no Discord login; prints what it WOULD post (validates formatting)
-npm test               # voice + titles + milestones unit tests (no network)
+npm test               # voice + titles + milestones + gallery-resize unit tests (no network)
 ```
 
 > ⚠️ **`npm run dry-run` is the only safe preview.** It never logs in to Discord and never writes
@@ -53,6 +53,36 @@ activity embed to `RECAP_CHANNEL` (default #valheim): vikings active, hours logg
 kills, who's online, the world day, the day boards and the Player of the Day — over the trailing 24
 hours. The old 08:00 morning recap is retired; `postRecap('morning')` still exists for previews.
 Recaps stay silent until `RECAPS_START`.
+
+## Photo gallery ingest (`GALLERY_INGEST=1`)
+Post an image in `CHANNEL_GALLERY` and @mention the bot: it re-hosts the image in the public
+`gallery` Supabase Storage bucket (Discord CDN URLs expire), inserts a `gallery_photos` row for the
+dashboard's Gallery page, links it to a map pin if the caption names a pinned place, and reacts 🖼️.
+An admin (**Manage Messages**) reacting 🗑️ on the photo message deletes the row(s) + object(s).
+
+**Photos are resized on ingest — the original is never stored.** Each attachment is decoded,
+auto-oriented from EXIF, downscaled so its longer edge is at most `GALLERY_MAX_EDGE` (default
+**1600 px**, never upscaled) and re-encoded as **WebP q82** via [`sharp`](https://sharp.pixelplumbing.com);
+that WebP is what gets uploaded (`.webp` key, `image/webp`) and what `url` points at. The row shape
+is unchanged — `content_type`, `width` and `height` just describe the stored WebP now, not the
+Discord original.
+
+Why: Valheim screenshots arrive as 3–7 MB full-resolution PNGs, and `/gallery` loads them raw. The
+four photos in the bucket on 2026-09-04 were 17.3 MB together — roughly **290 page views/month
+would have hit the Supabase Free plan's 5 GB egress cap on four photos alone**, and ~200 such photos
+fill the 1 GB storage. Blowing that cap throttles the whole project: the map, the gallery *and* the
+REST API the dashboard and bots read. Re-encoded, those same four are **0.17 MB (≈103× smaller)**
+with no visible loss at the sizes the masonry grid and lightbox actually render.
+
+Notes:
+- Attachments over **12 MB** are still skipped outright before download (unchanged OOM guard);
+  the resize happens after, so the cap governs the original, not the stored file.
+- **Animated GIF/WebP keeps its first frame** (a still is what the grid shows anyway; re-encoding
+  an animation would defeat the byte budget). Anything `sharp`/libvips can't decode is skipped with
+  a `[gallery] skipped … could not decode` warning — it is never uploaded full-size as a fallback.
+- Attachments are processed **one at a time**; a failure on one photo is logged and the rest of the
+  post still lands. Every ingest logs the before/after byte sizes.
+- Existing rows are untouched: photos ingested before this change still point at their original PNG.
 
 ## The Oath ingest (`OATH_INGEST=1`, off by default)
 When enabled, the bot records **oaths** posted in Discord that @mention it onto the dashboard's
@@ -155,6 +185,7 @@ journalctl -u eilif-discord-bot -f
 | `MILESTONE_MIN_GAP_MS` | quiet between two Great Deed announcements (default `60000` = 1 min) |
 | `MILESTONES_INTERVAL_MS` | how often the deed announcer polls (keep ≤ the gap; live `.env` is `60000`) |
 | `TITLE_CHANNEL` | where title proclamations go: `server` (default, unchanged behaviour) or `valheim` |
+| `GALLERY_MAX_EDGE` | longest edge (px) of a stored gallery photo before WebP re-encode (default `1600`) |
 | `ADMIN_ROLE_IDS` | comma-separated role ids allowed to use `@Eilif say:` on top of Administrator / Manage Server |
 | `RECAP_EVENING_HOUR` | hour of the nightly recap, local `TZ` (default `23`) |
 | `TZ` | recap timezone (`America/Chicago`) |

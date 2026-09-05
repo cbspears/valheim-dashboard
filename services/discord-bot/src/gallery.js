@@ -2,6 +2,10 @@
 // the bot, copy the attachment into Supabase Storage (Discord CDN URLs expire)
 // and record it in `gallery_photos` for the dashboard's Gallery page.
 //
+// The attachment is NOT stored as posted: it is downscaled to a ≤1600 px WebP
+// first (see resizeForGallery) so months of screenshots can't exhaust the
+// Supabase Free plan's storage/egress. `url` points at the WebP.
+//
 // Gated to a single channel via CHANNEL_GALLERY (contract C) — messages from
 // any other channel are ignored. If unset, ingest stays ungated (any channel)
 // like before, with a once-only warning.
@@ -26,8 +30,77 @@ const BUCKET = 'gallery';
 const TRASH_EMOJI = '🗑️';
 
 // Skip attachments over this size — a cap against OOM/storage abuse from a
-// single huge "photo" (the bot buffers the whole file in memory to upload it).
+// single huge "photo" (the bot buffers the whole file in memory to decode it).
+// This is the *download* guard: it applies to the original attachment, before
+// the resize below shrinks what actually reaches Supabase.
 const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024; // 12 MB
+
+// ── Resize on ingest ────────────────────────────────────────────────────────
+// Valheim screenshots arrive as 3–7 MB full-resolution PNGs. Stored and served
+// raw from Supabase Storage, a single /gallery page view pulls tens of MB, and
+// the Free plan's 5 GB/month egress (and 1 GB storage) would be gone inside the
+// first month of the playthrough — taking the map, the gallery AND the REST API
+// the dashboard depends on down with it.
+//
+// So every attachment is decoded, auto-oriented, downscaled so its longer edge
+// is at most GALLERY_MAX_EDGE (never upscaled) and re-encoded as WebP before
+// upload. A 4 MB PNG screenshot lands around 150–300 KB — a ~20× cut — with no
+// visible loss at the sizes the masonry grid and the lightbox actually render.
+const MAX_EDGE = Math.max(1, Number(process.env.GALLERY_MAX_EDGE) || 1600);
+const WEBP_QUALITY = 82;
+
+function fmtBytes(n) {
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
+}
+
+// sharp is this bot's only native dependency, and index.js imports this module
+// unconditionally. Load it lazily (and once) so a missing or mismatched binary
+// — a fresh `npm install --omit=optional`, a node_modules copied between archs
+// — degrades to "photos are skipped, loudly" instead of taking the whole bot
+// (event relay, boss announcements, recaps) down at startup.
+let sharpPromise = null;
+function loadSharp() {
+  sharpPromise ??= import('sharp').then((m) => m.default);
+  return sharpPromise;
+}
+
+/**
+ * Decode → auto-orient → downscale → WebP. Pure and offline (no network, no
+ * Discord, no Supabase) so `scripts/gallery-resize.test.mjs` can exercise it.
+ *
+ * Animated GIF/WebP: sharp reads only the **first frame** unless it is opened
+ * with `{ animated: true }`, and we deliberately don't — the grid shows a still
+ * anyway, and re-encoding an animation would blow through the byte budget this
+ * whole function exists to protect. So an animated post is kept as its opening
+ * frame rather than skipped.
+ *
+ * `limitInputPixels` is left at sharp's default (~268 MP), which rejects
+ * decompression-bomb inputs before they can allocate.
+ *
+ * @throws if the buffer isn't an image sharp/libvips can decode — callers skip
+ *         that one attachment rather than falling back to the full-size original.
+ */
+export async function resizeForGallery(input, { maxEdge = MAX_EDGE, quality = WEBP_QUALITY } = {}) {
+  const sharp = await loadSharp();
+  const pipeline = sharp(input, { failOn: 'error' });
+  const meta = await pipeline.metadata();
+  const { data, info } = await pipeline
+    .rotate() // honour the EXIF orientation tag, then drop it
+    .resize({ width: maxEdge, height: maxEdge, fit: 'inside', withoutEnlargement: true })
+    .webp({ quality })
+    .toBuffer({ resolveWithObject: true });
+
+  return {
+    data,
+    width: info.width,
+    height: info.height,
+    bytes: info.size,
+    originalBytes: input.length,
+    sourceFormat: meta.format ?? null,
+    // Set when the source had more than one frame and we kept only the first.
+    firstFrameOf: (meta.pages ?? 1) > 1 ? (meta.format ?? 'animated') : null,
+  };
+}
 
 // A best-effort insert error that just means the pin_id column isn't there yet
 // (migration db/2026-07-04_gallery_pin_link.sql not applied). We retry without it.
@@ -68,10 +141,27 @@ export function createGalleryIngest({ client, log = console }) {
       return false;
     }
 
-    const ext = ((att.name?.split('.').pop() || 'png').toLowerCase().match(/[a-z0-9]+/)?.[0]) || 'png';
-    const path = `${att.id}.${ext}`;
-    const { error: upErr } = await db.storage.from(BUCKET).upload(path, bytes, {
-      contentType: att.contentType ?? 'image/png',
+    // Shrink before upload. A decode failure (corrupt file, or a format libvips
+    // can't read) skips this one attachment — we never fall back to uploading
+    // the full-size original, which is the thing this exists to prevent.
+    const label = att.name || att.id;
+    let image;
+    try {
+      image = await resizeForGallery(bytes);
+    } catch (e) {
+      log.warn?.(`[gallery] skipped ${label} — could not decode (${e.message})`);
+      return false;
+    }
+    log.info?.(
+      `[gallery] resized ${label} ${fmtBytes(image.originalBytes)} → ${fmtBytes(image.bytes)} ` +
+        `(${image.originalBytes} → ${image.bytes} bytes, ${image.sourceFormat ?? '?'} → webp q${WEBP_QUALITY} ` +
+        `${image.width}×${image.height}` +
+        `${image.firstFrameOf ? `, first frame of an animated ${image.firstFrameOf}` : ''})`
+    );
+
+    const path = `${att.id}.webp`;
+    const { error: upErr } = await db.storage.from(BUCKET).upload(path, image.data, {
+      contentType: 'image/webp',
       upsert: true,
     });
     if (upErr) throw new Error(`upload: ${upErr.message}`);
@@ -85,9 +175,11 @@ export function createGalleryIngest({ client, log = console }) {
       discord_user_id: ctx.message.author.id,
       source_attachment_id: att.id,
       source_message_id: ctx.message.id,
-      content_type: att.contentType ?? null,
-      width: att.width ?? null,
-      height: att.height ?? null,
+      // These describe the object `url` actually points at (the WebP), not the
+      // Discord original — same columns, same shape, no migration.
+      content_type: 'image/webp',
+      width: image.width,
+      height: image.height,
       posted_at: new Date(ctx.message.createdTimestamp).toISOString(),
     };
     // Attach to a map pin if the caption names one (gallery ↔ map link).
@@ -140,8 +232,16 @@ export function createGalleryIngest({ client, log = console }) {
       };
 
       let added = 0;
+      // Strictly one attachment at a time: each one is fully buffered and then
+      // decoded into a raw bitmap, so ingesting a 10-image post concurrently
+      // would multiply peak memory. A failure on one photo (decode, upload,
+      // insert) is logged and the rest of the post still lands.
       for (const att of images) {
-        if (await storeOne(att, ctx)) added++;
+        try {
+          if (await storeOne(att, ctx)) added++;
+        } catch (e) {
+          log.error?.(`[gallery] ${att.name || att.id}: ${e.message}`);
+        }
       }
       if (added > 0) {
         await message.react('🖼️').catch(() => {});
