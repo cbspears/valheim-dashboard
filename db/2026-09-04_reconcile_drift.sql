@@ -1,3 +1,4 @@
+-- APPLIED TO PROD 2026-09-04 (Supabase MCP apply_migration, recorded as `reconcile_drift_2026_09_04` in supabase_migrations.schema_migrations).
 -- Reconcile the three places where db/*.sql and PRODUCTION disagree (backend-8).
 --
 -- Some migrations were applied by hand through the Supabase SQL editor rather

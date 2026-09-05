@@ -1,3 +1,4 @@
+-- APPLIED TO PROD 2026-09-04 (Supabase MCP apply_migration, recorded as `revoke_anon_writes_2026_09_04` in supabase_migrations.schema_migrations).
 -- Take INSERT/UPDATE/DELETE/TRUNCATE away from anon + authenticated.
 --
 -- WHY: Supabase's default grants give `anon` and `authenticated` DELETE, INSERT,

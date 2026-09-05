@@ -1,3 +1,4 @@
+-- APPLIED TO PROD 2026-09-04 (Supabase MCP apply_migration, recorded as `events_indexes_2026_09_04` in supabase_migrations.schema_migrations).
 -- Hot-path indexes for `events` + the four unindexed foreign keys.
 --
 -- WHY: pg_stat_user_tables showed events at 638,565 sequential scans vs 15 index

@@ -1,3 +1,4 @@
+-- APPLIED TO PROD 2026-09-04 (Supabase MCP apply_migration, recorded as `ingest_death_2026_09_04` in supabase_migrations.schema_migrations).
 -- Atomic death ingest — closes the gs↔eilif duplicate-death RACE.
 --
 -- APPLY WITH THE DEPLOY THAT CARRIES lib/deaths.ts; SAFE IN EITHER ORDER.
