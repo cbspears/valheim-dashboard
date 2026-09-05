@@ -268,7 +268,7 @@ export default function GetStartedPage() {
                 </div>
                 <p className="text-xs text-muted">
                   The download starts right away. Run the installer, click through it, and open
-                  r2modman. It keeps itself updated from then on. No Mac version — on a Mac, use
+                  r2modman. It keeps itself updated from then on. There is no Mac version. On a Mac, use
                   the Apple Silicon setup below instead.{' '}
                   <Ext href={R2MODMAN_ALL_URL}>All downloads</Ext>
                 </p>
@@ -366,7 +366,7 @@ export default function GetStartedPage() {
           <CardBody>
             <p className="text-sm leading-relaxed text-ash-dim">
               Valheim runs on Mac, but r2modman doesn&apos;t. On Apple Silicon (M1 and later) you
-              use <Ext href={MACHEIM_ALL_URL}>Macheim</Ext> instead — a Mac-native mod manager that
+              use <Ext href={MACHEIM_ALL_URL}>Macheim</Ext> instead, a Mac-native mod manager that
               sets up the mod loader and runs the game under Rosetta for you. About 15 minutes.
             </p>
 
@@ -388,7 +388,7 @@ export default function GetStartedPage() {
                 <span className="text-ash">Macheim</span> into Applications.
               </li>
               <li>
-                <span className="font-mono text-xs text-gold-light">2.</span> The first launch is
+                <span className="font-mono text-xs text-gold-light">2.</span>{' '}The first launch is
                 blocked because Macheim isn&apos;t signed. Open{' '}
                 <span className="text-ash">Terminal</span>, run this, then open Macheim:
                 <span className="mt-1.5 block">
@@ -400,12 +400,12 @@ export default function GetStartedPage() {
               </li>
               <li>
                 <span className="font-mono text-xs text-gold-light">3.</span> Macheim finds your
-                Valheim install. Click <span className="text-ash">Install BepInEx</span> — it sets
+                Valheim install. Click <span className="text-ash">Install BepInEx</span>. It sets
                 up the mod loader and installs Rosetta automatically (on Apple Silicon the mods run
                 under Rosetta).
               </li>
               <li>
-                <span className="font-mono text-xs text-gold-light">4.</span> Add the mods.
+                <span className="font-mono text-xs text-gold-light">4.</span>{' '}Add the mods.
                 Macheim can&apos;t read r2modman codes. Open the{' '}
                 <span className="text-ash">Mods</span> tab and install these seven, latest version:
                 <span className="mt-1 block text-ash">
@@ -432,7 +432,7 @@ export default function GetStartedPage() {
               </li>
               <li>
                 <span className="font-mono text-xs text-gold-light">5.</span> Launch from{' '}
-                <span className="text-ash">Macheim</span> (not Steam&apos;s Play button), pick your
+                <span className="text-ash">Macheim</span>{' '}(not Steam&apos;s Play button), pick your
                 character, then <span className="text-ash">Join Game → Add server</span> with the
                 address and password from the top of this page.
               </li>
@@ -440,7 +440,7 @@ export default function GetStartedPage() {
 
             <div className="mt-4 space-y-1.5">
               <p className="text-xs text-muted">
-                Some modded objects may look bright pink — a harmless Mac shader quirk, not a
+                Some modded objects may look bright pink. This is a harmless Mac shader quirk, not a
                 broken install.
               </p>
               <p className="text-xs text-muted">
@@ -518,7 +518,7 @@ export default function GetStartedPage() {
                 </ol>
                 <p className="text-xs text-muted">
                   Re-swear anytime with{' '}
-                  <span className="font-mono text-xs text-ash-dim">/s /oath your new vow</span> in
+                  <span className="font-mono text-xs text-ash-dim">/s /oath your new vow</span>{' '}in
                   game. Your latest oath replaces the last. Read the charter and see who&apos;s
                   sworn on the{' '}
                   <Link href="/oath" className="text-gold-light hover:underline">
@@ -633,7 +633,7 @@ export default function GetStartedPage() {
           <Platform icon={<Laptop size={17} />} name="Mac" difficulty="Tricky" tone="raid">
             <p>
               Valheim runs on Mac, but r2modman doesn&apos;t. On Apple Silicon (M1 and later), use{' '}
-              <Ext href={MACHEIM_ALL_URL}>Macheim</Ext> — the one-click download and full
+              <Ext href={MACHEIM_ALL_URL}>Macheim</Ext>. The one-click download and full
               walkthrough are in the <span className="text-ash">Apple Silicon setup</span> section
               above.
             </p>
@@ -681,8 +681,8 @@ export default function GetStartedPage() {
               second, and your kills, deaths, and builds are never touched.
             </Trouble>
             <Trouble symptom="It won't run on my Mac">
-              On Apple Silicon, use <span className="text-ash">Macheim</span> (see the Apple Silicon
-              setup section) — it runs the mods under Rosetta for you. If Macheim itself won&apos;t
+              On Apple Silicon, use <span className="text-ash">Macheim</span>{' '}(see the Apple Silicon
+              setup section). It runs the mods under Rosetta for you. If Macheim itself won&apos;t
               open, it needs the Gatekeeper step: Terminal{' '}
               <span className="font-mono text-xs">xattr -cr /Applications/Macheim.app</span>, or
               System Settings → Privacy &amp; Security → Open Anyway. Still stuck? Ask in Discord.

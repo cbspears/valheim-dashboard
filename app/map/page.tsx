@@ -137,7 +137,7 @@ export default async function MapPage() {
               </span>
               . The photo lands in the{' '}
               <span className="text-ash">Gallery</span> and on{' '}
-              <span className="text-ash">Draugheim&apos;s marker</span> here. Click any marker to
+              <span className="text-ash">Draugheim&apos;s marker</span>{' '}here. Click any marker to
               see its album. Pin first or photo first, either order works: a photo naming a place
               that isn&apos;t pinned yet attaches itself the moment the pin appears.
             </p>

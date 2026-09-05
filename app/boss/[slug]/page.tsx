@@ -251,10 +251,10 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
         {onMap && (
           <Link
             href="/map"
-            className="gold-ring inline-flex w-fit items-center gap-2 text-sm text-gold-dim transition-colors hover:text-gold-light"
+            className="gold-ring inline-flex w-fit items-center gap-2 text-sm text-gold-light transition-colors hover:text-gold"
           >
             <MapIcon size={14} />
-            The altar is marked on the atlas &mdash; view the map
+            The altar is marked on the atlas. View the map
           </Link>
         )}
       </div>

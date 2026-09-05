@@ -720,7 +720,7 @@ export default async function OpsArchitecturePage() {
               Every arrow points, eventually, at <b>Supabase</b>. Nothing talks to anything else
               directly. The game emits, the services and API routes write, and every surface reads
               back from the same database. That&apos;s why the whole thing is loosely coupled and why
-              the <b>trust boundary</b> sits at the ingest routes: anything a player&apos;s machine can
+              the <b>trust boundary</b>{' '}sits at the ingest routes: anything a player&apos;s machine can
               send (mod payloads, in-game chat) is untrusted until an authenticated, validated route
               has vetted it. The security pass hardened exactly that seam; the cockpit watches
               whether every producer on the left is still feeding it.

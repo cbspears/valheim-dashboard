@@ -54,15 +54,31 @@ export function NavBar({ nextGathering }: { nextGathering?: NextGathering | null
           </div>
         )}
 
-        {/* Desktop links */}
-        <div className="hidden shrink-0 items-center gap-1 md:flex">
+        {/*
+          Desktop links. The nine tabs turn on at md (768px), and at their full
+          lg spacing the row measures 668px. With the 75px wordmark and the
+          16px bar gap that is 759px of content in the 720px box a 768px
+          viewport gives it. 24px of the overrun is swallowed by the bar's own
+          right padding, so the visible symptom was a 15px horizontal scroll on
+          every page, from 768px through 782px (it clears at 783px).
+
+          Tighter gap/padding and normal tracking below lg take the row to
+          561px, so the bar needs 652px of 720px at 768px: 68px of headroom.
+          Every value is restored at lg, where the row is 668px again and the
+          desktop bar is unchanged.
+
+          All figures measured in a real build, not estimated. Re-measure
+          before loosening any of this, and note that a 820px-only check does
+          not catch the regression: the band ends at 782px.
+        */}
+        <div className="hidden shrink-0 items-center gap-0.5 md:flex lg:gap-1">
           {LINKS.map((l) =>
             l.cta ? (
               <Link
                 key={l.href}
                 href={l.href}
                 className={clsx(
-                  'ml-1.5 rounded-md border px-3.5 py-1.5 text-sm font-semibold tracking-wide transition-colors gold-ring',
+                  'ml-1 rounded-md border px-2.5 py-1.5 text-sm font-semibold tracking-normal transition-colors gold-ring lg:ml-1.5 lg:px-3.5 lg:tracking-wide',
                   isActive(l.href)
                     ? 'border-gold bg-gold/20 text-gold-light'
                     : 'border-gold-dim bg-gold/10 text-gold-light hover:border-gold hover:bg-gold/20'
@@ -75,7 +91,7 @@ export function NavBar({ nextGathering }: { nextGathering?: NextGathering | null
                 key={l.href}
                 href={l.href}
                 className={clsx(
-                  'rounded-md px-3 py-1.5 text-sm font-medium tracking-wide transition-colors gold-ring',
+                  'rounded-md px-2 py-1.5 text-sm font-medium tracking-normal transition-colors gold-ring lg:px-3 lg:tracking-wide',
                   isActive(l.href)
                     ? 'bg-gold/10 text-gold-light'
                     : 'text-ash-dim hover:bg-surface-raised hover:text-ash'
