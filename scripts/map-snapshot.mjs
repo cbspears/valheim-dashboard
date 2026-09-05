@@ -249,6 +249,17 @@ async function snapshot() {
     }
   }
 
+  // Liveness beacon for the site (2026-09-04): Supabase leaves an object's
+  // last-modified untouched when an upsert writes byte-identical content, and
+  // the composite IS byte-identical for days whenever nobody plays — so the
+  // dashboard cannot use current.webp's header to tell "paused" from "quiet".
+  // status.json changes every run (capturedAt), so its content is the signal.
+  await fetch(`${base}/object/map/status.json`, {
+    method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json', 'x-upsert': 'true', 'Cache-Control': 'no-cache' },
+    body: JSON.stringify({ capturedAt: new Date().toISOString(), revealedPct, worldDay: day, dayFramed: manifestOk === true }),
+  }).catch((e) => console.warn(`[map-snapshot] status.json failed (ignored): ${e.message}`));
+
   console.log(`[map-snapshot] ${new Date().toISOString()} uploaded (${(webp.length / 1024).toFixed(0)}KB, revealed ${revealedPct}%, ${dayNote})`);
   return { worldDay: day, revealedPct, manifestOk };
 }

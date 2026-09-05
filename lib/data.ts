@@ -208,7 +208,25 @@ export async function getLiveMap(): Promise<LiveMap | null> {
     } catch {
       /* no manifest yet — live-only */
     }
-    const updatedAt = head.headers.get('last-modified');
+    // Freshness: prefer the snapshot loop's own status.json (written on EVERY
+    // run with the capture time). The object's last-modified header is NOT a
+    // liveness signal: Supabase leaves it untouched when an upsert writes
+    // byte-identical content, which is exactly what happens for days on end
+    // when nobody plays (the composite never changes). Fall back to the header
+    // only when status.json is missing (older snapshot loop).
+    let updatedAt: string | null = null;
+    try {
+      const st = await fetch(`${bucket}/status.json`, { cache: 'no-store' });
+      if (st.ok) {
+        const j = (await st.json()) as { capturedAt?: string };
+        if (typeof j.capturedAt === 'string' && Number.isFinite(Date.parse(j.capturedAt))) {
+          updatedAt = j.capturedAt;
+        }
+      }
+    } catch {
+      /* fall through to the header */
+    }
+    if (!updatedAt) updatedAt = head.headers.get('last-modified');
     return { url, updatedAt, frames, ...mapFreshness(updatedAt) };
   } catch {
     return null;
