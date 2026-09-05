@@ -26,15 +26,44 @@ Mention Everyone). Intents (all non-privileged, declared in `src/discord.js`): *
 
 ## Run
 ```bash
-npm start              # live
-npm run dry-run        # no Discord login; prints what it WOULD post (validates formatting)
-npm test               # voice + titles + milestones + gallery-resize unit tests (no network)
+npm start                    # live
+npm run dry-run              # rehearse every loop once, print what it WOULD post, exit
+npm run dry-run -- --loop    # same, but keep the loops running at production cadence
+npm test                     # voice + titles + milestones + gallery-resize unit tests (no network)
 ```
 
-> ⚠️ **`npm run dry-run` is the only safe preview.** It never logs in to Discord and never writes
-> (reads Supabase, prints to the console). `scripts/preview.js` and `scripts/preview-recap-live.js`
-> log in and **POST live to #server** — they are demo tools for a channel you don't mind writing to,
-> not dry runs. `scripts/announce.js` and `scripts/mark-boss.js` also write for real.
+### What the dry run rehearses
+
+It is a **rehearsal of the live bot, not a subset of it**: it builds the same loops `runLive`
+builds, out of the same modules, honouring the same env gates (`VOICE_ENGINE`, `TITLES_ANNOUNCE`,
+`MILESTONES_ANNOUNCE`, `RECAP_CHANNEL`, `MILESTONE_CHANNEL`, the gap and interval vars), and ticks
+each one once — relay, boss watch, the **voice engine** (plus its stale-queue expiry), the
+**living-titles announcer**, the **Great Deeds announcer**, and both recaps. It closes with the
+per-loop pass/fail table the ops cockpit would have been sent. `--loop` keeps them all running.
+
+Two guarantees, and neither is a matter of convention:
+
+- **It never logs in to Discord.** `post` prints, the voice engine gets a stub client, and
+  `DISCORD_TOKEN` is never read — a dry run works with no token in the environment at all.
+- **It never writes.** The announcers return at their first line without a service-role client, so
+  a dry run needs one; it gets the real client wrapped **read-only** — selects pass through,
+  `insert`/`update`/`upsert`/`delete` are printed as `[dry-run db] … SKIPPED` and answered with the
+  success shape. So the whole read → decide → format → post → record path runs against real rows
+  and nothing moves. (Which also means nothing is ever marked announced: under `--loop` the same
+  deed or title re-announces every pass. That is the point.)
+
+Five things are deliberately **not** rehearsed, and the run names each one on the way in rather
+than leaving a silent gap: `events-sync` (needs a live gateway, and POSTs to the webhook for real),
+`identity-confirm` (builds its own service-role client inside `identity.js` and DMs real users),
+the gallery / oath / identity-link ingests (message handlers — a stub client never emits), the
+Skald retelling (a ~90 s local-LLM call per boss, and a dry run makes every felled boss look
+fresh), and the ops heartbeat (it must not tell `/admin/ops` that a bot is alive). The
+`RECAPS_START` gate is also ignored, so recap formatting is visible before launch day.
+
+> ⚠️ **`npm run dry-run` is the only safe preview.** `scripts/preview.js` and
+> `scripts/preview-recap-live.js` log in and **POST live to #server** — they are demo tools for a
+> channel you don't mind writing to, not dry runs. `scripts/announce.js` and `scripts/mark-boss.js`
+> also write for real.
 
 ## Operator scripts
 ```bash

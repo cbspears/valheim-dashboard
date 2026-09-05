@@ -8,22 +8,28 @@
  *   • the peer NAME (ZNet.RPC_PeerInfo assigns m_playerName straight from the handshake packet,
  *     with no length or character check — so it is free text on a modified client).
  *
- * Two shapes turn either field into somebody else's identity:
+ * Two shapes turned either field into somebody else's identity. BOTH ARE CLOSED — this file is a
+ * regression test now, not a report of a live defect:
  *
- *   1. THE CONSOLE-ECHO IMITATION. services/log-poller/src/parser.js tests RE.consoleShout as an
- *      UNANCHORED substring, before every marker regex, so ANY line merely CONTAINING
- *      `Console: <color=orange>NAME</color>: <color=..>TEXT</color>` is read as a mod-free echo
- *      from NAME. A player only has to SHOUT that literal string: the plugin's raw-case
- *      [EILIF_CHAT] line reproduces it verbatim. (The genuine echo is safe from this only because
- *      Valheim display-uppercases shouts, which breaks the lowercase `<color=orange>` match.)
+ *   1. THE CONSOLE-ECHO IMITATION. services/log-poller/src/parser.js used to test RE.consoleShout
+ *      as an UNANCHORED substring, before every marker regex, so ANY line merely CONTAINING
+ *      `Console: <color=orange>NAME</color>: <color=..>TEXT</color>` was read as a mod-free echo
+ *      from NAME. A player only had to SHOUT that literal string: the plugin's raw-case
+ *      [EILIF_CHAT] line reproduced it verbatim. Fixed 2026-09-05 at the consumer, in two places:
+ *      echo detection is now anchored to the line's OWN prefix (`ECHO_LINE`, a fixed-shape
+ *      `[… : Unity Log] <date> <time>: Console: ` with no `.*` in it, so the engine cannot
+ *      backtrack past the real prefix to a second, player-supplied "Console:" further along the
+ *      line), and every captured name goes through `isPlausibleCharacterName()`, which rejects
+ *      `<`, `>`, `|` and control characters outright.
  *   2. THE FIELD-SEPARATOR SHIFT. Marker lines are " | "-delimited and the oath/chat parsers split
- *      on the FIRST separator, so a peer named "Bren | hello" emits
- *      `[EILIF_CHAT] Bren | hello | (their words)` and the poller reads Bren speaking.
+ *      on the FIRST separator, so a peer named "Bren | hello" emitted
+ *      `[EILIF_CHAT] Bren | hello | (their words)` and the poller read Bren speaking. Closed at the
+ *      producer by SafeName(), and now also by the name check above.
  *
  * plugins/eilif-companion/src/SpeakerIdentity.cs closes both at the producer: Safe() defangs
  * rich-text tag openers in text, SafeName() also flattens '|' in names. This test drives the REAL
  * parser with the exact lines the hardened plugin emits and asserts they are attributed to the
- * speaker, never to the named victim.
+ * speaker, never to the named victim — so it keeps holding whichever end regresses.
  *
  * SCOPE, honestly: this covers the CONSUMER contract. The producer is C# and this repo has no C#
  * test harness, so the sanitized strings below are written out as literals rather than generated —

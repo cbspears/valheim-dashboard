@@ -331,7 +331,6 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
       const meta = (r.metadata ?? {}) as Record<string, unknown>;
       const id = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
       return {
-    nowMs,
         characterName: (r.character_name as string | null) ?? 'unknown',
         boundSteamId: id(meta.boundSteamId),
         seenSteamId: id(meta.seenSteamId),

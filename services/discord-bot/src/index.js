@@ -37,9 +37,50 @@ const recapsStart = (() => {
 
 const db = readClient();
 
+// `--loop` keeps the DRY RUN running instead of exiting after one tick of each
+// loop. It means nothing in live mode (the live bot always loops).
+const DRY_LOOP = process.argv.includes('--loop');
+
 async function main() {
-  if (DRY) return runDryRun();
+  if (DRY) return runDryRun({ loop: DRY_LOOP });
   return runLive();
+}
+
+// One tick at a time, per loop. setInterval fires on the clock, not on
+// completion: without this guard a slow Discord or Supabase call lets the
+// next tick start on the SAME cursor and post the same events twice (the
+// relay reads `> lastEventAt` and only advances it after each post).
+//
+// Shared by runLive and runDryRun so a rehearsal wraps its loops exactly the
+// way production does, including recording each tick for the ops cockpit.
+function makeSafe(isStopped) {
+  return (label, fn) => {
+    let running = false;
+    return async () => {
+      if (isStopped()) return;
+      if (running) {
+        console.log(`[${label}] previous tick still running, skipping this one`);
+        return;
+      }
+      running = true;
+      try {
+        const result = await fn();
+        recordLoopResult(label, true);
+        return result;
+      } catch (e) {
+        console.error(`[${label}]`, e.message);
+        recordLoopResult(label, false, e.message);
+      } finally {
+        running = false;
+      }
+    };
+  };
+}
+
+/** setInterval must never be handed a NaN — that turns a loop into a busy-wait. */
+function intervalMs(raw, fallback) {
+  const n = parseInt(raw || '', 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 async function runLive() {
@@ -85,30 +126,7 @@ async function runLive() {
   recap.schedule();
 
   let stopped = false;
-  // One tick at a time, per loop. setInterval fires on the clock, not on
-  // completion: without this guard a slow Discord or Supabase call lets the
-  // next tick start on the SAME cursor and post the same events twice (the
-  // relay reads `> lastEventAt` and only advances it after each post).
-  const safe = (label, fn) => {
-    let running = false;
-    return async () => {
-      if (stopped) return;
-      if (running) {
-        console.log(`[${label}] previous tick still running, skipping this one`);
-        return;
-      }
-      running = true;
-      try {
-        await fn();
-        recordLoopResult(label, true);
-      } catch (e) {
-        console.error(`[${label}]`, e.message);
-        recordLoopResult(label, false, e.message);
-      } finally {
-        running = false;
-      }
-    };
-  };
+  const safe = makeSafe(() => stopped);
 
   const relayLoop = safe('relay', () => relay.tick());
   const bossLoop = safe('bosses', () => bosses.tick());
@@ -298,34 +316,296 @@ async function runLive() {
   }
 }
 
-async function runDryRun() {
-  console.log('=== DRY RUN (no Discord login; printing would-be posts) ===');
-  const state = {}; // ephemeral
-  const saveState = async () => {};
-  const post = createDryRunPoster().post;
+// ── Dry run ─────────────────────────────────────────────────────────────────
+//
+// A REHEARSAL of the live bot, not a subset of it. It builds the same loops
+// runLive builds — relay, bosses, the voice engine, the titles announcer, the
+// milestones announcer and the recap — out of the same modules, honouring the
+// same env gates, and ticks each one once (`--loop` keeps them running).
+//
+// It used to build only relay + bosses + recap, which meant the three loops
+// whose behaviour actually changes at twenty players — milestones, titles and
+// the voice engine — were exactly the three that could never be rehearsed.
+//
+// TWO GUARANTEES, both structural rather than by convention:
+//
+//  1. NOTHING LOGS IN TO DISCORD. `post` is createDryRunPoster().post, the
+//     voice engine gets a stub client (it only ever uses `client` to attach a
+//     messageCreate handler for `@Eilif say:`), and DISCORD_TOKEN is never
+//     read — a dry run works with no token in the environment at all.
+//  2. NOTHING IS WRITTEN. The announcers return at their first line without a
+//     service-role client (titles.js:105, milestones.js:207), so handing them
+//     `null` would rehearse nothing at all. They get a READ-ONLY PROXY
+//     instead: selects pass straight through to the real client, and
+//     insert/update/upsert/delete are printed and skipped. The whole
+//     read → decide → format → post → record path runs; no row moves.
+//
+// Because the writes are skipped, nothing is ever marked announced — a second
+// pass re-announces the same deed or title. That is the point of a rehearsal,
+// and `--loop` says so on the way in.
+//
+// FIVE THINGS ARE DELIBERATELY NOT REHEARSED. Each is named in the output, so
+// the gap is visible rather than silent:
+//   • events-sync      — reads the guild's scheduled events over the gateway
+//                        and POSTs them to the dashboard webhook (a real write).
+//   • identity-confirm — builds its OWN service-role client inside identity.js
+//                        (no injection seam) and DMs real Discord users.
+//   • the message ingests (gallery / oath / identity-link) — event handlers
+//                        with nothing to tick; a stub client never emits.
+//   • the Skald retelling — a ~90 s local-LLM call per boss, and a dry run
+//                        makes every already-felled boss look fresh.
+//   • the ops heartbeat — would tell /admin/ops a bot is alive when none is.
 
-  // Replay recent history so we can see feed formatting against demo data.
-  state.relay = { lastEventAt: new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString() };
-  // Force boss announcements to print for already-felled demo bosses.
-  state.announcedBosses = [];
+/** Row-changing verbs. Everything else on a query builder is a read. */
+const WRITE_VERBS = new Set(['insert', 'update', 'upsert', 'delete']);
+
+function describePayload(payload) {
+  if (payload === undefined) return 'no payload';
+  try {
+    const s = JSON.stringify(payload);
+    return s.length > 200 ? `${s.slice(0, 200)}…` : s;
+  } catch {
+    return '[unserialisable payload]';
+  }
+}
+
+/**
+ * Chainable, awaitable stand-in for the builder a write verb returns: every
+ * further call (.eq/.is/.select/.single/…) returns itself, and awaiting it
+ * yields the shape supabase-js returns on success, so a caller that checks
+ * `error` takes the happy path exactly as it would live.
+ */
+function dryWriteBuilder() {
+  const result = { data: null, error: null, count: null, status: 200, statusText: 'OK (dry run)' };
+  const chain = new Proxy(
+    { then: (resolve, reject) => Promise.resolve(result).then(resolve, reject) },
+    {
+      get(target, prop) {
+        if (prop in target) return target[prop];
+        if (typeof prop === 'symbol') return undefined;
+        return () => chain;
+      },
+    }
+  );
+  return chain;
+}
+
+/** Wrap a real Supabase client so reads pass through and writes are printed. */
+function createReadOnlyDb(real) {
+  return {
+    from(table) {
+      const builder = real.from(table);
+      return new Proxy(builder, {
+        get(target, prop) {
+          if (typeof prop === 'string' && WRITE_VERBS.has(prop)) {
+            return (payload) => {
+              console.log(`  [dry-run db] ${table}.${prop} SKIPPED — ${describePayload(payload)}`);
+              return dryWriteBuilder();
+            };
+          }
+          const value = Reflect.get(target, prop, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    },
+    rpc(name) {
+      console.log(`  [dry-run db] rpc ${name} SKIPPED`);
+      return dryWriteBuilder();
+    },
+  };
+}
+
+/**
+ * Stand-in for the gateway client. The voice engine only uses `client` to
+ * attach a messageCreate handler, so this keeps the whole engine (ambient
+ * cadence, dawn lines, deed lines, death tiers, the queue writer) running with
+ * no login at all. Same shape as scripts/stress/bot-dryrun.mjs.
+ */
+function dryRunClient() {
+  return { on: () => {}, once: () => {}, isReady: () => false, ws: { status: null } };
+}
+
+async function runDryRun({ loop = false } = {}) {
+  console.log('=== DRY RUN — no Discord login, no database writes ===');
+
+  const state = {
+    // Replay a year of history so feed formatting is visible against real rows.
+    relay: { lastEventAt: new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString() },
+    // Force boss announcements to print for already-felled bosses.
+    announcedBosses: [],
+  };
+  const saveState = async () => {}; // ephemeral — state.json is never touched
+  const post = createDryRunPoster().post;
+  const client = dryRunClient();
+
+  // `false`, not `null`: createVoiceEngine treats a nullish writeDb as "not
+  // injected" and would build a REAL service client for itself (voice.js:154).
+  const writeDb = process.env.SUPABASE_SERVICE_ROLE_KEY ? createReadOnlyDb(serviceClient()) : false;
+
+  const voiceOn = process.env.VOICE_ENGINE === '1';
+  const titlesOn = process.env.TITLES_ANNOUNCE !== '0';
+  const milestonesOn = process.env.MILESTONES_ANNOUNCE !== '0';
+
+  console.log(`[dry-run] supabase: ${process.env.SUPABASE_URL || '(unset)'}`);
+  console.log('[dry-run] DISCORD_TOKEN is never read; no gateway login happens.');
+  console.log(
+    `[dry-run] writes: ${
+      writeDb
+        ? 'intercepted and printed (the service-role client is wrapped read-only)'
+        : 'no SUPABASE_SERVICE_ROLE_KEY — voice, titles and milestones will report themselves disabled, exactly as they would live'
+    }`
+  );
+  console.log(
+    '[dry-run] loops: relay, bosses, recap, ' +
+      `voice ${voiceOn ? 'on' : 'OFF (VOICE_ENGINE≠1)'}, ` +
+      `titles ${titlesOn ? 'on' : 'OFF (TITLES_ANNOUNCE=0)'}, ` +
+      `milestones ${milestonesOn ? 'on' : 'OFF (MILESTONES_ANNOUNCE=0)'}`
+  );
+  console.log(
+    '[dry-run] not rehearsed: events-sync (needs a live gateway, and POSTs to the webhook), ' +
+      'identity-confirm (builds its own service-role client and DMs real users), ' +
+      'the gallery/oath/identity-link ingests (event handlers — a stub client never emits), ' +
+      'the Skald retelling (a ~90 s local LLM call per boss, best-effort live), ' +
+      'the ops heartbeat (must not tell /admin/ops a bot is alive).'
+  );
+  console.log('[dry-run] the RECAPS_START gate is ignored here so recap formatting is always visible.');
+
+  // Built in runLive's order: voice before the recap, so the evening Player of
+  // the Day crown can hook into it.
+  const voiceMinGapMs = parseInt(process.env.VOICE_MIN_GAP_MS || '1800000', 10);
+  const voice = voiceOn
+    ? createVoiceEngine({
+        client,
+        db,
+        post,
+        state,
+        saveState,
+        writeDb,
+        minGapMs: Number.isFinite(voiceMinGapMs) ? voiceMinGapMs : 1800000,
+      })
+    : null;
 
   const relay = createRelay({ db, post, state, saveState });
+  // No skald: it is best-effort and never blocks the boss announcement live,
+  // but it calls a local LLM that takes ~90 s per boss — and a dry run forces
+  // EVERY already-felled boss to look fresh. A three-minute "one tick" reads
+  // as a hang. See the not-rehearsed line above.
   const bosses = createBossWatcher({ db, post, state, saveState });
-  const recap = createRecap({ db, post, state, saveState, tz: TZ });
+  const recap = createRecap({
+    db,
+    post,
+    state,
+    saveState,
+    writeDb: writeDb || null,
+    tz: TZ,
+    onPotyCrowned: voice ? voice.announcePoty : null,
+    channel: process.env.RECAP_CHANNEL || 'valheim',
+  });
+  const titles = titlesOn
+    ? createTitlesAnnouncer({
+        db,
+        post,
+        writeDb: writeDb || null,
+        apiUrl: process.env.TITLES_API_URL || 'https://valheim-dashboard.vercel.app/api/titles',
+        dryRun: process.env.TITLES_DRY === '1',
+        channel: process.env.TITLE_CHANNEL === 'valheim' ? 'valheim' : 'server',
+      })
+    : null;
+  const parsedMilestoneGap = parseInt(process.env.MILESTONE_MIN_GAP_MS || '', 10);
+  const milestones = milestonesOn
+    ? createMilestonesAnnouncer({
+        db,
+        post,
+        state,
+        saveState,
+        writeDb: writeDb || null,
+        minGapMs: Number.isFinite(parsedMilestoneGap) && parsedMilestoneGap >= 0 ? parsedMilestoneGap : 60000,
+        channel: process.env.MILESTONE_CHANNEL || 'valheim',
+      })
+    : null;
 
-  console.log('\n--- #server feed (recent events) ---');
-  const posted = await relay.tick();
-  console.log(`(relayed ${posted} feed messages)`);
+  // Proves the `@Eilif say:` wiring constructs and attaches; the stub never emits.
+  if (voice) voice.attach();
 
-  console.log('\n--- #valheim boss kills ---');
-  const bk = await bosses.tick();
-  console.log(`(would announce ${bk} boss kills)`);
+  let stopped = false;
+  const safe = makeSafe(() => stopped);
 
-  console.log('\n--- #valheim daily recap (morning) ---');
-  await recap.postRecap('morning');
+  // [safe() label, section heading, tick, one-line summary — omit it when the
+  // return value says nothing a reader wants (the recap returns its whole
+  // stats object, which would bury the embed it just printed).]
+  const sections = [
+    ['relay', '#server feed (recent events)', () => relay.tick(), (n) => `relayed ${n} feed messages`],
+    ['bosses', '#valheim boss kills', () => bosses.tick(), (n) => `would announce ${n} boss kills`],
+    ...(voice
+      ? [
+          ['voice', 'Voice of the Hall (queued lines)', () => voice.tick(), null],
+          ['voice-expire', 'Voice queue — expire stale lines', () => voice.expireStale(), (n) => `${n} stale lines expired`],
+        ]
+      : []),
+    ...(titles
+      ? [
+          [
+            'titles',
+            'Living titles',
+            () => titles.tick(),
+            (r) => `${r.seeded} seeded, ${r.announced} announced, ${r.unchanged} unchanged`,
+          ],
+        ]
+      : []),
+    ...(milestones
+      ? [['milestones', 'Great Deeds (milestones)', () => milestones.tick(), (n) => `${n} deed(s) announced`]]
+      : []),
+    ['recap', 'Daily recap (evening — the one that posts nightly)', () => recap.postRecap('evening'), null],
+    ['recap-morning', 'Daily recap (morning — preview only)', () => recap.postRecap('morning'), null],
+  ];
 
-  console.log('\n=== DRY RUN complete ===');
-  process.exit(0);
+  for (const [label, heading, fn, summarize] of sections) {
+    console.log(`\n--- ${heading} ---`);
+    const result = await safe(label, fn)();
+    if (summarize && result !== undefined && result !== null) console.log(`(${summarize(result)})`);
+  }
+
+  console.log('\n--- what the ops cockpit would have been told ---');
+  for (const [label, r] of Object.entries(loopsSnapshot())) {
+    console.log(`  ${label.padEnd(14)} ${r.ok ? 'ok' : `FAILED — ${r.lastError}`}`);
+  }
+
+  if (!loop) {
+    console.log('\n=== DRY RUN complete (one tick of every loop) ===');
+    process.exit(0);
+  }
+
+  // ── --loop: the same loops, at production cadence, until Ctrl-C ──────────
+  const timers = [
+    setInterval(safe('relay', () => relay.tick()), POLL),
+    setInterval(safe('bosses', () => bosses.tick()), 30000),
+  ];
+  if (voice) {
+    timers.push(setInterval(safe('voice', () => voice.tick()), 60000));
+    timers.push(setInterval(safe('voice-expire', () => voice.expireStale()), 300000));
+  }
+  if (titles) {
+    timers.push(setInterval(safe('titles', () => titles.tick()), intervalMs(process.env.TITLES_INTERVAL_MS, 600000)));
+  }
+  if (milestones) {
+    timers.push(
+      setInterval(safe('milestones', () => milestones.tick()), intervalMs(process.env.MILESTONES_INTERVAL_MS, 120000))
+    );
+  }
+
+  console.log(`\n=== DRY RUN steady state — ${timers.length} loops at production cadence, Ctrl-C to stop ===`);
+  console.log(
+    '[dry-run] the writes are skipped, so nothing is ever marked announced: the same deed, title or boss re-announces on every pass.'
+  );
+
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => {
+      console.log(`\n[dry-run] ${sig} — stopping`);
+      stopped = true;
+      for (const t of timers) clearInterval(t);
+      process.exit(0);
+    });
+  }
 }
 
 main().catch((err) => {

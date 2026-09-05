@@ -29,8 +29,9 @@ values (tokens/keys are redacted before they're ever stored, see
 >   server process*, so — exactly like `server-emitter` — their health is **inferred from what
 >   reaches the dashboard**, never measured at the source. Expect their rows to carry the same
 >   caveat: a stale signal is consistent with the plugin being dead, the server being down, or the
->   network path to Vercel being down, and the cockpit cannot tell you which. Their registry
->   entries, thresholds and this document's tables are the other agent's to fill in.
+>   network path to Vercel being down, and the cockpit cannot tell you which. **Both landed on
+>   2026-09-04** — their registry entries and thresholds are in the tables below, and the
+>   quiet-hall rule that applies to `companion-voice` alone is in §1.
 
 ---
 
@@ -52,6 +53,49 @@ signal is explicitly labeled **inferred**, not measured.
 | **dashboard-api** | the page itself rendered | Trivially "healthy" whenever the cockpit is being viewed at all — if this Server Component executed, the Next.js app is up. Its `version` is `process.env.VERCEL_GIT_COMMIT_SHA` (unset for `vercel deploy` CLI deploys — see below) falling back to a build-time constant; shows **"unknown"** rather than fabricating a version when neither is available. |
 | **supabase** | a lightweight service-role query issued during this render | "Healthy" = Supabase answered a real query just now. This is a point-in-time check, not a heartbeat — there's no history, just this render's result. |
 | **events-sync, gallery-ingest, oath-ingest, identity-link, identity-confirm, voice-queue, title-evaluator, milestone-evaluator** | the **discord-bot's own heartbeat `metrics.subLoops`** object, keyed by loop label | These are sub-loops inside the single discord-bot process, **not separate processes** — there is no way to observe them independently of the bot. Each entry carries `{ enabled, lastRunAt, ok, error }` as last recorded by that loop's own tick. If the discord-bot heartbeat itself is missing/stale, every sub-loop's state is **unknown** (not "disabled", not "healthy") — you cannot infer a sub-loop is fine just because the parent used to be. If a sub-loop's `enabled` flag is false, its state is **disabled**, which is a normal, not-broken state (e.g. `gallery-ingest` is intentionally off until `GALLERY_INGEST=1`). |
+
+### Two panels below the roster (shipped 2026-09-05)
+
+The table above answers *is each component alive*. Two panels under it answer
+questions the roster cannot, because both are about a component that is alive
+and still not doing its job.
+
+**Identity mismatches** (last 7 days) lists every join where the Steam account
+differed from the one bound to that character name — `events` rows of
+`type='join'` carrying `metadata.identity='steam_mismatch'`, newest first.
+Presence is still recorded for those joins; what is frozen is the name's oath,
+pin and Discord-link writes, until an admin releases the binding. The panel
+prints that release statement for you, one per distinct name in the window
+(`releaseBindingSql`, `lib/ops/release-sql.ts`):
+
+```sql
+update players set steam_id = null where character_name = 'Bjorn Ironside';
+```
+
+Character names are unvalidated player input and this block is meant to be
+pasted into Supabase under the service role, so the name is always quoted
+through `sqlQuote()` — Postgres's own `''` escape — never interpolated raw.
+
+**Voice queue** shows the age of the oldest line still waiting in `voice_lines`
+while a viking is connected, and flips to **degraded** past
+`VOICE_QUEUE_DEGRADED_SEC` (10 min). It is the second, independent signal for
+the in-game voice half: the `companion-voice` heartbeat says the Companion is
+*polling*, this says whether the lines it should be speaking are actually
+leaving the queue. It reads "none" when nothing is queued **or** nobody is on —
+the queue is only measured with players online.
+
+**The quiet-hall rule, and why the two paths differ on it.** `companion-voice`
+reports only when the Companion polls `/api/voice`, which it does only while
+players are online — so an empty hall silences it by design. The cockpit can
+tell an empty hall from a dead plugin, because it has the roster, and downgrades
+that silence from `stale` to `unknown` (and only while `server_status` is itself
+fresh: an aged emitter revokes the excuse, because the roster *is*
+`server_status.current_players`, and a dead emitter would report an empty hall).
+The off-PC watchdog has neither the roster nor a way to trust it, so it takes
+the other honest option: `companion-voice` carries `alertsOnSilence: false`
+(`lib/ops/watchdog.ts`) and its silence is reported with its age but never
+paged on. A beat that arrives and says it *errored* still alerts. `boards-plugin`
+gets no such excuse — it polls whether or not anybody is playing.
 
 ### The five states
 
@@ -275,7 +319,9 @@ only the thresholds differ:
 | discord-bot | 60s | 20 min |
 | log-poller | 60s | 20 min |
 | map-snapshot | 300s | 45 min |
-| ~~stats-parser~~ | — | **retired 2026-08-23; removed from the registry and the heartbeat allowlist, and its `ops_heartbeats` row deleted, 2026-09-04.** |
+| boards-plugin | 60s | 20 min |
+| companion-voice | 60s | **never on silence** — see the quiet-hall rule in §1. A self-reported error still alerts. |
+| ~~stats-parser~~ | — | **retired 2026-08-23; removed from the cockpit registry and the heartbeat allowlist and its `ops_heartbeats` row deleted 2026-09-04, and from the watchdog registry 2026-09-05.** |
 | game-server (`server_status` freshness + `is_online`) | 120s | 20 min |
 
 These are **looser than the cockpit's** on purpose. The cockpit's 180s bot

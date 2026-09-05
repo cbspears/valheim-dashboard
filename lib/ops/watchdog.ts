@@ -1,10 +1,12 @@
 // Off-PC watchdog — PURE evaluation + alert decisions (data in → decision out).
 //
-// WHY THIS EXISTS: every producer in the pipeline (discord-bot, log-poller,
-// map-snapshot, stats-parser) runs on Charlie's PC, and /admin/ops is PULL-only —
+// WHY THIS EXISTS: every host-side producer in the pipeline (discord-bot,
+// log-poller, map-snapshot) runs on Charlie's PC, and /admin/ops is PULL-only —
 // somebody has to open it. So when the PC is off, or the game server dies, the
 // only thing that notices is a human who happens to look. A ~7h outage on
-// 2026-08-17 and a 6-day server outage both went unseen that way.
+// 2026-08-17 and a 6-day server outage both went unseen that way. The two
+// in-game plugins have the same problem for a different reason: neither can
+// report a failure, so a frozen sign or a mute hall is invisible by default.
 //
 // The watchdog closes that hole by being PUSH-based and hosted somewhere the PC
 // can't take down: GitHub Actions curls GET /api/ops/watchdog on Vercel every
@@ -40,6 +42,19 @@ export interface WatchdogTarget {
   cadenceSec: number;
   /** Silence longer than this is an alert. */
   staleAfterSec: number;
+  /**
+   * Whether going silent should wake somebody. Defaults to true.
+   *
+   * THE QUIET-HALL RULE. `companion-voice` reports only when the in-game
+   * Companion polls /api/voice, which it does only while players are online —
+   * so an empty hall silences it BY DESIGN. lib/ops/health.ts can tell an empty
+   * hall from a dead plugin because the cockpit hands it the roster; this path
+   * has neither the roster nor a way to trust it (server_status is the roster,
+   * and a dead emitter would report an empty hall). With no way to distinguish
+   * "nobody is playing" from "the voice half is dead", the honest answer is to
+   * report the silence and NOT page anybody about it.
+   */
+  alertsOnSilence?: boolean;
   /** One-line "what this failing actually means", included in the alert. */
   meaning: string;
 }
@@ -60,6 +75,18 @@ export interface WatchdogTarget {
  *   • server_status (120s)   → 20 min
  * Worst-case detection latency is threshold + one ping interval (~35–60 min),
  * which is the right trade against a 7-hour outage nobody saw.
+ *
+ * The set mirrors lib/ops/health.ts's COMPONENTS, minus the two that only mean
+ * anything while somebody is looking at the cockpit (`dashboard-api` is "this
+ * page rendered" and `supabase` is a query issued during that render — neither
+ * exists to be polled from outside), and with `server-emitter` reading its
+ * source, server_status, directly under the name `game-server`.
+ *
+ * 'stats-parser' was REMOVED on 2026-09-05, following lib/ops/health.ts (2026-09-04).
+ * eilif-stats-parser.service was retired on 2026-08-23 and is off the heartbeat
+ * allowlist, so it can never report again — leaving it here meant the watchdog
+ * carried a target that was permanently `unknown` at best and would have paged
+ * about a process nobody wants running at worst.
  */
 export const WATCHDOG_TARGETS: WatchdogTarget[] = [
   {
@@ -87,12 +114,29 @@ export const WATCHDOG_TARGETS: WatchdogTarget[] = [
     meaning: 'The /map image is frozen at its last successful pull.',
   },
   {
-    key: 'stats-parser',
-    label: 'Stats parser',
+    // Inside the Valheim server process; its liveness IS its authed poll of
+    // /api/boards (lib/ops/route-heartbeat). It polls on a timer whether or not
+    // anyone is playing, so silence here is a real signal — and it is the only
+    // signal there is: on a 401 after a token rotation the plugin logs once to a
+    // file on the GTX box and then keeps the last text on the signs forever.
+    key: 'boards-plugin',
+    label: 'Boards signs',
     source: 'ops_heartbeats',
-    cadenceSec: 300,
-    staleAfterSec: 45 * 60,
-    meaning: 'Player stats are no longer being refreshed.',
+    cadenceSec: 60,
+    staleAfterSec: 20 * 60,
+    meaning: 'The in-game leaderboard signs are frozen at their last text.',
+  },
+  {
+    // Same class, but it polls /api/voice only while players are online — see
+    // the quiet-hall rule on WatchdogTarget.alertsOnSilence. Watched and
+    // reported so its age is visible; never alerted on.
+    key: 'companion-voice',
+    label: 'In-game voice',
+    source: 'ops_heartbeats',
+    cadenceSec: 60,
+    staleAfterSec: 20 * 60,
+    alertsOnSilence: false,
+    meaning: 'Eilif has no voice in the hall — queued lines are not being spoken.',
   },
   {
     key: 'game-server',
@@ -173,10 +217,16 @@ export function formatAge(sec: number | null): string {
  *   • A component we have NEVER heard from is `unknown`, and unknown is NEVER an
  *     alert. We cannot tell "not deployed yet" from "down" with zero data, and a
  *     watchdog that pages about a producer that has not shipped yet is noise.
- *     (stats-parser is exactly this case today — it gains its heartbeat now.)
  *     Once it reports once, silence afterwards is `stale` and DOES alert.
  *   • `stale` (was reporting, now silent) and `degraded` (reporting, but its own
  *     beat says error) both alert.
+ *
+ * One rule is this path's own: a target with `alertsOnSilence: false` is
+ * evaluated and reported like any other, but its SILENCE never wakes anybody —
+ * see the quiet-hall note on WatchdogTarget. A beat that arrives and says it
+ * errored still alerts; only the absence of one is excused. It is reported
+ * rather than dropped so the age is still there to read in the JSON when
+ * somebody is investigating.
  */
 export function evaluateWatchdog(input: WatchdogInput): WatchdogEvaluation {
   const { nowMs, heartbeats, serverStatusUpdatedAt, serverIsOnline } = input;
@@ -203,15 +253,18 @@ export function evaluateWatchdog(input: WatchdogInput): WatchdogEvaluation {
     const errored = hb.status === 'error' || hb.status === 'degraded';
     const state = computeState(nowMs, toMs(hb.last_success), target.staleAfterSec, { errored });
     const ageSec = ageOf(nowMs, hb.last_success);
+    const alertsOnSilence = target.alertsOnSilence !== false;
     checks.push({
       ...blank(target),
       state,
-      unhealthy: state === 'stale' || state === 'degraded',
+      unhealthy: state === 'degraded' || (state === 'stale' && alertsOnSilence),
       ageSec,
       lastSuccess: hb.last_success,
       detail:
         state === 'stale'
-          ? `Silent for ${formatAge(ageSec)} (allowed ${formatAge(target.staleAfterSec)}).`
+          ? alertsOnSilence
+            ? `Silent for ${formatAge(ageSec)} (allowed ${formatAge(target.staleAfterSec)}).`
+            : `Silent for ${formatAge(ageSec)}, which is also what an empty hall looks like — reported, not alerted on.`
           : state === 'degraded'
             ? `Reporting, but its last beat said "${hb.status}"${hb.error_summary ? `: ${hb.error_summary}` : ''}.`
             : `Last success ${formatAge(ageSec)} ago.`,
@@ -479,10 +532,16 @@ export function formatAlertMessage(
   if (decision.next.since && decision.reason === 're-alert') {
     lines.push(`_Unhealthy since ${decision.next.since}._`);
   }
-  const healthy = evaluation.checks.filter((c) => !c.unhealthy && c.state !== 'unknown').length;
+  // A check that is silent but never alerts (the quiet hall) is neither healthy
+  // nor a failure, so it gets counted as neither — saying "healthy" of a
+  // component we can see has gone quiet would be the one lie in this message.
+  const healthy = evaluation.checks.filter((c) => c.state === 'healthy').length;
+  const quiet = evaluation.checks.filter((c) => !c.unhealthy && c.state === 'stale').length;
   const never = evaluation.neverReported.length;
   lines.push(
     `_${healthy} other ${healthy === 1 ? 'check' : 'checks'} healthy${
+      quiet > 0 ? `, ${quiet} quiet by design` : ''
+    }${
       never > 0 ? `, ${never} never reported (${evaluation.neverReported.join(', ')})` : ''
     } · checked ${evaluation.checkedAt}_`,
   );
