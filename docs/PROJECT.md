@@ -1,4 +1,36 @@
-# Eilif — Project Doc (requirements, decisions, architecture, to-dos)
+# Eilif project doc (HISTORICAL, June to July 2026)
+
+> ## ⚠ This document is history. It is not the architecture.
+>
+> **Read [`ARCHITECTURE.md`](ARCHITECTURE.md) for what the system actually is.**
+>
+> This file was the living project doc from 2026-06-24 through late July 2026, and it
+> describes a system that no longer exists. Everything below is kept for the reasoning,
+> the requirements it captured, and the decision trail. It is deliberately left as it was
+> written, em dashes and all. Where it disagrees with `ARCHITECTURE.md`, it is wrong.
+>
+> The biggest ways it is now wrong, so nobody acts on it by accident:
+>
+> - **The stats parser is retired** (2026-08-23). `ServerCharacters` and the `.fch` path
+>   never shipped. Per-player stats come from the GsValheimStats Emitter and Client, plus
+>   our own EilifCompanionClient, through `/api/gs-ingest`. `type:'stats'` on
+>   `/api/webhook` is accepted and ignored.
+> - **Boss kills are detected automatically** from the Emitter's global keys, not marked
+>   by hand. `mark-boss.js` still exists as a manual override.
+> - **The chat relay shipped** (game to Discord, one way, through the log poller).
+> - **There are four custom BepInEx plugins**, none of which existed when this was
+>   written: Eilif Companion, Eilif Boards, Eilif Companion Client, EilifPaths.
+> - **The database is 20 tables, not nine**, and there are two Storage buckets.
+> - **Deploys are CLI only.** The GitHub to Vercel connection in the to-do list below was
+>   never made, and the blocker was a git-author check, not a rate limit.
+> - **The dashboard is eleven public pages**, not five, plus an unlinked TV mode and a
+>   password-gated ops cockpit.
+> - **The launch date held:** 2026-09-09, world `Eilif`, on Valheim 1.0.
+>
+> For the current runbooks see `docs/LAUNCH-WIPE.md`, `docs/PACK.md`,
+> `docs/OPS-COCKPIT.md` and `docs/STRESS-TEST.md`.
+
+---
 
 Living doc for the Eilif Valheim server dashboard + integrations. Updated 2026-06-24.
 See [README](../README.md) for the quick overview.
