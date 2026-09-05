@@ -86,6 +86,15 @@ staminadrain = 0.25
 # Default value: 0
 actionstamina = 0
 
+{{#FALLBACK}}
+[VPlusFallback]
+
+## Master switch for the ValheimPlus stand-in features. Ships OFF. Turn it on ONLY when ValheimPlus is not in the pack: with V+ installed these would stack on top of it and double every multiplier. Nothing in this section does anything while it is false.
+# Setting type: Boolean
+# Default value: false
+Enabled = {{PATHS_FALLBACK_ENABLED}}
+
+{{/FALLBACK}}
 [Wood]
 
 ## Speed multiplier while on Wood (1.0 = vanilla, >1 = faster).

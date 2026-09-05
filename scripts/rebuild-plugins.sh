@@ -12,6 +12,12 @@
 #   bash scripts/rebuild-plugins.sh --only eilif-companion    # one plugin
 #   bash scripts/rebuild-plugins.sh --skip-refresh            # keep libs/ as they are
 #   bash scripts/rebuild-plugins.sh --source-revision <sha>   # reproduce a committed DLL exactly
+#   bash scripts/rebuild-plugins.sh --stage                   # ... then stage the artifacts
+#   bash scripts/rebuild-plugins.sh --stage ~/eilif-launch-dlls   # ... into a named dir
+#
+# --stage takes an optional directory for the SERVER DLLs; without one it uses
+# $EILIF_STAGE_DIR, or $TMPDIR/eilif-launch-dlls. Client DLLs always go into the repo's
+# plugins/thunderstore/, so that argument does not affect them.
 #
 # What it does per plugin, in this order:
 #   1. refresh-libs.sh   — re-copies the game assemblies into the plugin's own libs/.
@@ -59,6 +65,21 @@
 #
 # Then it prints the staging summary: where each DLL goes, and what has to be true first.
 #
+# --stage does the copying that summary describes, and nothing beyond this machine:
+#   * SERVER DLLs (Companion, Boards) are copied into the staging dir with their md5
+#     and the exact SFTP destination path printed next to each. The upload itself is
+#     still by hand, inside the panel's stopped window, because Windows file-locks a
+#     loaded DLL and the lock outlives the process by a few seconds.
+#   * CLIENT DLLs (Paths, CompanionClient) are copied into
+#     plugins/thunderstore/<Name>-<ver>/, seeded from the newest existing package dir
+#     when that version is new, and the manifest's version_number is bumped after a
+#     typed confirmation. README.md, CHANGELOG.md and the manifest description are
+#     NOT written for you: a seeded package dir carries the PREVIOUS version's
+#     store page, and the script names all three so they cannot be forgotten.
+#     Charlie uploads the zip; this script never touches Thunderstore.
+#   * Nothing is staged at all if any plugin failed its checks, gate before copy.
+# --dry-run --stage prints that whole plan and writes nothing.
+#
 # Requires: dotnet 8 (~/.dotnet), bash, md5sum, strings (binutils).
 # Network: `dotnet build` restores Microsoft.NETFramework.ReferenceAssemblies, so it only
 # stays offline while that package is in ~/.nuget/packages — the plan below says whether it
@@ -80,11 +101,30 @@ ALL_PLUGINS=(eilif-paths eilif-companion-client eilif-companion eilif-boards)
 
 # Where each artifact goes once built. GTX nest dir is IP_PORT-derived (see verify-restart.sh).
 NEST="191.101.30.229_6028"
+declare -A SIDE=(
+  [eilif-paths]=CLIENT
+  [eilif-companion-client]=CLIENT
+  [eilif-companion]=SERVER
+  [eilif-boards]=SERVER
+)
+# SERVER plugins: the exact SFTP path the DLL overwrites, relative to the SFTP
+# user's home. The plugin FOLDER name is not always the assembly name, so it is
+# spelled out rather than derived.
+declare -A SFTP_DEST=(
+  [eilif-companion]="${NEST}/BepInEx/plugins/EilifCompanion/EilifCompanion.dll"
+  [eilif-boards]="${NEST}/BepInEx/plugins/EilifBoards/EilifBoards.dll"
+)
+# CLIENT plugins: the Thunderstore package name, which is also the
+# plugins/thunderstore/<Name>-<ver>/ staging directory name.
+declare -A TS_PACKAGE=(
+  [eilif-paths]=EilifPaths
+  [eilif-companion-client]=EilifCompanionClient
+)
 declare -A STAGING=(
   [eilif-paths]="CLIENT · Thunderstore Eilif/EilifPaths + the r2modman pack pin"
   [eilif-companion-client]="CLIENT · Thunderstore Eilif/EilifCompanionClient + the r2modman pack pin"
-  [eilif-companion]="SERVER · SFTP over ${NEST}/BepInEx/plugins/EilifCompanion/EilifCompanion.dll"
-  [eilif-boards]="SERVER · SFTP over ${NEST}/BepInEx/plugins/EilifBoards/EilifBoards.dll"
+  [eilif-companion]="SERVER · SFTP over ${SFTP_DEST[eilif-companion]}"
+  [eilif-boards]="SERVER · SFTP over ${SFTP_DEST[eilif-boards]}"
 )
 
 # ── args ────────────────────────────────────────────────────────────────────
@@ -95,9 +135,18 @@ SKIP_REFRESH=0
 ONLY=""
 SOURCE_REV=""
 ASSUME_YES=0
+STAGE=0
+# Defaults to a temp dir so a bare --stage never writes somewhere surprising. On
+# launch morning pass the session scratchpad explicitly, so the coordinator and
+# this script are looking at the same files.
+STAGE_DIR="${EILIF_STAGE_DIR:-${TMPDIR:-/tmp}/eilif-launch-dlls}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --libs) LIBS_SRC="${2:-}"; shift 2 ;;
+    --stage)
+      STAGE=1
+      # Optional value: only swallow the next argument if it is not another flag.
+      if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then STAGE_DIR="$2"; shift 2; else shift; fi ;;
     --sandbox) SANDBOX="${2:-}"; shift 2 ;;
     --only) ONLY="${2:-}"; shift 2 ;;
     --source-revision) SOURCE_REV="${2:-}"; shift 2 ;;
@@ -105,7 +154,7 @@ while [[ $# -gt 0 ]]; do
     --skip-refresh) SKIP_REFRESH=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -h|--help)
-      sed -n '2,67p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,86p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
@@ -137,6 +186,10 @@ if [[ -t 1 ]]; then BOLD=$'\e[1m'; RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; 
 
 FAILURES=0
 declare -A RESULT_LINE=()
+# What --stage later copies. Recorded here rather than recomputed, because in
+# --sandbox mode the artifact to stage is the freshly built one under the
+# sandbox, not the repo's dist/.
+declare -A BUILT_NAME=() BUILT_VER=() BUILT_DLL=() BUILT_OK=()
 
 hr() { printf '%s\n' "${DIM}$(printf '─%.0s' {1..78})${OFF}"; }
 say() { printf '%s\n' "$*"; }
@@ -154,6 +207,20 @@ stamp_of() {
   [[ -f "$1" ]] || { echo "-"; return; }
   { strings -a "$1"; strings -el "$1"; } | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\+[0-9a-f]{40}$' | head -1 && return
   echo "no git stamp"
+}
+
+manifest_version() { [[ -f "$1" ]] && sed -n 's/.*"version_number"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -1; }
+
+# The newest existing plugins/thunderstore/<Pkg>-<ver>/ (or the unsuffixed
+# <Pkg>/), used to seed a new version directory. Sorted by version, not by mtime:
+# a directory someone touched last is not the one whose README is newest.
+newest_package_dir() {
+  local pkg="$1" d best=""
+  for d in "$REPO/plugins/thunderstore/$pkg"-*/ "$REPO/plugins/thunderstore/$pkg"/; do
+    [[ -d "$d" && -f "$d/manifest.json" ]] || continue
+    best+="$(manifest_version "$d/manifest.json")|${d%/}"$'\n'
+  done
+  printf '%s' "$best" | grep -v '^$' | sort -t'|' -k1,1V | tail -1 | cut -d'|' -f2-
 }
 
 # ── plan ────────────────────────────────────────────────────────────────────
@@ -186,8 +253,26 @@ for p in "${PLUGINS[@]}"; do
   say "  $i. $p ($name $ver)"
   say "     ${DIM}refresh-libs.sh  →  dotnet build -c Release  →  md5/size diff  →  version + ValueTuple check${OFF}"
   say "     ${DIM}staging: ${STAGING[$p]}${OFF}"
+  if [[ $STAGE == 1 ]]; then
+    if [[ "${SIDE[$p]}" == SERVER ]]; then
+      say "     ${DIM}--stage: cp → $STAGE_DIR/$name.dll, print md5 + SFTP dest ${SFTP_DEST[$p]}${OFF}"
+    else
+      pkg="${TS_PACKAGE[$p]}"; tsdir="$REPO/plugins/thunderstore/$pkg-$ver"
+      if [[ -d "$tsdir" ]]; then
+        cur="$(manifest_version "$tsdir/manifest.json")"
+        say "     ${DIM}--stage: cp → plugins/thunderstore/$pkg-$ver/$name.dll (manifest says ${cur:-none}, wants $ver)${OFF}"
+      else
+        seed="$(newest_package_dir "$pkg")"
+        say "     ${DIM}--stage: create plugins/thunderstore/$pkg-$ver/ from ${seed##*/}, cp DLL, prompt to bump manifest to $ver${OFF}"
+      fi
+    fi
+  fi
 done
 say ""
+if [[ $STAGE == 1 ]]; then
+  say "${BOLD}Staging destination${OFF}  $STAGE_DIR ${DIM}(server DLLs; client DLLs go into plugins/thunderstore/)${OFF}"
+  say ""
+fi
 
 if [[ $DRY_RUN == 1 ]]; then
   hr
@@ -197,6 +282,10 @@ if [[ $DRY_RUN == 1 ]]; then
   say "  · Upload with a retrying loop: the lock can linger a few seconds after the process exits."
   say "  · Re-mint the modpack only AFTER any new client version is live on Thunderstore AND"
   say "    indexed in the community listing, or the pack imports as \"mod not found\"."
+  if [[ $STAGE == 1 ]]; then
+    say "  · --stage copies files and edits one manifest. It never uploads: the SFTP push is"
+    say "    by hand in the stopped window, and the Thunderstore upload is Charlie's account."
+  fi
   say ""
   exit 0
 fi
@@ -356,7 +445,9 @@ for p in "${PLUGINS[@]}"; do
     vt_ok=1
   fi
 
+  BUILT_NAME[$p]="$name"; BUILT_VER[$p]="$ver"; BUILT_DLL[$p]="$dll"
   if [[ $ver_ok == 1 && $vt_ok == 1 ]]; then
+    BUILT_OK[$p]=1
     RESULT_LINE[$p]="${GRN}OK${OFF} $name $ver  $after_md5  $after_size bytes  ${changed}"
   else
     RESULT_LINE[$p]="${RED}FAIL${OFF} $name $ver — see above"
@@ -372,6 +463,132 @@ for p in "${PLUGINS[@]}"; do
   printf '  %-24s %s\n' "$p" "${RESULT_LINE[$p]:-${YLW}not built${OFF}}"
   printf '  %-24s %s\n' "" "${DIM}${STAGING[$p]}${OFF}"
 done
+# ── stage ───────────────────────────────────────────────────────────────────
+# The gate comes BEFORE the copying, not after. A run that ends with "do not stage
+# any of this" printed underneath files that are already on disk and a manifest
+# that is already bumped is worse than one that never started: a half-staged tree
+# is exactly what gets uploaded by mistake on a morning like this one.
+if [[ $STAGE == 1 && $FAILURES -gt 0 ]]; then
+  hr
+  say ""
+  say "${RED}${BOLD}Staging skipped: $FAILURES check(s) failed.${OFF}"
+  say "  Nothing was copied and no manifest was touched. Fix the failures above and"
+  say "  re-run. Individual plugins that passed are not staged either, because a"
+  say "  partly-staged directory is indistinguishable from a complete one an hour later."
+  say ""
+  STAGE=0
+fi
+if [[ $STAGE == 1 ]]; then
+  hr
+  say ""
+  say "${BOLD}Staging${OFF}  ${DIM}copies only. Nothing here uploads.${OFF}"
+  mkdir -p "$STAGE_DIR"
+  say "  server dir : $STAGE_DIR"
+  say ""
+
+  for p in "${PLUGINS[@]}"; do
+    name="${BUILT_NAME[$p]:-}"
+    if [[ -z "$name" || "${BUILT_OK[$p]:-0}" != 1 ]]; then
+      say "  ${YLW}skip${OFF}   $p — did not pass its checks, so nothing is staged for it"
+      continue
+    fi
+    src="${BUILT_DLL[$p]}"
+    ver="${BUILT_VER[$p]}"
+
+    if [[ "${SIDE[$p]}" == SERVER ]]; then
+      dest="$STAGE_DIR/$name.dll"
+      if ! cp "$src" "$dest"; then
+        say "  ${RED}FAIL${OFF}   $p — could not copy $src"
+        FAILURES=$((FAILURES + 1))
+        continue
+      fi
+      say "  ${GRN}SERVER${OFF} $name $ver"
+      say "         local : $dest"
+      say "         md5   : $(md5_of "$dest")"
+      say "         sftp  : ${BOLD}${SFTP_DEST[$p]}${OFF}"
+      say "         ${DIM}Panel STOPPED first. The Windows lock outlives the process, so retry the put.${OFF}"
+      continue
+    fi
+
+    # CLIENT: plugins/thunderstore/<Pkg>-<ver>/ is the upload staging dir.
+    pkg="${TS_PACKAGE[$p]}"
+    tsdir="$REPO/plugins/thunderstore/$pkg-$ver"
+    seed=""   # per-plugin: without this the next plugin inherits the last one's seed
+    if [[ ! -d "$tsdir" ]]; then
+      seed="$(newest_package_dir "$pkg")"
+      if [[ -z "$seed" ]]; then
+        say "  ${RED}FAIL${OFF}   $p — no existing plugins/thunderstore/$pkg* to seed $pkg-$ver from"
+        FAILURES=$((FAILURES + 1))
+        continue
+      fi
+      mkdir -p "$tsdir"
+      # Only the files Thunderstore reads. UPLOAD.md is per-version notes and is
+      # deliberately NOT carried over: last version's instructions are worse than none.
+      for f in manifest.json icon.png README.md CHANGELOG.md; do
+        [[ -f "$seed/$f" ]] && cp "$seed/$f" "$tsdir/$f"
+      done
+      say "  ${GRN}CLIENT${OFF} $name $ver  ${DIM}(new dir, seeded from ${seed##*/})${OFF}"
+    else
+      say "  ${GRN}CLIENT${OFF} $name $ver"
+    fi
+
+    if ! cp "$src" "$tsdir/$name.dll"; then
+      say "         ${RED}could not copy $src${OFF}"
+      FAILURES=$((FAILURES + 1))
+      continue
+    fi
+    say "         dir   : plugins/thunderstore/$pkg-$ver/"
+    say "         md5   : $(md5_of "$tsdir/$name.dll")"
+
+    # The manifest version is what Thunderstore validates the upload against, and
+    # a seeded copy still carries the OLD number. Uploading that is rejected as a
+    # duplicate version, which reads on launch morning like the upload is broken.
+    mver="$(manifest_version "$tsdir/manifest.json")"
+    if [[ "$mver" == "$ver" ]]; then
+      say "         manifest: version_number already $ver"
+    else
+      say "         ${YLW}manifest: version_number is \"${mver:-missing}\", the build is $ver${OFF}"
+      bump=0
+      if [[ $ASSUME_YES == 1 ]]; then
+        bump=1
+        say "         ${DIM}--yes: bumping it${OFF}"
+      elif [[ -t 0 ]]; then
+        printf '         Set version_number to %s in plugins/thunderstore/%s-%s/manifest.json? [y/N] ' "$ver" "$pkg" "$ver"
+        read -r reply
+        [[ "$reply" == [yY] || "$reply" == [yY][eE][sS] ]] && bump=1
+      else
+        say "         ${DIM}stdin is not a terminal and --yes was not passed: left alone${OFF}"
+      fi
+      if [[ $bump == 1 ]]; then
+        if sed -i "s/\(\"version_number\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"/\1\"$ver\"/" "$tsdir/manifest.json" \
+          && [[ "$(manifest_version "$tsdir/manifest.json")" == "$ver" ]]; then
+          say "         ${GRN}manifest: version_number = $ver${OFF}"
+        else
+          say "         ${RED}manifest: the bump did not take — edit it by hand${OFF}"
+          FAILURES=$((FAILURES + 1))
+        fi
+      else
+        say "         ${YLW}manifest left at ${mver:-missing}. Thunderstore will reject the upload.${OFF}"
+      fi
+    fi
+    # Three files describe the release and NONE of them can be derived from a
+    # build. README.md is the package PAGE, and a seeded copy describes the
+    # PREVIOUS version: an EilifPaths 1.5.0 page that says nothing about
+    # [VPlusFallback] while the pack ships Enabled = true is a disclosure gap, not
+    # a cosmetic one. It is not copied from plugins/<dir>/README.md either - that
+    # file is a 20KB developer document, not a store page - so it is written by
+    # hand, using the plugin's README and CHANGELOG as the source.
+    say "         ${YLW}--stage cannot write these three. Do them before the zip:${OFF}"
+    say "         ${YLW}  README.md  ${OFF}${DIM}the package page. Still describes $( [[ -n "${seed:-}" ]] && echo "${seed##*/}" || echo "the previous version" ).${OFF}"
+    say "         ${YLW}  CHANGELOG.md${OFF}${DIM}  same: seeded, not generated.${OFF}"
+    say "         ${YLW}  manifest description${OFF}${DIM}  carried over verbatim, and it is what the${OFF}"
+    say "         ${DIM}                       package list shows. Check dependencies while you are in there.${OFF}"
+    say "         ${DIM}Source material: plugins/$p/README.md (a dev doc, not a store page).${OFF}"
+    say "         ${DIM}(cd plugins/thunderstore/$pkg-$ver && zip -qr ../$pkg-$ver.zip . -x '*.zip' 'UPLOAD.md')${OFF}"
+  done
+  say ""
+fi
+
 say ""
 say "${BOLD}What has to happen next, in this order${OFF}"
 say "  1. Panel ${BOLD}Stop${OFF}. Loaded DLLs are file-locked on the Windows host, so the two SERVER"

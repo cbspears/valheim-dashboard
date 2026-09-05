@@ -58,7 +58,7 @@ namespace EilifPaths
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.4.0";
+        public const string PluginVersion = "1.5.0";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -125,6 +125,13 @@ namespace EilifPaths
             // crafting station (see StationRangePatch.cs).
             StationRange.Bind(Config);
 
+            // [VPlusFallback] — the stand-in for the ValheimPlus comforts (infinite fuel, station
+            // range, gathering/picking/loot bonuses, shared map exploration) for the day V+ is not
+            // in the pack. Ships OFF. Bound BEFORE Harmony runs because Refuse() decides, once,
+            // whether any of those patch classes may touch anything (see src/VPlusFallbackPatch.cs).
+            VPlusFallback.Bind(Config);
+            VPlusFallback.Refuse();
+
             OldModPresent = Chainloader.PluginInfos != null &&
                             Chainloader.PluginInfos.ContainsKey(OldModGuid);
             if (OldModPresent)
@@ -149,15 +156,25 @@ namespace EilifPaths
             // ran, every tool/weapon charge would silently keep the movement discount — exactly the
             // failure this version exists to prevent. Isolating each class (and always reaching
             // ToolStamina.Apply below) makes that unreachable.
+            // The [VPlusFallback] classes (named Patch_VPF_*) are counted and applied SEPARATELY,
+            // and are not applied at all while that section is off. That keeps two properties worth
+            // having: the "Core patch classes: 6/6" line below stays the same number it has always
+            // been — it is the one-glance post-update health check, and it must not move because a
+            // dormant feature was added — and a disabled fallback leaves absolutely no hook on any
+            // vanilla method, rather than a dozen hooks that early-return.
             int classesApplied = 0, classesTotal = 0;
+            int fallbackApplied = 0, fallbackTotal = 0;
+            bool fallbackOn = VPlusFallback.Active;
             foreach (Type t in AccessTools.GetTypesFromAssembly(typeof(EilifPathsPlugin).Assembly))
             {
                 try
                 {
                     if (t.GetCustomAttributes(typeof(HarmonyPatch), true).Length == 0) continue;
-                    classesTotal++;
+                    bool isFallback = t.Name.StartsWith("Patch_VPF_", StringComparison.Ordinal);
+                    if (isFallback && !fallbackOn) continue;
+                    if (isFallback) fallbackTotal++; else classesTotal++;
                     harmony.CreateClassProcessor(t).Patch();
-                    classesApplied++;
+                    if (isFallback) fallbackApplied++; else classesApplied++;
                 }
                 catch (Exception ex)
                 {
@@ -165,11 +182,17 @@ namespace EilifPaths
                                  (t != null ? t.Name : "?") + ": " + ex.Message);
                 }
             }
+            if (fallbackOn)
+                Log.LogInfo("[EilifPaths] VPlusFallback patch classes: " + fallbackApplied + "/" +
+                            fallbackTotal + " applied.");
 
             // Tool/weapon context hooks are applied one by one (not by attribute) so a single
             // unresolvable target cannot take the rest of the plugin down with it. This ALWAYS runs,
             // whatever happened above.
             ToolStamina.Apply(harmony);
+
+            // One line per enabled fallback feature, or 'VPlusFallback: disabled'.
+            VPlusFallback.Report();
 
             Log.LogInfo($"[EilifPaths] {PluginName} v{PluginVersion} loaded. Surfaces (speed / movement " +
                         "stamina / tool stamina): " +
@@ -193,6 +216,10 @@ namespace EilifPaths
             // This tick never runs nested inside a wrapped tool/weapon method, so the context depth
             // must be zero here. If it is not, something leaked — clear it (see ToolStaminaPatch.cs).
             ToolStamina.SanityReset();
+
+            // [VPlusFallback] ShareExploration rides this same 0.4s poll (its own 2s accumulator
+            // inside), so the fallback needs no timer of its own. No-op while the section is off.
+            VPlusFallback.Tick(GroundCheckRate);
 
             var player = Player.m_localPlayer;
             if (player == null) { SetCurrent(PathType.None); return; }

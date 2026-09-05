@@ -14,7 +14,7 @@ observational, one (WORLD KEYS, added in 0.3.0) that **does change the world's r
   `[WorldKeys] EnforcedGlobalKeys` into the running world. Ships defaulting to `deathkeepequip`
   (keep equipped gear on death). **This overrides the GTX panel** — see [World keys](#world-keys-v030).
 
-`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.2`.
+`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.3`.
 
 ---
 
@@ -208,6 +208,96 @@ enforcement as belt-and-braces on top of it, not as a replacement for it.
 | Key | Default | Notes |
 | --- | --- | --- |
 | `EnforcedGlobalKeys` | `deathkeepequip` | Comma-separated global keys re-asserted into the world whenever missing (checked every 30s). Value keys (`skillreductionrate 15`) work too. **Empty = feature off** — that is the switch for relaxing keep-gear, and it needs a restart. |
+
+### Section `[ServerFallback]` (v0.3.3)
+
+The stand-in for ValheimPlus's `[Server] maxPlayers` on the day ValheimPlus is not installed.
+Without it, vanilla caps the world at **10** connected players; the crew's V+ config said 20.
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `Enabled` | `false` | Master switch. Ships OFF. While false, none of the patch classes below are applied and `ZNet.RPC_PeerInfo` keeps byte-identical vanilla IL. |
+| `MaxPlayers` | `20` | Connected players allowed. Clamped `1..64`. Counts real players only, not the headless server. Read live, so the cfg can be retuned without a rebuild. |
+
+**Hard refusal.** If ValheimPlus is present, the section refuses to apply even with `Enabled = true`
+and logs a warning block naming what it found. Both mods rewrite the *same* instruction in
+`ZNet.RPC_PeerInfo`, and the outcome would depend on which Harmony ran first. Presence is decided
+two ways:
+
+* **The plugin folder**, matching a *normalised name prefix* (`valheimplus…`) rather than the
+  literal `ValheimPlus.dll`. The crew's own build is already a fork
+  (`ValheimPlus_Grantapher_Temporary.dll`), so an exact-name test would let a renamed 1.0 build
+  straight through. This is the test that has to work, because BepInEx loads ValheimPlus **after**
+  this plugin on the live box — by the time the plugin list would show it, patching has already
+  happened.
+* **The BepInEx plugin registry**, by GUID `org.bepinex.plugins.valheim_plus`, which survives a
+  rename. Free to check, and it catches the case where something else loaded V+ before us.
+
+There is deliberately **no late re-check** on this side (the client plugin has one). A transpiler
+cannot be un-run, and the two-mods-one-instruction case is already loud here: whichever transpiler
+runs second either writes an int operand onto a `call` and produces corrupt IL (Harmony throws at
+patch time) or fails to find its literal and logs `could not find` plus the
+`Enabled=true but NO patch site was found` error. Silently doing the wrong thing is not on the menu.
+
+**Where the cap actually lives.** One gate plus three advertisements:
+
+| Method | What it is | Vanilla |
+| --- | --- | --- |
+| `ZNet.RPC_PeerInfo` | **the join gate** — `if (GetNrOfPlayers() >= 10) rpc.Invoke("Error", 9)` | `10` |
+| `ZSteamMatchmaking.RegisterServer` | the "x / y" in the Steam server browser | `SetMaxPlayerCount(10)` on the server build, `CreateLobby(type, 10)` on the client build |
+| `ZPlayFabMatchmaking.CreateAndJoinNetwork` | crossplay party size | `MaxPlayerCount = 11u` on the server build (`10u` on the client) |
+| `ZPlayFabMatchmaking.CreateLobby` | crossplay lobby size | `MaxPlayers = 11u` on the server build (`10u` on the client) |
+
+The `11` is the host's own slot, which the dedicated server occupies in a PlayFab party but not in
+`ZNet.m_players` — so the literal says which count it is, and the replacement follows: `10` becomes
+`MaxPlayers`, `11` becomes `MaxPlayers + 1`. The crossplay pair is inert while the server runs the
+Steam backend and only matters if crossplay is turned back on.
+
+> ⚠️ **`libs/assembly_valheim.dll` is the CLIENT assembly** (that is what `refresh-libs.sh` copies).
+> Three of those four method bodies differ between the client and dedicated-server builds, so for a
+> server-side patch, decompile `valheim_server_Data/Managed/assembly_valheim.dll` as well before
+> trusting a shape. Only `RPC_PeerInfo`'s `>= 10` is identical in both.
+
+**Verifying.** With the section **off** there are two different lines, and the difference is the
+whole point:
+
+```
+[Eilif] ServerFallback: disabled (ValheimPlus present).
+```
+
+means off *because* V+ is setting the cap. Nothing is missing. But:
+
+```
+[Warning] [Eilif] ServerFallback: OFF and no ValheimPlus installed. This world is capped at the
+vanilla 10 players. Set [ServerFallback] Enabled = true in the plugin config to raise it to 20.
+```
+
+means **nothing is lifting the cap** and viking number eleven will be refused with "Error 9, server
+is full". That is the launch-night failure mode for this feature: not a crash, an uneventful boot
+log. Grep the boot log for `ServerFallback: OFF and no ValheimPlus`, not just for the success line.
+
+With it on, a count plus one line per patched site:
+
+```
+[Eilif] ServerFallback patch classes: 2/2 applied.
+[Eilif] ServerFallback: player cap 10 -> 20 (ZNet.RPC_PeerInfo, the join gate).
+[Eilif] ServerFallback: Steam browser slots 10 -> 20 (ZSteamMatchmaking.RegisterServer, advertised count only).
+[Eilif] ServerFallback: crossplay MaxPlayerCount 11 -> 21 (ZPlayFabMatchmaking.CreateAndJoinNetwork; only bites when crossplay is on).
+[Eilif] ServerFallback: crossplay MaxPlayers 11 -> 21 (ZPlayFabMatchmaking.CreateLobby; only bites when crossplay is on).
+```
+
+Any `ServerFallback: <method>: ... not found` line at ERROR level means that site was NOT widened —
+read it, because on `RPC_PeerInfo` it means the cap is still 10.
+
+> ⚠️ **The dashboard's number does not follow this one.** `config/server.ts` currently reads
+> `export const MAX_PLAYERS = 15;`, which matches neither the 20 the crew has been playing under,
+> nor this section's default of 20, nor the vanilla 10 that applies if the switch is never flipped.
+> The worst combination is also the likeliest: V+ gone, `[ServerFallback]` off, real cap 10, site
+> still advertising "x / 15" — so the page says there is room while the server turns people away.
+> That file is outside this plugin and needs its own edit plus a Vercel deploy. Pair it with the
+> launch-morning check so the number on the site and the number in the boot log are read together.
+
+---
 
 ---
 

@@ -16,6 +16,11 @@ It also carries two unrelated quality-of-life patches: beds accept a fire much f
 much further out at *every* station (**1.3.0**, see
 [Workstation attachment range](#workstation-attachment-range-130)).
 
+Since **1.5.0** it also carries a dormant stand-in for the ValheimPlus comforts, for the day
+ValheimPlus is not in the pack — infinite fuel, station build range, the gathering and picking
+bonuses, shared map exploration. It ships **off** and applies no hooks at all until it is switched
+on. See [ValheimPlus fallback](#valheimplus-fallback-150).
+
 ## Why the old mod broke
 
 Useful Paths detected dirt/paved terrain with
@@ -86,7 +91,8 @@ movement (running, jumping, swimming, dodging, being encumbered). `actionstamina
 multiplier for tools and weapons (1 = vanilla, 0 = free).
 
 Plus two non-surface sections: `[Bed] extraFireRange` = `8` and
-`[Workstation] extraAttachmentRange` = `10` (see below).
+`[Workstation] extraAttachmentRange` = `10` (see below), and the dormant
+[`[VPlusFallback]`](#valheimplus-fallback-150) section.
 
 ## Tool and weapon stamina (1.4.0)
 
@@ -293,6 +299,156 @@ add to the vanilla per-prefab default.
 from a workbench you may build at all. That is the separate "workbench range" knob (V+
 `workbenchRange`), not an attachment's reach.
 
+## ValheimPlus fallback (1.5.0)
+
+ValheimPlus has no 1.0 build. If it is absent from the pack on launch day the crew loses infinite
+fuel, the wide workbench range and the +30% gathering they have been playing with all along. This
+section puts those back, in this plugin, **off by default**.
+
+Config lives in `net.eilif.paths.cfg` under `[VPlusFallback]`:
+
+| Key | Default | Mirrors | What it does |
+|---|---|---|---|
+| `Enabled` | `false` | — | Master switch. While false, **none** of the patch classes below are even applied. |
+| `InfiniteFireplaceFuel` | `true` | `[FireSource]` fires + torches | Fires, hearths, braziers and torches never burn out. |
+| `InfiniteOvenFuel` | `true` | `[Oven] infiniteFuel` | The stone oven's coal never runs down. |
+| `InfiniteHotTubFuel` | `true` | `[HotTub] infiniteFuel` | The hot tub stays hot without wood. |
+| `InfiniteShieldGeneratorFuel` | `true` | `[ShieldGenerator] infiniteFuel` | Ashlands shield generator never runs down. |
+| `StationBuildRange` | `30` | `[Workbench] workbenchRange` | Build radius for every station (vanilla 10). Moves the no-monsters bubble with it. |
+| `StationAttachmentRange` | `20` | `[Workbench] workbenchAttachmentRange` | Station↔upgrade reach **before** `[Workstation] extraAttachmentRange` is added on top. |
+| `DisableStationRoofCheck` | `true` | `[Workbench] disableRoofCheck` | Stations work in the open. |
+| `GatheringBonusPercent` | `30` | `[Gathering]` (all 18 materials) | Extra wood / stone / ore / scrap from trees, rocks and veins. |
+| `PickableBonusPercent` | `30` | `[Pickable]` (all categories) | Extra berries, mushrooms, flint, cores, amber. |
+| `LootDropBonusPercent` | `30` | `[LootDrop] lootDropAmountMultiplier` | Extra creature loot **amount**. |
+| `ShareExploration` | `true` | `[Map] shareMapProgression` (live half) | Your map fills in around every online viking, not just you. |
+| `ShareExplorationRadius` | `0` | `[Map] exploreRadius` | `0` = the game's own radius, which is already 100. |
+
+Two implementation details that are invisible in play but worth knowing:
+
+* **The oven and hot tub are topped up at vanilla's own "full" line**, `m_maxFuel - 1`, not the
+  instant fuel dips below max. Both are tended by a 1 Hz `InvokeRepeating` tick and vanilla's own
+  `UpdateFuel` already writes the fuel ZDO every one of those ticks, so refilling on every tick
+  meant marking that ZDO dirty twice a second per lit station, forever. `m_maxFuel - 1` is exactly
+  the level at which vanilla itself says "$msg_itsfull" and refuses more fuel, and both hover texts
+  print `Mathf.Ceil(fuel)`, so a tank at 9.4/10 still reads **10/10**. One write per station roughly
+  every 83 minutes instead of one a second, with nothing visible changed. The shield generator is
+  event-driven rather than polled and gates its start on `fuel >= m_maxFuel`, so it is still topped
+  right up to max.
+* **`ShareExploration` skips anyone whose position is not public.** `ZNet.PlayerInfo` is a struct
+  and vanilla only fills `m_position` when `m_publicPosition` is set, so an unfiltered loop would
+  explore `Vector3.zero` — the world origin — for every player who has turned their position off.
+  V+ loops that list unfiltered; this does not.
+
+### The attachment-range arithmetic
+
+This is the one number that is easy to get wrong, because two settings stack:
+
+```
+today, V+ alive:   5 (prefab) → V+ SETS 20 → EilifPaths ADDS 10  =  30 m
+V+ gone, this on:  5 (prefab) → we SET 20  → EilifPaths ADDS 10  =  30 m
+V+ gone, this off: 5 (prefab) →               EilifPaths ADDS 10  =  15 m
+```
+
+`StationAttachmentRange` **sets**, it does not add — that is what keeps the total identical to what
+the crew has today. Set it to `0` to leave the prefab value alone and let `extraAttachmentRange` do
+all the work.
+
+### Three guards against double-applying
+
+1. The config gate. With `Enabled = false` the `Patch_VPF_*` classes are skipped entirely, so no
+   vanilla method carries a hook. The `Core patch classes: 6/6` boot line is deliberately unchanged
+   by this feature — it is still the one-glance health check it always was.
+2. A **hard refusal**. If ValheimPlus is present, the whole section refuses to apply even with
+   `Enabled = true`, and logs a warning block naming what it found. Presence is decided two ways:
+   * **the plugin folder**, matching a *normalised name prefix* rather than the literal
+     `ValheimPlus.dll` — the crew's own build is already a fork
+     (`ValheimPlus_Grantapher_Temporary.dll`), so an exact-name test would let a renamed 1.0 build
+     through. This is the test that has to work at Awake time, because BepInEx loads ValheimPlus
+     *after* this plugin and `Chainloader.PluginInfos` is not populated yet while we patch.
+   * **the BepInEx plugin registry**, by GUID `org.bepinex.plugins.valheim_plus`, which survives any
+     rename.
+3. A **late re-check**, about 8 seconds into the session, asking the registry again. By then
+   Chainloader has finished. If ValheimPlus turns up after all, every percentage bonus reverts to
+   vanilla *immediately* (each one asks the gate on every call) and an `[Error]` block says so.
+   This closes the one path to silent double-application: the "set" features (30 m range, 20 m
+   attachment, infinite fuel) are idempotent because V+ sets them to the same values, but gathering,
+   picking and loot are multiplicative and would otherwise become 1.3 × 1.3 = **1.69×** with nothing
+   in the log to say so.
+
+### What is deliberately NOT here
+
+* **`[Chat]` shout / ping distance.** Charlie's call; vanilla shout range is the fallback.
+* **`[Map] exploreRadius`.** A no-op: vanilla already declares `Minimap.m_exploreRadius = 100f`, the
+  exact number V+ was set to.
+* **`[Map] shareAllPins`.** Dead code in ValheimPlus 0.9.17.1 — its `Minimap.AddPin` postfix is gated
+  on a `shareablePins` list that is created empty and never added to anywhere in the DLL. Pins are
+  not being shared today, so there is nothing to replace.
+* **The stored server-side map** half of `shareMapProgression`. It needs a `Minimap` instance on the
+  server, which a headless dedicated server does not have. `ShareExploration` reproduces the half
+  that does work: exploring around every player currently online.
+* **The 10-player cap.** Genuinely server-side; it lives in Eilif Companion's `[ServerFallback]`.
+
+### Not reproduced, and these ones are a real loss
+
+The list above is the "nothing is lost" list. This one is not, and it is here so the coverage above
+is not read as complete. The live `valheim_plus.cfg` has **17** sections at `enabled = true`. This
+plugin covers 10, `[Chat]` is the disclosed skip above, and `[Hud]` sits at all-default values so it
+loses nothing. That leaves **five enabled sections with real non-default settings that simply go
+away with V+**:
+
+| V+ section | Setting | What the crew loses |
+|---|---|---|
+| `[Bed]` | `sleepWithoutSpawn = true` | Sleeping in a bed you have not claimed. This is what makes group sleep work without everyone owning a bed. |
+| `[Building]` | `enableAreaRepair = true`, `areaRepairRadius = 7.5` | One hammer swing repairs everything within 7.5 m instead of the single piece under the cursor. |
+| `[Building]` | `noWeatherDamage = true` | Rain and water erosion start damaging structures again. |
+| `[Building]` | `alwaysDropResources = true`, `alwaysDropExcludedResources = true` | Deconstructing returns full materials, including pieces the devs marked "do not drop". |
+| `[Building]` | `noInvalidPlacementRestriction = true`, `maximumPlacementDistance = 12`, `pieceComfortRadius = 20` | Placing into other objects; build reach drops to vanilla `Player.m_maxPlaceDistance = 5`; comfort radius drops to vanilla `SE_Rested.c_ComfortRadius = 10`. |
+| `[Camera]` | `cameraMaximumZoomDistance = 100`, `cameraBoatMaximumZoomDistance = 100`, `cameraFOV = 75` | Zoom drops to vanilla 6, FOV to vanilla 65. |
+| `[Items]` | `itemsFloatInWater = true` | Dropped items sink again. |
+| `[GridAlignment]` | `enabled = true` | LeftAlt snap-to-grid placement, F7 / F6 toggles. |
+
+Ranked by what gets noticed first: **area repair**, **no weather damage**, **sleep-without-spawn**.
+Each of those three is a small client-side patch of the same shape as the ones already in this file,
+so a 1.5.1 could add them. None of it was built two days before launch on a guess about what
+matters — it is Charlie's call.
+
+One thing that looks like a loss and is not: `[Chat] forcedCase = true` on this server makes V+
+**return early** out of its `Chat_AddInworldText` transpiler and leave vanilla's case conversion
+alone. Shouts arrive uppercase today and will still arrive uppercase without V+. Nothing changes.
+
+### Verifying
+
+With the section on, the boot log carries one line per live feature plus a class count:
+
+```
+[EilifPaths] VPlusFallback patch classes: 12/12 applied.
+[EilifPaths] VPlusFallback: fires and torches never burn out.
+[EilifPaths] VPlusFallback: station build range 30m (vanilla 10).
+[EilifPaths] VPlusFallback: gathering +30%.
+```
+
+With it off there are two different lines, and the difference matters:
+
+```
+[EilifPaths] VPlusFallback: disabled (ValheimPlus present).
+```
+
+means off *because* V+ is doing the job. Nothing is missing. But:
+
+```
+[Warning] [EilifPaths] VPlusFallback: OFF and no ValheimPlus installed. Infinite fuel, the 30m
+station build range, no-roof crafting and the +30% gathering, picking and loot bonuses are NOT
+active. Set [VPlusFallback] Enabled = true in net.eilif.paths.cfg to restore them.
+```
+
+means nothing at all is providing these. That is the state a launch-morning checklist has to catch,
+so it is a **warning** naming the consequence rather than a bland "disabled" line. Grep for
+`VPlusFallback: OFF and no ValheimPlus`.
+
+There is also an `[Error]` block, `ValheimPlus IS loaded after all`, from the late re-check in guard
+3. If that appears, the fallback and V+ were both live for a few seconds; the bonuses are already
+back to vanilla, but the config still needs fixing.
+
 ## Coexistence guard
 
 If the old `Menthus.bepinex.plugins.UsefulPaths` is still loaded, EilifPaths logs a loud warning
@@ -319,7 +475,7 @@ pack as a local mod and removing the old Useful_Paths before the next pack expor
 
 ## Verifying in-game
 
-On boot: `[EilifPaths] Eilif Paths v1.4.0 loaded. … Bed fire range: +8m. Workstation attachment
+On boot: `[EilifPaths] Eilif Paths v1.5.0 loaded. … Bed fire range: +8m. Workstation attachment
 range: +10m. Core patch classes: 6/6 applied.`, followed by
 `[EilifPaths] tool/weapon stamina hooks: 9/9 applied.` **Both counts are the line to check after any
 Valheim update** — anything less than `6/6` or `9/9` means a target went missing, and the ERROR line

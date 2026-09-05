@@ -37,9 +37,16 @@ export const MODPACK_VERSION_LABEL = 'Pack v11 · Aug 27';
 //
 // Plain sentences only, no markup. Keep it to two or three lines; the whole
 // point is that people actually read it.
-// Example (hold on the old version):
+// Example of the register only. This one is a HOLD-ON-THE-OLD-VERSION notice
+// and is NOT the Sept 2026 posture: Charlie's decision of record (2026-09-05)
+// is that the server moves to 1.0 the same day, so nobody switches Valheim
+// back. Read the live string below, not this, for what we actually told people.
 //   'Sept 9: Steam updates Valheim to 1.0 automatically. Eilif stays on the
 //    old version until the mods are rebuilt. Before you play, switch Valheim
 //    back: Steam, Library, right-click Valheim, Properties, Betas. Do not
 //    re-install the pack.'
-export const LAUNCH_NOTICE = '';
+export const LAUNCH_NOTICE =
+  'Sept 9: Valheim 1.0 arrives in the morning and Eilif moves to 1.0 the same day, ' +
+  'with kickoff at 5:30 PM CT. Do not update your mods or re-import the pack until the ' +
+  'new pack code is posted in Discord that afternoon. If Steam already updated you to ' +
+  '1.0, that is fine, just wait for the code.';

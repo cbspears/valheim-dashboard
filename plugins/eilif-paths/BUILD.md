@@ -70,6 +70,50 @@ field is still the gate. Each attachment prefab logs
 note in `README.md` (Workstation attachment range) explains why one field covers both sides, and
 that reasoning is what a 1.0 rebuild has to re-confirm.
 
+**Fourth 1.0 risk (added 1.5.0):** the dormant `[VPlusFallback]` section hooks twelve more vanilla
+methods, all resolved by name, several of them private: `Fireplace.Awake`,
+`CookingStation.UpdateCooking`, `Smelter.UpdateSmelter`, `ShieldGenerator.Start` /
+`OnProjectileHit` / `RPC_Attack`, `CraftingStation.Start` / `CheckUsable`,
+`StationExtension.Awake`, `DropTable.GetDropList(int)`, `Pickable.RPC_Pick`,
+`CharacterDrop.GenerateDropList`. It also reaches three private members through `AccessTools`
+(`CookingStation.m_nview`, `Smelter.m_nview`, `ShieldGenerator.m_nview`, plus `Minimap.Explore` and
+`ZNet.m_players` for `ShareExploration`). **None of this is applied while `Enabled = false`**, which
+is how it ships — so a 1.0 rebuild does not have to get it right on launch night. If Charlie does
+turn it on, the boot line to check is `[EilifPaths] VPlusFallback patch classes: 12/12 applied.`;
+anything less names the missing class on the ERROR line above it, and the feature list that follows
+says which comforts are actually live. Re-verify a missing one with
+`DOTNET_ROLL_FORWARD=Major ilspycmd -t <Type> libs/assembly_valheim.dll`; the decompiled vanilla body
+each hook was written against is quoted in full above each patch class in
+`src/VPlusFallbackPatch.cs`.
+
+Two of those twelve are `Prefix` + **`Finalizer`** pairs, not `Prefix` + `Postfix`
+(`Pickable.RPC_Pick` and `CharacterDrop.GenerateDropList`). Both temporarily inflate shared
+per-instance state — `Pickable.m_amount`, `CharacterDrop.m_drops` — and restore it afterwards, and
+Harmony **skips postfixes when the original method throws**. A postfix there would leave the bush or
+the creature permanently inflated and compound on the next call (1.3 × 1.3). Harmony picks the
+finalizer up by method name (`HarmonyLib.AttributePatch` scans for `Finalizer` exactly as it does
+`Postfix`), and a `void` finalizer leaves the original exception to propagate unchanged. Same
+convention as `ToolStaminaPatch.ScopeFinalizer` and `eilif-companion-client`'s `TombstoneKeeper`.
+**If a 1.0 rebuild ever renames one of these back to `Postfix`, the restore silently stops covering
+the throw path** — the class count stays 12/12 either way, so the count will not catch it.
+
+**Boot lines a 1.0 rebuild should grep for (1.5.0):** three, not one.
+`VPlusFallback patch classes: 12/12 applied.` (section on and healthy),
+`VPlusFallback: disabled (ValheimPlus present).` (off because V+ is doing the job), and
+`[Warning] VPlusFallback: OFF and no ValheimPlus installed` (off with **nothing** providing the
+comforts — the state that used to print the same bland line as the healthy one). There is also an
+`[Error] ValheimPlus IS loaded after all` block from the ~8 s late re-check, which only fires when
+a ValheimPlus under an unrecognised file name loaded after we had already patched.
+
+**A trap that already bit once (1.5.0):** for anything SERVER-side, `libs/assembly_valheim.dll` is
+the wrong reference. `refresh-libs.sh` copies the **client** assembly, and several method bodies
+differ between the client and dedicated-server builds — `ZSteamMatchmaking.RegisterServer` calls
+`SteamMatchmaking.CreateLobby(type, 10)` on the client and `SteamGameServer.SetMaxPlayerCount(10)` on
+the server, and the PlayFab player-count literals are `10` on the client and `11` on the server.
+EilifPaths is a client plugin, so the client assembly is the right reference *here* — but do not
+carry a shape read from it over to Eilif Companion without re-checking against
+`valheim_server_Data/Managed/assembly_valheim.dll`.
+
 **ValheimPlus ordering (1.3.0):** V+ patches the same `StationExtension.Awake` with a *prefix* that
 **sets** `m_maxStationDistance`; ours is a *postfix* that **adds**. That ordering is what keeps the
 two composable — if this is ever changed to a prefix, or to an absolute assignment, the two mods

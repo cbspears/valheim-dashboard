@@ -22,7 +22,7 @@ namespace EilifCompanion
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
         public const string PluginName = "Eilif Companion";
-        public const string PluginVersion = "0.3.2";
+        public const string PluginVersion = "0.3.3";
 
         internal static ManualLogSource Log;
 
@@ -108,6 +108,12 @@ namespace EilifCompanion
             if (_enforceList.Length > 0)
                 Log.LogInfo($"[Eilif] World-key enforcement armed: {string.Join(", ", _enforceList)} (every {EnforceIntervalSeconds:0}s).");
 
+            // [ServerFallback] — the stand-in for ValheimPlus's [Server] maxPlayers when V+ is not
+            // installed. Bound BEFORE Harmony runs: its transpilers read this config at PATCH time to
+            // decide whether to touch the IL at all (see src/ServerFallbackPatch.cs).
+            ServerFallback.Bind(Config);
+            ServerFallback.Refuse();
+
             _voiceDormant = string.IsNullOrEmpty(_voiceToken.Value);
             if (_voiceDormant)
                 Log.LogInfo("[Eilif] VoiceToken is empty - voice half is DORMANT (only /oath capture is active).");
@@ -124,25 +130,46 @@ namespace EilifCompanion
             // them Harmony) carried on working — the worst possible diagnostic signal on a launch
             // night. Isolating each class turns that into a named error line plus an honest count.
             // Same pattern (and same reason) as ../eilif-paths/src/EilifPathsPlugin.cs.
+            //
+            // The [ServerFallback] classes (named Patch_SF_*) are counted SEPARATELY and are not
+            // applied at all while that section is off, so the "2/2" grep below keeps meaning exactly
+            // what it has always meant, and a disabled fallback leaves ZNet.RPC_PeerInfo carrying
+            // byte-identical vanilla IL — which is what keeps ValheimPlus, if it is still installed,
+            // free to rewrite that same instruction without us in the way.
             var harmony = new Harmony(PluginGuid);
             int classesApplied = 0, classesTotal = 0;
+            int fallbackApplied = 0, fallbackTotal = 0;
+            bool fallbackOn = ServerFallback.Active;
             foreach (Type t in AccessTools.GetTypesFromAssembly(typeof(EilifCompanionPlugin).Assembly))
             {
                 try
                 {
                     if (t.GetCustomAttributes(typeof(HarmonyPatch), true).Length == 0) continue;
-                    classesTotal++;
+                    bool isFallback = t.Name.StartsWith("Patch_SF_", StringComparison.Ordinal);
+                    if (isFallback && !fallbackOn) continue;
+                    if (isFallback) fallbackTotal++; else classesTotal++;
                     harmony.CreateClassProcessor(t).Patch();
-                    classesApplied++;
+                    if (isFallback) fallbackApplied++; else classesApplied++;
                 }
                 catch (Exception ex)
                 {
                     Log.LogError("[Eilif] could not apply " + (t != null ? t.Name : "?") + ": " + ex.Message);
                 }
             }
+            if (fallbackOn)
+                Log.LogInfo("[Eilif] ServerFallback patch classes: " + fallbackApplied + "/" +
+                            fallbackTotal + " applied.");
             // The one unambiguous post-rebuild grep: 2/2 is healthy (OathCapture +
             // Patch_OnNewChatMessage_Pin), anything else means read the "could not apply" lines.
             Log.LogInfo($"[Eilif] patch classes applied: {classesApplied}/{classesTotal}");
+
+            // Crossplay-only player caps: resolved by name and patched by hand, so a renamed or
+            // deleted method in 1.0 is one warning line rather than a dead plugin. No-op when
+            // [ServerFallback] is off.
+            PlayFabPlayerCap.Apply(harmony);
+
+            // One line per enabled fallback feature, or 'ServerFallback: disabled'.
+            ServerFallback.Report();
 
             Log.LogInfo($"[Eilif] {PluginName} v{PluginVersion} loaded. /oath capture armed, /pin capture armed, position emitter armed ({PositionEmitter.EmitIntervalSeconds:0}s).");
         }

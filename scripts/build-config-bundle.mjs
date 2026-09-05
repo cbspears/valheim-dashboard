@@ -26,7 +26,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
-  MODS, CFG_FILES, ROOT, DEFAULT_INGEST_URL,
+  MODS, OMITTABLE_MODS, ROOT, DEFAULT_INGEST_URL, DEFAULT_FALLBACK, FALLBACK_MODES,
   renderPack, renderReadme, zipSync, unzipSync, banner, firstDiff,
 } from './mint-pack.mjs';
 
@@ -34,11 +34,31 @@ const DEFAULT_OUT = path.join(ROOT, 'public', 'downloads');
 const ok = (s) => `  ok   ${s}`;
 const bad = (s) => `  FAIL ${s}`;
 
-/** The bundle's contents: the seven cfgs flat (no config/ folder) plus a README. */
-export function buildBundle({ world, versions, cfgVersions, ingestUrl, packNumber, packDate }) {
-  const { files } = renderPack({ world, versions, cfgVersions, ingestUrl });
-  const entries = CFG_FILES.slice().sort().map((name) => ({ name, data: files.get(`config/${name}`) }));
-  entries.push({ name: 'README.txt', data: renderReadme({ packNumber, packDate }) });
+/**
+ * The bundle's contents: whatever cfgs the pack itself ships, flat (no config/
+ * folder), plus a README.
+ *
+ * The names come from the rendered file map rather than from CFG_FILES, so a
+ * pack minted with --no-vplus produces a bundle with no valheim_plus.cfg in it
+ * for free. Reading the constant instead would hand Mac players a config for a
+ * mod the pack no longer installs.
+ */
+export function buildBundle({
+  world, versions, cfgVersions, ingestUrl, packNumber, packDate,
+  omit = [], fallback = DEFAULT_FALLBACK,
+}) {
+  const { files } = renderPack({ world, versions, cfgVersions, ingestUrl, omit, fallback });
+  const entries = [...files.keys()]
+    .filter((k) => k.startsWith('config/'))
+    .map((k) => k.slice('config/'.length))
+    .sort()
+    .map((name) => ({ name, data: files.get(`config/${name}`) }));
+  // The README is told what is actually in the zip, so its count and its file
+  // list cannot disagree with the entries above.
+  entries.push({
+    name: 'README.txt',
+    data: renderReadme({ packNumber, packDate, cfgs: entries.map((e) => e.name) }),
+  });
   return { entries, zip: zipSync(entries) };
 }
 
@@ -61,6 +81,10 @@ ${MODS.filter((m) => m.cfgVersionFlag)
     .map((m) => `  ${m.cfgVersionFlag} <x.y.z>`.padEnd(34) + `${m.label} (currently ${m.cfgVersionDefault})`)
     .join('\n')}
 
+Pack contents (pass the same ones you gave mint-pack)
+${OMITTABLE_MODS.map((m) => `  ${m.omitFlag}`.padEnd(30) + `Leave ${m.label} out: no ${m.cfg}.`).join('\n')}
+  --fallback on|off|none      EilifPaths [VPlusFallback] Enabled. Default ${DEFAULT_FALLBACK}.
+
 Other
   --ingest-url <url>          Dashboard ingest endpoint (default ${DEFAULT_INGEST_URL}).
   --out <dir>                 Default ${path.relative(ROOT, DEFAULT_OUT)}
@@ -75,10 +99,11 @@ function parseArgs(argv) {
   const args = {
     versions: {}, cfgVersions: {}, world: null, packNumber: null, packDate: null,
     ingestUrl: DEFAULT_INGEST_URL, out: DEFAULT_OUT, compareTo: null, dryRun: false,
-    force: false,
+    force: false, omit: [], fallback: DEFAULT_FALLBACK,
   };
   const byFlag = new Map(MODS.map((m) => [m.flag, m]));
   const byCfgFlag = new Map(MODS.filter((m) => m.cfgVersionFlag).map((m) => [m.cfgVersionFlag, m]));
+  const byOmitFlag = new Map(OMITTABLE_MODS.map((m) => [m.omitFlag, m]));
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -88,7 +113,20 @@ function parseArgs(argv) {
     };
     if (byFlag.has(a)) { args.versions[byFlag.get(a).key] = next(); continue; }
     if (byCfgFlag.has(a)) { args.cfgVersions[byCfgFlag.get(a).key] = next(); continue; }
+    if (byOmitFlag.has(a)) {
+      const key = byOmitFlag.get(a).key;
+      if (!args.omit.includes(key)) args.omit.push(key);
+      continue;
+    }
     switch (a) {
+      case '--fallback': {
+        const v = String(next()).toLowerCase();
+        if (!FALLBACK_MODES.includes(v)) {
+          throw new Error(`--fallback expects ${FALLBACK_MODES.join(' | ')}, got "${v}"`);
+        }
+        args.fallback = v;
+        break;
+      }
       case '--world': args.world = next(); break;
       case '--pack-number': args.packNumber = next(); break;
       case '--pack-date': args.packDate = next(); break;
@@ -126,6 +164,10 @@ function main(argv) {
   banner(`Mac config bundle - pack v${args.packNumber}${args.dryRun ? ' (DRY RUN)' : ''}`);
   console.log(`  world      ${args.world}`);
   console.log(`  ingest url ${args.ingestUrl}`);
+  if (args.omit.length) {
+    console.log(`  dropped    ${args.omit.map((k) => MODS.find((m) => m.key === k).label).join(', ')}`);
+  }
+  console.log(`  fallback   ${args.fallback}`);
 
   const { entries, zip } = buildBundle({
     world: args.world,
@@ -134,6 +176,8 @@ function main(argv) {
     ingestUrl: args.ingestUrl,
     packNumber: args.packNumber,
     packDate: args.packDate,
+    omit: args.omit,
+    fallback: args.fallback,
   });
   for (const e of entries) console.log(ok(`${e.name.padEnd(42)} ${e.data.length} bytes`));
 

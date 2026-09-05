@@ -7,16 +7,26 @@
 // ship a different pack than the one the crew has been playing, and this fails
 // instead. Re-baseline the hashes ONLY together with a deliberate cfg change.
 //
+// The baseline is still a plain default render: `--fallback` defaults to 'none'
+// precisely so that stays true, because pack v11 shipped EilifPaths 1.4.0, which
+// had no [VPlusFallback] section to write. A second assertion right after it
+// proves that turning the section ON changes that one section of that one file
+// and nothing else, so the tripwire did not get weaker when the option was added.
+//
 // The rest covers the substitution rules (world, version pins, README rule
-// length), the zip writer/reader pair, and the argument guards.
+// length), minting without ValheimPlus (--no-vplus) including what the Mac
+// README then says, the [VPlusFallback] switch and its version guard, the
+// {{#SECTION}} marker machinery, the zip writer/reader pair, and the argument
+// guards.
 //
 // Run: npx tsx scripts/mint-pack.test.mjs
 import assert from 'node:assert';
 import crypto from 'node:crypto';
 
 import {
-  MODS, CFG_FILES, DEFAULT_INGEST_URL,
-  renderPack, renderReadme, parseSemver, zipSync, unzipSync, crc32, firstDiff, bundleArgs,
+  MODS, CFG_FILES, DEFAULT_INGEST_URL, DEFAULT_FALLBACK, FALLBACK_MODES, OMITTABLE_MODS,
+  renderPack, renderReadme, parseSemver, compareSemver, zipSync, unzipSync, crc32, firstDiff,
+  bundleArgs, applySections,
 } from './mint-pack.mjs';
 import { buildBundle } from './build-config-bundle.mjs';
 
@@ -36,6 +46,8 @@ const V11 = {
 };
 const V11_README = '918fc816520e521d5b2e1073cfb7f2685c75d1b17808e25b119049e9966765de';
 
+// Nothing but a world: the defaults ARE pack v11's, down to `fallback: 'none'`,
+// because EilifPaths 1.4.0 had no [VPlusFallback] section to write.
 const { files: v11 } = renderPack({ world: 'EilifRehearsal' });
 assert.deepEqual(
   [...v11.keys()].sort(),
@@ -45,6 +57,33 @@ assert.deepEqual(
 for (const [rel, hash] of Object.entries(V11)) {
   assert.equal(sha(v11.get(rel)), hash, `${rel} renders byte-identical to pack v11`);
 }
+
+// The tripwire above covers the default, so this one covers the option: writing
+// the section must change the paths cfg and NOTHING else. Without it, adding a
+// second templated section could quietly change six other files and no assertion
+// would notice. (Writing the section requires the 1.5.0 pin - see the guard
+// further down - which also moves that cfg's writer header, so the header line
+// is the one other expected difference.)
+const { files: withSection } = renderPack({
+  world: 'EilifRehearsal', fallback: 'off', versions: { paths: '1.5.0' },
+});
+assert.deepEqual([...withSection.keys()].sort(), [...v11.keys()].sort(), 'the fallback render ships the same file list');
+for (const [rel, data] of withSection) {
+  if (rel === 'config/net.eilif.paths.cfg') {
+    assert.ok(!data.equals(v11.get(rel)), 'it DOES add the fallback section to the paths cfg');
+  } else if (rel === 'export.r2x') {
+    continue; // the 1.5.0 pin lives here on purpose
+  } else {
+    assert.ok(data.equals(v11.get(rel)), `${rel} is untouched by the fallback section: ${firstDiff(v11.get(rel), data)}`);
+  }
+}
+assert.equal(
+  withSection.get('config/net.eilif.paths.cfg').toString('latin1')
+    .replace(/\n\[VPlusFallback\][\s\S]*?\nEnabled = false\n\n/, '\n')
+    .replace('Eilif Paths v1.5.0', 'Eilif Paths v1.4.0'),
+  v11.get('config/net.eilif.paths.cfg').toString('latin1'),
+  'and the paths cfg differs from v11 by exactly that one section plus its writer header',
+);
 assert.equal(
   sha(renderReadme({ packNumber: 11, packDate: 'Aug 27, 2026' })),
   V11_README,
@@ -229,7 +268,7 @@ assert.equal(
 // ── Mac bundle ──────────────────────────────────────────────────────────────
 const bundle = buildBundle({
   world: 'EilifRehearsal', versions: {}, cfgVersions: {},
-  ingestUrl: undefined, packNumber: 11, packDate: 'Aug 27, 2026',
+  ingestUrl: undefined, packNumber: 11, packDate: 'Aug 27, 2026', fallback: 'none',
 });
 assert.deepEqual(
   bundle.entries.map((e) => e.name),
@@ -240,5 +279,183 @@ for (const e of bundle.entries.slice(0, -1)) {
   assert.ok(e.data.equals(v11.get(`config/${e.name}`)), `${e.name} in the bundle is the same file the pack ships`);
 }
 assert.equal(sha(bundle.entries.at(-1).data), V11_README, 'the bundle README is the published one');
+
+// ── minting without ValheimPlus ─────────────────────────────────────────────
+// Grantapher 9.17.1 targets 0.221.10 and has no 1.0 build, so pack v12 has to be
+// able to ship without it. V+ enforceMod is a two-way check, which is what makes
+// the "no entry AND no cfg" pairing load-bearing rather than tidy: a client that
+// installs V+ from a leftover pack entry is refused by a server without it, and
+// a leftover valheim_plus.cfg is a config for a mod that is not there.
+const { files: noVplus, omitted } = renderPack({ world: 'Eilif', omit: ['vplus'] });
+assert.deepEqual(omitted, ['vplus'], 'renderPack reports what it dropped');
+assert.ok(!noVplus.has('config/valheim_plus.cfg'), '--no-vplus drops config/valheim_plus.cfg');
+assert.deepEqual(
+  [...noVplus.keys()].sort(),
+  [...v11.keys()].filter((k) => k !== 'config/valheim_plus.cfg').sort(),
+  'and drops nothing else',
+);
+const noVplusR2x = noVplus.get('export.r2x').toString('latin1');
+assert.doesNotMatch(noVplusR2x, /ValheimPlus/, 'no ValheimPlus entry survives in export.r2x');
+assert.doesNotMatch(noVplusR2x, /Grantapher/, 'not under its namespace either');
+assert.equal(
+  (noVplusR2x.match(/- name: /g) || []).length, MODS.length - 1,
+  'export.r2x lists every mod but the dropped one',
+);
+assert.doesNotMatch(noVplusR2x, /\{\{|\}\}/, 'the section markers leave no residue in export.r2x');
+// The dropped block must vanish cleanly: what is left has to be byte-identical
+// to the same render with V+ kept, minus exactly those six lines.
+const vplusEntry = `  - name: Grantapher-ValheimPlus_Grantapher_Temporary
+    version:
+      major: 9
+      minor: 17
+      patch: 1
+    enabled: true
+`;
+const withVplusR2x = renderPack({ world: 'Eilif' }).files.get('export.r2x').toString('latin1');
+assert.ok(withVplusR2x.includes(vplusEntry), 'the kept render still carries the V+ entry verbatim');
+assert.equal(
+  withVplusR2x.replace(vplusEntry, ''), noVplusR2x,
+  'dropping V+ removes exactly its entry and no surrounding whitespace',
+);
+// Only V+ is droppable, and only through its own flag.
+assert.deepEqual(OMITTABLE_MODS.map((m) => m.key), ['vplus'], 'ValheimPlus is the only droppable mod');
+for (const mod of OMITTABLE_MODS) {
+  assert.ok(mod.cfg, `${mod.label} declares the cfg that leaves with it`);
+  assert.ok(mod.section, `${mod.label} declares its export.r2x section marker`);
+}
+assert.throws(() => renderPack({ world: 'Eilif', omit: ['azu'] }), /cannot be dropped/, 'a non-droppable mod is refused');
+assert.throws(() => renderPack({ world: 'Eilif', omit: ['nope'] }), /unknown mod key/, 'an unknown key is refused');
+
+// The Mac bundle follows the pack, because it reads the rendered file list
+// rather than the CFG_FILES constant.
+const noVplusBundle = buildBundle({
+  world: 'Eilif', versions: { paths: '1.5.0' }, cfgVersions: {}, ingestUrl: undefined,
+  packNumber: 12, packDate: 'Sep 9, 2026', omit: ['vplus'], fallback: 'on',
+});
+assert.ok(
+  !noVplusBundle.entries.some((e) => e.name === 'valheim_plus.cfg'),
+  'a Mac player gets no valheim_plus.cfg from a pack that has no ValheimPlus',
+);
+assert.deepEqual(
+  noVplusBundle.entries.map((e) => e.name),
+  CFG_FILES.filter((n) => n !== 'valheim_plus.cfg').sort().concat('README.txt'),
+  'and gets every other cfg exactly as before',
+);
+
+// The README is the only instructions a Mac player gets, and it is the half that
+// is easy to leave behind: removing the file while the text still says "all seven"
+// and lists valheim_plus.cfg sends them hunting for a missing file, or off to
+// install ValheimPlus - which enforceMod then uses to refuse them the server.
+const noVplusReadme = noVplusBundle.entries.at(-1).data.toString('latin1');
+assert.doesNotMatch(noVplusReadme, /valheim_plus/, 'the README of a V+-less bundle never names valheim_plus.cfg');
+assert.doesNotMatch(noVplusReadme, /\bseven\b/, 'and does not still say seven');
+assert.equal((noVplusReadme.match(/\bsix\b/g) || []).length, 2, 'it says six, in both places that count the files');
+assert.doesNotMatch(noVplusReadme, /\{\{|\}\}/, 'no marker or placeholder residue survives into the README');
+const v11Readme = renderReadme({ packNumber: 11, packDate: 'Aug 27, 2026' }).toString('latin1');
+assert.equal((v11Readme.match(/\bseven\b/g) || []).length, 2, 'a full bundle still says seven, in both places');
+assert.match(v11Readme, /^  valheim_plus\.cfg /m, 'and still lists valheim_plus.cfg');
+// The count is read off the zip's own entry list, not off a flag passed twice.
+assert.equal(
+  renderReadme({ packNumber: 12, packDate: 'Sep 9, 2026', cfgs: noVplusBundle.entries.slice(0, -1).map((e) => e.name) })
+    .toString('latin1'),
+  noVplusReadme,
+  'the bundle README is exactly renderReadme() over the entries sitting next to it',
+);
+assert.throws(
+  () => renderReadme({ packNumber: 12, packDate: 'Sep 9, 2026', cfgs: new Array(11).fill('x.cfg') }),
+  /no word for 11 cfg files/,
+  'a bundle bigger than the word list is refused rather than rendering "{{CFG_COUNT_WORD}}"',
+);
+
+// ── the [VPlusFallback] switch ──────────────────────────────────────────────
+// Writing the section at all needs the build that has the code behind it, so
+// every render here that is not 'none' pins EilifPaths 1.5.0.
+const pathsCfg = (fallback) => renderPack({
+  world: 'Eilif', fallback, versions: fallback === 'none' ? {} : { paths: '1.5.0' },
+}).files.get('config/net.eilif.paths.cfg').toString('latin1');
+
+assert.equal(DEFAULT_FALLBACK, 'none', 'the section is absent unless someone asks for it, which is what v11 was');
+assert.match(pathsCfg('on'), /^\[VPlusFallback\]$/m, "--fallback on writes the section");
+assert.match(pathsCfg('on'), /^Enabled = true$/m, '--fallback on flips Enabled to true');
+assert.match(pathsCfg('off'), /^\[VPlusFallback\]$/m, '--fallback off still writes the section');
+assert.match(pathsCfg('off'), /^Enabled = false$/m, '...with Enabled = false');
+assert.doesNotMatch(pathsCfg('none'), /VPlusFallback/, "--fallback none leaves the section out entirely");
+assert.equal(pathsCfg(undefined), pathsCfg('none'), 'no flag means none');
+
+// The guard that makes the switch impossible to ship dead. EilifPaths 1.4.0 has
+// no [VPlusFallback] code, so a cfg carrying the key against a 1.4.0 pin is an
+// orphaned BepInEx entry: every restored comfort silently absent, nothing
+// anywhere erroring. This is the one failure mode the round trip cannot see.
+for (const mode of ['on', 'off']) {
+  assert.throws(
+    () => renderPack({ world: 'Eilif', fallback: mode }),
+    /has no such section - it arrived in 1\.5\.0/,
+    `--fallback ${mode} against the default 1.4.0 pin is refused`,
+  );
+  assert.throws(
+    () => renderPack({ world: 'Eilif', fallback: mode, versions: { paths: '1.4.9' } }),
+    /has no such section/,
+    `--fallback ${mode} against any pre-1.5.0 pin is refused`,
+  );
+  // ...and the writer header follows the section rather than needing
+  // --paths-cfg-version passed by hand on every launch-day command.
+  assert.match(
+    renderPack({ world: 'Eilif', fallback: mode, versions: { paths: '1.6.0' } })
+      .files.get('config/net.eilif.paths.cfg').toString('latin1'),
+    /^## Settings file was created by plugin Eilif Paths v1\.5\.0$/m,
+    `--fallback ${mode} stamps the cfg header at the build that introduced the section`,
+  );
+}
+assert.match(
+  renderPack({ world: 'Eilif', fallback: 'on', versions: { paths: '1.5.0' }, cfgVersions: { paths: '1.6.1' } })
+    .files.get('config/net.eilif.paths.cfg').toString('latin1'),
+  /^## Settings file was created by plugin Eilif Paths v1\.6\.1$/m,
+  'and --paths-cfg-version still wins when a real capture says otherwise',
+);
+assert.equal(compareSemver('1.20.0', '1.5.0'), 1, 'version parts compare numerically, not as strings');
+assert.equal(compareSemver('1.5.0', '1.5.0'), 0);
+assert.equal(compareSemver('1.4.9', '1.5.0'), -1);
+// BepInEx writes sections in alphabetical order, so a hand-added section in the
+// wrong place would be silently rewritten the first time the game saves the cfg.
+const sectionOrder = [...pathsCfg('on').matchAll(/^\[([A-Za-z]+)\]$/gm)].map((m) => m[1]);
+assert.deepEqual(
+  sectionOrder,
+  ['HardWood', 'Iron', 'Path', 'PavedRoad', 'Stone', 'VPlusFallback', 'Wood'],
+  'the fallback section sits where BepInEx sorts it, between Stone and Wood',
+);
+assert.throws(() => renderPack({ world: 'Eilif', fallback: 'true' }), /fallback must be one of/, 'a bogus mode is refused');
+assert.deepEqual(FALLBACK_MODES, ['on', 'off', 'none'], 'the three modes are the documented ones');
+// Only the paths cfg carries it.
+for (const [rel, data] of renderPack({ world: 'Eilif', fallback: 'on', versions: { paths: '1.5.0' } }).files) {
+  if (rel === 'config/net.eilif.paths.cfg') continue;
+  assert.doesNotMatch(data.toString('latin1'), /VPlusFallback/, `${rel} has no fallback section`);
+}
+
+// ── section markers ─────────────────────────────────────────────────────────
+assert.equal(applySections('a\n{{#X}}\nb\n{{/X}}\nc\n', { X: true }, 't'), 'a\nb\nc\n', 'a kept block loses only its markers');
+assert.equal(applySections('a\n{{#X}}\nb\n{{/X}}\nc\n', { X: false }, 't'), 'a\nc\n', 'a dropped block takes its body with it');
+assert.equal(applySections('a\r\n{{#X}}\r\nb\r\n{{/X}}\r\nc\r\n', { X: false }, 't'), 'a\r\nc\r\n', 'CRLF templates work too');
+assert.throws(() => applySections('{{#X}}\nb\n', { X: true }, 't'), /unbalanced/, 'an opener with no closer is a template bug, not a shipped literal');
+assert.throws(() => applySections('{{#Y}}\nb\n{{/Y}}\n', { X: true }, 't'), /unknown section marker/, 'a marker nobody declared is caught before it ships');
+
+// ── the bundle command carries the two new switches ─────────────────────────
+assert.equal(
+  bundleArgs({ world: 'Eilif', ingestUrl: DEFAULT_INGEST_URL, cfgVersions: {}, omit: ['vplus'], fallback: 'on' },
+    MODS.filter((m) => m.key !== 'vplus').map((mod) => ({ mod, version: mod.baseline }))),
+  "--world 'Eilif' --no-vplus --fallback on",
+  'a pack minted without V+ rebuilds a bundle without V+',
+);
+assert.equal(
+  bundleArgs({ world: 'Eilif', ingestUrl: DEFAULT_INGEST_URL, cfgVersions: {}, omit: [], fallback: DEFAULT_FALLBACK },
+    MODS.map((mod) => ({ mod, version: mod.baseline }))),
+  "--world 'Eilif'",
+  'and the defaults are still forwarded as nothing at all',
+);
+assert.equal(
+  bundleArgs({ world: 'Eilif', ingestUrl: DEFAULT_INGEST_URL, cfgVersions: {}, omit: [], fallback: 'off' },
+    MODS.map((mod) => ({ mod, version: mod.key === 'paths' ? '1.5.0' : mod.baseline }))),
+  "--world 'Eilif' --paths 1.5.0 --fallback off",
+  'a non-default fallback travels even when it is only writing Enabled = false',
+);
 
 console.log('OK — all pack minter assertions passed');

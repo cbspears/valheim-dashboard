@@ -10,8 +10,14 @@ extends the station↔upgrade attachment reach by 10 m at **every** crafting sta
 to movement only: tools and weapons cost vanilla stamina on dirt paths and paved roads and nothing
 on built floors (`actionstamina`, below).
 
-Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
-**(B) disable/remove Useful_Paths** so bonuses don't double-apply.
+Since **1.5.0** it also carries a **dormant ValheimPlus fallback** (`[VPlusFallback]`, ships
+`Enabled = false`, applies no hooks at all until switched on): infinite fuel, station build range,
+the +30% gathering / picking / loot bonuses and shared map exploration. That is the pack-v12
+question, not a normal-day one — see **C** below and `README.md`.
+
+Three jobs for the next pack export: **(A) add EilifPaths as a local mod**,
+**(B) disable/remove Useful_Paths** so bonuses don't double-apply, and **(C) decide whether the
+ValheimPlus fallback ships on or off.**
 
 ## Files you need
 
@@ -26,7 +32,7 @@ Two jobs for the next pack export: **(A) add EilifPaths as a local mod**, and
 3. Choose `dist/EilifPaths.dll`. When prompted:
    - **Name:** `EilifPaths`
    - **Author:** `BlockspaceMedia` (or any — local mods aren't namespaced on Thunderstore)
-   - **Version:** `1.4.0`
+   - **Version:** `1.5.0`
    The manager copies the DLL into `<profile>/BepInEx/plugins/EilifPaths/`.
 4. **Enable** it, keep BepInEx + the other Eilif mods enabled.
 
@@ -43,6 +49,61 @@ to the old mod to limit the damage), but the correct fix is to turn the old one 
 
 > Do NOT just delete the `Menthus-Useful_Paths` folder on disk — it's an online-sourced mod, and
 > r2modman may re-download it on the next sync. Use the UI Disable/Remove button instead.
+
+## C. The ValheimPlus fallback — on or off for pack v12
+
+If ValheimPlus **ships in pack v12**, leave `[VPlusFallback] Enabled = false`. Nothing to do: the
+section applies no patches, and EilifPaths would refuse to apply them anyway while a
+`ValheimPlus.dll` sits in the profile.
+
+If ValheimPlus is **dropped from pack v12** (it has no 1.0 build), the crew loses infinite fuel,
+30 m workbench range and +30% gathering the moment they load in. To hand those back, ship a
+`net.eilif.paths.cfg` in the pack with:
+
+```ini
+[VPlusFallback]
+Enabled = true
+```
+
+and leave every other key at its default — the defaults are already the live server's V+ numbers.
+Confirm on the first launch that the boot log reads
+`[EilifPaths] VPlusFallback patch classes: 12/12 applied.` followed by the per-feature lines.
+
+**The minter already does this for you.** `scripts/pack-templates/config/net.eilif.paths.cfg.tmpl`
+carries a `{{#FALLBACK}} [VPlusFallback] Enabled = {{PATHS_FALLBACK_ENABLED}} {{/FALLBACK}}` block,
+and `scripts/mint-pack.mjs` takes `--no-vplus --fallback on --paths-cfg-version 1.5.0`. It refuses
+`--fallback on` against a pin older than 1.5.0 rather than writing an inert switch. Verify with a
+dry run that the rendered cfg really carries `[VPlusFallback] Enabled = true` before minting; there
+is nothing left to hand-edit in the template.
+
+### What dropping V+ still costs, even with the fallback on
+
+Three items are **not restored and are not a loss**, by design: `[Map] exploreRadius` (vanilla is
+already 100, the same number V+ used), `[Map] shareAllPins` (dead code in V+ 0.9.17.1 — its
+pin-sharing hook is gated on a list that is never populated, so pins are not being shared today),
+and the 10-player cap (genuinely server-side; it lives in Eilif Companion's `[ServerFallback]`).
+
+But five **enabled** V+ sections with real non-default settings are simply gone, and this is the
+part that is easy to read past. Full table with the exact keys is in `README.md` under
+[Not reproduced, and these ones are a real loss]; the short version:
+
+| V+ section | Gone with V+ |
+|---|---|
+| `[Bed] sleepWithoutSpawn` | sleeping in a bed you have not claimed (group sleep) |
+| `[Building] enableAreaRepair` + `areaRepairRadius = 7.5` | one hammer swing repairing a 7.5 m radius |
+| `[Building] noWeatherDamage` | rain and water erosion stop being harmless |
+| `[Building] alwaysDropResources` (+ excluded) | full material return on deconstruct |
+| `[Building]` placement | build reach 12 → vanilla 5, comfort radius 20 → vanilla 10, no free-placement |
+| `[Camera]` | zoom 100 → vanilla 6, FOV 75 → vanilla 65 |
+| `[Items] itemsFloatInWater` | dropped items sink again |
+| `[GridAlignment]` | LeftAlt snap-to-grid, F7 / F6 |
+
+Ranked by what gets noticed first: **area repair**, **no weather damage**, **sleep-without-spawn**.
+Each is a small client-side patch of the same shape as the ones already shipped, so a 1.5.1 could
+add them; none was built two days before launch on a guess. Charlie's call.
+
+Not a loss despite looking like one: `[Chat] forcedCase = true` makes V+ *return early* out of its
+case transpiler, so shouts arrive uppercase today and will still arrive uppercase without V+.
 
 ## The baked-in defaults (no config needed)
 
@@ -91,7 +152,7 @@ detect it. (The old mod's LevelGround config did nothing useful on current Valhe
 ## Sanity check before sharing
 
 Launch Valheim once from the profile, join the server, and watch `LogOutput.log`. On boot you should
-see `[EilifPaths] Eilif Paths v1.4.0 loaded. … Bed fire range: +8m. Workstation attachment range: +10m.
+see `[EilifPaths] Eilif Paths v1.5.0 loaded. … Bed fire range: +8m. Workstation attachment range: +10m.
 Core patch classes: 6/6 applied.` and `[EilifPaths] tool/weapon stamina hooks: 9/9 applied.` Anything
 less than `6/6` or `9/9` means a hook went missing — the ERROR line above it names which one, and the
 stamina split is running degraded until it is fixed.

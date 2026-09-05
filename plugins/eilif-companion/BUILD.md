@@ -8,9 +8,67 @@ byte-identical to that install — no drift found. dotnet SDK on this machine: *
 launch-day rebuild needs **no network access** for NuGet. Full build (`dotnet build -c Release`)
 takes under 2s.
 
-## Deploying **0.3.2** (built 2026-09-04, staged, NOT uploaded)
+## Deploying **0.3.3** (built 2026-09-05, staged, NOT uploaded)
 
-`dist/EilifCompanion.dll` is now **0.3.2**. It carries everything 0.3.1 did — both the
+`dist/EilifCompanion.dll` is now **0.3.3**, and it **supersedes the staged 0.3.2** — 0.3.2 was built
+2026-09-04 but never reached the box, so there is nothing to reconcile: upload 0.3.3 and 0.3.2 is
+simply skipped. Everything described in the 0.3.2 notes below is still in it, unchanged.
+
+**What 0.3.3 adds: `[ServerFallback]`, dormant.** ValheimPlus has no 1.0 build, and V+ is the only
+reason this world allows more than ten players. 0.3.3 carries a stand-in — `MaxPlayers = 20`,
+matching the V+ `[Server] maxPlayers` the crew has been playing under — behind
+`[ServerFallback] Enabled = false`. While that is false the plugin applies **no** fallback patch
+class at all and `ZNet.RPC_PeerInfo` keeps byte-identical vanilla IL, which is what lets ValheimPlus
+go on rewriting that same instruction untouched. If ValheimPlus is present the section refuses to
+apply even when switched on, and says so in a warning block naming what it found; presence is
+checked by BepInEx GUID **and** by a normalised DLL-name prefix, so a renamed fork does not slip
+past. Full design, patch-site table and the log lines to check: `README.md`, section
+`[ServerFallback]`.
+
+**⚠️ Uploading 0.3.3 does not raise the cap on its own.** It ships `Enabled = false`, which is safe,
+but if ValheimPlus is also gone from the box that combination is the vanilla **10**-player cap with
+nothing saying so. Since 0.3.3 that state logs a warning instead of a bland "disabled" line:
+
+```
+[Warning] [Eilif] ServerFallback: OFF and no ValheimPlus installed. This world is capped at the
+vanilla 10 players. Set [ServerFallback] Enabled = true in the plugin config to raise it to 20.
+```
+
+Grep the boot log for `ServerFallback: OFF and no ValheimPlus` as part of the launch-morning check,
+not just for `player cap 10 -> 20`.
+
+**Load-tested 2026-09-05** on the local creative dedicated server (`~/Valheim-Test-Server-2`, game
+0.221.12, BepInEx 5.4.23.3), six boots across two sessions, all clean, nothing left behind
+(all ten pre-existing plugin DLLs `md5sum -c` OK, config dir identical, `LogOutput.log` restored
+byte-identical):
+
+| Run | State | Result |
+| --- | --- | --- |
+| 1 | off, V+ present | `ValheimPlus detected (ValheimPlus.dll)` then `disabled (ValheimPlus present)` |
+| 2 | on, V+ present | the refusal block, naming `ValheimPlus.dll` |
+| 3 | on, V+ **renamed** `ValheimPlus_Grantapher_Temporary.dll` | still refused, naming the renamed file — the exact hole the old exact-name scan had |
+| 4 | off, V+ **absent** | the new `OFF and no ValheimPlus installed` **warning** |
+| 5 | on, V+ absent | `patch classes: 2/2 applied` + all four sites (`player cap 10 -> 20`, Steam browser slots, both crossplay literals `11 -> 21`) |
+| 6 | V+ renamed past the prefix, EilifPaths on | the client plugin's late re-check fired the `ValheimPlus IS loaded after all` error |
+
+`patch classes applied: 2/2` was unchanged in every run. This is a LOAD test only — no player has
+been the eleventh viking on a real server yet.
+
+> ⚠️ **Read the dedicated-server assembly, not just `libs/`.** `refresh-libs.sh` copies the **client**
+> `assembly_valheim.dll`, and three of the four player-cap sites have different bodies on the
+> dedicated-server build: `ZSteamMatchmaking.RegisterServer` calls `SteamGameServer.SetMaxPlayerCount(10)`
+> on the server and `SteamMatchmaking.CreateLobby(type, 10)` on the client, and the PlayFab
+> `MaxPlayerCount` / `MaxPlayers` literals are `11` on the server against `10` on the client. Only
+> `ZNet.RPC_PeerInfo`'s `>= 10` is identical in both. The first build of this feature was written
+> from the client assembly alone and three of its four hooks logged "not found" on the first real
+> boot. For any server-side patch, decompile
+> `valheim_server_Data/Managed/assembly_valheim.dll` as well.
+
+---
+
+## Deploying **0.3.2** (built 2026-09-04, superseded by 0.3.3 above)
+
+`dist/EilifCompanion.dll` was **0.3.2**. It carries everything 0.3.1 did — both the
 `[EILIF_OATH]` and `[EILIF_CHAT]` captures moved off the dead `Chat.RPC_ChatMessage` postfix onto
 the `Chat.OnNewChatMessage` **Prefix** that the `/pin` capture already proves works here (audit
 voice-6 — this is what stops oaths being stored SHOUT-UPPERCASED), and per-patch isolation with an
