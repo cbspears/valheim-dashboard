@@ -140,7 +140,7 @@ function checkStaleServerStatus(i: ConsistencyInput): Finding | null {
       id: 'server-status-stale-critical',
       severity: 'critical',
       title: 'Server status is very stale',
-      detail: `Last updated ${fmtAge(age)} ago — nothing has refreshed the roster/world day.`,
+      detail: `Last updated ${fmtAge(age)} ago. Nothing has refreshed the roster or world day.`,
       whatToDo: 'Confirm the server is online and the emitter + log poller are running; restart whichever is down (host-side, not from here).',
     };
   }
@@ -269,7 +269,7 @@ function checkExpiredClaims(i: ConsistencyInput): Finding | null {
     severity: 'info',
     title: 'Expired identity codes never used',
     detail: `${i.expiredUnconsumedClaims} identity claim code(s) expired without being consumed.`,
-    whatToDo: 'Housekeeping only — safe to leave; prune periodically if the table grows.',
+    whatToDo: 'Housekeeping only. Safe to leave; prune periodically if the table grows.',
   };
 }
 
@@ -283,7 +283,7 @@ function checkMissingTables(i: ConsistencyInput): Finding | null {
     severity: 'critical',
     title: 'Expected tables are missing',
     detail: `These tables were not found (a migration is likely unapplied): ${missing.join(', ')}.`,
-    whatToDo: 'Apply the matching db/*.sql migration in Supabase (Charlie applies migrations by hand — none run automatically).',
+    whatToDo: 'Apply the matching db/*.sql migration in Supabase (Charlie applies migrations by hand; none run automatically).',
   };
 }
 

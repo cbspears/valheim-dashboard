@@ -18,6 +18,26 @@ import { matchPinInCaption } from '@/lib/pin-match';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import { safeEqual } from '@/lib/ops/auth';
 import { decideIdentity } from '@/lib/identity-guard';
+// The pure decisions this handler used to inline. Everything below is string or
+// arithmetic work with no I/O, extracted so it can be tested without a database
+// (lib/webhook/*.test.mjs); the reads and writes all stay in this file.
+import {
+  escapeLikePattern,
+  decideRelink,
+  steamMismatchLog,
+  steamMismatchBody,
+  relinkRefusalLog,
+  relinkRefusalBody,
+} from '@/lib/webhook/identity';
+import {
+  normalizeOathText,
+  firstOathToken,
+  isClaimCode,
+  stripClaimCode,
+  stripLeadingSeparators,
+} from '@/lib/webhook/oath';
+import { shouldReplayGuard, isSameJoin, sessionDurationMinutes } from '@/lib/webhook/presence';
+import { shouldDedupeDeath, deathDedupeBounds } from '@/lib/webhook/dedupe';
 
 // Always run on the Node.js runtime (we need the service role key + full SDK)
 // and never cache — every webhook mutates state and must execute on request.
@@ -97,7 +117,7 @@ async function identityOf(
   if (!seenSteamId) return { decision: 'unknown', boundSteamId: null };
   // players_character_name_key is case-SENSITIVE, so the same ilike + escape +
   // limit(1) the rest of this route uses to find a viking by name.
-  const escaped = characterName.replace(/[%_]/g, (c) => `\\${c}`);
+  const escaped = escapeLikePattern(characterName);
   const { data, error } = await db
     .from('players')
     .select('steam_id')
@@ -121,20 +141,8 @@ async function identityOf(
 // (joins, deaths and chat included) rather than just dropping one write. The
 // refusal is in the body, and both sides log it.
 function identityRefusal(type: string, characterName: string, boundSteamId: string | null, seen: string | null) {
-  console.warn(
-    `[webhook] STEAM MISMATCH ${type} ${characterName}: bound ${boundSteamId ?? 'null'} saw ${seen ?? 'null'} — ` +
-      `write refused. Release it with: update players set steam_id = null where character_name = '${characterName}'`
-  );
-  return Response.json(
-    {
-      ok: false,
-      status: 'identity_mismatch',
-      character: characterName,
-      detail:
-        'That character is bound to a different Steam account. An admin has to release it (players.steam_id) first.',
-    },
-    { status: 200 }
-  );
+  console.warn(steamMismatchLog(type, characterName, boundSteamId, seen));
+  return Response.json(steamMismatchBody(characterName), { status: 200 });
 }
 
 export async function POST(request: Request) {
@@ -380,7 +388,7 @@ export async function POST(request: Request) {
     // match a known player we still insert it, unmatched, for a manual fix.
     if (type === 'oath') {
       const oathCharacterName = characterName;
-      let oathText = typeof body.text === 'string' ? body.text.trim() : '';
+      let oathText = normalizeOathText(body.text);
       if (!oathCharacterName || !oathText) {
         return Response.json(
           { error: "'oath' requires non-empty characterName and text" },
@@ -408,8 +416,8 @@ export async function POST(request: Request) {
       // single place a code is consumed: we bind the SHOUTER's character to that
       // Discord identity and strip the code so the remainder is the real oath.
       // Fully isolated in try/catch — a linking failure must NEVER fail the oath.
-      const firstToken = oathText.split(/\s+/)[0] ?? '';
-      if (/^[A-HJ-NP-Z2-9]{6}$/.test(firstToken)) {
+      const firstToken = firstOathToken(oathText);
+      if (isClaimCode(firstToken)) {
         try {
           // ATOMICALLY claim the code: a single UPDATE ... WHERE consumed_at IS
           // NULL AND expires_at > now() RETURNING is the whole check-and-consume,
@@ -441,7 +449,7 @@ export async function POST(request: Request) {
 
             // (a) Find the shouter's row FIRST, because whether we may bind at
             // all depends on what is already on it.
-            const escapedShouter = oathCharacterName.replace(/[%_]/g, (c) => `\\${c}`);
+            const escapedShouter = escapeLikePattern(oathCharacterName);
             const { data: shouter, error: shouterErr } = await db
               .from('players')
               .select('id, discord_user_id')
@@ -467,11 +475,9 @@ export async function POST(request: Request) {
             // reinstall, a fresh code) stays allowed, as does binding a character
             // nobody has claimed.
             const boundTo = (shouter?.discord_user_id as string | null) ?? null;
-            if (boundTo && boundTo !== discordUserId) {
+            if (decideRelink({ boundDiscordUserId: boundTo, claimDiscordUserId: discordUserId }) === 'refuse') {
               console.warn(
-                `[identity] refused relink of "${oathCharacterName}" — already linked to Discord ` +
-                  `${boundTo}, claim code was minted for ${discordUserId}. An admin must release it ` +
-                  `(update players set discord_user_id = null where id = '${shouter?.id}') before it can move.`,
+                relinkRefusalLog(oathCharacterName, boundTo as string, discordUserId, shouter?.id as string | undefined),
               );
               // The claim is already consumed (that UPDATE is the atomic
               // check-and-consume), so say so plainly: the bot surfaces this
@@ -483,17 +489,7 @@ export async function POST(request: Request) {
               // forever, so a permanently-refused relink would wedge the whole
               // pipeline (joins, deaths, chat) instead of dropping one write.
               // The refusal lives in the body; both sides log it.
-              return Response.json(
-                {
-                  ok: false,
-                  linked: false,
-                  status: 'character_already_linked',
-                  character: oathCharacterName,
-                  detail:
-                    'That character is already linked to a different Discord account. An admin has to release it first.',
-                },
-                { status: 200 },
-              );
+              return Response.json(relinkRefusalBody(oathCharacterName), { status: 200 });
             }
 
             // (b) Release this Discord id from any character it was previously on.
@@ -526,7 +522,7 @@ export async function POST(request: Request) {
             // left the em dash on the front of the stored oath: Lóa's live oath
             // reads "— I SWEAR TO ALWAYS WANDER OFF" on the signature wall, in
             // the Saga episodes and in the Discord embed.
-            oathText = oathText.slice(firstToken.length).replace(/^[\s\u2014\u2013\-:]+/, '').trim();
+            oathText = stripClaimCode(oathText, firstToken);
           }
         } catch (e) {
           console.error('[webhook] identity link skipped:', e instanceof Error ? e.message : 'error');
@@ -538,7 +534,7 @@ export async function POST(request: Request) {
       // swearing again later) would otherwise store "— I SWEAR …" verbatim. The
       // character class is exactly the separators the instructions can produce —
       // an oath's real first character is never one of them.
-      oathText = oathText.replace(/^[\s\u2014\u2013\-:]+/, '').trim();
+      oathText = stripLeadingSeparators(oathText);
 
       // Link-only swear: if stripping the code left no oath text, we're done.
       if (!oathText) {
@@ -546,7 +542,7 @@ export async function POST(request: Request) {
       }
 
       // Escape ilike wildcards (% _) so the character name is matched literally.
-      const escapedName = oathCharacterName.replace(/[%_]/g, (c) => `\\${c}`);
+      const escapedName = escapeLikePattern(oathCharacterName);
 
       const { data: player, error: playerErr } = await db
         .from('players')
@@ -576,7 +572,7 @@ export async function POST(request: Request) {
           .from('oaths')
           .delete()
           .is('player_id', null)
-          .ilike('character_name', canonicalName.replace(/[%_]/g, (c) => `\\${c}`));
+          .ilike('character_name', escapeLikePattern(canonicalName));
       }
 
       await db.from('oaths').insert({
@@ -635,7 +631,7 @@ export async function POST(request: Request) {
       if (statusErr) console.error(`[webhook] pin: server_status read failed — ${statusErr.message}`);
       const day = (status?.world_day as number | undefined) ?? 1;
 
-      await db.from('pins').delete().ilike('name', pinName.replace(/[%_]/g, (c) => `\\${c}`));
+      await db.from('pins').delete().ilike('name', escapeLikePattern(pinName));
       const { data: newPin } = await db
         .from('pins')
         .insert({
@@ -660,7 +656,7 @@ export async function POST(request: Request) {
       // pin is still created — this never fails the request.
       if (newPin?.id) {
         try {
-          const like = `%${pinName.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+          const like = `%${escapeLikePattern(pinName)}%`;
           const { data: candidates } = await db
             .from('gallery_photos')
             .select('id, caption')
@@ -748,10 +744,8 @@ export async function POST(request: Request) {
     // Discord posts). If a death for this character already exists within
     // +/-3 minutes of this one (either order, any metadata), treat this as
     // the same death and skip the insert + every downstream side-effect.
-    if (type === 'death' && characterName) {
-      const DEDUPE_WINDOW_MS = 3 * 60 * 1000;
-      const lowerBound = new Date(occurredAt.getTime() - DEDUPE_WINDOW_MS).toISOString();
-      const upperBound = new Date(occurredAt.getTime() + DEDUPE_WINDOW_MS).toISOString();
+    if (shouldDedupeDeath(type, characterName)) {
+      const { lowerBound, upperBound } = deathDedupeBounds(occurredAt.getTime());
       const { data: dupe, error: dupeErr } = await db
         .from('events')
         .select('id')
@@ -785,7 +779,7 @@ export async function POST(request: Request) {
     // replay — it is idempotent, and re-asserting presence is harmless. Only the
     // APPENDING work, sections 4 and 5, is skipped.
     let isPresenceReplay = false;
-    if ((type === 'join' || type === 'leave') && characterName) {
+    if (shouldReplayGuard(type, characterName)) {
       const { data: already, error: replayErr } = await db
         .from('events')
         .select('id')
@@ -925,10 +919,7 @@ export async function POST(request: Request) {
         if (openErr) console.error(`[webhook] join: open-session check failed — ${openErr.message}`);
         openForThisJoin = (open as { id: string; joined_at: string } | null) ?? null;
       }
-      const REJOIN_GRACE_MS = 60_000;
-      const openIsSameJoin =
-        openForThisJoin !== null &&
-        Math.abs(occurredAt.getTime() - new Date(openForThisJoin.joined_at).getTime()) <= REJOIN_GRACE_MS;
+      const openIsSameJoin = isSameJoin(occurredAt.getTime(), openForThisJoin?.joined_at);
 
       if (openIsSameJoin) {
         console.log(`[webhook] replay ignored join session ${characterName} ${occurredIso}`);
@@ -955,10 +946,9 @@ export async function POST(request: Request) {
       if (openErr) console.error(`[webhook] leave: open-session lookup failed — ${openErr.message}`);
 
       if (openSession?.id) {
-        const joinedMs = new Date(openSession.joined_at as string).getTime();
-        const durationMinutes = Math.max(
-          0,
-          Math.round((occurredAt.getTime() - joinedMs) / 60000)
+        const durationMinutes = sessionDurationMinutes(
+          openSession.joined_at as string,
+          occurredAt.getTime()
         );
         await db
           .from('sessions')

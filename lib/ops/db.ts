@@ -31,6 +31,27 @@ export function dashboardVersion(): string | null {
   return null;
 }
 
+/**
+ * A join that arrived under a Steam account other than the one bound to that
+ * character name. The webhook records presence anyway (someone really is in the
+ * world) but annotates the event and freezes that name's oath, pin and
+ * Discord-link writes until an admin releases the binding by hand.
+ */
+export interface IdentityMismatchEvent {
+  characterName: string;
+  /** players.steam_id at the time: the account that owns the name. */
+  boundSteamId: string | null;
+  /** The account that actually joined under it. */
+  seenSteamId: string | null;
+  at: string;
+}
+
+/** How far back the cockpit looks for identity mismatches. */
+export const IDENTITY_MISMATCH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Most mismatch rows the cockpit renders. One more is fetched to detect the cut. */
+export const IDENTITY_MISMATCH_LIMIT = 50;
+
 export interface OpsData {
   nowMs: number;
   supabaseOk: boolean;
@@ -51,6 +72,10 @@ export interface OpsData {
   botFlags: BotPilotFlags | null;
   /** Age (s) of the oldest queued voice line while players are online; null otherwise. */
   voiceQueueOldestSec: number | null;
+  /** Steam-identity mismatches recorded in the last 7 days, newest first. */
+  identityMismatches: IdentityMismatchEvent[];
+  /** True when more mismatches exist in the window than the list above holds. */
+  identityMismatchesTruncated: boolean;
   demoDiscordEvents: number;
   tablePresence: Record<string, boolean>;
 }
@@ -95,6 +120,8 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
     statPoisonReporters: [],
     botFlags: null,
     voiceQueueOldestSec: null,
+    identityMismatches: [],
+    identityMismatchesTruncated: false,
     demoDiscordEvents: 0,
     tablePresence: Object.fromEntries(REQUIRED_TABLES.map((t) => [t, true])),
   };
@@ -252,6 +279,68 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
       metrics: { ...(hb.metrics ?? {}), voiceQueueOldestSec: Math.round(data.voiceQueueOldestSec) },
     };
   }
+
+  // Steam-identity mismatches, last 7 days. The webhook writes the evidence onto
+  // the event row itself (metadata.identity = 'steam_mismatch' plus both ids), so
+  // this is a straight read of that annotation — the cockpit never re-derives who
+  // owns a name, it only shows what was recorded at the time.
+  //
+  // Filtered in the database on the JSON key so a quiet week reads a handful of
+  // rows, not every join of the week. A failed read yields an empty list (the
+  // convention everywhere in this file); the page says plainly that it is showing
+  // the last 7 days, so an empty table reads as "none recorded", never as "all
+  // clear, guaranteed".
+  //
+  // `type = 'join'` is pinned FIRST and is not cosmetic: it is what makes this a
+  // BOUNDED read. `events_type_created_idx (type, created_at desc)` — applied to
+  // prod in db/2026-09-04_events_indexes.sql precisely because `events` was doing
+  // 638k sequential scans — has `type` as its leading column, so pinning it lets
+  // one index scan serve the equality, the created_at range AND the ordering,
+  // leaving the JSON key as a cheap filter over a small slice.
+  //
+  // Verified on prod with EXPLAIN ANALYZE (read-only, 2026-09-04):
+  //   with the type pin: Index Scan, Index Cond on (type, created_at), no sort,
+  //                      2 shared buffers, 7 rows filtered.
+  //   without it:        the same index scanned end to end with only created_at
+  //                      as the cond, plus a Sort node, 6 buffers, 20 filtered.
+  // At ~100 rows both are instant; the difference is how they GROW. The pinned
+  // shape costs what the last 7 days of joins cost, the unpinned one costs the
+  // whole table and tips to a plain seq scan once the planner stops liking the
+  // index. This renders on every refresh of the page Charlie will sit on all
+  // launch night, against the table growing fastest at that moment.
+  //
+  // Pinning the type is LOSSLESS: metadata.identity is only ever set inside
+  // `if (type === 'join' && playerId)` (app/api/webhook/route.ts §3b) and merged
+  // into that same insert, so a steam_mismatch annotation cannot exist on any
+  // other event type. If a second writer is ever added, widen this to `.in('type',
+  // [...])` rather than dropping it — an unfiltered type means a seq scan again.
+  const mismatchRows = await safe(async () => {
+    const since = new Date(nowMs - IDENTITY_MISMATCH_WINDOW_MS).toISOString();
+    const { data: rows, error } = await client
+      .from('events')
+      .select('character_name, created_at, metadata')
+      .eq('type', 'join')
+      .eq('metadata->>identity', 'steam_mismatch')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      // One over the render limit: the extra row is never shown, it only tells
+      // the page that the table it is drawing is not the whole window.
+      .limit(IDENTITY_MISMATCH_LIMIT + 1);
+    if (error) return [];
+    return (rows ?? []).map((r) => {
+      const meta = (r.metadata ?? {}) as Record<string, unknown>;
+      const id = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+      return {
+    nowMs,
+        characterName: (r.character_name as string | null) ?? 'unknown',
+        boundSteamId: id(meta.boundSteamId),
+        seenSteamId: id(meta.seenSteamId),
+        at: r.created_at as string,
+      };
+    });
+  }, [] as IdentityMismatchEvent[]);
+  data.identityMismatchesTruncated = mismatchRows.length > IDENTITY_MISMATCH_LIMIT;
+  data.identityMismatches = mismatchRows.slice(0, IDENTITY_MISMATCH_LIMIT);
 
   // Demo data: discord_events with a null discord_event_id (manually seeded).
   data.demoDiscordEvents = await safe(async () => {

@@ -15,6 +15,71 @@ import { formatRecap } from './format.js';
 // Epic categories headline even on back-to-back nights (exempt from anti-repeat).
 const EPIC_KEYS = new Set(['boss_kill', 'most_explored']);
 
+// Two ingest paths (the `gs` mod report and the `eilif` death report) can write
+// the SAME death milliseconds apart, so the recap used to count one death twice:
+// the 2026-09-01 recap said 7 deaths for 4 real ones, and 'The Bold' crowned a
+// viking on a doubled tally. Collapse a repeat for the same viking inside this
+// window ONLY — a corpse run that ends in a second death a minute later is a
+// REAL second death and must still count, so never widen this. Mirrors
+// relay.js's DEATH_COLLAPSE_MS; both must move together if either ever does.
+const DEATH_COLLAPSE_MS = 10_000;
+
+/**
+ * Fold duplicate death reports for one viking into a single row.
+ *
+ * Pure and total: rows arrive in whatever order PostgREST returns them, so they
+ * are sorted by time here first. A row we cannot key on (no character name, or
+ * an unparseable created_at) is passed through untouched — collapsing needs a
+ * name and a clock, and a row without them is left exactly as the caller found
+ * it rather than guessed at.
+ *
+ * The window is anchored on the row that was KEPT, not on the previous row, so a
+ * burst of reports can never chain into a window wider than DEATH_COLLAPSE_MS.
+ * That is the same rule relay.js applies when deciding whether to post.
+ *
+ * Only one of the two producers knows what killed you (the log-poller path has
+ * no cause — the server log carries none), so when a folded row names a cause
+ * and the kept one does not, the cause is carried over.
+ */
+export function collapseDeathRows(rows, collapseMs = DEATH_COLLAPSE_MS) {
+  const causeOf = (r) => {
+    const c = r?.metadata?.cause;
+    return typeof c === 'string' && c.trim() ? c.trim() : undefined;
+  };
+
+  const passthrough = [];
+  const keyed = [];
+  for (const r of rows || []) {
+    const nm = (r?.character_name || '').trim();
+    const t = Date.parse(r?.created_at);
+    if (!nm || !Number.isFinite(t)) {
+      passthrough.push(r);
+      continue;
+    }
+    keyed.push({ row: r, name: nm, t });
+  }
+  keyed.sort((a, b) => a.t - b.t || a.name.localeCompare(b.name));
+
+  const kept = [];
+  const anchor = new Map(); // name -> the kept entry that owns the open window
+  for (const entry of keyed) {
+    const open = anchor.get(entry.name);
+    if (open && entry.t - open.t <= collapseMs) {
+      if (!causeOf(open.row)) {
+        const cause = causeOf(entry.row);
+        if (cause) {
+          open.row = { ...open.row, metadata: { ...(open.row.metadata || {}), cause } };
+        }
+      }
+      continue;
+    }
+    anchor.set(entry.name, entry);
+    kept.push(entry);
+  }
+
+  return [...passthrough, ...kept.map((e) => e.row)];
+}
+
 // POTY categories, highest priority first. `epic` => anti-repeat exempt.
 // REAL-DATA today: boss_kill / most_deaths / most_hours. The rest are
 // forward-compatible: they read player_stats deltas that are ~0 until a stats
@@ -241,10 +306,15 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
       .gte('created_at', startIso)
       .limit(10000);
 
+    // One death reported by both producers is ONE death on the boards: fold the
+    // twins before counting, so windowDeaths (and with it the death total, the
+    // Fallen board and the POTY 'The Bold' tally) counts real falls only.
+    const collapsedDeaths = collapseDeathRows(deathRows);
+
     const windowDeaths = {};
     const lastCause = {};
     const lastCauseAt = {};
-    for (const r of deathRows || []) {
+    for (const r of collapsedDeaths) {
       const nm = (r.character_name || '').trim();
       if (!nm) continue;
       const t = new Date(r.created_at).getTime();
@@ -466,5 +536,5 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     return jobs;
   }
 
-  return { buildStats, postRecap, schedule, selectPlayerOfDay };
+  return { buildStats, postRecap, schedule, selectPlayerOfDay, collapseDeathRows };
 }

@@ -60,7 +60,7 @@ export const COMPONENTS: ComponentDef[] = [
     source: 'server_status',
     expectedCadenceSec: 120,
     staleAfterSec: 300,
-    subtitle: 'Inferred — the mod cannot report for itself.',
+    subtitle: 'Inferred. The mod cannot report for itself.',
   },
   {
     key: 'log-poller',
@@ -239,10 +239,41 @@ export interface HealthInput {
    * speak to), which is why the player count is part of the condition.
    */
   voiceQueueOldestSec?: number | null;
+  /**
+   * How many vikings the roster says are on the server right now.
+   *
+   * The Companion polls /api/voice ONLY while at least one player is connected
+   * (EilifCompanionPlugin's PollSeconds: "only when >=1 player is connected"), so
+   * an empty hall produces no polls at all. Without this, 'In-game voice' turned
+   * STALE five minutes after the last player left and stayed red until somebody
+   * logged back in: a red cockpit every single night, for a component that was
+   * behaving exactly as designed. A quiet hall is now reported as unknown, which
+   * is the honest answer, and never as healthy (this file never goes green on
+   * absence).
+   *
+   * The count is only BELIEVED while `serverStatusUpdatedAt` is itself fresh: the
+   * roster is read out of server_status, so a dead emitter reports an empty hall
+   * whether or not anyone is playing, and taking that at face value would excuse
+   * a genuinely dead voice half at exactly the wrong moment.
+   *
+   * Omit it and staleness works exactly as it did before for every component.
+   */
+  playersOnline?: number | null;
 }
 
 /** Queued longer than this with players online → the voice half is degraded. */
 export const VOICE_QUEUE_DEGRADED_SEC = 10 * 60;
+
+/**
+ * How fresh server_status must be for its roster to be believed.
+ *
+ * Deliberately the SAME bound that turns 'server-emitter' stale, read off that
+ * component's own definition so the two can never drift: past this age the
+ * cockpit already declares the emitter unreliable, and a roster it no longer
+ * trusts must not be used to excuse another component's silence.
+ */
+export const SERVER_STATUS_TRUST_SEC =
+  COMPONENTS.find((c) => c.key === 'server-emitter')?.staleAfterSec ?? 300;
 
 function toMs(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -285,6 +316,25 @@ export function buildHealth(input: HealthInput): ComponentReport[] {
         : null;
   const voiceStalledSec =
     voiceOldestSec !== null && voiceOldestSec >= VOICE_QUEUE_DEGRADED_SEC ? voiceOldestSec : null;
+
+  // An empty hall silences the Companion's /api/voice polling by design, so its
+  // heartbeat is expected to go quiet with it. Only asserted when the caller
+  // actually told us the roster is empty; an omitted count changes nothing.
+  //
+  // The roster is only trusted while server_status is itself fresh. That roster
+  // IS server_status.current_players: if the emitter dies while vikings are
+  // playing, the hall reads empty and a genuinely dead voice half would be
+  // quietly downgraded from stale (red) to unknown (blue) — and server-emitter,
+  // the one component that would contradict it, is exactly the component that
+  // just went stale. So an aged server_status revokes the excuse and the voice
+  // half stays stale, which is the honest answer when nothing is known.
+  const serverStatusFresh = (() => {
+    const t = toMs(serverStatusUpdatedAt);
+    if (t === null) return false;
+    return nowMs - t <= SERVER_STATUS_TRUST_SEC * 1000;
+  })();
+  const quietHall =
+    serverStatusFresh && typeof input.playersOnline === 'number' && input.playersOnline === 0;
 
   for (const def of COMPONENTS) {
     if (def.key === 'dashboard-api') {
@@ -335,14 +385,14 @@ export function buildHealth(input: HealthInput): ComponentReport[] {
     // ops_heartbeats-sourced pipeline processes.
     const hb = heartbeats[def.key];
     if (!supabaseOk) {
-      out.push({ ...base(def), state: 'unknown', detail: 'Database unreachable this render — status unknown.' });
+      out.push({ ...base(def), state: 'unknown', detail: 'Database unreachable this render, so status is unknown.' });
       continue;
     }
     if (!hb) {
       out.push({
         ...base(def),
         state: 'unknown',
-        detail: 'No heartbeat recorded yet — this component has never checked in.',
+        detail: 'No heartbeat recorded yet. This component has never checked in.',
       });
       continue;
     }
@@ -351,19 +401,27 @@ export function buildHealth(input: HealthInput): ComponentReport[] {
     // while players are on means the Companion is polling but not speaking.
     const voiceStalled = def.key === 'companion-voice' && voiceStalledSec !== null;
     const errored = hb.status === 'error' || hb.status === 'degraded' || voiceStalled;
+    let state = computeState(nowMs, lastSuccessMs, def.staleAfterSec, { errored });
+    // The one component whose silence is expected: with nobody on the server the
+    // Companion does not poll, so an aged heartbeat is not evidence of a fault.
+    // Downgraded to unknown, never up to healthy.
+    const quietVoice = def.key === 'companion-voice' && quietHall && state === 'stale';
+    if (quietVoice) state = 'unknown';
     out.push({
       ...base(def),
-      state: computeState(nowMs, lastSuccessMs, def.staleAfterSec, { errored }),
+      state,
       ageSec: ageOf(nowMs, hb.last_success),
       version: hb.version,
       lastSuccess: hb.last_success,
       lastError: hb.error_summary,
       flags: flagsFromMetrics(hb.metrics),
-      detail: voiceStalled
-        ? `Polling, but a voice line has sat queued for ${Math.round(voiceStalledSec / 60)} min with players online — the Companion is not speaking them.`
-        : errored && lastSuccessMs !== null
-          ? `Last heartbeat reported status "${hb.status}".`
-          : 'Health from the component\'s own heartbeat.',
+      detail: quietVoice
+        ? 'Nobody is on the server. The Companion only polls while a viking is connected, so a quiet heartbeat here is expected.'
+        : voiceStalled
+          ? `Polling, but a voice line has sat queued for ${Math.round(voiceStalledSec / 60)} min with players online. The Companion is not speaking them.`
+          : errored && lastSuccessMs !== null
+            ? `Last heartbeat reported status "${hb.status}".`
+            : 'Health from the component\'s own heartbeat.',
     });
   }
 
@@ -379,7 +437,7 @@ export function buildHealth(input: HealthInput): ComponentReport[] {
         ...base(def),
         state: 'unknown',
         detail: !supabaseOk
-          ? 'Database unreachable this render — status unknown.'
+          ? 'Database unreachable this render, so status is unknown.'
           : 'The discord bot has not checked in, so its loops are unknown.',
       });
       continue;

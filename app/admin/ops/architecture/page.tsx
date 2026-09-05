@@ -246,7 +246,6 @@ export default async function OpsArchitecturePage() {
               {/* SFTP: server files -> host services */}
               <g fill="none" stroke="var(--e-sftp)" strokeWidth="2.3">
                 <path d="M256,150 C270,150 276,96 286,96" markerEnd="url(#m-sftp)" />
-                <path d="M256,168 C270,168 276,186 286,186" markerEnd="url(#m-sftp)" />
                 <path d="M256,188 C270,188 276,276 286,276" markerEnd="url(#m-sftp)" />
               </g>
               <text x="270" y="128" className="e-label" fontSize="9.5" fill="var(--e-sftp)" textAnchor="middle">SFTP</text>
@@ -254,7 +253,6 @@ export default async function OpsArchitecturePage() {
               {/* host services -> API (authed POST) */}
               <g fill="none" stroke="var(--e-post)" strokeWidth="2.3">
                 <path d="M510,96 C525,96 528,182 540,182" markerEnd="url(#m-post)" />
-                <path d="M510,182 C524,182 528,190 540,190" markerEnd="url(#m-post)" />
               </g>
               <text x="527" y="150" className="e-label" fontSize="9.5" fill="var(--e-post)" textAnchor="middle">x-webhook-secret</text>
               {/* producers -> ops heartbeat */}
@@ -297,7 +295,7 @@ export default async function OpsArchitecturePage() {
                 <text x="34" y="134" className="n-sub" fontSize="11">WebMap · ValheimPlus</text>
                 <text x="34" y="158" className="n-sub" fontSize="10.5" fill="var(--z-game)">emits → server payloads (roster,</text>
                 <text x="34" y="172" className="n-sub" fontSize="10.5" fill="var(--z-game)">worldDay, boss milestones)</text>
-                <text x="34" y="192" className="n-sub" fontSize="10.5">writes LogOutput.log · .fch</text>
+                <text x="34" y="192" className="n-sub" fontSize="10.5">writes LogOutput.log</text>
                 <text x="34" y="212" className="n-sub" fontSize="10.5">serves WebMap map.png / fog.png</text>
                 <text x="34" y="228" className="e-label" fontSize="9" fill="var(--z-game)">plugins/eilif-companion ↗</text>
               </a>
@@ -320,12 +318,10 @@ export default async function OpsArchitecturePage() {
                 <text x="304" y="117" className="n-sub" fontSize="10.5">joins/deaths/oaths/pins/chat</text>
                 <text x="304" y="128" className="e-label" fontSize="9" fill="var(--z-host)">services/log-poller ↗</text>
               </a>
-              <a className="node" href={`${REPO}/tree/main/services/stats-parser`} target="_blank" rel="noreferrer">
-                <rect x="292" y="150" width="212" height="56" rx="9" fill="var(--surface)" stroke="var(--z-host)" />
-                <text x="304" y="172" className="n-title" fontSize="12.5" fill="var(--ink)">Stats parser (.fch)</text>
-                <text x="304" y="190" className="n-sub" fontSize="10.5">optional: full-profile fallback</text>
-                <text x="304" y="201" className="e-label" fontSize="9" fill="var(--z-host)">services/stats-parser ↗</text>
-              </a>
+              {/* The stats-parser node stood here. eilif-stats-parser.service was
+                  retired 2026-08-23 and its webhook branch with it; player_stats is fed
+                  end to end by the Emitter and the Companion Client now, so drawing it
+                  claimed a producer that has not written a row in weeks. */}
               <a className="node" href={`${REPO}/blob/main/scripts/map-snapshot.mjs`} target="_blank" rel="noreferrer">
                 <rect x="292" y="224" width="212" height="56" rx="9" fill="var(--surface)" stroke="var(--z-host)" />
                 <text x="304" y="246" className="n-title" fontSize="12.5" fill="var(--ink)">Map snapshot</text>
@@ -600,17 +596,6 @@ export default async function OpsArchitecturePage() {
                     SFTP ← server; → <code>/api/webhook</code>; → Discord; →{' '}
                     <code>/api/ops/heartbeat</code>
                   </td>
-                </tr>
-                <tr>
-                  <td className="comp">
-                    <a href={`${REPO}/tree/main/services/stats-parser`} target="_blank" rel="noreferrer">stats-parser</a>
-                  </td>
-                  <td>
-                    <span className="zdot" style={{ background: 'var(--z-host)' }} />
-                    <span className="ztag">host</span>
-                  </td>
-                  <td>Optional: parses ServerCharacters <code>.fch</code> for full profiles.</td>
-                  <td>SFTP ← server; → <code>/api/webhook</code></td>
                 </tr>
                 <tr>
                   <td className="comp">
