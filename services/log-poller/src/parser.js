@@ -81,8 +81,14 @@ const RE = {
   // is [^<>]+ (not .+?): a shout whose text carries rich-text closers, e.g.
   //   …<color=orange>Bob</color>: <color=#FFFFFFFF></color>: <color=white>/oath x</color>
   // otherwise filed the oath under the name "Bob</color>: <color=#FFFFFFFF>".
-  //   Console: <color=orange>Testman</color>: <color=#FFEB04FF>/OATH I SWEAR ...</color>
-  consoleOath: /Console:\s*<color=orange>([^<>]+)<\/color>:\s*<color=[^>]*>\/oath\s+(.+?)<\/color>/i,
+  //
+  // ANCHORED AT ^ and matched against the echo PAYLOAD (everything after the
+  // line's own "Console: " prefix — see ECHO_LINE), never against the raw line.
+  // Matching it anywhere in the line let a player SHOUT the echo shape and have
+  // the plugin's verbatim [EILIF_CHAT] copy of their own words re-read as a
+  // genuine console echo from whoever they named.
+  //   <color=orange>Testman</color>: <color=#FFEB04FF>/OATH I SWEAR ...</color>
+  consoleOath: /^<color=orange>([^<>]+)<\/color>:\s*<color=[^>]*>\/oath\s+(.+?)<\/color>/i,
   // The Eilif companion plugin's /pin capture (Harmony patch on
   // Chat.OnNewChatMessage — unlike /oath this NEEDS the plugin, since a
   // world position isn't available from the console echo alone).
@@ -106,16 +112,40 @@ const RE = {
   // Any shouted chat as echoed by the server console — the mod-free capture
   // path (text arrives display-UPPERCASED). Command shouts (/oath, /pin, …)
   // are filtered out in processLine, and the consoleOath check runs first.
-  // processLine tests THIS pattern before any [EILIF_*] marker regex, so a
-  // shout containing a literal marker (e.g. "[EILIF_OATH] Victim | ...") is
-  // always captured here as echoed oath/chat, never trusted as the real
-  // plugin-emitted marker (see processLine's console-echo guard). The markers
-  // being anchored to the plugin's log prefix is the second, independent
-  // guard: an echo line starts with "[Info   : Unity Log]", never with the
-  // companion's own prefix.
-  //   Console: <color=orange>Testman</color>: <color=#FFEB04FF>HELLO THERE</color>
-  consoleShout: /Console:\s*<color=orange>(.+?)<\/color>:\s*<color=[^>]*>(.+?)<\/color>/,
+  // Anchored at ^ against the echo PAYLOAD, like consoleOath above.
+  //   <color=orange>Testman</color>: <color=#FFEB04FF>HELLO THERE</color>
+  consoleShout: /^<color=orange>(.+?)<\/color>:\s*<color=[^>]*>(.+?)<\/color>/,
 };
+
+// The console echo's own line prefix, anchored at the START of the line. The
+// game writes shout echoes through Unity's logger, so BepInEx stamps them with
+// its "Unity Log" source and the game adds its own date/time:
+//
+//   [Info   : Unity Log] 09/01/2026 09:41:59: Console: <color=orange>…
+//
+// Every part before "Console: " is FIXED SHAPE — no `.*` anywhere — so this can
+// only ever match the line's own prefix. That matters: with a lazy `.*?Console:`
+// the engine would happily backtrack past the real prefix to a second, PLAYER
+// SUPPLIED "Console:" further along the line, which is exactly the forgery this
+// closes (a shout whose text is itself an echo-shaped string, reproduced
+// verbatim on the plugin's [EILIF_CHAT] line). The BepInEx prefix and the
+// timestamp are both optional so a log-format change degrades to "echo
+// ignored", never "echo forged".
+const ECHO_LINE = /^(?:\[\w+\s*:\s*Unity Log\]\s*)?(?:[\d/]+\s+[\d:]+:\s*)?Console:\s*/;
+
+// A captured character name that could not have come from Valheim. Rich-text
+// markup (`<`/`>`), the plugin's own field separator (`|`) and control
+// characters are all signatures of an injected or malformed capture rather than
+// a real name — the plugin sanitises what IT logs (SpeakerIdentity.Safe), and
+// this is the log parser refusing to be the single point of trust for the
+// console-echo path, which no plugin touches.
+const IMPLAUSIBLE_NAME_RE = /[<>|]|[\u0000-\u001f\u007f]/;
+
+/** Could this captured string be a real Valheim character name? */
+export function isPlausibleCharacterName(name) {
+  const n = String(name ?? '');
+  return n.length > 0 && n.length <= 64 && !IMPLAUSIBLE_NAME_RE.test(n);
+}
 
 export class LogParser {
   /**
@@ -195,31 +225,47 @@ export class LogParser {
     // ...>[EILIF_OATH] Victim | fake text</color>". If a marker regex ran over
     // an echo line first it would trust the embedded marker as if the plugin
     // emitted it — impersonating (and overwriting) another player's real
-    // oath/pin/chat/position. So: any line matching the console-echo shape is
-    // handled ONLY as an echoed oath/chat, and is NEVER allowed to fall
-    // through to a marker check, no matter what marker text the shouter
-    // embedded. (The markers are also anchored to the plugin's own log prefix,
-    // which an echo line can never carry — two independent guards.)
-    if (RE.consoleShout.test(line)) {
+    // oath/pin/chat/position. So: a line that IS a console echo is handled
+    // ONLY as an echoed oath/chat and never falls through to a marker check.
+    // (The markers are also anchored to the plugin's own log prefix, which an
+    // echo line can never carry — two independent guards.)
+    //
+    // "IS a console echo" now means the echo prefix at the START of the line
+    // (ECHO_LINE), not the echo SHAPE anywhere in it. The old test was itself
+    // forgeable: shout an echo-shaped string and the plugin's raw-case
+    // [EILIF_CHAT] copy of your own words carried that shape, so the parser
+    // read it as a genuine echo from whatever name you had embedded — an oath
+    // filed under someone else's viking. Anchoring also means the payload the
+    // two regexes below see always starts at the line's OWN "Console: ",
+    // never at one a player typed.
+    const echoPrefix = line.match(ECHO_LINE);
+    if (echoPrefix) {
+      const payload = line.slice(echoPrefix[0].length);
+
       // --- In-game sworn oath (shouted, via the server's console echo) ---
-      const co = line.match(RE.consoleOath);
+      const co = payload.match(RE.consoleOath);
       if (co) {
         const name = co[1].trim();
         const text = co[2].trim().slice(0, MAX_OATH_LEN);
-        if (name && text) {
-          events.push({ type: 'oath', characterName: name, metadata: { text } });
+        // `source` tells the poller which of the two lines a /oath shout
+        // produces this is. The plugin's own [EILIF_OATH] line carries the
+        // SERVER-verified peer name (Companion 0.3.2) and the raw casing, so
+        // when both are in one batch the plugin's must win — see the twin
+        // dedupe in poller.js.
+        if (name && text && isPlausibleCharacterName(name)) {
+          events.push({ type: 'oath', characterName: name, metadata: { text, source: 'echo' } });
         }
         return events;
       }
 
       // --- Any other shouted chat (console echo, mod-free but UPPERCASED) ---
-      const cs = line.match(RE.consoleShout);
+      const cs = payload.match(RE.consoleShout);
       if (cs) {
         const name = cs[1].trim();
         const text = cs[2].trim().slice(0, MAX_CHAT_LEN);
         // '/'-prefixed shouts are commands (/oath handled above, /pin via the
         // plugin, anything else is noise) — never mirror them as chat.
-        if (name && text && !text.startsWith('/')) {
+        if (name && text && !text.startsWith('/') && isPlausibleCharacterName(name)) {
           events.push({ type: 'chat', characterName: name, metadata: { text, source: 'echo' } });
         }
       }
@@ -234,8 +280,13 @@ export class LogParser {
       if (sep !== -1) {
         const name = rest.slice(0, sep).trim();
         const text = rest.slice(sep + ' | '.length).trim().slice(0, MAX_OATH_LEN);
+        // Tagged 'plugin' so the poller can drop the server's console echo of
+        // the same shout. This line is the authoritative one: with Companion
+        // 0.3.2 the name is the server's record for the sending peer, not the
+        // client-supplied display name the echo carries, and the text keeps
+        // its real casing instead of Terminal.AddString's uppercase.
         if (name && text) {
-          events.push({ type: 'oath', characterName: name, metadata: { text } });
+          events.push({ type: 'oath', characterName: name, metadata: { text, source: 'plugin' } });
         }
       }
       return events;
@@ -257,6 +308,12 @@ export class LogParser {
     }
 
     // --- In-game pin (/pin, via the Eilif companion plugin) ---
+    // No `source` tag and no twin to dedupe: the console-echo path CANNOT emit
+    // a pin. A shouted "/pin base Odinshold" is a '/'-prefixed command, which
+    // the echo branch above drops, and there is no consolePin rule — a pin
+    // needs the world position only the plugin has. If an echo pin is ever
+    // added, tag both sides 'plugin'/'echo' like oath and chat and add 'pin' to
+    // the twin dedupe in poller.js.
     const p = line.match(RE.pin);
     if (p) {
       const [, name, kind, place, worldX, worldZ] = p;
@@ -420,4 +477,4 @@ export class LogParser {
   }
 }
 
-export { RAID_MESSAGES, RE, MAX_OATH_LEN, MAX_PIN_NAME_LEN, MAX_CHAT_LEN };
+export { RAID_MESSAGES, RE, ECHO_LINE, MAX_OATH_LEN, MAX_PIN_NAME_LEN, MAX_CHAT_LEN };

@@ -29,6 +29,36 @@ const SFTP_TICK_TIMEOUT_MS = 60000;
 const AUTH_BACKOFF_MS = 10 * 60 * 1000; // 10m
 const AUTH_FAIL_RE = /authentication/i; // ssh2: "All configured authentication methods failed"
 
+// Event types a shout can produce TWICE in one batch: once from the companion
+// plugin's marker line and once from the server's console echo of the same
+// words. `pin` is not one of them — the echo path drops '/'-prefixed shouts and
+// there is no console pin rule (see parser.js).
+const TWIN_TYPES = new Set(['chat', 'oath']);
+
+// One 429 retry on the dashboard webhook, capped. Same shape as discordFetch:
+// honour the advertised delay once, then give up and let the tick fail.
+const WEBHOOK_RETRY_CAP_MS = 10000;
+const WEBHOOK_RETRY_DEFAULT_MS = 1000;
+
+/**
+ * How long to wait before the single webhook retry: the `retry-after` header
+ * (seconds), else a `retry_after` field in the body (seconds, Discord's shape),
+ * else one second — clamped to [0, 10 s]. Exported so the clamp is testable
+ * without actually sleeping for it.
+ */
+export function webhookRetryDelayMs(headerValue, body) {
+  let after = parseFloat(headerValue ?? '');
+  if (!Number.isFinite(after)) {
+    try {
+      after = parseFloat(JSON.parse(body).retry_after);
+    } catch {
+      after = NaN;
+    }
+  }
+  const ms = Number.isFinite(after) ? after * 1000 : WEBHOOK_RETRY_DEFAULT_MS;
+  return Math.min(Math.max(ms, 0), WEBHOOK_RETRY_CAP_MS);
+}
+
 export class Poller {
   constructor(config, logger = console) {
     this.cfg = config; // { source, sftp, logPath, webhookUrl, webhookSecret, intervalMs, statePath, syncEveryMs }
@@ -223,8 +253,16 @@ export class Poller {
   }
 
   // --- POST one event to the dashboard webhook ---
-  async postEvent(payload) {
-    const res = await fetch(this.cfg.webhookUrl, {
+  // ONE 429 retry, mirroring discordFetch. A refusal here is not like a 500:
+  // the caller treats any non-2xx as a failed tick, tick() rewinds the byte
+  // cursor and the WHOLE batch is re-read next time — so a single rate-limited
+  // request costs the entire batch, and a batch bigger than the budget can
+  // never drain. Pausing for the advertised delay and trying once more turns
+  // that into a pause. `retry-after` is in seconds (header first, then a
+  // `retry_after` body field), defaulting to 1 s and capped at 10 s: anything
+  // longer is not something a tick should sit on.
+  async webhookFetch(payload) {
+    return fetch(this.cfg.webhookUrl, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -232,6 +270,17 @@ export class Poller {
       },
       body: JSON.stringify(payload),
     });
+  }
+
+  async postEvent(payload) {
+    let res = await this.webhookFetch(payload);
+    if (res.status === 429) {
+      const raw = await res.text().catch(() => '');
+      const waitMs = webhookRetryDelayMs(res.headers?.get?.('retry-after'), raw);
+      this.log.warn?.(`[webhook] 429 rate limited — one retry in ${Math.round(waitMs)}ms`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      res = await this.webhookFetch(payload);
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       throw new Error(`webhook ${res.status}: ${text.slice(0, 120)}`);
@@ -271,20 +320,34 @@ export class Poller {
       const lines = combined.split('\n');
       this.partial = lines.pop() ?? ''; // last (possibly partial) line held over
 
-      // Collect the whole batch first so chat dedupe can prefer the plugin's
-      // raw-case [EILIF_CHAT] line over the UPPERCASED console echo of the
-      // same shout (the two lines land milliseconds apart, i.e. same batch).
+      // Collect the whole batch first so the twin dedupe can prefer the
+      // plugin's raw-case [EILIF_CHAT]/[EILIF_OATH] line over the UPPERCASED
+      // console echo of the same shout (the two lines land milliseconds apart,
+      // i.e. same batch).
+      //
+      // OATHS ARE DEDUPED TOO, and that is the whole point of this block. The
+      // webhook's oath handler is delete-then-insert, and the echo is always
+      // the LATER line (our Harmony prefix runs before OnNewChatMessage's body,
+      // which is what produces the echo) — so before this, every shouted oath
+      // was written by the plugin and then immediately overwritten by the echo,
+      // bellowed in uppercase and filed under the CLIENT-SUPPLIED display name.
+      // Both of Companion 0.3.1's and 0.3.2's identity fixes reached the log
+      // and nowhere else.
       const batch = [];
       for (const line of lines) {
         batch.push(...this.parser.processLine(line));
       }
-      const pluginChatKeys = new Set(
+      const pluginTwinKeys = new Set(
         batch
-          .filter((e) => e.type === 'chat' && e.metadata.source === 'plugin')
-          .map((e) => this.chatKey(e))
+          .filter((e) => TWIN_TYPES.has(e.type) && e.metadata?.source === 'plugin')
+          .map((e) => this.twinKey(e))
       );
       for (const ev of batch) {
-        if (ev.type === 'chat' && ev.metadata.source === 'echo' && pluginChatKeys.has(this.chatKey(ev))) {
+        if (
+          TWIN_TYPES.has(ev.type) &&
+          ev.metadata?.source === 'echo' &&
+          pluginTwinKeys.has(this.twinKey(ev))
+        ) {
           continue; // twin of a plugin-captured shout in this same batch
         }
         await this.dispatch(ev);
@@ -432,16 +495,30 @@ export class Poller {
     }
   }
 
-  // Case-insensitive identity of one shout (echo text arrives uppercased).
-  chatKey(ev) {
-    return `${ev.characterName}|${ev.metadata.text.toUpperCase()}`;
+  // Case-insensitive identity of one shout, keyed on the TEXT and the event
+  // type ALONE — deliberately NOT the name.
+  //
+  // With Companion 0.3.2 the plugin's line carries the server-verified peer
+  // name while the console echo carries the name the CLIENT claimed. For an
+  // honest player they are identical and nothing changes. For a forged
+  // ChatMessage RPC they differ — which is precisely when a name-inclusive key
+  // stops matching, fails to recognise the echo as a twin, and lets the
+  // impersonation through to #server and to the oath wall under the claimed
+  // name. Keying on the text alone makes the plugin line always win.
+  //
+  // The cost is one collision case: two vikings shouting the identical words
+  // inside the same batch (or the same 60 s cross-batch window) mirror once
+  // instead of twice. A dropped duplicate line is a far smaller thing than a
+  // mirrored impersonation.
+  twinKey(ev) {
+    return `${ev.type}|${String(ev.metadata?.text ?? '').toUpperCase()}`;
   }
 
   // --- Mirror one in-game shout to Discord (plain channel webhook) ---
   // Not routed through the dashboard webhook on purpose: chat is Discord-only
   // (the site is public), so it never touches the events table.
   async postChat(ev) {
-    const key = this.chatKey(ev);
+    const key = this.twinKey(ev);
     const now = Date.now();
     // Cross-batch twin suppression (plugin line + console echo split across
     // two polls, or a re-read after a log rotation glitch).

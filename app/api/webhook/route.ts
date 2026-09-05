@@ -15,7 +15,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { matchPinInCaption } from '@/lib/pin-match';
-import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
+import { webhookRateLimit, ipFromRequest } from '@/lib/rate-limit';
 import { safeEqual } from '@/lib/ops/auth';
 import { decideIdentity } from '@/lib/identity-guard';
 // The pure decisions this handler used to inline. Everything below is string or
@@ -36,7 +36,7 @@ import {
   stripClaimCode,
   stripLeadingSeparators,
 } from '@/lib/webhook/oath';
-import { shouldReplayGuard, isSameJoin, sessionDurationMinutes } from '@/lib/webhook/presence';
+import { shouldReplayGuard, planJoinSession, sessionDurationMinutes } from '@/lib/webhook/presence';
 import { shouldDedupeDeath, deathDedupeBounds } from '@/lib/webhook/dedupe';
 
 // Always run on the Node.js runtime (we need the service role key + full SDK)
@@ -146,18 +146,27 @@ function identityRefusal(type: string, characterName: string, boundSteamId: stri
 }
 
 export async function POST(request: Request) {
-  // ---- 0. Rate limit (best-effort, per-IP) --------------------------------
-  if (!rateLimit(ipFromRequest(request))) {
-    return Response.json({ error: 'rate limited' }, { status: 429 });
-  }
-
-  // ---- 1. Authenticate -----------------------------------------------------
+  // ---- 1. Authenticate, then rate limit on the matching budget -------------
+  // The secret is checked FIRST because it decides which budget applies. The
+  // whole server's event stream arrives from ONE address (the log poller is a
+  // single process), and the poller rewinds its byte cursor on any non-2xx, so
+  // a flat 60/min made a catch-up batch of more than 60 events permanently
+  // undrainable — see lib/rate-limit.ts's two-tier note.
   const provided = request.headers.get('x-webhook-secret');
   const expected = process.env.WEBHOOK_SECRET;
   // Constant-time (lib/ops/auth safeEqual hashes both sides first, so it leaks
   // neither content nor length) — the same compare /api/boards, /api/ops/* and
   // the login route already use. Still fails closed when the env is unset.
-  if (!expected || !provided || !safeEqual(provided, expected)) {
+  const authenticated = !!expected && !!provided && safeEqual(provided, expected);
+
+  // Both branches consume a token, on separate keys, and the unauthenticated
+  // bucket is drawn on BEFORE the 401 — so guessing the secret is still capped
+  // at 60 attempts per minute per address, and that flood cannot drain the
+  // poller's bucket.
+  if (!webhookRateLimit(ipFromRequest(request), authenticated)) {
+    return Response.json({ error: 'rate limited' }, { status: 429 });
+  }
+  if (!authenticated) {
     return Response.json({ error: 'unauthorized' }, { status: 401 });
   }
 
@@ -919,11 +928,41 @@ export async function POST(request: Request) {
         if (openErr) console.error(`[webhook] join: open-session check failed — ${openErr.message}`);
         openForThisJoin = (open as { id: string; joined_at: string } | null) ?? null;
       }
-      const openIsSameJoin = isSameJoin(occurredAt.getTime(), openForThisJoin?.joined_at);
+      // What to do about sessions is a pure decision (lib/webhook/presence.ts):
+      // swallow a replay, refuse to credit an impostor, or close whatever is
+      // stale before opening the new one. Before this, the third case simply
+      // inserted a second open session and abandoned the first — see the
+      // planJoinSession header for the damage that did.
+      const plan = planJoinSession({
+        occurredAtMs: occurredAt.getTime(),
+        openSession: openForThisJoin,
+        identityMismatch,
+      });
 
-      if (openIsSameJoin) {
+      if (plan.action === 'skip' && plan.reason === 'replay') {
         console.log(`[webhook] replay ignored join session ${characterName} ${occurredIso}`);
+      } else if (plan.action === 'skip') {
+        // The presence rows above still went in; only the session is withheld.
+        console.warn(`[webhook] session skipped for identity mismatch ${characterName}`);
       } else {
+        if (plan.action === 'close-then-open') {
+          // Same arithmetic the leave branch below uses. A stale open session
+          // means the leave for it never arrived (crash, missed "Closing
+          // socket", a name taken over); this join is the last moment we can
+          // honestly say they were still on.
+          const { error: closeErr } = await db
+            .from('sessions')
+            .update({ left_at: occurredIso, duration_minutes: plan.durationMinutes })
+            .eq('id', plan.closeSessionId);
+          if (closeErr) {
+            console.error(`[webhook] join: closing the stale session failed — ${closeErr.message}`);
+          } else {
+            console.log(
+              `[webhook] join closed a stale open session for ${characterName} ` +
+                `(${plan.durationMinutes} min) before opening a new one`
+            );
+          }
+        }
         await db.from('sessions').insert({
           player_id: playerId,
           character_name: characterName,

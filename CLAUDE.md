@@ -24,6 +24,8 @@ Read the **T−6 launch audit** first — it is the punch list of record and sup
 
 **Shipped 2026-09-04 (T−5), all live:** prod deploy `r75dm7mmb` (site copy, launch-notice slot, hardened ingest, cockpit keys), the four `db/2026-09-04_*.sql` migrations APPLIED (`ingest_death()` is live, so the gs↔eilif death race is closed), poller + bot restarted on hardened code, the 4 duplicate death rows and the phantom day-64 frame purged, `.env.example` templates tracked. Details: tracker block 2026-09-04.
 
+**Overnight 2026-09-05 (T−4):** stress test exists and passes (`docs/STRESS-TEST.md`); pack v12 minter (`docs/PACK.md`); plugins **0.3.2** staged (Client zip `plugins/thunderstore/EilifCompanionClient-0.3.2.zip`, Companion DLL waits for a stopped window); `scripts/launch-preflight.mjs` + `scripts/rebuild-plugins.sh`; webhook logic in `lib/webhook/*`. Handoff: vault `08-Dashboard/09-Handoff-2026-09-05.md`. Printable launch runbook: <https://claude.ai/code/artifact/86c52627-5eb9-4d34-b064-e1b1a9d14e96>.
+
 **What is where right now**
 - **Pack of record: v11** (`01a0440c…`) — decodes cleanly, all eight third-party mods at Thunderstore latest. It pins Companion Client **0.2.0**, so the tombstone keep-list is dark for every player until v12 is minted at cutover.
 - **On the box:** Eilif **Companion 0.3.0** and **Boards 0.2.0**, both byte-identical to the repo; Emitter 0.2.4; V+ 0.9.17.1; WebMap 2.7.1; game **0.221.12**.

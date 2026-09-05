@@ -1,21 +1,27 @@
 #!/usr/bin/env node
 // How much room does ONE producer actually have?
 //
-// lib/rate-limit.ts gives every IP 60 requests per 60 seconds, refilling
-// linearly, and lib/rate-limit.ipFromRequest keys on the first `x-forwarded-for`
-// hop. That means all of these share ONE bucket:
+// lib/rate-limit.ipFromRequest keys on the first `x-forwarded-for` hop, so all
+// of these share ONE bucket:
 //
 //   • the log poller — every join, leave, death, position, chat mirror, oath,
 //     pin and roster sync for the WHOLE server, from one process on one machine;
 //   • the game server's Emitter — one address for every server payload.
 //
 // A player's own client mod posts from that player's own address, so the client
-// paths have 60/min each and are never the problem. The poller is.
+// paths are never the problem. The poller is.
 //
-// This probe measures the real budget at real-time cadence (no simulated clock,
-// no compression), which is the only way the number means anything: it fires a
-// burst from one address, records where the 429s begin, then measures the steady
-// rate that address can sustain.
+// SINCE THE FIX (stress-1) THERE ARE TWO BUDGETS, and this probe measures both.
+// /api/webhook checks WEBHOOK_SECRET first: a caller that presents it draws on
+// WEBHOOK_AUTHED_LIMIT (1200/min), a caller that does not keeps the strict
+// WEBHOOK_UNAUTHED_LIMIT (60/min) — on a separate key, so a brute-force flood
+// cannot drain the poller's bucket. Before it, one flat 60/min applied to
+// everything and phase 3 below never drained.
+//
+// It measures at real-time cadence (no simulated clock, no compression), which
+// is the only way the numbers mean anything: a burst from one address, then the
+// steady rate that address can sustain, then the strict tier, then a catch-up
+// batch replayed with the poller's own all-or-nothing semantics.
 //
 // Usage (local stack only):
 //   BASE_URL=http://localhost:3400 WEBHOOK_SECRET=stress-secret \
@@ -54,7 +60,10 @@ const codes = [];
 for (let i = 0; i < burst; i++) codes.push(await hit());
 const firstRefusal = codes.findIndex((c) => c === 429);
 const accepted = codes.filter((c) => c === 200).length;
-console.log(`[probe] burst: ${accepted}/${burst} accepted; first 429 at request #${firstRefusal + 1}`);
+console.log(
+  `[probe] burst: ${accepted}/${burst} accepted; ` +
+    (firstRefusal === -1 ? 'no 429 at all' : `first 429 at request #${firstRefusal + 1}`),
+);
 
 console.log('[probe] now measuring the sustained rate for 60s (1 request per second)...');
 let ok = 0;
@@ -68,9 +77,34 @@ while (Date.now() - start < 60_000) {
 }
 console.log(`[probe] sustained 1/s for 60s: ${ok} accepted, ${refused} refused.`);
 console.log(
-  '[probe] budget for ONE address = 60 requests / 60 s. At 20 players the log poller sends roughly ' +
-    '20 position posts + the chat mirror + joins/leaves/deaths + a roster sync every minute, all from ' +
-    'that single address.',
+  `[probe] authenticated budget for ONE address: ${accepted}/${burst} in a burst and ${ok}/${ok + refused} ` +
+    'sustained. At 20 players the log poller sends roughly 20 position posts + the chat mirror + ' +
+    'joins/leaves/deaths + a roster sync every minute, all from that single address.',
+);
+
+// ── phase 2b: the strict tier is still strict ────────────────────────────────
+//
+// Raising the authenticated budget is only safe if the unauthenticated one did
+// not move with it. Same address, no secret: every one of these must be refused
+// (401 while there is budget, 429 once there is not), and the count of 401s is
+// the strict tier's size.
+const probeIpAnon = process.env.PROBE_IP_ANON || '203.0.113.97';
+console.log(`\n[probe] brute force: 90 requests with NO secret from ${probeIpAnon}`);
+let unauthorized = 0;
+let throttled = 0;
+for (let i = 0; i < 90; i++) {
+  const res = await fetch(`${base}/api/webhook`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': probeIpAnon },
+    body,
+  });
+  if (res.status === 401) unauthorized++;
+  else if (res.status === 429) throttled++;
+  else console.log(`[probe] UNEXPECTED ${res.status} on a secretless request`);
+}
+console.log(
+  `[probe] secretless: ${unauthorized} answered 401, ${throttled} answered 429 — the strict tier is ` +
+    `${unauthorized} guesses per minute per address, and none of them touched the poller's bucket.`,
 );
 
 // ── phase 3: the catch-up batch ──────────────────────────────────────────────

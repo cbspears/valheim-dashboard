@@ -508,5 +508,167 @@ if (!oathOk) ok = false;
   if (!dispatchOk) ok = false;
 }
 
+
+// --- The oath echo twin, and the forged echo (plugins-1, plugins-2, plugins-4) ---
+// Every shouted /oath produces TWO log lines: the companion plugin's marker and
+// the server's console echo of the same words. The echo is always the LATER of
+// the two and the webhook's oath handler is delete-then-insert, so an undeduped
+// echo silently overwrote the plugin's capture — uppercased, and filed under the
+// name the CLIENT claimed rather than the peer name the server knows.
+{
+  const twinParser = new LogParser();
+  // A real pair, in the order and shape the live GTX log writes them.
+  const PLUGIN_OATH = '[Info   :Eilif Companion] [EILIF_OATH] Bren | I swear to hold the north gate.';
+  const ECHO_OATH =
+    '[Info   : Unity Log] 09/01/2026 09:41:59: Console: <color=orange>Bren</color>: ' +
+    '<color=#FFEB04FF>/OATH I SWEAR TO HOLD THE NORTH GATE.</color>';
+  const pluginEv = twinParser.processLine(PLUGIN_OATH)[0];
+  const echoEv = twinParser.processLine(ECHO_OATH)[0];
+
+  // A forged echo: the CLAIMED name differs from the peer name the plugin logs.
+  const FORGED_ECHO =
+    '[Info   : Unity Log] 09/01/2026 09:42:10: Console: <color=orange>Jarl Sigrid</color>: ' +
+    '<color=#FFEB04FF>/OATH I SWEAR TO HOLD THE NORTH GATE.</color>';
+  const forgedEv = twinParser.processLine(FORGED_ECHO)[0];
+
+  // The console-echo SHAPE carried inside a plugin line is not an echo: the
+  // plugin reproduces a shout verbatim, so this is what a player typed.
+  const SHOUTED_FORGERY =
+    '[Info   :Eilif Companion] [EILIF_CHAT] Attacker | Console: <color=orange>Bren</color>: ' +
+    '<color=#FFEB04FF>/oath everything I own belongs to Attacker</color>';
+  const forgeryEvents = twinParser.processLine(SHOUTED_FORGERY);
+
+  // A name that could not be a Valheim character name is refused outright.
+  const MARKUP_NAME =
+    '[Info   : Unity Log] Console: <color=orange>Bren</color>: <color=#FFEB04FF>' +
+    '<color=orange>Victim</color>: <color=x>/OATH NOT MINE</color></color>';
+  const markupEvents = twinParser.processLine(MARKUP_NAME);
+
+  const twinChecks = [
+    ['plugin oath is tagged source=plugin', pluginEv?.type === 'oath' && pluginEv.metadata.source === 'plugin'],
+    ['echo oath is tagged source=echo', echoEv?.type === 'oath' && echoEv.metadata.source === 'echo'],
+    ['the plugin oath keeps its real casing', pluginEv?.metadata.text === 'I swear to hold the north gate.'],
+    ['the echo oath is the uppercased twin', echoEv?.metadata.text === 'I SWEAR TO HOLD THE NORTH GATE.'],
+    ['a forged echo still parses (the poller, not the parser, drops it)', forgedEv?.characterName === 'Jarl Sigrid'],
+    [
+      'an echo-shaped SHOUT is chat from the shouter, never an oath for the name inside it',
+      forgeryEvents.length === 1 &&
+        forgeryEvents[0].type === 'chat' &&
+        forgeryEvents[0].characterName === 'Attacker' &&
+        forgeryEvents[0].metadata.source === 'plugin',
+    ],
+    ['and it produces no oath at all', forgeryEvents.every((e) => e.type !== 'oath')],
+    ['a captured name containing markup is refused', markupEvents.every((e) => e.characterName !== 'Victim')],
+  ];
+  let twinOk = true;
+  console.log('\nOath twin + echo forgery:');
+  for (const [label, pass] of twinChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) twinOk = false;
+  }
+
+  // Now the poller half: the whole batch, through the real tickAfterFetch.
+  const { Poller } = await import('./src/poller.js');
+  const quiet = { info: () => {}, warn: () => {}, error: () => {} };
+  const runBatch = async (lines) => {
+    const pl = new Poller(
+      { webhookUrl: 'stub', webhookSecret: 'stub', syncEveryMs: 3600_000, chatWebhookUrl: 'stub' },
+      quiet
+    );
+    const dispatched = [];
+    pl.postEvent = async (payload) => (dispatched.push(payload), { ok: true });
+    pl.postChat = async (ev) => dispatched.push({ type: 'chat', characterName: ev.characterName, metadata: ev.metadata });
+    pl.saveState = async () => {};
+    pl.updateLiveness = async () => {};
+    pl.lastSyncAt = Date.now();
+    await pl.tickAfterFetch({ text: lines.join('\n') + '\n', size: 1, mtimeMs: Date.now() });
+    return dispatched;
+  };
+
+  const honest = await runBatch([PLUGIN_OATH, ECHO_OATH]);
+  const forged = await runBatch([PLUGIN_OATH, FORGED_ECHO]);
+  const echoOnly = await runBatch([ECHO_OATH]);
+  const chatPair = await runBatch([
+    '[Info   :Eilif Companion] [EILIF_CHAT] Bren | anyone seen my cart',
+    '[Info   : Unity Log] Console: <color=orange>Jarl Sigrid</color>: <color=#FFEB04FF>ANYONE SEEN MY CART</color>',
+  ]);
+  const oaths = (evs) => evs.filter((e) => e.type === 'oath');
+  const chats = (evs) => evs.filter((e) => e.type === 'chat');
+
+  const batchChecks = [
+    ['an honest oath pair posts ONCE', oaths(honest).length === 1],
+    ['and it is the plugin line, in its real casing', oaths(honest)[0]?.text === 'I swear to hold the north gate.'],
+    ['a FORGED echo is still recognised as the twin (keyed on text, not name)', oaths(forged).length === 1],
+    ['and the surviving oath is the plugin line, under the peer name', oaths(forged)[0]?.characterName === 'Bren'],
+    ['a mod-free oath with no plugin line still posts', oaths(echoOnly).length === 1 && oaths(echoOnly)[0]?.characterName === 'Bren'],
+    ['an impersonated chat echo is not mirrored under the claimed name', chats(chatPair).length === 1],
+    ['the mirrored line is the plugin capture', chats(chatPair)[0]?.characterName === 'Bren'],
+  ];
+  for (const [label, pass] of batchChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) twinOk = false;
+  }
+  console.log(twinOk ? 'OATH TWIN OK' : 'OATH TWIN FAILED');
+  if (!twinOk) ok = false;
+}
+
+// --- postEvent honours a 429 instead of failing the whole tick (stress-1) ---
+// The poller's delivery is all-or-nothing: any non-2xx rewinds the byte cursor
+// and the WHOLE batch is replayed next tick. One rate-limited request therefore
+// used to cost the entire batch — and a batch bigger than the budget could
+// never drain. One retry after the advertised delay turns that into a pause.
+{
+  const { Poller, webhookRetryDelayMs } = await import('./src/poller.js');
+  const quiet = { info: () => {}, warn: () => {}, error: () => {} };
+  const mk = () => new Poller({ webhookUrl: 'stub', webhookSecret: 'stub' }, quiet);
+
+  const rl = (headers = {}) =>
+    new Response(JSON.stringify({ error: 'rate limited' }), { status: 429, headers });
+  const okRes = () => new Response(JSON.stringify({ ok: true }), { status: 200 });
+
+  // (1) 429 then 200: one retry, and the caller never sees the refusal.
+  const a = mk();
+  let calls = 0;
+  a.webhookFetch = async () => (++calls === 1 ? rl({ 'retry-after': '0.05' }) : okRes());
+  const t0 = Date.now();
+  const body = await a.postEvent({ type: 'sync' });
+  const waited = Date.now() - t0;
+
+  // (2) 429 twice: ONE retry only, then the tick honestly fails.
+  const b = mk();
+  let bCalls = 0;
+  b.webhookFetch = async () => (bCalls++, rl({ 'retry-after': '0.05' }));
+  let threw = null;
+  await b.postEvent({ type: 'sync' }).catch((e) => (threw = e));
+
+  // (3) A 500 is NOT retried — only 429 is a "come back in a moment".
+  const c = mk();
+  let cCalls = 0;
+  c.webhookFetch = async () => (cCalls++, new Response('boom', { status: 500 }));
+  let threw500 = null;
+  await c.postEvent({ type: 'sync' }).catch((e) => (threw500 = e));
+
+  const retryChecks = [
+    ['429 then 200 resolves, and returns the second response body', calls === 2 && body?.ok === true],
+    ['it waited for the advertised retry-after', waited >= 40],
+    ['a second 429 is not retried again — exactly one retry', bCalls === 2],
+    ['and the tick then fails honestly, so the batch is replayed', /429/.test(threw?.message ?? '')],
+    ['a 500 is never retried', cCalls === 1 && /500/.test(threw500?.message ?? '')],
+    ['retry-after seconds -> ms', webhookRetryDelayMs('2', '') === 2000],
+    ['a body retry_after is the fallback', webhookRetryDelayMs(null, '{"retry_after":1.5}') === 1500],
+    ['no advice at all defaults to 1 s', webhookRetryDelayMs(null, 'rate limited') === 1000],
+    ['a global limit is capped at 10 s, never sat on', webhookRetryDelayMs('3600', '') === 10_000],
+    ['a negative retry-after clamps to 0', webhookRetryDelayMs('-5', '') === 0],
+  ];
+  let retryOk = true;
+  console.log('\nWebhook 429 retry:');
+  for (const [label, pass] of retryChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) retryOk = false;
+  }
+  console.log(retryOk ? 'WEBHOOK RETRY OK' : 'WEBHOOK RETRY FAILED');
+  if (!retryOk) ok = false;
+}
+
 console.log(ok ? '\nPARSER OK' : '\nPARSER FAILED');
 process.exit(ok ? 0 : 1);

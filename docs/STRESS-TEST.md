@@ -268,12 +268,16 @@ on a localhost port cannot echo a number that only exists locally, so the trap i
 
 ### A caveat you must read before believing the 429 column
 
-`lib/rate-limit.ts` counts against the **wall clock**: 60 requests per 60 real
-seconds per IP, keyed on the first `x-forwarded-for` hop. The harness replays a
-simulated minute every two real seconds, so the poller's roughly twenty-one posts
-per simulated minute arrive as roughly 630 per real minute. In a first
-uncorrected run that emptied the bucket immediately and 2,232 of 2,305 position
-posts came back 429, drowning every other measurement.
+`lib/rate-limit.ts` counts against the **wall clock**, keyed on the first
+`x-forwarded-for` hop. **Since the 2026-09-05 fix the webhook budget is two-tier**
+— 1,200/min for a caller that presents `WEBHOOK_SECRET`, the old 60/min for one
+that does not, on separate buckets — but everything below was measured against
+the single flat 60/min that preceded it, and is kept because it is what the
+sharding exists for. The harness replays a simulated minute every two real
+seconds, so the poller's roughly twenty-one posts per simulated minute arrive as
+roughly 630 per real minute. In a first uncorrected run that emptied the bucket
+immediately and 2,232 of 2,305 position posts came back 429, drowning every other
+measurement.
 
 `POLLER_SHARDS` spreads the poller's traffic over sixteen addresses so the
 per-real-minute rate matches what the real poller produces, and the run measures
@@ -407,6 +411,50 @@ grows by another twenty-one events every minute it is stalled. Joins, leaves,
 deaths, chat and the roster sync all stop, and a restart does not help because
 the offset is in `state.json`. Measured against a single local server, which is
 the worst case — on Vercel each warm instance has its own bucket.
+
+---
+
+## Re-run after the two launch blockers were fixed, 2026-09-05
+
+Same harness, same twenty vikings, 360 simulated minutes at 2 s each, against a
+**fresh** `next build` of the fixed tree repointed at a `db reset` local stack,
+with the dry-run bot restarted alongside it. 12,762 requests in 719 s real,
+again **no 5xx, no non-2xx of any kind, and no retries**.
+
+**32 of 32 invariants passed, 0 failed, 0 skipped** — including the two that
+failed the first time:
+
+| Invariant | Before | After |
+|---|---|---|
+| every session closed | FAIL — 1 of 25 open forever | **PASS** — 0 open of 24 |
+| session count matches joins | FAIL — 25 sessions for 24 joins | **PASS** — expected 24, found 24 |
+
+The impostor join at 83 % is what produced both. It is still recorded as
+presence and still flagged (`impostor join flagged and NOT bound` passes
+unchanged), but it no longer opens a session: the site log carries one
+`[webhook] session skipped for identity mismatch Ulf` and Ulf keeps his single
+real session. Everything else stayed green — 38 deaths in 38 rows, both boss
+scenarios, 21 Great Deeds announced once each, 20 unique titles, 49 voice lines,
+355 mirrored chat lines.
+
+Counts for the evening: 110 `events`, **24 sessions**, 20 `players`, 20
+`player_stats`, 21 milestones achieved, 49 voice lines.
+
+**The rate-limit probe, same day, against the same server:**
+
+```
+[probe] burst: 90/90 accepted; no 429 at all
+[probe] sustained 1/s for 60s: 60 accepted, 0 refused.
+[probe] secretless: 60 answered 401, 30 answered 429 — the strict tier is 60
+        guesses per minute per address, and none of them touched the poller's bucket.
+[probe] catch-up batch: 75 events in one tick, poller semantics
+[probe] tick 1: all 75 delivered — cursor advances, batch drains.
+```
+
+Phase 3 is the whole point: the 75-event batch that never drained in five ticks
+now drains on tick 1. The poller also honours a 429 with one `retry-after`
+retry before failing its tick, so even a refusal costs a pause rather than the
+batch.
 
 ---
 
