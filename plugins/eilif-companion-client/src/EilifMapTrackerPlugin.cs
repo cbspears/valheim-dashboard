@@ -37,7 +37,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.3.1";
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
@@ -99,15 +99,44 @@ namespace EilifCompanionClient
             }
             catch { /* older runtimes may not expose Tls12 explicitly; ignore */ }
 
-            // Hook logout so we always send a FRESH final reading on a clean quit-to-menu / log out
-            // (Minimap + local player are still alive inside Game.Logout). Hard disconnects that
-            // skip Logout are covered by the connected->disconnected fallback in Update().
+            // Three independent hooks, applied ONE AT A TIME (v0.3.1, audit plugins-6):
+            //
+            //   • Patch_GameLogout          — a FRESH final map reading on a clean quit-to-menu /
+            //     log out (Minimap + local player are still alive inside Game.Logout; hard
+            //     disconnects that skip Logout are covered by the fallback in Update()).
+            //   • Patch_PlayerOnDeath       — the local player's death cause (DeathReporter.cs).
+            //   • Patch_MoveInventoryToGrave — the tombstone keep-list (TombstoneKeeper.cs).
+            //
+            // WHY ONE AT A TIME. These used to be three bare PatchAll(type) calls with nothing
+            // around them. Harmony throws when it cannot resolve a target method, so if ONE of
+            // Game.Logout / Player.OnDeath / Inventory.MoveInventoryToGrave changes shape in a game
+            // update, that exception escapes Awake: every LATER patch silently never applies and
+            // even the "loaded" / "armed" boot lines never print — while Update() keeps posting
+            // map-% quite happily. The result looks like a working plugin whose death causes have
+            // quietly reverted to the third-party "enemyhit" catch-all, which is close to
+            // undiagnosable from a player's log. Isolating each class makes a partial failure
+            // LOUD instead: the survivors still apply and the count below says so out loud.
+            // Same pattern (and same reason) as ../../eilif-paths/src/EilifPathsPlugin.cs.
             var harmony = new Harmony(PluginGuid);
-            harmony.PatchAll(typeof(Patch_GameLogout));
-            // v0.2.0: the local player's death cause (see DeathReporter.cs).
-            harmony.PatchAll(typeof(Patch_PlayerOnDeath));
-            // v0.3.0: keep tools/weapons/ammo out of the tombstone (see TombstoneKeeper.cs).
-            harmony.PatchAll(typeof(Patch_MoveInventoryToGrave));
+            int classesApplied = 0, classesTotal = 0;
+            foreach (Type t in AccessTools.GetTypesFromAssembly(typeof(EilifMapTrackerPlugin).Assembly))
+            {
+                try
+                {
+                    if (t.GetCustomAttributes(typeof(HarmonyPatch), true).Length == 0) continue;
+                    classesTotal++;
+                    harmony.CreateClassProcessor(t).Patch();
+                    classesApplied++;
+                }
+                catch (Exception ex)
+                {
+                    Log.LogError("[EilifDeath] could not apply " + (t != null ? t.Name : "?") + ": " + ex.Message);
+                }
+            }
+            // The one unambiguous grep for a post-rebuild verification: 3/3 is healthy, anything
+            // else means read the "could not apply" line(s) above it.
+            Log.LogInfo($"[EilifDeath] patch classes applied: {classesApplied}/{classesTotal}");
+
             if (TombstoneKeeper.KeepTypes.Count > 0)
                 Log.LogInfo($"[EilifDeath] tombstone keep-list armed ({TombstoneKeeper.KeepTypes.Count} item types; active only where deathkeepequip is set).");
 

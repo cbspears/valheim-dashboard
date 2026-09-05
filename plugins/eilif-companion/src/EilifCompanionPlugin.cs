@@ -22,7 +22,7 @@ namespace EilifCompanion
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
         public const string PluginName = "Eilif Companion";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.3.1";
 
         internal static ManualLogSource Log;
 
@@ -114,7 +114,36 @@ namespace EilifCompanion
             else
                 Log.LogInfo($"[Eilif] Voice half active. Polling {_voiceUrl.Value} every {_pollSeconds.Value}s while players online; speaking at most one line per {_lineSpacing.Value}s.");
 
-            new Harmony(PluginGuid).PatchAll();
+            // Every attribute-declared patch class is applied ON ITS OWN (v0.3.1, audit plugins-6).
+            // A bare PatchAll() throws on the FIRST target it cannot resolve and abandons the rest
+            // of the batch — and the order it walks the classes in is not defined, so a single
+            // changed signature in a game update could take out the oath capture, the pin capture,
+            // or both, at random, and the exception would escape Awake before the "loaded" line
+            // below ever printed. The plugin would then look completely absent in the log while the
+            // voice pump, world-key enforcement and position emitter (all Update()-driven, none of
+            // them Harmony) carried on working — the worst possible diagnostic signal on a launch
+            // night. Isolating each class turns that into a named error line plus an honest count.
+            // Same pattern (and same reason) as ../eilif-paths/src/EilifPathsPlugin.cs.
+            var harmony = new Harmony(PluginGuid);
+            int classesApplied = 0, classesTotal = 0;
+            foreach (Type t in AccessTools.GetTypesFromAssembly(typeof(EilifCompanionPlugin).Assembly))
+            {
+                try
+                {
+                    if (t.GetCustomAttributes(typeof(HarmonyPatch), true).Length == 0) continue;
+                    classesTotal++;
+                    harmony.CreateClassProcessor(t).Patch();
+                    classesApplied++;
+                }
+                catch (Exception ex)
+                {
+                    Log.LogError("[Eilif] could not apply " + (t != null ? t.Name : "?") + ": " + ex.Message);
+                }
+            }
+            // The one unambiguous post-rebuild grep: 2/2 is healthy (OathCapture +
+            // Patch_OnNewChatMessage_Pin), anything else means read the "could not apply" lines.
+            Log.LogInfo($"[Eilif] patch classes applied: {classesApplied}/{classesTotal}");
+
             Log.LogInfo($"[Eilif] {PluginName} v{PluginVersion} loaded. /oath capture armed, /pin capture armed, position emitter armed ({PositionEmitter.EmitIntervalSeconds:0}s).");
         }
 

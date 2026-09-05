@@ -1,0 +1,9 @@
+{
+  "name": "EilifPaths",
+  "version_number": "1.4.0",
+  "website_url": "https://valheim-dashboard.vercel.app/mods",
+  "description": "Eilif community server: +40% speed and a quarter of the movement stamina drain on dirt paths, paved roads and built floors. Tools and weapons cost normal stamina on paths, nothing on floors. Beds take a fire further off, upgrades attach further out.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2333"
+  ]
+}

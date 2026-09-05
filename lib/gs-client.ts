@@ -402,7 +402,9 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
 // Both maps resolve to the exact `bosses.name` values seeded in Supabase.
 // Forsaken VIII (bosses row, biome "Deep North") has NO entry in either map:
 // Valheim ships no Deep North boss / global key yet, so it can never auto-fire
-// — it stays manual (scripts/mark-boss.js) until the update lands.
+// — it stays manual (scripts/mark-boss.js) until the update lands. When it does,
+// the first unknown key is announced by noteUnrecognizedDefeatKey below rather
+// than swallowed, so the kill is noticed on the night it happens.
 
 /** Valheim boss-defeat global key (milestone `key`) → `bosses.name`. */
 export const BOSS_MILESTONE_KEY_TO_NAME: Record<string, string> = {
@@ -443,12 +445,47 @@ export function parseBossMilestones(body: Obj): ParsedBossMilestone[] {
   for (const m of arr(body.milestones)) {
     const key = str(m.key);
     if (!key || seen.has(key)) continue;
-    const bossName = BOSS_MILESTONE_KEY_TO_NAME[key];
-    if (!bossName) continue;
     seen.add(key);
+    const bossName = BOSS_MILESTONE_KEY_TO_NAME[key];
+    if (!bossName) {
+      noteUnrecognizedDefeatKey(key);
+      continue;
+    }
     out.push({ key, bossName, tsUtc: str(m.tsUtc) });
   }
   return out;
+}
+
+/**
+ * Say something the first time a `defeated_*` key arrives that this map has never
+ * heard of (audit backend-17).
+ *
+ * THE NIGHT THIS EXISTS FOR. Valheim 1.0 ships the Deep North boss, and its
+ * global key is not knowable until it lands — so `bosses`' eighth row (Forsaken
+ * VIII) cannot auto-fire, and without this line the ONLY symptom of the kill is
+ * that nothing happens: no altar lights up, no Great Deed, no Discord embed, and
+ * nobody knows whether the key was missed or the fight was never won. One log
+ * line turns a silent gap into a five-minute fix — add the key to both maps here,
+ * add its art in config/art.ts, and (until a deploy) register the kill by hand
+ * with scripts/mark-boss.js.
+ *
+ * Deliberately fires for mini-boss keys too (`defeated_serpent` and friends,
+ * which are correctly not in the map): "unrecognized" is the honest word for
+ * them, and once-per-key-per-instance means a handful of lines over a server's
+ * life rather than one every ~120s. Emitter milestones are NEW-only per process,
+ * so in practice these appear at most once each anyway.
+ */
+const unrecognizedDefeatKeys = new Set<string>();
+function noteUnrecognizedDefeatKey(key: string): void {
+  if (!key.startsWith('defeated_')) return; // progression/bounty keys are not defeat claims
+  if (unrecognizedDefeatKeys.has(key)) return;
+  unrecognizedDefeatKeys.add(key);
+  console.warn(`[gs-ingest] unrecognized defeated_* key: ${key}`);
+}
+
+/** TEST SEAM ONLY — forget which unknown keys have already been logged. */
+export function resetUnrecognizedDefeatKeys(): void {
+  unrecognizedDefeatKeys.clear();
 }
 
 /**

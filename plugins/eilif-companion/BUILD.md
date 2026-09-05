@@ -8,6 +8,27 @@ byte-identical to that install — no drift found. dotnet SDK on this machine: *
 launch-day rebuild needs **no network access** for NuGet. Full build (`dotnet build -c Release`)
 takes under 2s.
 
+## Deploying **0.3.1** (built 2026-09-04, staged, NOT uploaded)
+
+`dist/EilifCompanion.dll` is now **0.3.1**: both the `[EILIF_OATH]` and `[EILIF_CHAT]` captures moved
+off the dead `Chat.RPC_ChatMessage` postfix onto the `Chat.OnNewChatMessage` **Prefix** that the
+`/pin` capture already proves works here (audit voice-6 — this is what stops oaths being stored
+SHOUT-UPPERCASED), and every Harmony patch class is now applied in its own try/catch with an
+explicit count (audit plugins-6). **ValheimPlus `[Chat]` stays ENABLED** — it is what makes `/s`
+shouts carry server-wide — and no server config changes: V+'s patch throws inside
+`Chat.AddInworldText`, which `OnNewChatMessage` calls from its *body*, so our Prefix has already
+written its marker line before the NRE fires. No config keys changed and no marker-line format
+changed, so the log poller needs no matching edit. **The GTX host is Windows and a loaded plugin DLL is
+file-locked**, so this swap only works inside a stopped window: **Panel Stop** → SFTP-upload
+`dist/EilifCompanion.dll` over `<nest>/BepInEx/plugins/EilifCompanion/EilifCompanion.dll` (retrying
+upload — the lock can linger a few seconds after the process exits) → **Panel Start** (Stop → Start,
+never Restart) → then grep `LogOutput.log` for **`Eilif Companion 0.3.1`** (the version actually
+loaded) and for **`[Eilif] patch classes applied: 2/2`** (both hooks on; anything else means read the
+`[Eilif] could not apply <Class>: <message>` lines above it). Finally have someone shout
+`/s /oath I will hold the north` and confirm a raw-case `[EILIF_OATH] <Name> | I will hold the north`
+line appears — mixed case is the proof the new hook is live, since the old echo path could only ever
+produce capitals. Fold this into the same stopped window as the 1.0 rebuild if one is coming.
+
 ## Launch-day sequence — do these BEFORE `refresh-libs.sh` (added 2026-09-04, audit plugins-9)
 
 `refresh-libs.sh` copies the game DLLs out of the **local Steam client install**

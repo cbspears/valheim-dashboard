@@ -36,7 +36,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CREATURES, capitalizeCreature } from '@/config/creatures';
-import { sanitizeClientText, CLIENT_TEXT_MAX } from './gs-client';
+import { sanitizeClientText, CLIENT_TEXT_MAX, CLIENT_NAME_MAX, identityKey } from './gs-client';
 
 /** ±3 min — the same death-dedupe window /api/webhook and the gs path use. */
 export const DEDUPE_WINDOW_MS = 3 * 60_000;
@@ -163,6 +163,11 @@ export function eilifCause(hitType: HitType, attacker: string | null): string {
 
 export type ParsedEilifDeath = {
   player: string;
+  /**
+   * The character that SENT this report (EilifCompanionClient ≥0.3.1), or null
+   * from an older client that doesn't carry the field. See parseEilifDeath.
+   */
+  reporter: string | null;
   occurredIso: string;
   /** Natural unique key: a player cannot die twice in the same instant. */
   key: string;
@@ -179,10 +184,28 @@ export type ParsedEilifDeath = {
  * an unrecognized HitType from a future game version must fail safe rather than
  * write a row whose cause would render as a raw token, and must NOT claim the
  * eilif precedence that would then suppress the gs report.
+ *
+ * `reporter` (EilifCompanionClient ≥0.3.1) is WHO SENT the report — the local
+ * player's own character name, which for an honest client is always `player`
+ * itself. It is sanitized and capped exactly like every other client-supplied
+ * name, and it is OPTIONAL: a report from a ≤0.3.0 client simply has none, and
+ * is parsed exactly as before. The self-only rule that uses it lives in
+ * ingestEilifDeath (and, one layer earlier, in /api/gs-ingest, which also runs
+ * its presence cross-check on the reporter rather than the victim).
  */
 export function parseEilifDeath(body: Record<string, unknown>): ParsedEilifDeath | null {
   const player = typeof body.player === 'string' ? body.player.trim() : '';
   if (!player) return null;
+
+  // Absent → null (an older client). Present-but-junk (a control-character-only
+  // string, a lone rich-text tag) also lands on null, which the mismatch rule
+  // deliberately treats as "no claim of identity" rather than as a mismatch:
+  // the presence cross-check still has to pass, so this is no weaker than the
+  // pre-0.3.1 behaviour it falls back to.
+  const reporter =
+    body.reporter === undefined || body.reporter === null
+      ? null
+      : sanitizeClientText(body.reporter, CLIENT_NAME_MAX);
 
   const tsUtc = typeof body.tsUtc === 'string' ? body.tsUtc.trim() : '';
   if (!tsUtc || Number.isNaN(Date.parse(tsUtc))) return null;
@@ -216,6 +239,7 @@ export function parseEilifDeath(body: Record<string, unknown>): ParsedEilifDeath
 
   return {
     player,
+    reporter,
     occurredIso: new Date(tsUtc).toISOString(),
     key: `${player}|${tsUtc}`,
     hitType,
@@ -357,6 +381,25 @@ async function findPlayerId(client: SupabaseClient, name: string): Promise<strin
 }
 
 /**
+ * Are these two client-supplied names the same viking?
+ *
+ * BOTH SIDES GET THE IDENTICAL TREATMENT, which is the entire point. `reporter`
+ * has already been through sanitizeClientText + the 32-char name cap in
+ * parseEilifDeath while `player` is only trimmed, so comparing them as-is would
+ * make the two strings diverge for a name long or ornamented enough to be
+ * changed by that pass — and the failure mode would be REJECTING A REAL DEATH,
+ * the one outcome worth engineering against here. (Valheim caps character names
+ * far below 32, so this is a guard rail rather than a live case; guard rails are
+ * cheap and a launch-night false rejection is not.) identityKey then folds case
+ * and whitespace, the same rule the rest of the ingest uses for this question.
+ */
+function sameViking(a: string, b: string): boolean {
+  const fold = (v: string) => identityKey(sanitizeClientText(v, CLIENT_NAME_MAX) ?? '');
+  const left = fold(a);
+  return left.length > 0 && left === fold(b);
+}
+
+/**
  * Ingest ONE death reported by our own client plugin (source:'eilif-death').
  * Writes to `events` only. See the precedence table at the top of this file.
  */
@@ -366,6 +409,24 @@ export async function ingestEilifDeath(
 ): Promise<EilifDeathResult> {
   const p = parseEilifDeath(body);
   if (!p) return { ok: false, status: 'ignored', reason: 'bad eilif-death payload' };
+
+  // SELF-ONLY (audit security-2). A death report may only be filed by the
+  // character it is about. /api/gs-ingest rejects a mismatch a layer earlier —
+  // this is the same rule restated at the write, so the invariant belongs to the
+  // function that does the writing and cannot be lost by a future caller. Same
+  // case/whitespace folding the rest of the ingest uses for "are these two
+  // strings the same viking" (identityKey), because the two names come from the
+  // same Player object anyway and a fold costs nothing.
+  //
+  // A reporter-less report (client ≤0.3.0) is NOT a mismatch: it is the old
+  // shape, still accepted, still gated by the presence cross-check upstream.
+  if (p.reporter && !sameViking(p.reporter, p.player)) {
+    console.warn(
+      `[deaths] eilif death REJECTED: reporter "${p.reporter}" is not the victim "${p.player}" — ` +
+        `a death report may only be filed by the character it is about.`,
+    );
+    return { ok: false, status: 'ignored', reason: 'reporter mismatch' };
+  }
 
   // Resolve an EXISTING players row only — never auto-create one from a client
   // payload (the poller's join path owns that). Looked up BEFORE the write so

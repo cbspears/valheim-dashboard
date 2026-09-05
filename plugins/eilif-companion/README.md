@@ -14,30 +14,62 @@ observational, one (WORLD KEYS, added in 0.3.0) that **does change the world's r
   `[WorldKeys] EnforcedGlobalKeys` into the running world. Ships defaulting to `deathkeepequip`
   (keep equipped gear on death). **This overrides the GTX panel** — see [World keys](#world-keys-v030).
 
-`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.0`.
+`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.1`.
 
 ---
 
 ## How it works
 
-### EARS — `/oath` capture
-A HarmonyX **Postfix** on the private `ZRoutedRpc.HandleRoutedRPC(RoutedRPCData)`. On a dedicated
-server every routed RPC passes through this method, so we can observe the routed **`ChatMessage`**
-payload with zero client installs (the exact pattern the WebMap mod uses for its chat-command pins).
+### EARS — `/oath` capture (hook moved in v0.3.1)
+A HarmonyX **Prefix** on `Chat.OnNewChatMessage(GameObject, long senderID, Vector3 pos,
+Talker.Type type, UserInfo sender, string text)` — the same hook the `/pin` capture has always used,
+and the reason this one moved.
 
-For each `ChatMessage` we read a *copy* of the payload (so the original re-broadcast is untouched):
-`Vector3 position, int type, UserInfo userInfo, string text`. If `text` starts with `/oath ` (case-
-insensitive) and has non-empty oath text, we log:
+**What was wrong before 0.3.1.** The capture used to postfix `Chat.RPC_ChatMessage`. That hook is
+dead on this server: ValheimPlus's `[Chat]` patch throws an NRE earlier in the same chain, so the
+original never completes and our postfix never runs. The 09-01 boot log contains **zero**
+`[EILIF_OATH]` lines; all ten oaths on record reached the dashboard through the poller's *console
+echo* fallback instead — and the echo is the server printing a SHOUT, which Valheim
+display-uppercases. That is why every signature on the Oath wall reads `I WILL NOT RUN, JUMP OR
+CLIMB!`. (Audit finding voice-6.)
+
+**Why `OnNewChatMessage` is the right hook.** The decompile shows `RPC_ChatMessage` doing exactly
+one thing — `OnNewChatMessage(null, sender, position, (Talker.Type)type, userInfo, text)` — so it
+carries every argument the old hook had, one level further down, and a Prefix on it is *proven* to
+run on this exact server, because that is where `/pin` lives. Oaths captured here keep their
+**original casing**.
+
+**V+ `[Chat]` stays enabled — nothing about the server config has to change.** That section is what
+makes `/s` shouts carry server-wide (`shoutDistance` + `serverSyncsConfig`), which is the behaviour
+oaths and the chat mirror are built on, so turning it off is not on the table. Its patch throws
+inside `Chat.AddInworldText`, and `AddInworldText` is called from the **body** of
+`OnNewChatMessage` — so our Prefix has already run and already written its marker line before the
+NRE happens. The exception still kills the rest of that call (which is why the old postfix, one
+frame further out, never ran and never will), but it can no longer cost us the capture.
+
+Both markers are emitted from this one Prefix. If `text` starts with `/oath ` (case-insensitive)
+and has non-empty oath text, we log, at Info level:
 
 ```
 [EILIF_OATH] <exact character name> | <oath text>
 ```
 
-at Info level. `userInfo.Name` is the sender's exact character name.
+and any other **shouted**, non-`/command` text is mirrorable chat, logged in the same shape:
 
-> **Suppression:** because this is a Postfix, the `/oath` line has *already* been re-broadcast to
-> other players — it appears in chat as normal. Suppressing it would require a Prefix that drops the
-> whole routed RPC (invasive/risky), so by design we **let it through**. Fine for the pilot.
+```
+[EILIF_CHAT] <exact character name> | <shout text>
+```
+
+`sender.Name` is the sender's exact character name. Both line formats are byte-identical to 0.3.0's
+(`services/log-poller/src/parser.js` anchors each to the plugin's own log prefix and splits
+name/text on the FIRST `" | "`), so the poller needs no matching change — it keeps preferring these
+raw-case lines over their uppercased console-echo twins. A repeat of the same marker + sender + text
+inside 5 seconds is suppressed, so nothing can put one signature on the wall (or one sentence in
+#server) twice.
+
+> **Suppression:** the `/oath` line is still re-broadcast to other players and appears in chat as
+> normal. Swallowing it would mean a Prefix that *skips* the original chat handling for everyone,
+> which is invasive and risky for a cosmetic gain — by design we **let it through**.
 
 ### VOICE — speak queued lines
 The plugin's `Update()` (main thread) runs a `PollSeconds` timer. When it fires **and ≥1 player is

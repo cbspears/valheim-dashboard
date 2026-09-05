@@ -1,0 +1,9 @@
+{
+  "name": "EilifPaths",
+  "version_number": "1.3.0",
+  "website_url": "https://valheim-dashboard.vercel.app/mods",
+  "description": "Eilif community server: +40% move speed and a quarter of the stamina drain on dirt paths, paved roads, and built floors, plus beds that accept a fire further away and crafting upgrades that attach from further out.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2333"
+  ]
+}

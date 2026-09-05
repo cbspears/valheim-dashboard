@@ -63,6 +63,28 @@ function db() {
 }
 
 /**
+ * ONE line per serverless instance, not one per death (audit security-2).
+ *
+ * Every death from a client older than EilifCompanionClient 0.3.1 arrives with no
+ * `reporter`, and pack v11 still pins 0.2.0 — so this is the NORMAL case until the
+ * pack is re-minted, and logging it per-request would just be noise that teaches
+ * everyone to ignore it. One line per cold instance is enough to answer the only
+ * question worth asking from the logs: "are we still accepting unbound death
+ * reports, or has everyone updated?" When this line stops appearing after a pack
+ * re-mint, the reporter-less path is dead and can be tightened to a refusal.
+ */
+let warnedReporterlessDeath = false;
+function warnReporterlessDeathOnce() {
+  if (warnedReporterlessDeath) return;
+  warnedReporterlessDeath = true;
+  console.warn(
+    '[gs-ingest] eilif-death accepted WITHOUT a reporter (EilifCompanionClient ≤0.3.0). ' +
+      'Presence is being checked against the victim, so the report is not bound to its sender. ' +
+      'This line prints once per instance; it stops once every player runs 0.3.1+.',
+  );
+}
+
+/**
  * Guard against the Emitter's `onlinePlayers` roster going stale (real
  * incident 2026-07-04: a player relogged to a different character and the
  * Emitter kept reporting the OLD character name online for ~1h). The log
@@ -1168,11 +1190,49 @@ export async function POST(req: Request) {
     // causing false rejections; flip it back once the poller's confirmed healthy.
     const presenceCheckEnabled = (process.env.PRESENCE_CHECK_ENABLED || 'true').toLowerCase() !== 'false';
     const reporter = typeof body.reporter === 'string' ? body.reporter.trim() : '';
+
+    // SELF-ONLY DEATH REPORTS (audit security-2). Client payloads carry no secret
+    // by design — they run on players' PCs — so until EilifCompanionClient 0.3.1
+    // the only thing tying a death report to its sender was the presence check on
+    // the VICTIM's name. That let anyone who could reach this endpoint fabricate a
+    // death, with attacker-written cause text, for any viking who happened to be
+    // online: the row lands in #server via the relay, in How We Die, in the Saga
+    // and in that viking's death log, and Eilif speaks the cause aloud in game.
+    //
+    // 0.3.1 sends `reporter` = the LOCAL player's character name (DeathReporter.cs
+    // — the same identity the map-% post reports as `playerName`). Two rules follow:
+    //
+    //   • reporter present and NOT the victim  → refuse. Nobody files a death for
+    //     somebody else, and there is no honest client that would try.
+    //   • reporter present                     → run the presence check on the
+    //     REPORTER, not the victim. That is what makes the check meaningful: it
+    //     now proves the SENDER is connected here, instead of proving that the
+    //     person they are writing about is.
+    //
+    // A reporter-less report (client ≤0.3.0, still pinned by pack v11) keeps
+    // exactly today's behaviour — refusing them would silently drop every real
+    // death until the pack is re-minted — but it is logged once per instance so
+    // the gap is visible rather than assumed closed. lib/deaths.ts restates the
+    // mismatch rule at the write itself.
+    if (body.source === 'eilif-death') {
+      const victim = typeof body.player === 'string' ? body.player.trim() : '';
+      if (reporter && identityKey(reporter) !== identityKey(victim)) {
+        console.warn(
+          `[gs-ingest] REPORTER MISMATCH: eilif-death claims reporter "${reporter}" for victim ` +
+            `"${victim}" — a death report may only be filed by the character it is about. Ignoring.`,
+        );
+        return Response.json({ status: 'ignored', reason: 'reporter mismatch' });
+      }
+      if (!reporter) warnReporterlessDeathOnce();
+    }
+
     const presenceName =
       body.source === 'client-map'
         ? (typeof body.playerName === 'string' ? body.playerName.trim() : '')
         : body.source === 'eilif-death'
-          ? (typeof body.player === 'string' ? body.player.trim() : '')
+          ? // 0.3.1+: prove the SENDER is here. Older clients fall back to the
+            // victim, which is what this check has always done for them.
+            reporter || (typeof body.player === 'string' ? body.player.trim() : '')
           : reporter;
     if (presenceCheckEnabled && presenceName) {
       const presence = await confirmOnThisServer(presenceName);

@@ -8,7 +8,8 @@ using UnityEngine;
 namespace EilifCompanionClient
 {
     /// <summary>
-    /// EilifCompanionClient v0.2.0 — the authoritative DEATH-CAUSE reporter.
+    /// EilifCompanionClient — the authoritative DEATH-CAUSE reporter (since v0.2.0;
+    /// self-binding `reporter` field since v0.3.1, see Report()).
     ///
     /// THE PROBLEM IT SOLVES. Death causes used to reach the dashboard only via the
     /// third-party GsValheimStatsClient's `deathEvents[]`, which reports every
@@ -116,6 +117,19 @@ namespace EilifCompanionClient
             string world = znet.GetWorldName() ?? "";
             if (string.IsNullOrEmpty(player)) return;
 
+            // v0.3.1 — WHO SENT THIS. `who` is already proven to be
+            // Player.m_localPlayer above, so this is the very same identity the
+            // cartography post reports as `playerName`: the character sitting at
+            // this keyboard. The server requires reporter == player and runs its
+            // presence cross-check on the REPORTER, which is what makes a death
+            // report self-only — before this field existed, anyone who could reach
+            // /api/gs-ingest (client payloads carry no secret, by design: they run
+            // on players' PCs) could POST a fabricated death, with an
+            // attacker-written cause, for any viking who happened to be online.
+            // For an honest client the two names are always identical; the field
+            // exists so the server can TELL that, instead of having to assume it.
+            string reporter = Player.m_localPlayer.GetPlayerName();
+
             Vector3 pos = who.transform.position;
             string tsUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
 
@@ -123,6 +137,7 @@ namespace EilifCompanionClient
                 "{\"schemaVersion\":1,\"game\":\"valheim\",\"source\":\"eilif-death\"," +
                 "\"world\":" + EilifMapTrackerPlugin.JsonStr(world) + "," +
                 "\"player\":" + EilifMapTrackerPlugin.JsonStr(player) + "," +
+                "\"reporter\":" + EilifMapTrackerPlugin.JsonStr(reporter) + "," +
                 "\"tsUtc\":" + EilifMapTrackerPlugin.JsonStr(tsUtc) + "," +
                 "\"hitType\":" + EilifMapTrackerPlugin.JsonStr(hitType) + "," +
                 "\"attacker\":" + (attacker == null ? "null" : EilifMapTrackerPlugin.JsonStr(attacker)) + "," +

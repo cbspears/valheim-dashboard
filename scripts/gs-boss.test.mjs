@@ -8,6 +8,7 @@ import {
   parseSelfDistances,
   BOSS_MILESTONE_KEY_TO_NAME,
   BOSS_OBJECT_TO_NAME,
+  resetUnrecognizedDefeatKeys,
 } from '../lib/gs-client.ts';
 import { planBossKillUpdate } from '../lib/boss-damage.ts';
 import assert from 'node:assert';
@@ -313,4 +314,49 @@ for (const priorSource of ['server', 'gs-milestone']) {
   assert.equal(plan.fightStats.topDamageFrom, undefined, 'the fallback marker retires with the real verdict');
 }
 
-console.log('OK — all boss + distance parser assertions passed, and every client bossKillEvents rule holds');
+// ── (h) An unknown `defeated_*` key is ANNOUNCED, not swallowed (audit backend-17)
+//
+// Valheim 1.0 ships the Deep North boss on 09-09 and its global key is not
+// knowable until it lands, so `bosses`' eighth row (Forsaken VIII) cannot
+// auto-fire. Without a log line the only symptom of that kill is that NOTHING
+// happens — no altar, no Great Deed, no Discord embed — and nobody can tell a
+// missed key from a fight that was never won. One line turns that into a
+// five-minute fix on the night.
+{
+  resetUnrecognizedDefeatKeys();
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...a) => warnings.push(a.join(' '));
+  try {
+    // A mapped key says nothing; an unmapped defeated_* key says exactly one thing.
+    parseBossMilestones({ milestones: [
+      { key: 'defeated_eikthyr', tsUtc: ts },
+      { key: 'defeated_thenorthernone', tsUtc: ts },
+    ] });
+    assert.deepEqual(warnings, ['[gs-ingest] unrecognized defeated_* key: defeated_thenorthernone']);
+
+    // Once per key per process — the Emitter re-fires its whole knownKeys set on a
+    // fresh deploy / lost state.tsv, and this must not become a per-payload chorus
+    // that everyone learns to scroll past.
+    parseBossMilestones({ milestones: [{ key: 'defeated_thenorthernone', tsUtc: ts }] });
+    assert.equal(warnings.length, 1, 'the same unknown key is only announced once');
+
+    // Non-defeat milestones are not defeat claims and must stay silent.
+    parseBossMilestones({ milestones: [
+      { key: 'KilledTroll', tsUtc: ts }, { key: 'Hildir1', tsUtc: ts },
+    ] });
+    assert.equal(warnings.length, 1, 'progression/bounty keys are not announced');
+
+    // A mini-boss key IS announced (it is genuinely unrecognized as a boss), and
+    // still must not be parsed as one.
+    const mini = parseBossMilestones({ milestones: [{ key: 'defeated_serpent', tsUtc: ts }] });
+    assert.equal(mini.length, 0, 'a mini-boss still maps to no boss');
+    assert.equal(warnings.length, 2);
+    assert.ok(warnings[1].endsWith('defeated_serpent'));
+  } finally {
+    console.warn = realWarn;
+    resetUnrecognizedDefeatKeys();
+  }
+}
+
+console.log('OK — all boss + distance parser assertions passed, every client bossKillEvents rule holds, and an unknown defeated_* key is announced once');

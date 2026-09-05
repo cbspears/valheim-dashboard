@@ -641,4 +641,89 @@ for (const mode of ['rpc', 'missing']) {
   assert.ok(!/[<>]/.test(row.metadata.cause), 'no rich-text markup survives');
 }
 
-console.log(`OK — eilif-death: all ${HIT_TYPES.length} HitTypes phrase cleanly, both dedupe orders collapse to one row (atomic rpc AND fallback), simultaneous reports collapse too`);
+// ── 16. `reporter`: a death report may only be filed by the character it is about
+//
+// THE HOLE THIS CLOSES (audit security-2). Client payloads carry no secret — they
+// run on players' PCs — so before EilifCompanionClient 0.3.1 the only thing tying
+// a death report to its sender was a presence check on the VICTIM's name. Anyone
+// who could reach /api/gs-ingest could therefore post a death, with
+// attacker-written cause text, for any viking who happened to be online: it lands
+// in #server via the relay, in How We Die, in the Saga and in that viking's death
+// log, and Eilif speaks the cause aloud in game.
+//
+// 0.3.1 sends `reporter` = the local player's own character name. Three cases,
+// and all three have to keep holding: present-and-matching (the honest client),
+// present-and-mismatched (refused outright, nothing written), and absent (a
+// ≤0.3.0 client — pack v11 still pins 0.2.0, so refusing these would silently
+// drop every real death until the pack is re-minted).
+{
+  // (a) PRESENT AND MATCHING — the only shape an honest 0.3.1 client sends.
+  const withReporter = { ...eilifBody, reporter: 'Testman' };
+  assert.equal(parseEilifDeath(withReporter).reporter, 'Testman', 'reporter parsed');
+
+  const db = makeDb(freshState(), 'rpc');
+  const ok = await ingestEilifDeath(db, withReporter);
+  assert.equal(ok.status, 'inserted', 'a self-reported death is ingested exactly as before');
+  assert.equal(ok.cause, 'burning');
+  assert.equal(deaths(db).length, 1, 'one death row');
+
+  // Same viking, different spelling: identityKey folds case and whitespace, the
+  // same rule the rest of the ingest uses for "are these two strings one viking".
+  // A skew of case here must never cost somebody a real death.
+  const folded = makeDb(freshState(), 'rpc');
+  const okFolded = await ingestEilifDeath(folded, { ...eilifBody, reporter: '  testman ' });
+  assert.equal(okFolded.status, 'inserted', 'case/whitespace skew is still the same viking');
+  assert.equal(deaths(folded).length, 1);
+
+  // (b) PRESENT AND MISMATCHED — refused, and nothing at all is written.
+  const forge = makeDb(freshState(), 'rpc');
+  const bad = await ingestEilifDeath(forge, { ...eilifBody, reporter: 'Griefer' });
+  assert.equal(bad.ok, false, 'a death filed for somebody else is refused');
+  assert.equal(bad.status, 'ignored');
+  assert.equal(bad.reason, 'reporter mismatch');
+  assert.equal(deaths(forge).length, 0, 'and NOTHING is written — not even an upgrade');
+
+  // The refusal must not be dodgeable by dressing the name up: sanitizeClientText
+  // strips the markup first, so this is still plainly not "Testman".
+  const dressed = makeDb(freshState(), 'rpc');
+  const bad2 = await ingestEilifDeath(dressed, { ...eilifBody, reporter: '<color=red>Griefer</color>' });
+  assert.equal(bad2.reason, 'reporter mismatch', 'rich text does not smuggle a mismatch past the check');
+  assert.equal(deaths(dressed).length, 0);
+
+  // Nor by making the victim the odd one out: the pair has to agree either way.
+  const swapped = makeDb(freshState(), 'rpc');
+  const bad3 = await ingestEilifDeath(swapped, { ...eilifBody, player: 'Someone Else', reporter: 'Testman' });
+  assert.equal(bad3.reason, 'reporter mismatch', 'the rule is symmetric — the two names must agree');
+  assert.equal(deaths(swapped).length, 0);
+
+  // (c) ABSENT (client <=0.3.0) — parsed as null and ingested exactly as today.
+  assert.equal(parseEilifDeath(eilifBody).reporter, null, 'no reporter -> null, not a mismatch');
+  const legacy = makeDb(freshState(), 'rpc');
+  const okLegacy = await ingestEilifDeath(legacy, eilifBody);
+  assert.equal(okLegacy.status, 'inserted', 'an older client is not broken by the new field');
+  assert.equal(deaths(legacy).length, 1);
+
+  // Junk that sanitizes away to nothing is treated as ABSENT, not as a mismatch:
+  // it is no claim of identity at all, and the presence cross-check upstream still
+  // has to pass, so this is no weaker than the pre-0.3.1 path it falls back to.
+  assert.equal(parseEilifDeath({ ...eilifBody, reporter: '<b></b>' }).reporter, null);
+  assert.equal(parseEilifDeath({ ...eilifBody, reporter: 42 }).reporter, null, 'a non-string is not a reporter');
+
+  // Same capping as every other client-supplied name (32, not the 48 used for
+  // free text) — a reporter name also reaches the ops logs.
+  const long = parseEilifDeath({ ...eilifBody, reporter: 'R'.repeat(200) });
+  assert.equal(long.reporter.length, 32, 'reporter capped at CLIENT_NAME_MAX');
+  assert.equal(long.player, 'Testman', 'and the victim is untouched by it');
+
+  // …and that cap must not, by itself, invent a mismatch. Only `reporter` goes
+  // through it at parse time, so a name long enough to be truncated would
+  // otherwise stop matching the untruncated `player` and cost a real viking a
+  // real death. Valheim's own name limit is far below 32, so this is a guard
+  // rail — but a launch-night false rejection is exactly the thing worth one.
+  const bigName = 'V'.repeat(40);
+  const big = makeDb(freshState(), 'rpc');
+  const okBig = await ingestEilifDeath(big, { ...eilifBody, player: bigName, reporter: bigName });
+  assert.notEqual(okBig.reason, 'reporter mismatch', 'a truncating-length name is still self-reported');
+}
+
+console.log(`OK — eilif-death: all ${HIT_TYPES.length} HitTypes phrase cleanly, both dedupe orders collapse to one row (atomic rpc AND fallback), simultaneous reports collapse too, and a death can only be reported by the viking it happened to`);

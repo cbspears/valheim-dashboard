@@ -20,7 +20,7 @@ same toolchain, same repo conventions.
    weapons, shield, torch and ammo stay on you when you die instead of going into the grave —
    but only on a world whose `deathkeepequip` global key is set. Everywhere else it is inert.
 
-`BepInPlugin` GUID: `net.eilif.companionclient` — name `Eilif Companion Client` — v`0.3.0`.
+`BepInPlugin` GUID: `net.eilif.companionclient` — name `Eilif Companion Client` — v`0.3.1`.
 
 ---
 
@@ -85,7 +85,8 @@ only) reads it and fires a fire-and-forget POST:
 
 ```json
 { "schemaVersion": 1, "game": "valheim", "source": "eilif-death",
-  "world": "<world>", "player": "<char>", "tsUtc": "2026-08-23T12:00:00.000Z",
+  "world": "<world>", "player": "<char>", "reporter": "<char>",
+  "tsUtc": "2026-08-23T12:00:00.000Z",
   "hitType": "Burning", "attacker": null, "biome": "Meadows",
   "pos": { "x": 12.4, "z": -7.8 } }
 ```
@@ -95,6 +96,13 @@ only) reads it and fires a fire-and-forget POST:
   `Water`, `Smoke`, `EdgeOfWorld`, `Impact`, `Cart`, `Tree`, `Self`, `Structural`, `Turret`, `Boat`,
   `Stalagtite`, `Catapult`, `CinderFire`, `AshlandsOcean`). The server holds the same list in
   `lib/deaths.ts` and maps every one to a rendered phrase.
+- **`reporter`** (v0.3.1) is the LOCAL player's character name — who *sent* this report, which for
+  an honest client is always the same string as `player`. Client payloads carry no secret by design
+  (they run on players' PCs), so before this field existed the server had no way to tell a real
+  self-report from a death fabricated for any viking who happened to be online. It now requires
+  `reporter == player` and runs its "are you actually connected to this server right now"
+  cross-check on the **reporter**. A report from an older client (no `reporter`) is still accepted,
+  checked against the victim as before.
 - **`attacker`** is `null` for an environmental death. For a creature it is the **raw**
   `Character.m_name`, which is a localization token like `$enemy_serpent` — the server humanizes it
   via `config/creatures.ts` so there is exactly one naming table, not two. For a player killer it is
@@ -210,12 +218,16 @@ dotnet build -c Release    # outputs plugins/eilif-companion-client/dist/EilifCo
    `[EilifMap] posted 0.87% for <Char> (Dedicated) [interval]` (or `[logout]`).
 2. The dashboard's Cartographer board / `player_stats.map_explored_pct` for that character updates.
 3. At the menu / in singleplayer there should be **no** `[EilifMap] posted` lines.
-4. On boot: `[EilifDeath] death-cause reporter armed …`. Then die on the server (a campfire is the
+4. On boot (v0.3.1): `[EilifDeath] patch classes applied: 3/3` — the one unambiguous grep that all
+   three Harmony hooks (logout, death reporter, tombstone keep-list) went on. Anything other than
+   `3/3` means read the `[EilifDeath] could not apply <Class>: <message>` line(s) just above it;
+   each hook now fails on its own instead of taking the others down with it.
+5. On boot: `[EilifDeath] death-cause reporter armed …`. Then die on the server (a campfire is the
    quickest honest test) and look for
    `[EilifDeath] <Char> died in <World>: hitType=Burning, attacker=(none), biome=Meadows`
    followed by `[EilifDeath] reported Burning for <Char>`. The Saga / How We Die should read
    "lost to the flames", **not** "struck down by an unseen foe".
-5. On boot (v0.3.0): `[EilifDeath] tombstone keep-list armed (N item types; active only where
+6. On boot (v0.3.0): `[EilifDeath] tombstone keep-list armed (N item types; active only where
    deathkeepequip is set).` On a real death on a keep-gear world:
    `[EilifDeath] tombstone keep-list spared N item(s).` — then check the corpse: weapons, shield,
    torch, tools and ammo should still be in your inventory, resources and food in the grave.

@@ -139,6 +139,16 @@ export const MODS: Mod[] = [
     url: 'https://thunderstore.io/c/valheim/p/Proudlock_Technology/GsValheimStatsClient/',
   },
   {
+    // VERSION = WHAT THE PACK SHIPS, not what the repo has built. This page tells a
+    // player which mods they are running, and r2modman reinstalls the pinned pack
+    // versions on every "Start modded" — so the honest answer is the version pack
+    // v11 pins, which is 0.2.0. EilifCompanionClient **0.3.1** is built and staged
+    // for Thunderstore (plugins/thunderstore/EilifCompanionClient-0.3.1/) but is
+    // NOT uploaded and NOT in any pack: it adds the tombstone keep-list (0.3.0) and
+    // the self-binding `reporter` field on death reports (0.3.1), neither of which
+    // any player has today. Bump this to 0.3.1 only after the upload lands AND the
+    // pack is re-minted to pin it — advertising it earlier promises players
+    // gameplay they do not have. See that directory's UPLOAD.md for the decision.
     name: 'Eilif Companion Client',
     author: 'cbspears (custom-built)',
     description:
