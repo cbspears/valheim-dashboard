@@ -62,6 +62,7 @@ export default async function OpsPage() {
     unannouncedIdentityConfirmations: data.unannouncedIdentityConfirmations,
     expiredUnconsumedClaims: data.expiredUnconsumedClaims,
     statPoisonReporters: data.statPoisonReporters,
+    futureDatedEvents: data.futureDatedEvents,
     botFlags: data.botFlags,
     demoDiscordEvents: data.demoDiscordEvents,
     tablePresence: data.tablePresence,

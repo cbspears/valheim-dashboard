@@ -12,8 +12,13 @@ import assert from 'node:assert';
 import {
   bossDamageMap,
   bossDamageDeltas,
+  bossDamagePostCap,
   foldClientDamage,
   foldObservedDamage,
+  sealClientDamageVerdict,
+  BOSS_MAX_HP,
+  BOSS_DAMAGE_POST_MULTIPLE,
+  UNKNOWN_BOSS_MAX_HP,
   CLIENT_DAMAGE_SOURCE,
 } from '../lib/boss-damage.ts';
 import { applyBaseline, mergeIntoRow } from '../lib/gs-baseline.ts';
@@ -461,5 +466,89 @@ assert.equal(
   null,
   'observed path: idempotent',
 );
+
+// ── 8. THE SANITY CEILING and the is_killed rule (red-team, 2026-09-05) ──────
+// `gs_stats.bossDamage` is self-reported in an unauthenticated payload and
+// nothing bounded it: one POST of 500000 damage on Eikthyr — a thousand times
+// the beast's health — crowned its author top-damage on a boss nobody had
+// felled, and put them in fighters/players_present permanently (both monotonic).
+
+// 8a. The ceiling itself.
+assert.equal(bossDamagePostCap('Eikthyr'), BOSS_MAX_HP.Eikthyr * BOSS_DAMAGE_POST_MULTIPLE);
+assert.equal(
+  bossDamagePostCap('Forsaken VIII'),
+  UNKNOWN_BOSS_MAX_HP * BOSS_DAMAGE_POST_MULTIPLE,
+  'a boss we have no figure for still gets a ceiling, never Infinity',
+);
+for (const [boss, hp] of Object.entries(BOSS_MAX_HP)) {
+  assert.ok(bossDamagePostCap(boss) >= hp, `${boss}: the ceiling is never below the beast's own health`);
+  assert.ok(bossDamagePostCap(boss) < 500_000, `${boss}: and it is far below the red-team's 500000`);
+}
+
+// 8b. THE ATTACK, on a felled boss: the number is trimmed to the ceiling.
+{
+  const felled = { fighters: ['Lóa'], damage: { 'Lóa': 420 }, source: 'gs-milestone' };
+  const cap = bossDamagePostCap('Eikthyr');
+  const attacked = foldClientDamage(felled, 'TrollMVP', 500_000, { cap, isKilled: true });
+  assert.equal(attacked.damage.TrollMVP, cap, 'the credited damage is the ceiling, not the claim');
+  assert.ok(attacked.damage.TrollMVP < 500_000, 'the 500000 never lands');
+  // An honest delta under the ceiling is untouched.
+  const honest = foldClientDamage(felled, 'Bren', 180, { cap, isKilled: true });
+  assert.equal(honest.damage.Bren, 180, 'a real fight is not clipped');
+}
+
+// 8c. THE ATTACK, on an UNFELLED boss: no verdict is carved at all.
+{
+  const cap = bossDamagePostCap('Eikthyr');
+  const seeded = foldClientDamage(null, 'TrollMVP', 500_000, { cap, isKilled: false });
+  assert.equal(seeded.topDamagePlayer, undefined, 'a boss nobody has felled gets no champion');
+  assert.equal(seeded.topDamage, undefined);
+  assert.equal(seeded.topDamageFrom, undefined);
+  // …but the damage still accrues, which is the point of accruing pre-kill.
+  assert.deepEqual(seeded.fighters, ['TrollMVP'], 'the fighter is still banked');
+  assert.equal(seeded.damage.TrollMVP, cap, 'and so is the (capped) damage');
+  // Default behaviour is unchanged for callers with no is_killed fact to give
+  // (the backfill script replays against a boss already felled).
+  assert.equal(foldClientDamage(null, 'Steve', 100).topDamagePlayer, 'Steve', 'the default still carves');
+}
+
+// 8d. sealClientDamageVerdict: the kill flip carves what the grind earned.
+// Without this the 2026-08-28 Eikthyr shape — a kill with NO bossKillEvents MVP
+// — would show a damage ledger and no champion.
+{
+  const grind = foldClientDamage(null, 'Bren', 180, { isKilled: false });
+  const grind2 = foldClientDamage(grind, 'Lóa', 320, { isKilled: false });
+  assert.equal(grind2.topDamagePlayer, undefined, 'still no verdict while the beast stands');
+  const sealed = sealClientDamageVerdict(grind2);
+  assert.equal(sealed.topDamagePlayer, 'Lóa', 'the kill carves it from the accrued ledger');
+  assert.equal(sealed.topDamage, 320);
+  assert.equal(sealed.topDamageFrom, CLIENT_DAMAGE_SOURCE, 'stamped as ours, still ours to revise');
+  assert.deepEqual(sealed.fighters, ['Bren', 'Lóa'], 'and the war party is untouched');
+  assert.equal(sealClientDamageVerdict(sealed), null, 're-sealing an unchanged ledger is a no-op');
+  assert.equal(sealClientDamageVerdict(null), null, 'nothing accrued → nothing to carve');
+  assert.equal(sealClientDamageVerdict({ fighters: [] }), null, 'no damage map → nothing to carve');
+  // A real MVP summary still owns the verdict — the same contract as the folds.
+  assert.equal(
+    sealClientDamageVerdict({ damage: { Troll: 9_999 }, topDamagePlayer: 'Bjorn Ironside', topDamage: 3120 }),
+    null,
+    "a server MVP's verdict is never re-carved by the fallback",
+  );
+}
+
+// 8e. The observed (bystander) path takes the same ceiling and the same rule.
+{
+  const cap = bossDamagePostCap('Eikthyr');
+  const obs = foldObservedDamage(null, 'ChÆrleif', { TrollMVP: 500_000 }, { cap, isKilled: false });
+  assert.equal(obs.damage.TrollMVP, cap, 'a bystander reading is self-reported too, and is capped');
+  assert.equal(obs.topDamagePlayer, undefined, 'and carves no verdict on an unfelled boss');
+  // The high-water ledger still advances to the full claim, so the un-credited
+  // excess is forgiven once rather than re-credited on every re-post.
+  assert.equal(obs.observed['ChÆrleif'].TrollMVP, 500_000, 'the ledger records what was READ');
+  assert.equal(
+    foldObservedDamage(obs, 'ChÆrleif', { TrollMVP: 500_000 }, { cap, isKilled: false }),
+    null,
+    'so the identical re-post is still a true no-op',
+  );
+}
 
 console.log('OK — all client-damage fallback assertions passed');

@@ -38,6 +38,7 @@ import {
 } from '@/lib/webhook/oath';
 import { shouldReplayGuard, planJoinSession, sessionDurationMinutes } from '@/lib/webhook/presence';
 import { shouldDedupeDeath, deathDedupeBounds } from '@/lib/webhook/dedupe';
+import { clampEventTime } from '@/lib/event-time';
 
 // Always run on the Node.js runtime (we need the service role key + full SDK)
 // and never cache — every webhook mutates state and must execute on request.
@@ -210,14 +211,23 @@ export async function POST(request: Request) {
 
   // Honor an explicit event time if the producer supplies a valid ISO string;
   // otherwise stamp "now". Used for created_at, sessions, and last_seen.
-  const occurredAt = (() => {
-    if (typeof body.occurredAt === 'string') {
-      const t = new Date(body.occurredAt);
-      if (!Number.isNaN(t.getTime())) return t;
-    }
-    return new Date();
-  })();
-  const occurredIso = occurredAt.toISOString();
+  //
+  // Clamped like every other producer-supplied time (lib/event-time.ts): this
+  // one value becomes events.created_at, sessions.joined_at/left_at AND
+  // players.last_seen_at, so a future date here would stall the #server relay's
+  // cursor and pin a player "last seen" in the year 2999. This endpoint is
+  // secret-gated, so the realistic case is a skewed clock on the poller host
+  // rather than an attacker — but the shape of the bug is identical and the rule
+  // belongs in one place.
+  const clamped = clampEventTime(typeof body.occurredAt === 'string' ? body.occurredAt : null);
+  if (clamped.claimedIso) {
+    console.warn(
+      `[webhook] ${type} for "${characterName ?? 'unknown'}" claimed ${clamped.claimedIso}, which is in the ` +
+        `future — stored at ${clamped.iso} instead. Check the clock on the log-poller host.`,
+    );
+  }
+  const occurredAt = new Date(clamped.iso);
+  const occurredIso = clamped.iso;
 
   try {
     const db = serviceClient();

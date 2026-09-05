@@ -37,6 +37,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CREATURES, capitalizeCreature } from '@/config/creatures';
 import { sanitizeClientText, CLIENT_TEXT_MAX, CLIENT_NAME_MAX, identityKey } from './gs-client';
+import { clampEventTime } from './event-time';
 
 /** ±3 min — the same death-dedupe window /api/webhook and the gs path use. */
 export const DEDUPE_WINDOW_MS = 3 * 60_000;
@@ -169,6 +170,12 @@ export type ParsedEilifDeath = {
    */
   reporter: string | null;
   occurredIso: string;
+  /**
+   * Set when the client's `tsUtc` sat further ahead than lib/event-time's
+   * tolerance and `occurredIso` was pulled back to now — what it CLAIMED, so the
+   * ingest can log the refusal. Null on every honest report.
+   */
+  clampedFromIso: string | null;
   /** Natural unique key: a player cannot die twice in the same instant. */
   key: string;
   hitType: HitType;
@@ -210,6 +217,14 @@ export function parseEilifDeath(body: Record<string, unknown>): ParsedEilifDeath
   const tsUtc = typeof body.tsUtc === 'string' ? body.tsUtc.trim() : '';
   if (!tsUtc || Number.isNaN(Date.parse(tsUtc))) return null;
 
+  // WHEN it happened is the client's to report; that it happened AFTER NOW is
+  // not. This payload carries no token (see lib/event-time.ts for the full
+  // incident), and the value below becomes events.created_at — which is the
+  // Discord relay's cursor and the recap's window key. A future-dated row froze
+  // the feed permanently and counted in every recap forever, so anything past
+  // the tolerance is pulled back to now and the claim is logged by the caller.
+  const when = clampEventTime(tsUtc);
+
   const hitType = normalizeHitType(body.hitType);
   if (!hitType) return null;
 
@@ -240,7 +255,11 @@ export function parseEilifDeath(body: Record<string, unknown>): ParsedEilifDeath
   return {
     player,
     reporter,
-    occurredIso: new Date(tsUtc).toISOString(),
+    occurredIso: when.iso,
+    clampedFromIso: when.claimedIso,
+    // The dedupe key stays the RAW tsUtc: it is what the other two producers
+    // key on too, and clamping it would make a re-post of the same death look
+    // like a new one every cycle.
     key: `${player}|${tsUtc}`,
     hitType,
     attacker,
@@ -428,6 +447,18 @@ export async function ingestEilifDeath(
     return { ok: false, status: 'ignored', reason: 'reporter mismatch' };
   }
 
+  // The report stands, but its clock did not. Loud on purpose: a clamped time is
+  // either a badly-set PC clock (harmless, worth knowing) or someone probing the
+  // unauthenticated POST URL with a forged date (the exact attack lib/event-time
+  // documents), and the two look identical from here.
+  if (p.clampedFromIso) {
+    console.warn(
+      `[deaths] eilif death for "${p.player}" claimed ${p.clampedFromIso}, which is in the future — ` +
+        `stored at ${p.occurredIso} instead. A future-dated event row stalls the #server relay and ` +
+        `counts in every recap, so the time is clamped rather than trusted.`,
+    );
+  }
+
   // Resolve an EXISTING players row only — never auto-create one from a client
   // payload (the poller's join path owns that). Looked up BEFORE the write so
   // the atomic function has everything it needs in one round trip; an upgrade
@@ -603,7 +634,21 @@ export async function ingestDeathEvents(
       if (typeof d.killsThisLife === 'number' && Number.isFinite(d.killsThisLife)) {
         metadata.killsThisLife = Math.round(d.killsThisLife);
       }
-      return { name, occurredIso: new Date(tsUtc).toISOString(), key: `${name}|${tsUtc}`, metadata };
+      // Same unauthenticated producer, same clamp as parseEilifDeath: this
+      // `occurredIso` becomes events.created_at, which is the Discord relay's
+      // cursor and the recap's window key. See lib/event-time.ts. The claim is
+      // carried rather than logged here: this snapshot is CUMULATIVE and
+      // re-POSTed every ~120s, so logging at parse time would repeat the same
+      // warning forever. It is logged once, below, for the deaths that are
+      // actually new.
+      const when = clampEventTime(tsUtc);
+      return {
+        name,
+        occurredIso: when.iso,
+        clampedFromIso: when.claimedIso,
+        key: `${name}|${tsUtc}`,
+        metadata,
+      };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
@@ -630,6 +675,16 @@ export async function ingestDeathEvents(
     fresh.push(p);
   }
   if (fresh.length === 0) return;
+
+  // Once per genuinely new death, not once per ~120s re-post of the same one.
+  for (const p of fresh) {
+    if (!p.clampedFromIso) continue;
+    console.warn(
+      `[deaths] gs death for "${p.name}" claimed ${p.clampedFromIso}, which is in the future — ` +
+        `stored at ${p.occurredIso} instead. A future-dated event row stalls the #server relay and ` +
+        `counts in every recap, so the time is clamped rather than trusted.`,
+    );
+  }
 
   // ── Atomic path (db/2026-09-04_ingest_death.sql) ─────────────────────────
   // One rpc per death: the ±3-min eilif-precedence check and the insert happen

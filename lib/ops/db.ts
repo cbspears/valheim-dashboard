@@ -11,6 +11,7 @@ import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { HeartbeatRow } from './health';
 import { extractBotFlags, type BotPilotFlags } from './consistency';
+import { FUTURE_EVENT_TOLERANCE_MS } from '../event-time';
 
 const REQUIRED_TABLES = ['identity_claims', 'chat_lines', 'player_positions', 'ops_heartbeats'];
 
@@ -69,6 +70,8 @@ export interface OpsData {
   unannouncedIdentityConfirmations: number;
   expiredUnconsumedClaims: number;
   statPoisonReporters: string[];
+  /** events rows dated ahead of now (see lib/event-time.ts and the relay cursor). */
+  futureDatedEvents: { type: string; character_name: string | null; created_at: string }[];
   botFlags: BotPilotFlags | null;
   /** Age (s) of the oldest queued voice line while players are online; null otherwise. */
   voiceQueueOldestSec: number | null;
@@ -118,6 +121,7 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
     unannouncedIdentityConfirmations: 0,
     expiredUnconsumedClaims: 0,
     statPoisonReporters: [],
+    futureDatedEvents: [],
     botFlags: null,
     voiceQueueOldestSec: null,
     identityMismatches: [],
@@ -246,6 +250,21 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
       }
     }
     return out;
+  }, []);
+
+  // Events dated in the future: the row shape that freezes the #server relay's
+  // cursor (see lib/event-time.ts). Cheap — an indexed range read that normally
+  // returns nothing at all. The tolerance matches the ingest clamp so a producer
+  // whose clock is a couple of minutes fast is not reported every render.
+  data.futureDatedEvents = await safe(async () => {
+    const horizon = new Date(nowMs + FUTURE_EVENT_TOLERANCE_MS).toISOString();
+    const { data: rows } = await client
+      .from('events')
+      .select('type, character_name, created_at')
+      .gt('created_at', horizon)
+      .order('created_at', { ascending: true })
+      .limit(20);
+    return (rows ?? []) as { type: string; character_name: string | null; created_at: string }[];
   }, []);
 
   // Voice queue depth: the age of the OLDEST still-queued line, but only while

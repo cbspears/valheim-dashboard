@@ -9,9 +9,10 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "npm run test:parser && npm run test:liveness",
+    "test": "npm run test:parser && npm run test:liveness && npm run test:rewind",
     "test:parser": "node test-parser.js",
     "test:liveness": "node test-liveness.js",
+    "test:rewind": "node test-rewind.js",
     "test:sftp": "node test-sftp.js"
   },
   "dependencies": {

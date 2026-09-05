@@ -295,14 +295,31 @@ export class Poller {
   // and those joins/deaths/oaths were gone for good. Now the cursor is
   // restored and the error rethrown, so saveState() is never reached with an
   // advanced offset and the batch is simply re-read (duplicates beat losses).
+  // THE HALF THAT WAS MISSING (red-team, 2026-09-05). Rewinding the byte cursor
+  // is not enough on its own: LogParser mutates its OWN state (online,
+  // nameToSteam, steamToName, pendingConnections) as a side effect of parsing,
+  // and tickAfterFetch parses the WHOLE batch before dispatching any of it. So a
+  // failure on the first event still left the parser advanced past the entire
+  // batch — and `processLine` only emits a join `if (!alreadyOnline)`, so on the
+  // re-read the join was simply gone. The death still landed; the arrival line,
+  // the attendance grid entry and that viking's session hours did not, because
+  // `sessions` rows are opened only on a real join (the `sync` self-heal fixes
+  // players.is_online within ~120s but writes no session).
+  //
+  // A webhook 500 or a network blip on launch night is precisely the case this
+  // at-least-once cursor was written for, so the parser is snapshotted and
+  // restored alongside the bytes. LogParser already round-trips through
+  // snapshot() / new LogParser(initial) for restarts — this is the same trip,
+  // taken in memory.
   async tick() {
-    const prev = { offset: this.offset, partial: this.partial };
+    const prev = { offset: this.offset, partial: this.partial, parser: this.parser.snapshot() };
     const { text, size, mtimeMs } = await this.fetchNewBytes();
     try {
       await this.tickAfterFetch({ text, size, mtimeMs });
     } catch (err) {
       this.offset = prev.offset;
       this.partial = prev.partial;
+      this.parser = new LogParser(prev.parser);
       throw err;
     }
   }

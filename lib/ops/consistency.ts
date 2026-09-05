@@ -32,6 +32,12 @@ export interface ConsistencyInput {
   unannouncedIdentityConfirmations: number; // consumed_at set, announced_at null
   expiredUnconsumedClaims: number; // expires_at < now, consumed_at null
   statPoisonReporters: string[]; // player_stats.gs_stats._flags present
+  /**
+   * events rows dated further ahead than the ingest clamp allows
+   * (lib/event-time.ts). One such row stalls the #server relay's cursor and is
+   * counted in the recap window until its date arrives, so it is never noise.
+   */
+  futureDatedEvents: { type: string; character_name: string | null; created_at: string }[];
   botFlags: BotPilotFlags | null;
   demoDiscordEvents: number; // discord_events with discord_event_id null
   /** required table → present? (probed by existence). */
@@ -114,6 +120,7 @@ export function runConsistencyChecks(input: ConsistencyInput): Finding[] {
     checkUnannouncedMilestones(input),
     checkUnannouncedIdentities(input),
     checkStatPoison(input),
+    checkFutureDatedEvents(input),
     checkExpiredClaims(input),
     checkMissingTables(input),
     checkPilotFlags(input),
@@ -259,6 +266,35 @@ function checkStatPoison(i: ConsistencyInput): Finding | null {
     title: 'Stat-poison flags recorded',
     detail: `player_stats carry _flags (implausible counter jumps) for: ${i.statPoisonReporters.slice(0, 8).join(', ')}.`,
     whatToDo: 'Review the flagged rows (gs_stats._flags has prev→next); the jump was merged but marked for a manual undo.',
+  };
+}
+
+/**
+ * Event rows dated in the future — the red-team finding of 2026-09-05.
+ *
+ * The relay's cursor IS events.created_at and only moves forward, so a single
+ * future-dated row freezes #server for good, and it freezes it SILENTLY: a tick
+ * that posts nothing is a success, so every health signal stays green. The same
+ * row is also inside the recap's death window every day until its date arrives.
+ * Ingest now clamps producer-supplied times (lib/event-time.ts) and the relay
+ * refuses to step onto such a row, so this fires only for rows written before
+ * those landed, or by a producer we do not control. Critical: nothing else in
+ * the cockpit would show it.
+ */
+function checkFutureDatedEvents(i: ConsistencyInput): Finding | null {
+  const rows = i.futureDatedEvents ?? [];
+  if (rows.length === 0) return null;
+  const sample = rows
+    .slice(0, 5)
+    .map((r) => `${r.type} ${r.character_name ?? '(no name)'} at ${r.created_at}`);
+  return {
+    id: 'future-dated-events',
+    severity: 'critical',
+    title: 'Events are dated in the future',
+    detail: `${rows.length} event row(s) are dated ahead of now: ${sample.join('; ')}.`,
+    whatToDo:
+      'Delete these rows in Supabase. Until they are gone the Discord relay will not advance past them, ' +
+      'so #server stays quiet. Check the relay cursor in the bot state file afterwards.',
   };
 }
 

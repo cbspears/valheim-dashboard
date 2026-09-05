@@ -161,6 +161,79 @@ function name(v: unknown): string | null {
   return t;
 }
 
+// ─── THE SANITY CEILING ─────────────────────────────────────────────────────
+//
+// THE BUG THIS CLOSES (red-team, 2026-09-05). `gs_stats.bossDamage` is
+// SELF-REPORTED in a `source:'client'` payload that carries no token — the mod
+// runs on players' PCs and cannot hold a secret, and the POST URL ships in the
+// public Thunderstore pack. Nothing here bounded the number. A single POST of
+// `bossDamage: [{ boss: 'Eikthyr', damageDealt: 500000 }]` — a thousand times
+// the beast's real health — made the caller `topDamagePlayer` with 499999
+// points, on a boss nobody had felled, and put them in `fighters` and
+// `players_present` permanently (both are monotonic unions). Compare
+// lib/gs-baseline POISON_CAPS, which at least MARKS a leap in the five stat
+// columns; the boss ledger had no equivalent at all.
+//
+// WHAT A CAP CAN AND CANNOT DO. This producer is unauthenticated by design, so
+// no rule here makes a self-report true. What the ceiling buys is that a forgery
+// must now be the same ORDER OF MAGNITUDE as a real fight, has to be repeated
+// post after post while its author is genuinely online to build anything larger,
+// and leaves a loud line in the ingest log every time it is trimmed. Combined
+// with the is_killed rule below — the fallback's verdict is not carved on a boss
+// nobody has felled, which is where a pre-seeded crown had no real damage to
+// compete with — that is as far as an unsigned number can be trusted.
+//
+// The numbers are deliberately GENEROUS sanity ceilings, not a claim about the
+// game's balance sheet: they exist to separate "a hard fight" from "a thousand
+// Eikthyrs", and being off by a factor of two changes nothing about either.
+// Eikthyr's 500 is the one that is certain — it is the beast from the 2026-08-28
+// incident this whole module was written for.
+
+/** Rough max health per boss, keyed by `bosses.name`. A ceiling, not a stat. */
+export const BOSS_MAX_HP: Record<string, number> = {
+  Eikthyr: 500,
+  'The Elder': 2500,
+  Bonemass: 5000,
+  Moder: 5000,
+  Yagluth: 15000,
+  'The Queen': 18000,
+  Fader: 25000,
+};
+
+/** Used for a boss we have no figure for (Deep North, and anything a game update adds). */
+export const UNKNOWN_BOSS_MAX_HP = 25000;
+
+/**
+ * How many times a boss's health one client post may credit. A snapshot lands
+ * every ~120s, so this allows a full solo kill plus overkill several times over
+ * inside one window — comfortably above any honest fight, and four orders of
+ * magnitude below the 500000 the red-team walked in with.
+ */
+export const BOSS_DAMAGE_POST_MULTIPLE = 4;
+
+/** The most damage ONE client post may credit against `bossName`. */
+export function bossDamagePostCap(bossName: string): number {
+  const hp = BOSS_MAX_HP[bossName] ?? UNKNOWN_BOSS_MAX_HP;
+  return hp * BOSS_DAMAGE_POST_MULTIPLE;
+}
+
+/** Options both folds accept. Defaults keep the pre-cap behaviour for callers
+ *  that legitimately have neither fact — the backfill script replays damage
+ *  against a boss already felled, with numbers read out of the database. */
+export interface FoldOptions {
+  /**
+   * Has this boss actually been felled? When explicitly false the damage still
+   * accrues (that is the whole point — a two-session grind against Bonemass has
+   * its war party carved before the milestone fires) but the top-damage VERDICT
+   * is not written, so an unfelled boss cannot be pre-seeded with a champion.
+   * The verdict is carved from the accrued ledger at the kill itself, by
+   * sealClientDamageVerdict.
+   */
+  isKilled?: boolean;
+  /** Ceiling for the credited delta; see bossDamagePostCap. */
+  cap?: number;
+}
+
 /**
  * `gs_stats.bossDamage` (`[{ boss, damageDealt, fightSec }]`) → `{ boss: damage }`,
  * keyed by the RAW creature gameObject name the mod reports ('Eikthyr', 'gd_king',
@@ -283,19 +356,29 @@ export function foldClientDamage(
   existing: FightStats | null,
   reporter: string,
   delta: number,
+  opts: FoldOptions = {},
 ): FightStats | null {
   const who = name(reporter);
   if (!who || !isFiniteNum(delta) || delta <= 0) return null;
+
+  // The ceiling. `cap` is left off only by callers that have no boss name to
+  // look one up with (the backfill script); the ingest route always passes it.
+  const cap = isFiniteNum(opts.cap) && opts.cap > 0 ? opts.cap : Infinity;
+  const credited = Math.min(delta, cap);
 
   const fighters = readFighters(existing);
   if (!fighters.includes(who)) fighters.push(who);
 
   const damage = readDamage(existing);
-  damage[who] = (damage[who] ?? 0) + delta;
+  damage[who] = (damage[who] ?? 0) + credited;
 
   const next: FightStats = { ...(existing ?? {}), fighters, damage };
 
-  if (verdictIsOurs(existing)) {
+  // A boss nobody has felled has no real fight record to compete with, which is
+  // exactly where a fabricated number used to crown itself unopposed. Accrue,
+  // but do not carve a verdict until the beast is actually down —
+  // sealClientDamageVerdict does that at the kill, from everything accrued.
+  if (opts.isKilled !== false && verdictIsOurs(existing)) {
     // Highest damage wins; ties break on name so two equal scores always produce
     // the same row and a re-post is a genuine no-op rather than a coin flip.
     const top = Object.entries(damage).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
@@ -312,6 +395,39 @@ export function foldClientDamage(
   if (!name(next.source)) next.source = CLIENT_DAMAGE_SOURCE;
 
   return next;
+}
+
+/**
+ * Carve the fallback's top-damage verdict at the moment the boss actually goes
+ * down, from everything the two folds accrued while it was still standing.
+ *
+ * WHY THIS EXISTS. foldClientDamage deliberately accrues damage before the kill
+ * — a two-session grind against Bonemass has its war party carved before the
+ * milestone fires — but it no longer writes a VERDICT on an unfelled boss,
+ * because an unfelled boss has no real fight record for a fabricated number to
+ * compete with. Without this, the 2026-08-28 Eikthyr case (a kill that lands
+ * with NO bossKillEvents MVP, which is the entire reason this module exists)
+ * would show a damage ledger and no champion. So the kill flip calls this: the
+ * evidence was gathered honestly, it is simply read at the right moment.
+ *
+ * Returns NULL when there is nothing to carve — no ledger, or a real MVP
+ * summary already owns the verdict (verdictIsOurs, the same contract
+ * foldClientDamage keeps) — so the caller can leave the row alone.
+ */
+export function sealClientDamageVerdict(existing: FightStats | null): FightStats | null {
+  if (!verdictIsOurs(existing)) return null;
+  const damage = readDamage(existing);
+  const top = Object.entries(damage).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  if (!top) return null;
+  // Idempotent: re-sealing an unchanged ledger produces the same row, so a
+  // re-POSTed kill is a genuine no-op rather than a churned write.
+  if (existing?.topDamagePlayer === top[0] && existing?.topDamage === Math.round(top[1])) return null;
+  return {
+    ...(existing ?? {}),
+    topDamagePlayer: top[0],
+    topDamage: Math.round(top[1]),
+    topDamageFrom: CLIENT_DAMAGE_SOURCE,
+  };
 }
 
 /**
@@ -374,6 +490,7 @@ export function foldObservedDamage(
   existing: FightStats | null,
   observer: string,
   playerCums: Record<string, number>,
+  opts: FoldOptions = {},
 ): FightStats | null {
   const who = name(observer);
   if (!who) return null;
@@ -396,7 +513,9 @@ export function foldObservedDamage(
     const delta = cum - prev;
     if (!(delta > 0)) continue; // stale, duplicate, or a shrunken reading — the ledger stands
 
-    const folded = foldClientDamage(next, player, delta);
+    // Same ceiling and the same is_killed rule as the reporter-own path: a
+    // bystander reading is self-reported too, just about somebody else.
+    const folded = foldClientDamage(next, player, delta, opts);
     if (!folded) continue; // defensive: the shared fold owns the rules, including its own refusals
     next = folded;
     mine[player] = cum;

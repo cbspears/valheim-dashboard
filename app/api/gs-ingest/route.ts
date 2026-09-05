@@ -21,14 +21,17 @@ import {
 } from '@/lib/gs-baseline';
 import {
   bossDamageDeltas,
+  bossDamagePostCap,
   foldClientDamage,
   foldObservedDamage,
+  sealClientDamageVerdict,
   planBossKillUpdate,
   CLIENT_DAMAGE_SOURCE,
   type FightStats,
 } from '@/lib/boss-damage';
 import { evaluateAndRecord } from '@/lib/milestones';
 import { ingestDeathEvents, ingestEilifDeath } from '@/lib/deaths';
+import { clampEventTime } from '@/lib/event-time';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import { safeEqual } from '@/lib/ops/auth';
 import type { GsClientStats } from '@/lib/types';
@@ -673,7 +676,7 @@ async function ingestBossDamageDeltas(
   // ingestBossMilestones).
   const { data: rows, error: readErr } = await client
     .from('bosses')
-    .select('id, name, fight_stats, players_present')
+    .select('id, name, is_killed, fight_stats, players_present')
     .in('name', [...deltas.keys()]);
   if (readErr) {
     console.error(`[gs-ingest] boss-damage fallback: could not read bosses rows — ${readErr.message}`);
@@ -685,8 +688,25 @@ async function ingestBossDamageDeltas(
     const delta = deltas.get(bossName);
     if (!delta) continue;
 
+    // THE CEILING (red-team, 2026-09-05). `delta` derives from a self-reported
+    // number in an unauthenticated payload, and nothing bounded it: one POST of
+    // 500000 damage on Eikthyr — a thousand times the beast's health — crowned
+    // its author top-damage on a boss nobody had felled. See lib/boss-damage
+    // BOSS_MAX_HP for what the ceiling does and does not buy.
+    const cap = bossDamagePostCap(bossName);
+    if (delta > cap) {
+      console.warn(
+        `[gs-ingest] boss-damage fallback: "${reporter}" reported ${Math.round(delta)} damage on ${bossName} ` +
+          `in one post, over the ${cap} ceiling — credited ${cap} instead. A number this far past a boss's ` +
+          `health is a broken mod or a forged payload; the client path carries no token either way.`,
+      );
+    }
+
     const existing = ((row as { fight_stats?: FightStats | null }).fight_stats ?? null) as FightStats | null;
-    const next = foldClientDamage(existing, reporter, delta);
+    const next = foldClientDamage(existing, reporter, delta, {
+      cap,
+      isKilled: !!(row as { is_killed?: boolean }).is_killed,
+    });
     if (!next) continue; // nothing to fold (guarded inside the pure fold too)
 
     // Fold the reporter into players_present as well (union — grow only, never
@@ -713,7 +733,7 @@ async function ingestBossDamageDeltas(
       continue;
     }
     console.info(
-      `[gs-ingest] boss-damage fallback: credited "${reporter}" +${Math.round(delta)} damage on ${bossName} ` +
+      `[gs-ingest] boss-damage fallback: credited "${reporter}" +${Math.round(Math.min(delta, cap))} damage on ${bossName} ` +
         `(fighters now ${next.fighters?.length ?? 0}` +
         `${next.topDamageFrom === CLIENT_DAMAGE_SOURCE ? `, top damage "${next.topDamagePlayer}"` : ''}).`,
     );
@@ -831,7 +851,7 @@ async function ingestObservedBossDamage(
 
   const { data: rows, error: readErr } = await client
     .from('bosses')
-    .select('id, name, fight_stats, players_present')
+    .select('id, name, is_killed, fight_stats, players_present')
     .in('name', [...byBoss.keys()]);
   if (readErr) {
     console.error(`[gs-ingest] observed boss damage: could not read bosses rows — ${readErr.message}`);
@@ -844,7 +864,12 @@ async function ingestObservedBossDamage(
     if (!cums) continue;
 
     const existing = ((row as { fight_stats?: FightStats | null }).fight_stats ?? null) as FightStats | null;
-    const next = foldObservedDamage(existing, observer, cums);
+    // Same ceiling and the same is_killed rule as the reporter-own path above:
+    // a bystander reading is self-reported too, just about somebody else.
+    const next = foldObservedDamage(existing, observer, cums, {
+      cap: bossDamagePostCap(bossName),
+      isKilled: !!(row as { is_killed?: boolean }).is_killed,
+    });
     if (!next) continue; // nothing grew since this observer's last reading — skip the write entirely
 
     // Who actually got credited: the players whose high-water mark advanced. Read
@@ -911,9 +936,10 @@ async function ingestBossMilestones(
   body: Record<string, unknown>,
   roster: string[],
   fighters: Record<string, string[]>,
-): Promise<void> {
+): Promise<number> {
   const milestones = parseBossMilestones(body);
-  if (milestones.length === 0) return;
+  if (milestones.length === 0) return 0;
+  let felled = 0;
 
   const client = db();
   const names = [...new Set(milestones.map((m) => m.bossName))];
@@ -940,7 +966,18 @@ async function ingestBossMilestones(
     const row = byName.get(m.bossName);
     if (!row || row.is_killed) continue; // unknown boss (e.g. Forsaken VIII, the unrevealed 8th) or already felled
 
-    const killedAt = m.tsUtc && !Number.isNaN(Date.parse(m.tsUtc)) ? new Date(m.tsUtc).toISOString() : new Date().toISOString();
+    // Clamped like every other producer-supplied time (lib/event-time.ts): this
+    // value becomes bosses.killed_at AND the boss event's created_at — the
+    // Discord relay's cursor and the recap's window key — so a future date here
+    // would stall the feed and park the kill outside every recap window.
+    const killedAtClamp = clampEventTime(m.tsUtc);
+    if (killedAtClamp.claimedIso) {
+      console.warn(
+        `[gs-ingest] boss milestone ${m.bossName} claimed ${killedAtClamp.claimedIso}, which is in the ` +
+          `future — recorded at ${killedAtClamp.iso} instead.`,
+      );
+    }
+    const killedAt = killedAtClamp.iso;
 
     // TRUE fighters if we have any; degrade to the online roster ONLY when empty
     // (never blank a war party). The online roster is preserved separately on
@@ -969,6 +1006,7 @@ async function ingestBossMilestones(
       .select('id');
 
     if (!flipped || flipped.length === 0) continue; // lost the race / already flipped
+    felled++;
 
     // Seed fight_stats with the fighter list + the online-roster-at-kill (both
     // best-effort so a missing column can't undo the flip above). ingestBossKillEvents
@@ -978,10 +1016,18 @@ async function ingestBossMilestones(
     // `source` deliberately becomes 'gs-milestone' — this row's real provenance —
     // which is safe because the fallback's top-damage verdict is gated on
     // topDamageFrom, not on source (see lib/boss-damage CLIENT_DAMAGE_SOURCE).
+    // The beast is down, so the fallback's verdict may now be carved from
+    // everything the two damage folds accrued while it was still standing.
+    // foldClientDamage deliberately withholds it on an UNFELLED boss (nothing
+    // real to compete with a fabricated number there — see lib/boss-damage
+    // BOSS_MAX_HP), and this is the moment that rule was waiting for. Returns
+    // null when a real bossKillEvents MVP already owns the verdict, which is
+    // left untouched exactly as before.
+    const sealed = sealClientDamageVerdict(prior) ?? prior;
     await client
       .from('bosses')
       .update({
-        fight_stats: { ...(prior ?? {}), fighters: fought, onlineAtKill: roster, source: 'gs-milestone' },
+        fight_stats: { ...(sealed ?? {}), fighters: fought, onlineAtKill: roster, source: 'gs-milestone' },
       })
       .eq('id', row.id);
 
@@ -997,6 +1043,7 @@ async function ingestBossMilestones(
       created_at: killedAt,
     });
   }
+  return felled;
 }
 
 // (FightStats now lives in lib/boss-damage.ts — one definition, shared by this
@@ -1437,8 +1484,19 @@ export async function POST(req: Request) {
   // derived from THIS payload (players[] damage ∪ bossKillEvents MVPs), degrading
   // to the reconciled online roster only when no fighter is derivable. Its own
   // bossKillEvents then add the fight detail + fold the MVPs in.
-  await ingestBossMilestones(body, names ?? [], parseBossFighters(body));
+  const felled = await ingestBossMilestones(body, names ?? [], parseBossFighters(body));
   await ingestBossKillEvents(body.bossKillEvents, 'server');
+  // A boss just fell on THIS payload: re-evaluate the Great Deeds now, so a
+  // boss-count deed ("First of the Forsaken") lands with the kill instead of
+  // waiting up to ~120 s for the next client snapshot to trigger the evaluator.
+  // Same best-effort contract as the client-path call above.
+  if (felled > 0) {
+    try {
+      await evaluateAndRecord(client);
+    } catch (e) {
+      console.error('[milestones]', e instanceof Error ? e.message : e);
+    }
+  }
 
   return Response.json({ status: 'inserted' });
 }
