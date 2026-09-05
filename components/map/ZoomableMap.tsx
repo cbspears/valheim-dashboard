@@ -63,11 +63,15 @@ export function ZoomableMap({
   alt,
   corner,
   markers = [],
+  dimmed = false,
 }: {
   src: string;
   alt: string;
   corner?: React.ReactNode;
   markers?: ZoomableMapMarker[];
+  /** Fade the image (markers keep full strength) when the chart it shows is no
+   *  longer live — see components/map/LiveWorld's `stale` prop. */
+  dimmed?: boolean;
 }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 }); // % of unscaled content
@@ -131,7 +135,14 @@ export function ZoomableMap({
         style={{ transform: `scale(${zoom}) translate(${pan.x}%, ${pan.y}%)` }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} className="block h-full w-full select-none" draggable={false} />
+        <img
+          src={src}
+          alt={alt}
+          className={`block h-full w-full select-none${
+            dimmed ? ' opacity-45 saturate-50 transition-opacity' : ''
+          }`}
+          draggable={false}
+        />
 
         {markers.map((m) => {
           const count = m.photos?.length ?? 0;

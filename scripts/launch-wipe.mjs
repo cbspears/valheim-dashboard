@@ -262,6 +262,12 @@ const DELETE_TABLES = [
   { table: 'identity_claims', pk: 'code' },
   { table: 'player_positions', pk: 'character_name' },
   { table: 'map_markers', pk: 'id' }, // not confirmed to exist in this project — handled gracefully
+  // ORPHANED TABLE (audit site-16): nothing reads `roadmap` any more — its
+  // getRoadmap()/RoadmapItem code was deleted on 2026-09-04 — but the pilot's
+  // seed rows are still in the database claiming The Elder is completed and
+  // Bonemass is in progress with a June target date. Wiped here so a future
+  // page (or a curious SQL editor) can never resurrect that false progress.
+  { table: 'roadmap', pk: 'id' },
 ];
 
 // State-only resets: definitions/rows stay, only the "has this happened" state
@@ -585,8 +591,10 @@ function printPostWipeChecklist() {
       empty and repopulates from real joins.
 
   Adjacent tables intentionally NOT touched by this script: discord_events,
-  roadmap, ops_heartbeats. (server_status IS reset now — see the note on that
-  target above for why "it refreshes itself" was wrong.)
+  ops_heartbeats. (server_status IS reset now — see the note on that target
+  above for why "it refreshes itself" was wrong. The roadmap table IS cleared now
+  too — it is orphaned code-side, but its stale pilot rows contradicted the
+  bosses table, so the wipe empties it.)
 `);
 }
 

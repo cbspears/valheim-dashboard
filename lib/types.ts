@@ -213,21 +213,6 @@ export interface Boss {
   retelling_generated_at?: string | null;
 }
 
-export type RoadmapStatus = 'planned' | 'in_progress' | 'completed' | string;
-export type RoadmapType = 'boss' | 'build' | 'milestone' | 'event' | string;
-
-export interface RoadmapItem {
-  id: string;
-  title: string;
-  description: string | null;
-  type: RoadmapType;
-  status: RoadmapStatus;
-  target_date: string | null;
-  completed_at: string | null;
-  sort_order: number;
-  created_at: string;
-}
-
 export interface DiscordEvent {
   id: string;
   discord_event_id: string | null;

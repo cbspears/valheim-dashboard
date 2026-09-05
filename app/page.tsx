@@ -37,6 +37,7 @@ import {
   getOaths,
   getMilestones,
   getMilestoneAggregates,
+  statsFreshness,
 } from '@/lib/data';
 import { summarizeMilestones } from '@/lib/milestones';
 import { describeEvent } from '@/lib/events';
@@ -61,6 +62,10 @@ export default async function HomePage() {
     ]);
 
   const milestoneSummary = summarizeMilestones(milestones, milestoneAgg);
+
+  // Server up, but the stats feed (Emitter → server_status) has gone quiet.
+  // The Hearth says so plainly rather than presenting old numbers as live.
+  const { statsStale } = statsFreshness(status);
 
   const oathCount = oaths.length;
   const latestOath = oathCount > 0 ? oaths[oathCount - 1] : null;
@@ -207,7 +212,7 @@ export default async function HomePage() {
       <section>
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           {/* The Hearth — server pulse + who's online */}
-          <Hearth status={status} online={online} />
+          <Hearth status={status} online={online} statsStale={statsStale} />
 
           {/* Great Deeds — the collective-milestone counterpart to the Hearth */}
           <GreatDeedsCard summary={milestoneSummary} />

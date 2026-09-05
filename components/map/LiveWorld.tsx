@@ -16,12 +16,17 @@ export function LiveWorld({
   frames,
   pins = [],
   photosByPin = {},
+  stale = false,
 }: {
   currentUrl: string;
   updatedLabel: string | null;
   frames: LiveMapFrame[];
   pins?: LivePin[];
   photosByPin?: Record<string, PinPhoto[]>;
+  /** The composite has stopped refreshing (lib/data getLiveMap → stale). The
+   *  last image still renders, dimmed and labelled as the last chart rather
+   *  than as Now; the archived-day replay is unaffected and keeps working. */
+  stale?: boolean;
 }) {
   // positions 0..frames.length-1 = archived days; frames.length = Now
   const nowIndex = frames.length;
@@ -50,8 +55,9 @@ export function LiveWorld({
   }, [playing, nowIndex]);
 
   const atNow = pos >= nowIndex;
+  const paused = stale && atNow;
   const src = atNow ? `${currentUrl}?t=${updatedLabel ?? 'now'}` : frames[pos].url;
-  const label = atNow ? 'Now' : `Day ${frames[pos].day}`;
+  const label = atNow ? (stale ? 'Last chart' : 'Now') : `Day ${frames[pos].day}`;
   const replayReady = frames.length >= 2;
 
   // Which replay position each named place shows up on. Pin days and frame days
@@ -87,17 +93,24 @@ export function LiveWorld({
         src={src}
         alt={`The known world, ${label}`}
         markers={markers}
+        dimmed={paused}
         corner={
           <div className="absolute right-3 top-3 flex items-center gap-2">
             <div className="rounded-md border border-rune bg-pitch/85 px-2.5 py-1 font-display text-sm font-semibold tracking-wide text-gold-light backdrop-blur-sm">
               {label}
             </div>
-            {atNow && (
-              <div className="flex items-center gap-1.5 rounded-md border border-online/40 bg-pitch/85 px-2.5 py-1 text-xs font-medium text-online-glow backdrop-blur-sm">
-                <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-online" />
-                Live
-              </div>
-            )}
+            {atNow &&
+              (paused ? (
+                <div className="flex items-center gap-1.5 rounded-md border border-gold-dim/60 bg-pitch/85 px-2.5 py-1 text-xs font-medium text-gold-light backdrop-blur-sm">
+                  <span className="block h-1.5 w-1.5 rounded-full bg-gold-dim" />
+                  Paused
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 rounded-md border border-online/40 bg-pitch/85 px-2.5 py-1 text-xs font-medium text-online-glow backdrop-blur-sm">
+                  <span className="block h-1.5 w-1.5 animate-pulse rounded-full bg-online" />
+                  Live
+                </div>
+              ))}
           </div>
         }
       />

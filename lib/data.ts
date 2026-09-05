@@ -15,7 +15,6 @@ import type {
   GameSession,
   GameEvent,
   Boss,
-  RoadmapItem,
   ServerStatus,
   DiscordEvent,
   UpcomingEvent,
@@ -45,6 +44,51 @@ const PLAYERS_PUBLIC_COLS =
 export async function getServerStatus(): Promise<ServerStatus | null> {
   const { data } = await db().from('server_status').select('*').eq('id', 1).single();
   return (data as ServerStatus) ?? null;
+}
+
+/**
+ * How long `server_status.updated_at` may go without a refresh before the site
+ * stops presenting the live stats as live. The GsValheimStats Emitter rewrites
+ * that row every 120 s while the server runs, so 15 minutes is ~7 missed
+ * cycles: the Emitter (closed source, no 1.0 statement — audit mods-7) has
+ * stopped, not hiccuped. `is_online` is kept honest separately by the log
+ * poller, which reads joins and leaves out of the server log and does not
+ * depend on the Emitter at all.
+ */
+export const STATS_STALE_AFTER_MS = 15 * 60 * 1000;
+
+export interface StatsFreshness {
+  /** True only when the server reads as online but the stats feed has gone quiet. */
+  statsStale: boolean;
+  /** Age of `server_status.updated_at` in ms; null when it is missing or unreadable. */
+  statsAgeMs: number | null;
+}
+
+/**
+ * Is the live stats feed (Emitter → server_status) keeping up with a server
+ * that is actually up? An offline server is its own story and never counts as
+ * stale — the Hearth already says the hall sleeps. An online server with no
+ * usable timestamp at all counts as stale: there is no evidence the feed is
+ * running, and the site must degrade honestly rather than imply it is.
+ */
+export function statsFreshness(
+  status: ServerStatus | null,
+  now: number = Date.now()
+): StatsFreshness {
+  if (!status || !status.is_online) {
+    return { statsStale: false, statsAgeMs: ageMs(status?.updated_at ?? null, now) };
+  }
+  const age = ageMs(status.updated_at, now);
+  if (age === null) return { statsStale: true, statsAgeMs: null };
+  return { statsStale: age > STATS_STALE_AFTER_MS, statsAgeMs: age };
+}
+
+/** Milliseconds between `iso` and `now`, or null when `iso` can't be read. Never negative. */
+function ageMs(iso: string | null | undefined, now: number): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, now - t);
 }
 
 export async function getOnlinePlayers(): Promise<Player[]> {
@@ -107,10 +151,42 @@ export interface LiveMapFrame {
   url: string;
 }
 
+/**
+ * How long the live map composite may go without a refresh before /map stops
+ * calling it live. scripts/map-snapshot.mjs re-uploads `map/current.webp` every
+ * 5 minutes, so 6 hours is ~72 missed cycles — the WebMap plugin, the SFTP
+ * pull, or the snapshot service itself has stopped (audit mods-8), not a blip.
+ */
+export const MAP_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
+
+export interface LiveMap {
+  url: string;
+  /** `last-modified` of current.webp, i.e. when the composite was last charted. */
+  updatedAt: string | null;
+  frames: LiveMapFrame[];
+  /** True when the composite is older than MAP_STALE_AFTER_MS, or its age is unknown. */
+  stale: boolean;
+  /** Age of the composite in ms; null when `last-modified` is missing or unreadable. */
+  ageMs: number | null;
+}
+
+/**
+ * Is the map composite still being refreshed? An unreadable or absent
+ * `last-modified` counts as stale: freshness can't be proven, and a paused map
+ * shown as live is exactly the lie this guard exists to prevent. The archived
+ * day frames are unaffected — the timelapse keeps working either way.
+ */
+export function mapFreshness(
+  updatedAt: string | null,
+  now: number = Date.now()
+): { stale: boolean; ageMs: number | null } {
+  const age = ageMs(updatedAt, now);
+  if (age === null) return { stale: true, ageMs: null };
+  return { stale: age > MAP_STALE_AFTER_MS, ageMs: age };
+}
+
 /** The live fog-masked world map snapshot + the per-in-game-day frame archive. */
-export async function getLiveMap(): Promise<
-  { url: string; updatedAt: string | null; frames: LiveMapFrame[] } | null
-> {
+export async function getLiveMap(): Promise<LiveMap | null> {
   const bucket = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/map`;
   const url = `${bucket}/current.webp`;
   try {
@@ -132,7 +208,8 @@ export async function getLiveMap(): Promise<
     } catch {
       /* no manifest yet — live-only */
     }
-    return { url, updatedAt: head.headers.get('last-modified'), frames };
+    const updatedAt = head.headers.get('last-modified');
+    return { url, updatedAt, frames, ...mapFreshness(updatedAt) };
   } catch {
     return null;
   }
@@ -434,12 +511,4 @@ export async function getMilestoneAggregates(): Promise<Aggregates> {
   const onlineNames = new Set(online.map((p) => p.character_name));
   const bossesKilled = bosses.filter((b) => b.is_killed).length;
   return computeAggregates({ stats, sessions, onlineNames, bossesKilled });
-}
-
-export async function getRoadmap(): Promise<RoadmapItem[]> {
-  const { data } = await db()
-    .from('roadmap')
-    .select('*')
-    .order('sort_order', { ascending: true });
-  return (data as RoadmapItem[]) ?? [];
 }

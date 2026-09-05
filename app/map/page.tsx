@@ -11,6 +11,29 @@ import { LiveWorld } from '@/components/map/LiveWorld';
 import { SERVER_NAME } from '@/config/server';
 import { getLiveMap, getPins, getPhotosByPin } from '@/lib/data';
 
+/**
+ * The two lines the live section shows when the composite has stopped
+ * refreshing (older than MAP_STALE_AFTER_MS, or with no readable timestamp).
+ * The last image stays on screen, dimmed, and the replay scrubber keeps working
+ * from the archived day frames — only the "this is live" claim is withdrawn.
+ */
+const MAP_PAUSED_LINE =
+  "The map feed is paused; it resumes on its own when the server's map plugin is back.";
+
+/** "Sep 3, 7:12 PM" in Central. The site dates everything in CT; Vercel renders in UTC. */
+function chartedAtCT(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(d);
+}
+
 export const metadata: Metadata = {
   title: 'Map',
   description: `The known world of ${SERVER_NAME}: only what the warband has charted.`,
@@ -32,7 +55,15 @@ export default async function MapPage() {
         <SectionHeader
           title="The Known World"
           icon={<Map size={22} />}
-          action={liveMap ? <Badge tone="online">Live</Badge> : null}
+          action={
+            liveMap ? (
+              liveMap.stale ? (
+                <Badge tone="gold">Map paused</Badge>
+              ) : (
+                <Badge tone="online">Live</Badge>
+              )
+            ) : null
+          }
         />
       </PageHeader>
 
@@ -117,7 +148,7 @@ export default async function MapPage() {
       {/* The LIVE known world — fed by the real server (fog-masked before upload),
           with the real per-in-game-day replay scrubber and real /pin markers. */}
       {liveMap ? (
-        <Card glow className="mx-auto mb-8 max-w-3xl">
+        <Card glow={!liveMap.stale} className="mx-auto mb-8 max-w-3xl">
           <CardBody>
             <LiveWorld
               currentUrl={liveMap.url}
@@ -125,13 +156,31 @@ export default async function MapPage() {
               frames={liveMap.frames}
               pins={pins}
               photosByPin={photosByPin}
+              stale={liveMap.stale}
             />
-            <p className="mt-3 text-center text-xs text-muted">
-              The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed it,
-              refreshed from the server every 5 minutes
-              {liveMap.updatedAt ? ` · last charted ${new Date(liveMap.updatedAt).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })} CT` : ''}.
-              The unexplored dark is real: nobody has been there yet.
-            </p>
+            {liveMap.stale ? (
+              <>
+                <p className="mt-3 text-center text-sm leading-relaxed text-gold-light">
+                  {chartedAtCT(liveMap.updatedAt)
+                    ? `Last charted ${chartedAtCT(liveMap.updatedAt)} CT. `
+                    : ''}
+                  {MAP_PAUSED_LINE}
+                </p>
+                <p className="mt-1.5 text-center text-xs text-muted">
+                  What you see is the last chart the warband sent home.
+                  {liveMap.frames.length >= 2
+                    ? ' The season replay above still walks every archived day.'
+                    : ''}
+                </p>
+              </>
+            ) : (
+              <p className="mt-3 text-center text-xs text-muted">
+                The real {SERVER_NAME} world, exactly as far as the warband has walked and sailed
+                it, refreshed from the server every 5 minutes
+                {chartedAtCT(liveMap.updatedAt) ? ` · last charted ${chartedAtCT(liveMap.updatedAt)} CT` : ''}.
+                The unexplored dark is real: nobody has been there yet.
+              </p>
+            )}
           </CardBody>
         </Card>
       ) : (

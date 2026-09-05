@@ -1,8 +1,16 @@
 import { Flame, Sun } from 'lucide-react';
 import { Card, CardHeader, CardBody, OnlineDot, VikingLink } from '@/components/ui';
+import { timeAgo } from '@/lib/format';
 import type { Player, ServerStatus } from '@/lib/types';
 
 type HearthState = 'lively' | 'banked' | 'sleeping';
+
+/**
+ * The one line the Hearth shows when the server is up but the stats feed has
+ * gone quiet (lib/data statsFreshness). Says what still works, because the log
+ * poller keeps presence and deaths flowing without the Emitter.
+ */
+const STATS_PAUSED_LINE = 'Live stats are paused; joins and deaths still count.';
 
 /**
  * The Hearth — the Hall's pulse, distilled into one card. Reacts to server
@@ -12,9 +20,12 @@ type HearthState = 'lively' | 'banked' | 'sleeping';
 export function Hearth({
   status,
   online,
+  statsStale = false,
 }: {
   status: ServerStatus | null;
   online: Player[];
+  /** Server reads online but server_status has gone stale — see lib/data statsFreshness. */
+  statsStale?: boolean;
 }) {
   const isOnline = status?.is_online ?? false;
   const playerCount = status?.player_count ?? online.length;
@@ -67,6 +78,13 @@ export function Hearth({
             <p className="mt-0.5 text-sm text-ash-dim">{copy.body}</p>
           </div>
         </div>
+
+        {statsStale && (
+          <p className="rounded-md border border-gold-dim/40 bg-gold/5 px-3 py-2 text-xs leading-relaxed text-gold-light">
+            {STATS_PAUSED_LINE}
+            {status?.updated_at ? ` Last stats update ${timeAgo(status.updated_at)}.` : ''}
+          </p>
+        )}
 
         {state === 'lively' && (
           <>

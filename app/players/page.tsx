@@ -33,7 +33,9 @@ import {
   getPotyArchive,
   getSessionsSince,
   getEventsSince,
+  getServerStatus,
   playtimeMinutesByCharacter,
+  statsFreshness,
 } from '@/lib/data';
 import type { PlayerWithStats } from '@/lib/types';
 import {
@@ -152,14 +154,20 @@ interface Board {
 }
 
 export default async function PlayersPage() {
-  const [online_, roster_, withStats_, potyArchive, sessions, deaths] = await Promise.all([
-    getOnlinePlayers(),
-    getAllPlayers(),
-    getPlayersWithStats(),
-    getPotyArchive(),
-    getSessionsSince(70),
-    getEventsSince(70, ['death']),
-  ]);
+  const [online_, roster_, withStats_, potyArchive, sessions, deaths, status] =
+    await Promise.all([
+      getOnlinePlayers(),
+      getAllPlayers(),
+      getPlayersWithStats(),
+      getPotyArchive(),
+      getSessionsSince(70),
+      getEventsSince(70, ['death']),
+      getServerStatus(),
+    ]);
+
+  // Server up, but the stats feed has gone quiet: every board below is still
+  // the last real number, just no longer moving. Flagged in the header.
+  const { statsStale } = statsFreshness(status);
 
   const attendanceSessions = sessions.map((s) => ({
     character_name: s.character_name,
@@ -310,7 +318,10 @@ export default async function PlayersPage() {
           subtitle="Every warrior who has set foot on these shores: the warband that carves its saga into the world."
           icon={<Users size={22} />}
           action={
-            <Badge tone="neutral">{roster.length} vikings</Badge>
+            <div className="flex items-center gap-2">
+              {statsStale && <Badge tone="gold">Stats paused</Badge>}
+              <Badge tone="neutral">{roster.length} vikings</Badge>
+            </div>
           }
         />
       </PageHeader>
