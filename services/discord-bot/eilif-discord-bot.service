@@ -2,18 +2,30 @@
 Description=Eilif Discord bot (event relay, boss announcements, daily recaps)
 After=network-online.target
 Wants=network-online.target
+# Restart forever; never park in a dead unit nobody notices (audit services-9).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=cbspears
 WorkingDirectory=/home/cbspears/Projects/valheim-dashboard/services/discord-bot
-# Absolute nvm Node 20 path (systemd does not source nvm).
-# Update if your version dir differs: ls ~/.config/nvm/versions/node
-ExecStart=/home/cbspears/.config/nvm/versions/node/v20.20.2/bin/node src/index.js
-Restart=on-failure
+# Node 20 runtime lives OUTSIDE nvm on purpose (audit services-6): an nvm
+# upgrade/cleanup deletes the versioned dir and every bridge service dies at
+# once with 203/EXEC. AFTER AN NVM UPGRADE, RE-COPY THE BINARY DELIBERATELY:
+#   sudo install -D -m 0755 ~/.config/nvm/versions/node/vXX.YY.Z/bin/node /opt/eilif/node
+#   sudo systemctl restart eilif-log-poller eilif-discord-bot eilif-map-snapshot
+ExecStartPre=/usr/bin/test -x /opt/eilif/node
+ExecStart=/opt/eilif/node src/index.js
+Restart=always
 RestartSec=10
+# The bot exits on SIGTERM promptly; 30 s is a hard ceiling, not a wait.
+TimeoutStopSec=30
+MemoryMax=512M
+OOMScoreAdjust=-500
 Environment=NODE_ENV=production
 Environment=TZ=America/Chicago
+# Launch value. The INSTALLED unit currently overrides this with RECAPS_START=2026-07-04
+# for the pilot (deliberate); restore both to 2026-09-09 before launch.
 Environment=RECAPS_START=2026-09-09
 
 [Install]

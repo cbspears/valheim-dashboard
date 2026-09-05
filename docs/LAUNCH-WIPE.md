@@ -93,7 +93,7 @@ you'd be wiping real launch data along with the pilot's.
 
 6. **Do the post-wipe checklist** the script prints at the end (world upload +
    `Start.bat World=`, panel death penalty = **Casual**, Combat per the launch
-   decision, V+ `[Chat] enabled=false`, Emitter/Companion cfgs off the old
+   decision, leave V+ `[Chat]` ENABLED (it is what makes /s shouts server-wide; the Companion 0.3.1 chat/oath hook no longer depends on it), Emitter/Companion cfgs off the old
    world, `GS_EXPECTED_WORLD` in Vercel, `MAP_REMOTE_DIR` in the poller `.env`,
    and the bot `.env` pilot overrides `RECAPS_START` / `RECAP_CHANNEL` /
    `MILESTONE_CHANNEL` / any `*_CHANNEL=server`). None of it is automated — it
@@ -153,7 +153,7 @@ you'd be wiping real launch data along with the pilot's.
 
 ## What it deliberately does NOT touch
 
-`discord_events`, `roadmap`, and `ops_heartbeats`. Flag to whoever owns
+`discord_events` and `ops_heartbeats` (`roadmap` IS wiped since 2026-09-05: the table is orphaned and was added to DELETE_TABLES). Flag to whoever owns
 launch-week ops if they also need clearing. (`poty_history` **is** wiped — its
 migration documents a pre-launch wipe. `server_status` **is** reset now, see
 above.)

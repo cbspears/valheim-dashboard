@@ -320,3 +320,89 @@ prefix — without it, mentions are suppressed entirely). GitHub repository
 secret: `WATCHDOG_TOKEN`, the same value. Note GitHub disables scheduled
 workflows after 60 days of repo inactivity — re-enable from the Actions tab
 if that ever happens.
+
+---
+
+## 8. Backups (schema + data) — audit backend-2
+
+The Supabase project is on the **free plan**: no automated daily backups, no
+PITR, and project deletion is irreversible (it removes any backups with it).
+So the recovery story is assembled here, out of three pieces:
+
+| Piece | Where | Cadence |
+|---|---|---|
+| **Schema** | `db/0000_initial_schema.sql` + the dated `db/*.sql` migrations, in git | on change (hand-applied) |
+| **Data** | `~/valheim-db-backups/<YYYYmmdd-HHMM>/<table>.json` | nightly 03:30 CT, `eilif-db-snapshot.timer` |
+| **World** | `~/valheim-world-backups/<World>-<YYYYmmdd-HHMM>/` | every 6h, `eilif-world-backup.timer` |
+
+**The snapshot** (`scripts/db-snapshot.mjs`, run by
+`services/eilif-db-snapshot.service`) asks PostgREST for the table list and
+primary keys (`GET /rest/v1/`, OpenAPI), pages every public table 1000 rows at
+a time ordered by PK, and writes one `<table>.json` per table (one row per
+line), plus `storage-objects.json` and a `manifest.json` with row counts,
+byte sizes and any errors. It keeps the newest **30** runs (`KEEP=`
+overrides; `DEST=` moves the destination) and **exits non-zero if any table
+fails**, so a partial snapshot shows as a `failed` unit rather than a green
+one. It reads `SUPABASE_SERVICE_ROLE_KEY` from `.env.local` itself and never
+prints or argv-passes it; snapshot dirs are `0700` because the dumps carry
+player names, Steam/Discord ids and chat lines. It also doubles as a
+keep-alive — free projects pause after 7 days without API activity.
+
+Check it: `systemctl list-timers 'eilif-*'`,
+`journalctl -u eilif-db-snapshot -n 40`, or read the newest `manifest.json`
+(`ok: true` + `errors: []`).
+
+**Restore.** Schema first, then rows:
+
+1. Create/repair the project, then apply `db/0000_initial_schema.sql` followed
+   by the dated `db/*.sql` files **in filename order** (there is no migration
+   runner — they are hand-applied in the SQL editor, as always).
+2. Insert the JSON back per table with the **service role** (RLS blocks anon
+   writes; a `POST /rest/v1/<table>` with the file's array as the body works,
+   or `insert … select * from json_populate_recordset` in the SQL editor).
+   Insert parents before children — `players` before `sessions`,
+   `player_stats`, `title_history`, `events`, `oaths` — then the rest. Every
+   PK in this schema is a UUID (`gen_random_uuid()`) or a natural key
+   (`identity_claims.code`, `player_positions.character_name`,
+   `ops_heartbeats.component`, `ops_alerts.key`); there are **no sequences to
+   re-bump**, so re-inserting rows with their original ids is enough and the
+   foreign keys still line up.
+3. `bosses`, `roadmap`, `milestones` and `server_status` are seed/state tables:
+   restoring their JSON restores the *pilot/live* state, which may not be what
+   you want after a wipe — `scripts/launch-wipe.mjs` is the tool for resetting
+   them.
+
+**Storage objects are NOT copied.** `storage-objects.json` is a *listing*
+only — names, ids, sizes, mimetypes, timestamps for the `gallery` and `map`
+buckets. The image bytes (~18 MB of gallery photos, ~1 MB of map frames) live
+only in Supabase Storage, and Supabase's own database backups exclude Storage
+too. If the project is deleted, those images are gone; the listing tells you
+exactly what was lost and lets `gallery_photos` rows be re-pointed at
+re-uploaded files. Downloading the bytes is a deliberate future item, not
+something this timer does.
+
+### Node runtime for the service units — audit services-6
+
+`eilif-log-poller`, `eilif-discord-bot`, `eilif-map-snapshot` and
+`eilif-db-snapshot` all run **`/opt/eilif/node`**, a copy of Node 20.20.2
+taken out of nvm on 2026-09-04. They used to point straight at
+`~/.config/nvm/versions/node/v20.20.2/bin/node`, where a routine
+`nvm install 20` + `nvm uninstall 20.20.2` deletes the path and takes all of
+them down at once with a silent `203/EXEC` restart loop. Each unit now also
+has `ExecStartPre=/usr/bin/test -x /opt/eilif/node`, so a missing runtime
+fails loudly instead of crash-looping.
+
+**After an nvm upgrade the binary must be re-copied deliberately:**
+
+```bash
+sudo install -D -m 0755 ~/.config/nvm/versions/node/vXX.YY.Z/bin/node /opt/eilif/node
+/opt/eilif/node -v
+sudo systemctl restart eilif-log-poller eilif-discord-bot eilif-map-snapshot
+```
+
+Stay on Node **20** unless `services/*/node_modules` and the root
+`node_modules` are rebuilt as well — sharp's native binaries
+(`@img/sharp-linux-x64`, used by the map loop) are ABI-bound to the Node
+major. `eilif-world-backup` runs bash + sftp and is deliberately independent
+of both nvm and `/opt/eilif/node`, so a broken Node runtime can never stop
+world backups.

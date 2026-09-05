@@ -1,5 +1,5 @@
 [Unit]
-# REFERENCE COPY — NOT INSTALLED. Install instructions are in eilif-world-backup.service.
+# INSTALLED 2026-09-04. Install/uninstall instructions are in eilif-world-backup.service.
 Description=Eilif off-box world backup every 6 hours
 Requires=eilif-world-backup.service
 

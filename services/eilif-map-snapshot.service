@@ -2,15 +2,29 @@
 Description=Eilif map snapshot loop (WebMap SFTP pull -> fog-masked frames)
 After=network-online.target
 Wants=network-online.target
+# Restart forever; never park in a dead unit nobody notices (audit services-9).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=cbspears
 WorkingDirectory=/home/cbspears/Projects/valheim-dashboard
-# Absolute nvm Node 20 path (systemd does not source nvm).
-ExecStart=/home/cbspears/.config/nvm/versions/node/v20.20.2/bin/node scripts/map-snapshot.mjs --loop
-Restart=on-failure
+# Node 20 runtime lives OUTSIDE nvm on purpose (audit services-6): an nvm
+# upgrade/cleanup deletes the versioned dir and every bridge service dies at
+# once with 203/EXEC. AFTER AN NVM UPGRADE, RE-COPY THE BINARY DELIBERATELY:
+#   sudo install -D -m 0755 ~/.config/nvm/versions/node/vXX.YY.Z/bin/node /opt/eilif/node
+#   sudo systemctl restart eilif-log-poller eilif-discord-bot eilif-map-snapshot
+# sharp (node_modules/@img/sharp-linux-x64) is ABI-bound to the Node major —
+# a major bump needs an `npm rebuild` here as well.
+ExecStartPre=/usr/bin/test -x /opt/eilif/node
+ExecStart=/opt/eilif/node scripts/map-snapshot.mjs --loop
+Restart=always
 RestartSec=30
+TimeoutStopSec=30
+# sharp frames peaked at 522 MB (2026-08-21); 1G caps a runaway without
+# tripping normal operation (~300-420 MB).
+MemoryMax=1G
+OOMScoreAdjust=-500
 Environment=NODE_ENV=production
 Environment=TZ=America/Chicago
 

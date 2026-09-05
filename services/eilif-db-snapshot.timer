@@ -1,0 +1,16 @@
+[Unit]
+# Timer for eilif-db-snapshot.service. Install instructions are in that file.
+Description=Eilif nightly Supabase logical snapshot (03:30 America/Chicago)
+Requires=eilif-db-snapshot.service
+
+[Timer]
+# 03:30 local — after the 00:00 world backup, well clear of the 23:00 Discord recap.
+OnCalendar=*-*-* 03:30:00
+# This PC is a desktop, not a server: a missed window is the normal case. Catch up.
+Persistent=true
+RandomizedDelaySec=600
+AccuracySec=1m
+Unit=eilif-db-snapshot.service
+
+[Install]
+WantedBy=timers.target

@@ -2,16 +2,30 @@
 Description=Valheim (Eilif) log poller -> dashboard webhook
 After=network-online.target
 Wants=network-online.target
+# Restart forever: a persistent failure should keep retrying (with an alert from
+# the ops watchdog), never end up in a dead unit nobody notices (audit services-9).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=cbspears
 WorkingDirectory=/home/cbspears/Projects/valheim-dashboard/services/log-poller
-# Absolute path to the nvm-installed Node 20 (systemd does not source nvm).
-# Update if your Node version dir differs: ls ~/.config/nvm/versions/node
-ExecStart=/home/cbspears/.config/nvm/versions/node/v20.20.2/bin/node src/index.js
-Restart=on-failure
+# Node 20 runtime lives OUTSIDE nvm on purpose (audit services-6): nvm dirs are
+# deleted by a routine `nvm install 20` + `nvm uninstall 20.20.2`, which used to
+# take the poller, bot and map loop down together with a silent 203/EXEC loop.
+# AFTER AN NVM UPGRADE, RE-COPY THE BINARY DELIBERATELY:
+#   sudo install -D -m 0755 ~/.config/nvm/versions/node/vXX.YY.Z/bin/node /opt/eilif/node
+#   sudo systemctl restart eilif-log-poller eilif-discord-bot eilif-map-snapshot
+# (sharp's native binaries are ABI-bound to the Node major — stay on 20 unless
+# services/*/node_modules are rebuilt too.)
+ExecStartPre=/usr/bin/test -x /opt/eilif/node
+ExecStart=/opt/eilif/node src/index.js
+Restart=always
 RestartSec=10
+# stop() awaits the in-flight tick and saves state before exit; 30 s is ample.
+TimeoutStopSec=30
+MemoryMax=512M
+OOMScoreAdjust=-500
 # Keep the byte-offset/roster state across restarts (lives in WorkingDirectory).
 Environment=NODE_ENV=production
 

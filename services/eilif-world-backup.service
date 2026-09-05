@@ -1,5 +1,7 @@
 [Unit]
-# REFERENCE COPY — NOT INSTALLED. See the install block at the bottom of this file.
+# INSTALLED 2026-09-04 (see the install/uninstall block at the bottom of this file).
+# This unit runs bash + sftp, NOT node — it is deliberately independent of /opt/eilif/node
+# and of nvm (audit services-6), so a broken Node runtime can never stop world backups.
 #
 # Off-box world backup: pulls worlds_local/<World>.db + .fwl (or the 1.0 chunked
 # worlds_local/<World>/ folder) off the GTX box over read-only SFTP into

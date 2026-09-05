@@ -1,0 +1,46 @@
+[Unit]
+# Nightly logical snapshot of the Supabase project (audit backend-2, 2026-09-04).
+#
+# The project is on the Supabase FREE plan: no automated daily backups, no PITR, and
+# deleting the project is irreversible. db/*.sql rebuilds the SCHEMA; this unit keeps
+# the DATA. It writes ~/valheim-db-backups/<YYYYmmdd-HHMM>/<table>.json (all 20 public
+# tables) + storage-objects.json + manifest.json, keeping the newest 30 runs.
+# It doubles as a Supabase keep-alive: free projects pause after 7 days with no API
+# activity (audit backend-14), and this touches the REST API every night.
+#
+# Restore procedure: docs/OPS-COCKPIT.md § "Backups (schema + data)".
+Description=Eilif nightly Supabase logical snapshot (all tables -> JSON)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cbspears
+WorkingDirectory=/home/cbspears/Projects/valheim-dashboard
+# Node 20 runtime lives OUTSIDE nvm on purpose (audit services-6) — an nvm upgrade or
+# cleanup deletes the versioned dir. AFTER AN NVM UPGRADE, RE-COPY THE BINARY:
+#   sudo install -D -m 0755 ~/.config/nvm/versions/node/vXX.YY.Z/bin/node /opt/eilif/node
+ExecStartPre=/usr/bin/test -x /opt/eilif/node
+ExecStart=/opt/eilif/node scripts/db-snapshot.mjs
+Environment=TZ=America/Chicago
+# KEEP=<n> overrides the 30-snapshot retention; DEST=<dir> overrides ~/valheim-db-backups.
+#Environment=KEEP=30
+
+# Hardening (same shape as eilif-world-backup.service).
+MemoryMax=512M
+TimeoutStartSec=900
+Nice=10
+IOSchedulingClass=idle
+# The script reads SUPABASE_SERVICE_ROLE_KEY out of .env.local itself and never prints,
+# logs or argv-passes it. ProtectSystem=full keeps /usr+/boot+/etc read-only; the only
+# thing it writes is ~/valheim-db-backups.
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+
+# ── INSTALL ─────────────────────────────────────────────────────────────────────────────
+#   sudo install -m 0644 services/eilif-db-snapshot.service /etc/systemd/system/
+#   sudo install -m 0644 services/eilif-db-snapshot.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now eilif-db-snapshot.timer
+#   systemctl start eilif-db-snapshot.service          # force one now
+#   journalctl -u eilif-db-snapshot -n 40 --no-pager   # what it dumped
