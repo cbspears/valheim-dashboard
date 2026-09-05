@@ -447,8 +447,24 @@ you'd be wiping real launch data along with the pilot's.
 4. **Run for real** once the preview output looks right:
 
    ```bash
-   node scripts/launch-wipe.mjs --execute
+   node scripts/launch-wipe.mjs --execute --i-mean-prod
    ```
+
+   `--i-mean-prod` is new on 2026-09-06 and is required for every `--execute`
+   against a non-loopback Supabase URL. Without it the script refuses and prints
+   the target it was about to wipe. A **dry run is never blocked**, so step 3
+   above is unchanged. The flag exists because the rehearsal added
+   `--supabase-url` / `--service-key`, and a tool that can be aimed somewhere
+   else must say out loud when it is aimed at production. The banner now prints
+   the target URL, where that URL came from, and which directory the local state
+   files will be deleted from, before it counts a single row: read those three
+   lines every time.
+
+   **Exactly this command, with no other flags.** In particular no `--state-dir`:
+   that one is for the rehearsal, and against production it is refused, because
+   it would clear every row while deleting none of the three live state files
+   and leave the bot holding the pilot's `announcedBosses`. The state-file line
+   in the banner must read `(repo root — the LIVE services’ own files)`.
 
    Still refuses while a hard-gate unit is active, and additionally requires
    typing `WIPE` at a confirmation prompt before touching anything. Its own
@@ -538,6 +554,262 @@ you'd be wiping real launch data along with the pilot's.
    comes off and fewer if a third-party mod is pulled. Compare against the list
    written down in step 13, not against a remembered number.
 
+## Rehearsal 2026-09-06
+
+The whole sequence above, run end to end against a local stack: seed, wipe,
+verify, then a first evening on a world named `Eilif` with the pages read
+between every step. One command re-runs it:
+
+```bash
+export BASE_URL=http://localhost:3405 \
+       SUPABASE_URL=http://127.0.0.1:55321 \
+       SUPABASE_SERVICE_ROLE_KEY=<that stack's service key>
+scripts/stress/rehearse-launch.sh
+```
+
+New tools, all local-only and all refusing any non-loopback URL:
+
+| File | What it does |
+|---|---|
+| `scripts/stress/rehearse-launch.sh` | chains the whole rehearsal and diffs `cutover-env.sh` against the real files |
+| `scripts/stress/day-one.mjs` | the first evening in stages (`boot`, `first-join`, `day1`, `day2`, `day3`, `close`, `verify`) so the pages can be read between them |
+| `scripts/stress/page-check.mjs` | reads the six player-facing pages as text and fails on `undefined`, `NaN`, `Invalid Date`, `Day 0`, plural disagreement at exactly one, and names from the previous world |
+
+`scripts/launch-wipe.mjs` grew three flags for this (`--supabase-url`,
+`--service-key`, `--state-dir`, plus env equivalents) and **three** refusals:
+
+1. no `--execute` against a non-loopback URL without `--i-mean-prod`;
+2. no `--execute` against a loopback URL **without** `--state-dir`;
+3. no `--execute` against a non-loopback URL **with** `--state-dir`.
+
+The second matters more than it looks: the three state files the wipe deletes
+are the LIVE services' own, because `eilif-discord-bot`, `eilif-log-poller` and
+`eilif-map-snapshot` all run out of this working copy. A rehearsal that pointed
+the wipe at a local database while leaving those paths alone would delete
+production's byte cursor and announced-boss ledger and prove nothing.
+
+The third closes the footgun the other two created, and it is the combination
+that reads harmless. `--state-dir` is a rehearsal flag; carried into the
+launch-day command (the rehearsal block above sits a hundred lines below the
+real command, which is where a copy-paste comes from) it wipes every production
+row and then deletes **nothing**, leaving `services/discord-bot/state.json`
+holding the pilot's `announcedBosses`. That is precisely the silence this script
+exists to prevent: launch night's first boss kill announced to no one. Drop
+`--state-dir` and `LAUNCH_WIPE_STATE_DIR` for the real wipe.
+
+A fourth guard is not about targets: on a loopback target, `--execute` is
+refused while a `bot-dryrun.mjs` **pointed at that same database** is running.
+It is the loopback twin of the `eilif-discord-bot` gate, matched by the
+process's own `SUPABASE_URL` (never by pattern) so another agent's rehearsal on
+another stack is left alone. `rehearse-launch.sh` therefore stops the announcer
+before the wipe and starts it again after the verification, which is the
+launch-day order anyway.
+
+The rehearsal ran on its own Supabase project (`dressrehearsal`, ports 553xx)
+rather than the 543xx stress stack, because two agents writing to one database
+turns every count into a coin flip. Two of those coin flips were caught in the
+act: the first wipe read 641 rows and the row counts had moved twice before the
+verification finished.
+
+### What passed
+
+- **The wipe, entirely.** Every table it claimed to empty is empty, every
+  milestone reset (`achieved_at`, `achieved_value`, `announced_at`, `meta` back
+  to `{}`), all eight bosses back to `is_killed=false` with `players_present=[]`,
+  and `server_status` at `world_day=0, player_count=0, current_players=[],
+  is_online=false`.
+- **Storage, including the nested prefixes.** Seeded with the snapshotter's real
+  layout (`current.webp`, `frames-by-day/day-0001.webp`,
+  `frames-by-day/day-0064.webp`, `frames-fog/day-0064.png`,
+  `frames-manifest.json`, plus a `gallery/2026/07/` photo and its thumb), the
+  wipe removed all of it. The recursion into folder pseudo-entries works. Worth
+  knowing because a stack whose buckets are already empty prints "already empty"
+  and never exercises this path at all.
+- **The state files**, deleted from the scratch directory, with the live ones
+  untouched and still being written by the running services throughout.
+- **The post-wipe checklist matches reality.** Running
+  `launch-preflight.mjs --phase post-wipe` immediately after the wipe, from a
+  repo copy whose `.env.local` points at the rehearsal stack, turns all five row
+  counts and all three state-file checks green.
+- **Day one on the pages.** Boot with the world at day 1 and nobody online, the
+  first join, twenty vikings, three oaths, three deaths, Eikthyr felled on day 3,
+  everyone logging off. Six pages read at each of those seven points: no
+  `undefined`, no `NaN`, no `Invalid Date`, no empty heading, no name from the
+  previous world, and every empty state reads as written.
+- **The day-one invariants**, 19 of 20: one session per join and all closed, one
+  events row per death with `causeSource='eilif'`, the war party equal to the
+  eight who swung, exactly one `boss` saga row, no second boss felled, the ledger
+  still at one deed of thirty-eight.
+- **Titles seed silently.** On the wiped roster the first announcer pass recorded
+  twenty titles, all distinct, with **zero** `title_history` rows and zero
+  proclamations. That is the behaviour the launch depends on: without it, launch
+  night opens with twenty "earned a new title" messages.
+- **The day-one recap reads right.** `Vikings on today: 20 · Hours logged: 15.1h
+  · Deaths: 3 · Bosses felled: Eikthyr · World day: 3`, and a Player of the Day
+  naming the viking who stood over Eikthyr.
+- **The map manifest starts at day 1, by construction.** `map-snapshot.mjs`
+  cannot run here (it reads the in-game day from the production `/api/status` at
+  a hard-coded URL, `scripts/map-snapshot.mjs:94`), so this was settled by
+  reading it: `loadState()` returns `{days: []}` when the file is missing, and
+  `currentWorldDay()` returns null unless `worldDay > 0`. The wipe deletes the
+  state file and zeroes `world_day`, so the first frame after the cutover can
+  only be the first day the Emitter reports. Both preconditions were verified
+  after the wipe.
+
+### What failed
+
+Five findings, in the order they cost the most:
+
+1. **The `MAP_REMOTE_DIR` check in `launch-preflight.mjs` grades with
+   `includes(WORLD)` while its own message says "must end in map_data/Eilif".**
+   (Cited by symbol on purpose: `grep -n 'MAP_REMOTE_DIR names the world'
+   scripts/launch-preflight.mjs`. It was line 352 when the rehearsal ran and 354
+   an hour later.) The poller `.env`
+   on this box reads `.../map_data/EilifRehearsal` today, and the launch world is
+   `Eilif`, so the stale value **passes** the check in all three phases. If
+   `cutover-env.sh --apply` is skipped or fails, every gate says PASS and
+   `map-snapshot` spends launch night framing the rehearsal world's map. This is
+   the 2026-08-23 day-64 incident with a green light on top of it. Fix:
+   `endsWith('/map_data/' + WORLD)`.
+2. **The first-boss deed cannot fire from the kill.** `evaluateAndRecord()` has
+   exactly one call site in the repo, inside the `source:'client'` branch of
+   `app/api/gs-ingest/route.ts`, behind `if (merged)`; the server branch that
+   flips the boss is `ingestBossMilestones()` in the same file. (Find both with
+   `grep -n evaluateAndRecord app/api/gs-ingest/route.ts` rather than by line
+   number: that file is being edited daily this week and the call site moved
+   twice during the review of this document. Any fix must be applied by symbol
+   for the same reason.) The Emitter's
+   `defeated_eikthyr` key flips `bosses.is_killed` and never re-evaluates the
+   collective deeds. In the rehearsal Eikthyr went down, the boss saga row was
+   written, the recap said "Bosses felled: Eikthyr", and **"First of the
+   Forsaken" stayed unachieved** because the warband logged off inside the ~120 s
+   before the next client snapshot. The Hall then reads
+   `Next deed · First of the Forsaken 99 %` directly above `Bosses slain · 1 of
+   1`. Launch night is the one night this is likely: the first boss, then people
+   stop playing.
+3. **The Hall's `const worldDay = status?.world_day ?? 0` (in `app/page.tsx`,
+   rendered as `Day {worldDay} of the tenth world` and as a `World Day` stat
+   tile) reads "Day 0 of the tenth world"** (and a `World Day 0` stat tile) for the whole window
+   between the wipe and the Emitter's first post. The wipe zeroes `world_day`
+   deliberately, and step 18 of the launch-morning sequence puts the wipe after
+   the panel Start, which is when the GO post goes out.
+4. **`app/players/page.tsx` renders `{roster.length} vikings` with the plural
+   hard-coded**, so the first viking to join sees "1 vikings". `app/tv/page.tsx`
+   already writes `{playerCount === 1 ? 'viking' : 'vikings'}` in the same repo.
+5. **`ops_alerts` is neither wiped nor listed as deliberately untouched.** The
+   watchdog's state row (`state`, `signature`, `since`, `alert_count`) survives
+   the wipe, and nothing in this runbook mentions the watchdog at all, even
+   though `.github/workflows/watchdog.yml` pings every 15 minutes and the
+   launch-morning sequence stops all three producers for most of the day. Expect
+   Discord alerts for the planned outage, and a "down for X" duration measured
+   from before the cutover.
+
+### Fixes in the rehearsal tooling
+
+`scripts/stress/bot-dryrun.mjs` hard-coded `channel: 'server'` for the recap, the
+titles announcer and the deed announcer, so the one launch-day change nobody
+could see locally was the channel revert, which is step 6 of the cutover. It now
+reads `RECAP_CHANNEL` / `MILESTONE_CHANNEL` / `TITLE_CHANNEL` exactly as
+`services/discord-bot/src/index.js` does, and prints the routing at startup next
+to the clock.
+
+Five more found by reviewing the harness itself, all of the same shape: a check
+that could not fail, or a default that made a bad state look like a good one.
+
+- **`day-one.mjs --stage verify` could report a majority PASS against an empty
+  database.** Most of its checks compare a filtered row count against a counter
+  in the state file, so with an empty state file both sides are zero and "0
+  sessions for 0 joins" passes. A crashed stage, a `boot` re-run mid-sequence or
+  a wrong `DAY_ONE_STATE` all produced that. Verify now gates on the evening's
+  own shape first (all six stages run, 20 joins, 3 deaths, 8 at Eikthyr) and
+  stops there when it does not hold, so an inconclusive run cannot read as a
+  clean one.
+- **The rehearsal's proof that the LIVE state files survived was dead code.** It
+  was guarded on a `.orig` file nothing ever wrote, so the second half of the
+  condition was always false. It now records which of the three files existed
+  before the wipe and asserts each of those is still there afterwards, naming
+  them one by one. (`scripts/.map-snapshot-state.json` is gitignored and
+  legitimately absent on a fresh checkout, which is why "missing afterwards"
+  only means something for files that were present to begin with.)
+- **An unreachable database read as an already-seeded one.** The row count is
+  scraped out of a `Content-Range` header; with the stack down it is the empty
+  string, and `'' != "0"`, so the script announced "database already holds an
+  evening (events= players=)" and skipped ahead to a wipe that then failed for
+  an unrelated-looking reason. A non-numeric count now stops the run where the
+  cause is.
+- **`WORK` defaulted to `$REPO/.rehearsal`**, which is not in `.gitignore`, so a
+  plain run left logs, page dumps and copies of the live services' `state.json`
+  in the working tree four days before launch. It defaults to
+  `$TMPDIR/eilif-rehearsal` now.
+- **The verification raced the announcer.** The rehearsal wiped and immediately
+  re-counted every table with the dry-run bot still writing, which is the same
+  "another writer was writing the whole time" problem that made the rehearsal
+  move off the shared stack in the first place. The announcer is now stopped
+  before the wipe and started again after the verification, matched on its own
+  `SUPABASE_URL`, and `launch-wipe` refuses a loopback `--execute` while one is
+  up.
+
+`cutover-env.sh` was diffed line by line against the real files and every value
+it writes is correct, including the non-obvious one: `TITLE_CHANNEL` defaults to
+`server` inside `services/discord-bot/src/index.js`, so writing
+`TITLE_CHANNEL=valheim` really is required rather than cosmetic. The rehearsal
+turned up three defects around those correct values, and all three are now
+fixed:
+
+- **Argument parsing.** `APPLY` was `[ "${2:-}" = "--apply" ]`, so
+  `cutover-env.sh --apply` with no world argument did a silent dry run for a
+  world named `--apply`. Every argument is scanned now, and any other leading
+  dash is an error.
+- **The unit-file edit failing silently.** It was one
+  `sudo -n sed ... && sudo -n systemctl daemon-reload && echo` chain with no
+  `set -e` and no else branch: without passwordless sudo the whole chain was
+  skipped, nothing said so, and the script still exited 0 while the unit kept
+  overriding `RECAPS_START`. It now re-reads the unit to check the postcondition
+  rather than trusting sudo's exit code, says so loudly when the line is still
+  there, and exits non-zero.
+- **The printed pack command.** It read `--companion-client 0.3.2 --paths 1.4.0`
+  and omitted `--no-vplus --fallback on --cap <N>`, contradicting step 15 of the
+  launch-morning sequence: `mint-pack` refuses `--fallback` below EilifPaths
+  1.5.0, and a pack still pinning ValheimPlus is refused by a box that no longer
+  runs it. Pasted under time pressure it minted a pack every client rejects. The
+  script now prints step 15's own flag set and points at steps 14 and 15.
+
+### Found on the re-run, and fixed
+
+**The wipe left the war party of a boss that was fought and never killed.** The
+boss reset filtered on `is_killed = true`, but `gs-ingest` folds client damage
+into `players_present` and `fight_stats` on every snapshot with no kill
+required, and both folds are grow-only unions. So a boss the pilot world only
+attempted kept its fighters and its damage numbers through the wipe, and the
+next kill inherited them. The second rehearsal run made it visible on a page:
+`/world` read `War party: Astrid Bjorn Cnut Dagny Eirik Freydis Gunnar Halla
+Ingimar Brynja …` after day three, sixteen names for eight vikings, eight of
+them from the world that had just been wiped, and the damage board was topped by
+one of them. `page-check.mjs --stale` is what caught it, which is the check the
+first rehearsal added for exactly this and had not yet had a chance to fire.
+The reset now clears all eight rows; the same run afterwards reported `war party
+is the eight who swung · 8 present`, and `/world` was clean.
+
+Prod is not carrying this today (only Eikthyr has residue, and it is killed, so
+the old filter would have caught it), but a failed boss attempt between now and
+the 9th puts it back.
+
+### Known artifacts of the rehearsal, not defects
+
+- The day-one harness anchors its evening three hours in the past, so the
+  Emitter's `emittedAtUtc` at the boot stage is three hours old and the Hall shows
+  "Live stats are paused". `statsFreshness` reads `server_status.updated_at`
+  (`lib/data.ts:74`) and a real Emitter post carries a real timestamp.
+- `page-check.mjs` reads text with the tags stripped, so a filter chip row
+  ("All 1 Deaths 0") and a heading after a count ("Greylings 1 Players of the
+  Day") both look like plural faults. Both shapes are reported separately as
+  notes rather than failures.
+- Never `pkill -f` a bot pattern from an interactive shell, including with the
+  bracket trick `bot[-]dryrun`: the shell's own command line is matched, and a
+  heredoc body inside that command counts as part of it. This killed the
+  rehearsal shell twice. Match on the process's `SUPABASE_URL` instead, from a
+  script file.
+
 ## What it wipes
 
 - **Deletes all rows**: `title_history`, `players`, `sessions`, `events`,
@@ -551,7 +823,19 @@ you'd be wiping real launch data along with the pilot's.
   - `milestones` — zeroes `achieved_at` / `achieved_value` / `announced_at` /
     `meta` on rows currently marked achieved.
   - `bosses` — flips `is_killed` back to `false` and clears `killed_at` /
-    `players_present` / `fight_stats` / `retelling` / `retelling_generated_at`.
+    `players_present` / `fight_stats` / `retelling` / `retelling_generated_at`,
+    on **every** row. **This changed on 2026-09-06.** It used to reset only the
+    rows with `is_killed = true`, which misses a boss the pilot world FOUGHT and
+    never killed: `gs-ingest` folds client damage into `players_present` and
+    `fight_stats` on every snapshot, kill or no kill, and both folds are
+    grow-only unions. So the residue survived the wipe and launch night's first
+    kill of that boss inherited it. Caught in the rehearsal on 2026-09-06: the
+    seed left Eikthyr fought-but-unkilled, the wipe skipped the row, and the
+    day-three kill came out with a war party of **16** — the eight who actually
+    swung plus eight vikings from the wiped world, one of them topping the
+    damage board. Prod is clean of this today (only Eikthyr carries residue and
+    it is killed, so the old filter caught it), but any boss attempt that fails
+    between now and the 9th recreates it.
   - `server_status` (the singleton `id = 1`) — `world_day` → `0`,
     `player_count` → `0`, `current_players` → `[]`, `is_online` → `false`.
     **This is new (2026-09-04).** It used to be left alone as "it refreshes
@@ -573,8 +857,20 @@ you'd be wiping real launch data along with the pilot's.
 
 ## What it deliberately does NOT touch
 
-`discord_events` and `ops_heartbeats` (`roadmap` IS wiped since 2026-09-05: the table is orphaned and was added to DELETE_TABLES). Flag to whoever owns
-launch-week ops if they also need clearing. (`poty_history` **is** wiped — its
+`discord_events`, `ops_heartbeats` and **`ops_alerts`** (`roadmap` IS wiped since
+2026-09-05: the table is orphaned and was added to DELETE_TABLES). Flag to
+whoever owns launch-week ops if they also need clearing.
+
+`ops_alerts` was added to this list on 2026-09-06 because it was in neither list
+before, which is worse than being in the wrong one. It is the watchdog's dedupe
+memory (`db/2026-08-21_ops_alerts.sql`: one row, `key='watchdog'`, carrying
+`state`, `signature`, `since` and `alert_count`), and it survives the wipe. Two
+consequences on launch morning, neither of them fatal and both surprising if
+nobody said so first: `.github/workflows/watchdog.yml` pings every 15 minutes and
+`/api/ops/watchdog` posts to Discord, so the hours in which all three producers
+are deliberately stopped will generate a real alert plus a re-alert every six
+hours; and the `since` that drives the "down for X" line is measured from
+whenever that episode began, which is before the cutover rather than after it. (`poty_history` **is** wiped — its
 migration documents a pre-launch wipe. `server_status` **is** reset now, see
 above.)
 

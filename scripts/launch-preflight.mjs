@@ -351,7 +351,9 @@ function checkPollerEnv() {
   graded(
     'poller:MAP_REMOTE_DIR',
     'MAP_REMOTE_DIR names the world',
-    mapDir.includes(WORLD),
+    // endsWith, not includes: 'map_data/EilifRehearsal' contains 'Eilif' and
+    // must FAIL here (the rehearsal caught exactly that false pass).
+    mapDir.replace(/\/+$/, '').endsWith(`map_data/${WORLD}`),
     `${mapDir || '(unset)'} — must end in map_data/${WORLD}`,
     PHASE === 'pre-wipe' ? 'warn' : true,
   );

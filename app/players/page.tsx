@@ -320,7 +320,7 @@ export default async function PlayersPage() {
           action={
             <div className="flex items-center gap-2">
               {statsStale && <Badge tone="gold">Stats paused</Badge>}
-              <Badge tone="neutral">{roster.length} vikings</Badge>
+              <Badge tone="neutral">{roster.length} {roster.length === 1 ? 'viking' : 'vikings'}</Badge>
             </div>
           }
         />

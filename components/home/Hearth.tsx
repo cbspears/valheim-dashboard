@@ -37,14 +37,14 @@ export function Hearth({
     lively: {
       title: 'The hall is lively',
       body:
-        typeof worldDay === 'number'
+        typeof worldDay === 'number' && worldDay > 0
           ? `Day ${worldDay}. Voices and laughter ring beneath the rafters.`
           : 'Voices and laughter ring beneath the rafters.',
     },
     banked: {
       title: 'The hall is quiet',
       body:
-        typeof worldDay === 'number'
+        typeof worldDay === 'number' && worldDay > 0
           ? `Day ${worldDay}. The server is up, but no one is online.`
           : 'The server is up, but no one is online.',
     },
@@ -60,7 +60,7 @@ export function Hearth({
         title="The Hearth"
         icon={<Flame size={16} />}
         action={
-          typeof worldDay === 'number' && state !== 'sleeping' ? (
+          typeof worldDay === 'number' && worldDay > 0 && state !== 'sleeping' ? (
             <span className="flex items-center gap-1.5 text-xs text-muted">
               <Sun size={12} className="text-gold-dim" />
               Day {worldDay}

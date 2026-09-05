@@ -133,9 +133,21 @@ const saveState = async () => {};
 // deed lines, death tiers, the queue writer) running with no gateway.
 const stubClient = { on: () => {}, isReady: () => false, ws: { status: null } };
 
+// CHANNEL ROUTING, and why it is read from the environment rather than pinned.
+// The pilot pinned RECAP/MILESTONE/OATH/BOSS_CHANNEL to 'server', and reverting
+// those four (plus adding TITLE_CHANNEL=valheim) is step 6 of the cutover
+// (docs/LAUNCH-WIPE.md, scripts/cutover-env.sh). Hard-coding 'server' here made
+// that revert the one launch-day change no local rehearsal could see: the bot
+// printed #server whatever the .env said. These mirror index.js exactly —
+// including that TITLE_CHANNEL defaults to 'server' while the other three
+// default to 'valheim'.
+const RECAP_CHANNEL = process.env.RECAP_CHANNEL || 'valheim';
+const MILESTONE_CHANNEL = process.env.MILESTONE_CHANNEL || 'valheim';
+const TITLE_CHANNEL = process.env.TITLE_CHANNEL === 'valheim' ? 'valheim' : 'server';
+
 const relay = createRelay({ db, post, state, saveState });
 const bosses = createBossWatcher({ db, post, state, saveState });
-const recap = createRecap({ db, post, state, saveState, writeDb, tz: process.env.TZ || 'America/Chicago', channel: 'server' });
+const recap = createRecap({ db, post, state, saveState, writeDb, tz: process.env.TZ || 'America/Chicago', channel: RECAP_CHANNEL });
 const voice = createVoiceEngine({
   client: stubClient,
   db,
@@ -150,7 +162,7 @@ const titles = createTitlesAnnouncer({
   post,
   writeDb,
   apiUrl: process.env.TITLES_API || 'http://localhost:3400/api/titles',
-  channel: 'server',
+  channel: TITLE_CHANNEL,
 });
 const milestones = createMilestonesAnnouncer({
   db,
@@ -159,7 +171,7 @@ const milestones = createMilestonesAnnouncer({
   state,
   saveState,
   minGapMs: effective.MILESTONE_MIN_GAP_MS,
-  channel: 'server',
+  channel: MILESTONE_CHANNEL,
 });
 
 let stopped = false;
@@ -209,6 +221,15 @@ for (const key of Object.keys(PRODUCTION)) {
       `effective ${String(effective[key]).padStart(7)}ms  (${provenance[key]})`,
   );
 }
+
+// Channel routing, declared next to the clock and for the same reason: no line
+// of #channel evidence below can be read without knowing what routed it.
+console.log(
+  `[bot-dryrun] channels: recap=#${RECAP_CHANNEL} deeds=#${MILESTONE_CHANNEL} titles=#${TITLE_CHANNEL} ` +
+    `oaths=#${process.env.OATH_CHANNEL === 'server' ? 'server' : 'valheim'} ` +
+    `bosses=#${process.env.BOSS_CHANNEL === 'server' ? 'server' : 'valheim'}` +
+    `${process.env.RECAP_CHANNEL || process.env.MILESTONE_CHANNEL || process.env.TITLE_CHANNEL ? '' : '   (no *_CHANNEL set — launch defaults)'}`,
+);
 
 // A recap on demand, so the recap formatting is exercised against the stressed
 // data without waiting for 23:00 CT.

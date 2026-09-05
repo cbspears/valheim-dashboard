@@ -8,7 +8,30 @@
 //
 //   Node 20:  export NVM_DIR=~/.config/nvm; . $NVM_DIR/nvm.sh; nvm use 20
 //   Preview:  node scripts/launch-wipe.mjs
-//   Wipe:     node scripts/launch-wipe.mjs --execute
+//   Wipe:     node scripts/launch-wipe.mjs --execute --i-mean-prod
+//
+// TARGET SELECTION (added 2026-09-06, for the launch-day rehearsal). The target
+// still defaults to .env.local, i.e. production. Three flags move it:
+//
+//   --supabase-url <u>   (or LAUNCH_WIPE_SUPABASE_URL)  where to wipe
+//   --service-key <k>    (or LAUNCH_WIPE_SERVICE_KEY)   the key to wipe with
+//   --state-dir <dir>    (or LAUNCH_WIPE_STATE_DIR)     root of the three local
+//                                                       state files it deletes
+//
+// and three refusals make the choice impossible to get wrong by accident:
+//
+//   * --execute against a NON-loopback url is refused unless --i-mean-prod is
+//     also passed. A dry run is never blocked — the production preview is a
+//     documented launch-day step.
+//   * --execute against a loopback url is refused without --state-dir, because
+//     the three state files live in this working copy and belong to the LIVE
+//     systemd services. A rehearsal that deleted them would break production.
+//   * --execute against a NON-loopback url is refused WITH --state-dir, because
+//     that combination wipes production while deleting nothing local, which is
+//     how the pilot's announcedBosses would survive into launch night.
+//
+// Rehearsal (docs/LAUNCH-WIPE.md, "Rehearsal 2026-09-06"):
+//   scripts/stress/rehearse-launch.sh
 //
 // Why this exists (not a naive `delete from ...` pass): two services will undo
 // the wipe from underneath it, so step 1 below refuses --execute outright while
@@ -43,13 +66,39 @@ const ROOT = path.join(__dirname, '..');
 
 // ── args ─────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
+
+// `--name value` and `--name=value` both accepted. A following token that starts
+// with `--` is a flag, never this flag's value.
+function flagValue(name) {
+  const eq = argv.find((a) => a.startsWith(`--${name}=`));
+  if (eq) return eq.slice(name.length + 3);
+  const i = argv.indexOf(`--${name}`);
+  if (i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--')) return argv[i + 1];
+  return null;
+}
+
 const EXECUTE = argv.includes('--execute');
 const DRY_RUN = !EXECUTE;
+// Only meaningful with --execute against a NON-loopback target. See the target
+// guard below for why it exists.
+const I_MEAN_PROD = argv.includes('--i-mean-prod');
+
+const urlFlag = flagValue('supabase-url');
+const keyFlag = flagValue('service-key');
+const stateDirFlag = flagValue('state-dir');
+const URL_OVERRIDE = urlFlag || process.env.LAUNCH_WIPE_SUPABASE_URL || null;
+const KEY_OVERRIDE = keyFlag || process.env.LAUNCH_WIPE_SERVICE_KEY || null;
+const STATE_DIR_OVERRIDE = stateDirFlag || process.env.LAUNCH_WIPE_STATE_DIR || null;
+const URL_SOURCE = urlFlag ? '--supabase-url' : URL_OVERRIDE ? 'LAUNCH_WIPE_SUPABASE_URL' : '.env.local';
+const KEY_SOURCE = keyFlag ? '--service-key' : KEY_OVERRIDE ? 'LAUNCH_WIPE_SERVICE_KEY' : '.env.local';
 
 // ── env (mirrors scripts/backfill-identity.js / seed-milestones-backfill.mjs) ──
+// .env.local is the launch-day source and stays the default. It is READ ONLY
+// when neither override is supplied, so a rehearsal box without one still runs.
 function loadEnv() {
   const file = path.join(ROOT, '.env.local');
   const env = {};
+  if (!fs.existsSync(file)) return env;
   for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
     if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
@@ -57,15 +106,107 @@ function loadEnv() {
   return env;
 }
 const env = loadEnv();
-const SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL || env.SUPABASE_URL;
-const SERVICE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL = URL_OVERRIDE || env.NEXT_PUBLIC_SUPABASE_URL || env.SUPABASE_URL;
+const SERVICE_KEY = KEY_OVERRIDE || env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error('Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env.local');
+  console.error(
+    'Missing Supabase target. Supply --supabase-url/--service-key (or\n' +
+      'LAUNCH_WIPE_SUPABASE_URL / LAUNCH_WIPE_SERVICE_KEY), or put\n' +
+      'NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env.local.',
+  );
   process.exit(1);
 }
 const REST = `${SUPABASE_URL}/rest/v1`;
 const STORAGE = `${SUPABASE_URL}/storage/v1`;
 const AUTH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
+
+// ── which stack is this pointed at? ──────────────────────────────────────────
+//
+// A loopback host is the rehearsal stack (docs/STRESS-TEST.md); anything else is
+// treated as production, because in this repo it always has been.
+function isLoopbackUrl(u) {
+  try {
+    return ['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'].includes(new URL(u).hostname);
+  } catch {
+    return false;
+  }
+}
+const TARGET_IS_LOCAL = isLoopbackUrl(SUPABASE_URL);
+
+// ── local state files: whose? ────────────────────────────────────────────────
+//
+// The three state files this script deletes belong to the LIVE systemd services
+// (eilif-discord-bot, eilif-log-poller, eilif-map-snapshot all run out of this
+// working copy). A rehearsal against the local stack that deleted them would
+// take out production's cursor and announced-boss ledger while the rehearsal
+// itself proved nothing. So --state-dir relocates them, and a local --execute
+// without one is refused below rather than defaulted.
+const STATE_ROOT = STATE_DIR_OVERRIDE ? path.resolve(STATE_DIR_OVERRIDE) : ROOT;
+
+// ── target guards ────────────────────────────────────────────────────────────
+//
+// Read-only runs are never blocked: the dry run against production IS the
+// launch-day preview (docs/LAUNCH-WIPE.md, "Order of operations" step 3).
+if (EXECUTE && !TARGET_IS_LOCAL && !I_MEAN_PROD) {
+  console.error('====================================================================');
+  console.error(' Refusing --execute.');
+  console.error('====================================================================');
+  console.error(`  Target:      ${SUPABASE_URL}  (from ${URL_SOURCE})`);
+  console.error('  That is not a loopback host, so this is a PRODUCTION wipe: real');
+  console.error('  DELETEs, no undo, and the Free plan has no backups.');
+  console.error('');
+  console.error('  Rehearsing?  Point it at the local stack instead:');
+  console.error('    node scripts/launch-wipe.mjs --execute \\');
+  console.error('      --supabase-url http://127.0.0.1:54321 --service-key <local service key> \\');
+  console.error('      --state-dir <scratch copy of the state files>');
+  console.error('');
+  console.error('  Really wiping production on launch day? Add --i-mean-prod.');
+  process.exit(2);
+}
+if (EXECUTE && TARGET_IS_LOCAL && !STATE_DIR_OVERRIDE) {
+  console.error('====================================================================');
+  console.error(' Refusing --execute against the local stack without --state-dir.');
+  console.error('====================================================================');
+  console.error(`  Target: ${SUPABASE_URL}`);
+  console.error('  The three state files this wipe deletes belong to the LIVE services,');
+  console.error('  which run out of this working copy:');
+  console.error('    services/discord-bot/state.json    (announcedBosses)');
+  console.error('    services/log-poller/state.json     (byte cursor)');
+  console.error('    scripts/.map-snapshot-state.json   (day-frame manifest cursor)');
+  console.error('  Deleting them for a rehearsal would break production and prove nothing.');
+  console.error('  Copy them into scratch and pass --state-dir <that dir> instead.');
+  process.exit(2);
+}
+// The third combination, and the one that reads harmless. --state-dir is a
+// REHEARSAL flag: against production the three state files must be the live
+// services' own, at the repo root. A prod wipe carrying a leftover --state-dir
+// from a rehearsal command line (they sit a hundred lines apart in
+// docs/LAUNCH-WIPE.md, which is where the copy-paste comes from) would clear
+// every row and then delete nothing, leaving services/discord-bot/state.json
+// holding the pilot's announcedBosses — the exact silence this script's header
+// says it exists to prevent. Refuse rather than warn.
+if (EXECUTE && !TARGET_IS_LOCAL && STATE_DIR_OVERRIDE) {
+  console.error('====================================================================');
+  console.error(' Refusing --execute: --state-dir is a rehearsal-only flag.');
+  console.error('====================================================================');
+  console.error(`  Target:      ${SUPABASE_URL}  (from ${URL_SOURCE})`);
+  console.error(`  --state-dir: ${STATE_ROOT}`);
+  console.error('');
+  console.error('  Against a production target the three state files MUST be the live');
+  console.error('  services’ own, at the repo root. Wiping prod with the state files');
+  console.error('  pointed at scratch clears every row and deletes nothing, so:');
+  console.error('    services/discord-bot/state.json  keeps the pilot announcedBosses');
+  console.error('                                     -> launch night’s first boss kill');
+  console.error('                                        posts nothing and is never retold');
+  console.error('    services/log-poller/state.json   keeps a stale byte cursor');
+  console.error('    scripts/.map-snapshot-state.json keeps the day-64 manifest cursor');
+  console.error('');
+  console.error('  Drop --state-dir (and LAUNCH_WIPE_STATE_DIR) for the launch-day wipe.');
+  process.exit(2);
+}
+if (I_MEAN_PROD && TARGET_IS_LOCAL) {
+  console.log('\n  note: --i-mean-prod ignored — the target is loopback, not production.');
+}
 
 function banner(title) {
   console.log(`\n── ${title} ${'─'.repeat(Math.max(0, 70 - title.length))}`);
@@ -204,8 +345,51 @@ function serviceStatus(unit) {
   }
 }
 
+// The local rehearsal's own announcer. Matched the way scripts/smoke/run.mjs
+// matches it: pgrep by script path, then narrowed to the processes whose OWN
+// environment names THIS database. A dry-run bot on another stack is somebody
+// else's rehearsal in progress, and killing or gating on it because it shares a
+// filename is the same mistake as `pkill -f "node src/index.js"` against the
+// bot and the poller.
+function dryRunBotsOnThisDatabase() {
+  let pids = [];
+  try {
+    pids = execSync('pgrep -f "scripts/stress/bot[-]dryrun.mjs" || true', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString().trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+  return pids.filter((pid) => {
+    try {
+      return fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`SUPABASE_URL=${SUPABASE_URL}`);
+    } catch {
+      return false;
+    }
+  });
+}
+
 function preflightServices() {
   banner('Pre-flight: service liveness');
+  if (TARGET_IS_LOCAL) {
+    // These three units write to PRODUCTION Supabase, so nothing they do can
+    // undo a wipe of the loopback stack: report them, gate on none of them.
+    // The producer that CAN undo this wipe is the local rehearsal's own
+    // announcer (scripts/stress/bot-dryrun.mjs), which is gated below.
+    for (const u of [...HARD_GATE_UNITS, ...SOFT_GATE_UNITS]) {
+      console.log(`  ${u.padEnd(24)} ${serviceStatus(u)}   (writes to prod — not a gate for a loopback target)`);
+    }
+    const bots = dryRunBotsOnThisDatabase();
+    console.log(
+      `  ${'stress bot-dryrun'.padEnd(24)} ${bots.length ? `running (pid ${bots.join(', ')})` : 'none on this database'}   (the local rehearsal's own announcer)`,
+    );
+    // A running announcer is a WRITER, which is the whole reason the production
+    // branch below hard-gates on eilif-discord-bot. On a loopback target it is
+    // the same hazard in miniature: it re-creates the state files it owns and
+    // announces off a half-wiped database, so anything that verifies the wipe
+    // straight afterwards is racing it. Same terms, then -- gated below, not
+    // warned about.
+    return { hardActive: [], softActive: [], localBots: bots };
+  }
   const hardStatuses = HARD_GATE_UNITS.map((u) => [u, serviceStatus(u)]);
   for (const [u, st] of hardStatuses) console.log(`  ${u.padEnd(24)} ${st}   (hard gate)`);
   const softStatuses = SOFT_GATE_UNITS.map((u) => [u, serviceStatus(u)]);
@@ -288,7 +472,20 @@ const UPDATE_TARGETS = [
   },
   {
     table: 'bosses',
-    filter: 'is_killed=eq.true',
+    // EVERY boss row, not just the killed ones (`is_killed=eq.true`, which this
+    // was until the 2026-09-06 rehearsal). A boss that the pilot world FOUGHT
+    // and never killed still carries `players_present` and `fight_stats` from
+    // that fight: app/api/gs-ingest/route.ts folds client damage into both on
+    // every snapshot, with no kill required. The old filter skipped those rows
+    // entirely, and both folds are grow-only unions ("union — grow only, never
+    // shrink" in that file), so launch night's first kill of that boss INHERITS
+    // the pilot's war party and damage numbers. Reproduced on the rehearsal
+    // stack: Bonemass left at is_killed=false with two pilot names survived the
+    // wipe untouched, and in the full run Eikthyr's war party came out as 16
+    // vikings — the eight who actually swung plus eight from the wiped world,
+    // with a pilot name topping the damage board. Resetting all eight rows is
+    // idempotent and costs one PATCH.
+    filter: 'id=not.is.null',
     // NOTE: players_present is read as `boss.players_present.length` with no
     // null-guard in app/boss/[slug]/page.tsx — it must reset to [] (empty
     // array), never null, or that page throws.
@@ -307,7 +504,7 @@ const UPDATE_TARGETS = [
       retelling: null,
       retelling_generated_at: null,
     },
-    label: 'killed bosses to reset',
+    label: 'boss rows to clear (kill flag, war party, fight stats, retelling)',
   },
   {
     table: 'server_status',
@@ -349,15 +546,15 @@ function localStateFiles() {
   return [
     {
       label: 'log-poller cursor/dedupe state (offset, online roster, connection dedupe)',
-      file: path.join(ROOT, 'services/log-poller/state.json'),
+      file: path.join(STATE_ROOT, 'services/log-poller/state.json'),
     },
     {
       label: 'discord-bot state (announcedBosses, voice ambient/discovery dedupe, POTY recap streaks)',
-      file: path.join(ROOT, 'services/discord-bot/state.json'),
+      file: path.join(STATE_ROOT, 'services/discord-bot/state.json'),
     },
     {
       label: 'map-snapshot day-frame manifest cursor',
-      file: path.join(ROOT, 'scripts/.map-snapshot-state.json'),
+      file: path.join(STATE_ROOT, 'scripts/.map-snapshot-state.json'),
     },
     {
       // Confirmed by reading services/stats-parser/src — it re-reads *.fch
@@ -374,8 +571,14 @@ async function main() {
   console.log('====================================================================');
   console.log(` Eilif launch-wipe — ${EXECUTE ? 'EXECUTE (live wipe)' : 'DRY RUN (read-only)'}`);
   console.log('====================================================================');
+  // Which stack, said out loud, before a single row is counted. A wipe whose
+  // target the operator has not read is the accident this whole script exists
+  // to prevent.
+  console.log(`  target      ${SUPABASE_URL}`);
+  console.log(`              ${TARGET_IS_LOCAL ? 'LOOPBACK — rehearsal stack' : 'REMOTE — treated as PRODUCTION'} (url from ${URL_SOURCE}, key from ${KEY_SOURCE})`);
+  console.log(`  state files ${STATE_ROOT}${STATE_DIR_OVERRIDE ? '   (--state-dir)' : '   (repo root — the LIVE services\u2019 own files)'}`);
 
-  const { hardActive } = preflightServices();
+  const { hardActive, localBots } = preflightServices();
 
   banner('Row counts — target tables (BEFORE)');
   const deleteCounts = [];
@@ -418,6 +621,21 @@ async function main() {
   if (EXECUTE && hardActive.length) {
     console.error(`\nRefusing --execute: ${hardActive.join(', ')} active. Stop and re-run:`);
     console.error(`  sudo systemctl stop ${hardActive.join(' ')}`);
+    process.exit(1);
+  }
+  // The loopback equivalent, on the same terms. The dry-run bot is the local
+  // stack's announcer: it writes titles, saga rows and its own state file, so a
+  // wipe underneath it leaves the announcedBosses/title state disagreeing with
+  // the database, and anything verifying the wipe right afterwards is racing a
+  // writer. Same order as launch day, then: stop the announcer FIRST, wipe,
+  // start it again. Killed by pid, never by pattern.
+  if (EXECUTE && localBots?.length) {
+    console.error(`\nRefusing --execute: ${localBots.length} dry-run bot(s) are writing to ${SUPABASE_URL}.`);
+    console.error('  This is the loopback version of the eilif-discord-bot gate: it re-creates');
+    console.error('  the state files it owns and announces off a half-wiped database.');
+    console.error(`  Stop them by pid (a pkill pattern would match other stacks' bots too):`);
+    console.error(`    kill ${localBots.join(' ')}`);
+    console.error('  then re-run the wipe, and start the announcer again afterwards.');
     process.exit(1);
   }
 
@@ -591,7 +809,9 @@ function printPostWipeChecklist() {
       empty and repopulates from real joins.
 
   Adjacent tables intentionally NOT touched by this script: discord_events,
-  ops_heartbeats. (server_status IS reset now — see the note on that target
+  ops_heartbeats, ops_alerts (the watchdog's dedupe memory -- it keeps its
+  alerting state and its 'since' across the wipe, and the GitHub pinger keeps
+  running through the stopped-service window; see docs/LAUNCH-WIPE.md). (server_status IS reset now — see the note on that target
   above for why "it refreshes itself" was wrong. The roadmap table IS cleared now
   too — it is orphaned code-side, but its stale pilot rows contradicted the
   bosses table, so the wipe empties it.)

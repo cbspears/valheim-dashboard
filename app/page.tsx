@@ -101,7 +101,7 @@ export default async function HomePage() {
           </Badge>
           <span className="flex items-center gap-1.5 text-ash-dim">
             <Sun size={14} className="text-gold-dim" />
-            Day {worldDay} of the tenth world
+            {worldDay > 0 ? `Day ${worldDay} of the tenth world` : 'A new world, not yet a day old'}
           </span>
           <span className="flex items-center gap-1.5 text-ash-dim">
             <Users size={14} className="text-gold-dim" />
