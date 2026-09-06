@@ -144,6 +144,54 @@ Reactions: **📜** on a recorded oath (plus **❓** when the name didn't match 
 bio/role update (**❓** if no viking matched). Re-swearing **replaces** that Discord user's previous
 oath (one per user). Needs `SUPABASE_SERVICE_ROLE_KEY` and the GuildMessages intent (already set).
 
+## Player retellings (`TELLINGS`, on unless `TELLINGS=0`)
+A boss's saga used to be one column that only the Skald could write. It is now a table
+(`boss_tellings`, `db/2026-09-06_boss_tellings.sql`), and any viking whose Discord is linked to a
+character can add their own account of a fight. The war-room shows whichever telling is **chosen**
+and folds the rest into a collapsed "Other tellings" list underneath.
+
+Accepted formats (verb case-insensitive; the boss may be its name or its URL slug, in any case,
+and a unique fragment works too, so `bone` finds Bonemass):
+```
+@Eilif retell Bonemass: how the fight really went
+@Eilif tell the-elder: the mist came in fast
+@Eilif retell The Elder:
+we lost the shieldwall twice, and Bren held the gate alone
+
+@Eilif tellings Bonemass          list them, numbered: the chosen one, then newest first
+@Eilif keep Bonemass 2            make telling 2 the one the page shows
+```
+
+- **Identity-gated**, exactly like the oath ingest: the telling is credited to the character the
+  **sender's** Discord account is linked to (`@Eilif I am <name>`, then shout the rune in-game),
+  never to a name typed in the message. An unlinked viking is told how to link and nothing is
+  written.
+- **A new telling becomes the one shown.** The previous one is not deleted, it simply stops being
+  chosen, and `@Eilif tellings` still lists it. The Skald keeps writing `bosses.retelling` on every
+  kill and files the same text as a telling, marked chosen **only when nothing else is** — so
+  regenerating a saga never displaces a viking's account of the fight.
+- **The chosen telling is always listed first, and always visible.** Both the list and the war-room
+  are bounded at 20 rows; sorting by date alone would let a kept telling age out behind twenty
+  newer ones, and the page would quietly go back to showing the newest.
+- **`keep`** is allowed for that telling's own author, and for anyone with **Administrator** or
+  **Manage Server** or a role id in `ADMIN_ROLE_IDS` (the same check `@Eilif say:` uses, guild-pinned
+  the same way). Anyone else gets a one-line refusal.
+- **One retell per member per 5 minutes**, held in memory, so a restart forgets it. Listing and
+  choosing are not rate limited; the roster of the forsaken is cached for a minute, so a stream of
+  messages that merely start with "tell" costs one read rather than one each.
+- **The numbers in `tellings` are that moment's numbers.** Another viking's telling landing between
+  `@Eilif tellings` and `@Eilif keep` shifts them, so read the list again if the hall is busy.
+- Reactions: **📜** on a recorded telling and on a successful `keep`, **❓** when the sender has no
+  linked viking. Replies never ping anyone, and every player-typed string is escaped before it
+  reaches Discord.
+- Text is capped at **2000 characters** (Discord's own message ceiling, and the column's check
+  constraint), stripped of control and bidi characters, and stored otherwise **raw** — markdown is
+  escaped on display, not on storage, so the site can render blank-line paragraphs as paragraphs.
+- One in-game voice line is queued per telling, so the hall hears who told it.
+- Needs `SUPABASE_SERVICE_ROLE_KEY`. **Before `db/2026-09-06_boss_tellings.sql` is applied** every
+  verb answers "the Hall's ledgers are still being carved" and writes nothing, and the war-room
+  renders `bosses.retelling` exactly as it did before.
+
 ## The Voice of the Hall (`VOICE_ENGINE=1`, off by default)
 Eilif's brain. A server-side game plugin polls `GET /api/voice` and **speaks** queued lines in-game
 as "Eilif"; this bot decides **what** gets queued and **when**, writing rows to the `voice_lines`
@@ -287,7 +335,8 @@ journalctl -u eilif-discord-bot -f
 | `MILESTONES_INTERVAL_MS` | how often the deed announcer polls (keep ≤ the gap; live `.env` is `60000`) |
 | `TITLE_CHANNEL` | where title proclamations go: `server` (default, unchanged behaviour) or `valheim` |
 | `GALLERY_MAX_EDGE` | longest edge (px) of a stored gallery photo before WebP re-encode (default `1600`) |
-| `ADMIN_ROLE_IDS` | comma-separated role ids allowed to use `@Eilif say:` on top of Administrator / Manage Server |
+| `ADMIN_ROLE_IDS` | comma-separated role ids allowed to use `@Eilif say:` and `@Eilif keep` on top of Administrator / Manage Server |
+| `TELLINGS` | `0` turns player retellings off — both the verbs (`@Eilif retell/tellings/keep`) and the `boss_tellings` row the Skald files on each kill, so nothing touches the table; anything else, including unset, leaves them on |
 | `RECAP_EVENING_HOUR` | hour of the nightly recap, local `TZ` (default `23`) |
 | `WEEKLY_CHRONICLE` | `1` turns the weekly Chronicle on (default off) |
 | `CHRONICLE_CHANNEL` / `CHRONICLE_HOUR` | where the Chronicle posts (default `valheim`) and the Sunday hour, local `TZ` (default `20`) |

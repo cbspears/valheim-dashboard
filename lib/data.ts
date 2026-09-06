@@ -99,6 +99,7 @@ import type {
   GameSession,
   GameEvent,
   Boss,
+  BossTelling,
   ServerStatus,
   DiscordEvent,
   UpcomingEvent,
@@ -616,6 +617,53 @@ export const getActiveSessions = cache(async (): Promise<GameSession[]> => {
 export const getBosses = cache(async (): Promise<Boss[]> => {
   const { data } = await db().from('bosses').select('*').order('sort_order');
   return (data as Boss[]) ?? [];
+});
+
+// Explicit column list for public telling reads: every boss_tellings column
+// EXCEPT `author_discord_id`, which is the Discord account of whoever told it.
+// Paired with a REVOKE SELECT ... / GRANT SELECT (cols) migration exactly like
+// PLAYERS_PUBLIC_COLS above, so this is not merely tidy: `select('*')` here
+// would fail outright with "permission denied for column author_discord_id".
+const BOSS_TELLINGS_PUBLIC_COLS = 'id, boss_id, author_character, text, source, chosen, created_at';
+
+/**
+ * The tellings of one boss's fall (db/2026-09-06_boss_tellings.sql): the
+ * `chosen` one FIRST, then the rest newest first. The war-room shows the first
+ * and collapses the rest.
+ *
+ * BOUNDED AT 20 because the rows are player-written and unbounded in number: a
+ * boss retold two hundred times must not turn its war-room into a two-hundred
+ * paragraph page. The Discord side lists the same 20 in the same order, so
+ * `@Eilif keep <Boss> <n>` can always name what the page can show.
+ *
+ * CHOSEN FIRST IS WHAT MAKES THE BOUND SAFE. Ordering by date alone would let a
+ * deliberately kept telling age out of the window once twenty newer ones
+ * arrived, and the page would quietly go back to showing the newest — silently
+ * undoing `@Eilif keep`, which is the one thing this feature exists to do.
+ *
+ * TOLERATES THE TABLE NOT EXISTING. This migration is unapplied at the time of
+ * writing and is applied by hand, so the deployed site must render correctly
+ * against a database without it: PostgREST answers PGRST205 ("Could not find
+ * the table ... in the schema cache") and psql answers 42P01, and either way
+ * this returns [] and the page falls back to `bosses.retelling` exactly as it
+ * did before. Every other error (a network blip, a revoked grant) takes the
+ * same path for the same reason: a war-room that renders without its saga is
+ * better than one that does not render.
+ */
+export const getBossTellings = cache(async (bossId: string): Promise<BossTelling[]> => {
+  if (!bossId) return [];
+  const { data, error } = await db()
+    .from('boss_tellings')
+    .select(BOSS_TELLINGS_PUBLIC_COLS)
+    .eq('boss_id', bossId)
+    .order('chosen', { ascending: false })
+    .order('created_at', { ascending: false })
+    // Tie-break on id, so two tellings written in the same second are ordered
+    // the same way here and in the bot's numbered list.
+    .order('id', { ascending: false })
+    .limit(20);
+  if (error) return [];
+  return (data as BossTelling[]) ?? [];
 });
 
 /**

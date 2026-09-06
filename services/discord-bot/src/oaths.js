@@ -117,11 +117,29 @@ function splitNameBody(rest) {
   return m ? { name: m[1].trim(), text: m[2].trim() } : null;
 }
 
+// Verbs that belong to another handler and must not be read as an oath.
+//
+// This parser looks for `oath` / `bio` / `role` ANYWHERE in the message, which
+// every other verb anchors at the start instead. That is fine until a viking
+// writes a story containing one of those words:
+//
+//   @Eilif retell Bonemass: we swore an oath that day: never again
+//
+// which tellings.js records as a telling AND this parser reads as
+// { kind: 'oath', name: 'that day', text: 'never again' } — silently replacing
+// the sender's own oath. `role` is worse, because it writes players.role. The
+// telling verbs are anchored, so anchoring the refusal here is enough, and it
+// costs nothing when the tellings feature is off. Kept as a literal rather than
+// imported from tellings.js so this module gains no dependency on one that a
+// different flag governs.
+const OTHER_VERBS = /^(retellings|tellings|retell|tell|keep)\b/i;
+
 // Pull { kind, name, text } out of a mention message, or null if it isn't one.
 function parse(content, botId) {
   const stripped = (content ?? '')
     .replace(new RegExp(`<@!?${botId}>`, 'g'), '')
     .trim();
+  if (OTHER_VERBS.test(stripped.replace(/^[\s,.:!]+/, ''))) return null;
   const km = stripped.match(new RegExp(`\\b(${KINDS.join('|')})\\b([\\s\\S]*)`, 'i'));
   if (!km) return null;
   const kind = km[1].toLowerCase();

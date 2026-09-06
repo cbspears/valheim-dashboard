@@ -3,7 +3,6 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
   Users,
-  ScrollText,
   Camera,
   Swords,
   Map as MapIcon,
@@ -14,10 +13,17 @@ import {
 } from 'lucide-react';
 import { Card, CardHeader, CardBody, EmptyState, StatTile, VikingLink } from '@/components/ui';
 import { BossHero } from '@/components/boss/BossHero';
+import { BossTellings } from '@/components/boss/BossTellings';
 import { BossPortrait } from '@/components/art/BossPortrait';
 import { ART_ENABLED } from '@/config/art';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
-import { getBosses, getGalleryPhotos, getUpcomingEvents, getAllPlayers } from '@/lib/data';
+import {
+  getBosses,
+  getBossTellings,
+  getGalleryPhotos,
+  getUpcomingEvents,
+  getAllPlayers,
+} from '@/lib/data';
 import { slugify, vikingPath, matchVikingName, resolvePhotoViking } from '@/lib/slug';
 
 // SIXTY SECONDS OF ISR (2026-09-06). A Forsaken's page changes on exactly two
@@ -78,7 +84,15 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
   if (!boss) notFound();
 
   if (boss.is_killed) {
-    const [photos, roster] = await Promise.all([getGalleryPhotos(), getAllPlayers()]);
+    const [photos, roster, tellings] = await Promise.all([
+      getGalleryPhotos(),
+      getAllPlayers(),
+      // The tellings of this fall: the Skald's, and any a viking has told with
+      // `@Eilif retell <Boss>: <text>`. Empty before
+      // db/2026-09-06_boss_tellings.sql is applied, which is exactly the case
+      // BossTellings falls back to `boss.retelling` for.
+      getBossTellings(boss.id),
+    ]);
     const nameLower = boss.name.toLowerCase();
     const depiction = photos.find((p) => p.caption?.toLowerCase().includes(nameLower)) ?? null;
     // Prefer the explicit Discord↔character link, then loose name matching.
@@ -145,28 +159,12 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
           );
         })()}
 
-        {/* The Retelling */}
-        <Card>
-          <CardHeader title="The Skald's Retelling" icon={<ScrollText size={16} />} />
-          <CardBody>
-            {boss.retelling?.trim() ? (
-              <figure>
-                <p className="text-sm italic leading-relaxed text-ash-dim">
-                  {boss.retelling.trim()}
-                </p>
-                <figcaption className="mt-3 text-xs uppercase tracking-wider text-gold-dim">
-                  The Skald
-                </figcaption>
-              </figure>
-            ) : boss.notes ? (
-              <p className="text-sm italic leading-relaxed text-ash-dim">{boss.notes}</p>
-            ) : (
-              <p className="text-sm text-muted">
-                The Skald has not yet set this battle to words.
-              </p>
-            )}
-          </CardBody>
-        </Card>
+        {/* The Retelling: the chosen telling, with the rest folded underneath. */}
+        <BossTellings
+          tellings={tellings}
+          fallback={boss.retelling ?? null}
+          notes={boss.notes}
+        />
 
         {/* The Depiction */}
         <Card>

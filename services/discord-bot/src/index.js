@@ -12,6 +12,7 @@ import { createRecap } from './recap.js';
 import { createEventsSync } from './events.js';
 import { createGalleryIngest } from './gallery.js';
 import { createOathIngest } from './oaths.js';
+import { createTellings } from './tellings.js';
 import { createIdentityLink, createIdentityConfirmations } from './identity.js';
 import { createVoiceEngine } from './voice.js';
 import { createTitlesAnnouncer } from './titles.js';
@@ -180,6 +181,19 @@ async function runLive() {
   if (process.env.OATH_INGEST === '1') {
     createOathIngest({ client: poster.client }).attach();
     extra += ', oath ingest on';
+  }
+
+  // Player retellings of a boss fall: `@Eilif retell <Boss>: <text>`,
+  // `@Eilif tellings <Boss>`, `@Eilif keep <Boss> <n>`. ON by default (the
+  // whole point is that a viking can update a boss story without asking
+  // anyone), off with TELLINGS=0 — which the Skald's own hook in retelling.js
+  // honours too, so that flag stops every write to the table, not just the
+  // verbs. Reads and writes `boss_tellings`; before
+  // db/2026-09-06_boss_tellings.sql is applied every verb answers "the ledgers
+  // are still being carved" and writes nothing.
+  if (process.env.TELLINGS !== '0') {
+    createTellings({ client: poster.client }).attach();
+    extra += ', tellings on';
   }
 
   // Discord↔character identity: `@Eilif I am <name>` mints a claim code (the
@@ -587,7 +601,7 @@ async function runDryRun({ loop = false } = {}) {
   console.log(
     '[dry-run] not rehearsed: events-sync (needs a live gateway, and POSTs to the webhook), ' +
       'identity-confirm (builds its own service-role client and DMs real users), ' +
-      'the gallery/oath/identity-link ingests (event handlers — a stub client never emits), ' +
+      'the gallery/oath/identity-link/tellings ingests (event handlers — a stub client never emits), ' +
       'the Skald retelling (a ~90 s local LLM call per boss, best-effort live), ' +
       'the ops heartbeat (must not tell /admin/ops a bot is alive).'
   );

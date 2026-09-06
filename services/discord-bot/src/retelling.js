@@ -9,6 +9,15 @@
 //
 // Used by src/bosses.js (after the @everyone announcement — never blocking it)
 // and by scripts/retell-boss.js (manual generate / regenerate).
+//
+// AND, since 2026-09-06, it files the same text as a `boss_tellings` row so a
+// viking can answer it with their own account of the fight (tellings.js). The
+// column and the row are both written: `bosses.retelling` stays the
+// pre-migration fallback for the war-room, and is what the backfill in
+// db/2026-09-06_boss_tellings.sql was built from. A regeneration NEVER
+// displaces a player's telling — see recordSkaldTelling.
+
+import { recordSkaldTelling } from './tellings.js';
 
 // 127.0.0.1, not localhost: Node 20 fetch resolves localhost to ::1 first and
 // ollama listens on IPv4 only — "fetch failed" with no further hint.
@@ -622,7 +631,15 @@ export function createSkald({ db, writeDb }) {
 
     console.log(`[skald] ${facts.name}: ${source} retelling, ${text.length} chars`);
     const wrote = await writeRetelling(writeDb, boss, text);
-    return { retelling: text, source, wrote, facts };
+    // File the same saga as a telling, so a viking can answer it with their
+    // own. It CLAIMS the chosen flag and the partial unique index refuses the
+    // claim when a player's telling already holds it, so a regeneration is
+    // filed UNDER a player's account of the fight rather than over it, with no
+    // read-then-write window in between. Honours TELLINGS=0. Best-effort by
+    // contract: recordSkaldTelling throws nothing and reports a missing table
+    // as a skip, exactly like writeRetelling does.
+    const telling = await recordSkaldTelling({ db: writeDb, boss, text });
+    return { retelling: text, source, wrote, telling, facts };
   }
 
   return {

@@ -213,6 +213,30 @@ export interface Boss {
   retelling_generated_at?: string | null;
 }
 
+/**
+ * One saga retelling of a boss fall (db/2026-09-06_boss_tellings.sql). A boss
+ * may have several: the Skald's, written on the kill, and any a viking has told
+ * since with `@Eilif retell <Boss>: <text>`. Exactly one carries `chosen`, and
+ * that is the one the war-room shows.
+ *
+ * `author_discord_id` is DELIBERATELY ABSENT. The column exists (the bot needs
+ * it so a telling's own author may re-choose it) but it is REVOKEd from the
+ * anon role, exactly like players.steam_id, so the public site can neither read
+ * it nor select it: getBossTellings names its columns for that reason and must
+ * never go back to `select('*')`.
+ */
+export interface BossTelling {
+  id: string;
+  boss_id: string;
+  /** The teller as the Hall knows them, or 'The Skald'. */
+  author_character: string | null;
+  text: string;
+  /** 'skald' | 'player' | 'admin' (checked in the database). */
+  source: string;
+  chosen: boolean;
+  created_at: string;
+}
+
 export interface DiscordEvent {
   id: string;
   discord_event_id: string | null;

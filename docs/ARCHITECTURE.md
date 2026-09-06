@@ -216,8 +216,35 @@ only component holding a Supabase key directly. Loops, with their intervals:
 | `boss-polls` | `BOSS_POLLS_INTERVAL_MS`, default 60 s | watches `bosses` for a fresh kill and posts one native Discord poll naming who takes first blood on the next boss, plus a follow-up when it falls. **Off unless `BOSS_POLLS=1`** |
 | chronicle | one `node-cron` job, `0 <CHRONICLE_HOUR> * * 0` (Sunday, default 20:00) America/Chicago | the weekly Skald's Chronicle embed. **Off unless `WEEKLY_CHRONICLE=1`** |
 
-Recaps are gated by `RECAPS_START`. Gallery ingest, oath ingest and identity linking are
-Discord event handlers rather than loops, each behind its own env flag.
+Recaps are gated by `RECAPS_START`. Gallery ingest, oath ingest, identity linking and
+player tellings are Discord event handlers rather than loops, each behind its own env flag.
+
+**Player tellings (`services/discord-bot/src/tellings.js`, on unless `TELLINGS=0`).** A
+boss's saga is no longer one column that only the Skald may write. `db/2026-09-06_boss_tellings.sql`
+adds `boss_tellings` (boss, author, text, `source` of skald/player/admin, `chosen`), and a
+viking whose Discord is linked to a character can write their own account of a fight with
+`@Eilif retell <Boss>: <text>` (also `tell`; `@Eilif tellings <Boss>` lists them numbered,
+`@Eilif keep <Boss> <n>` chooses one, allowed for that telling's author or a guild
+Administrator, the same check the voice puppet uses). The teller is the character the
+SENDER's Discord account is linked to, never a name typed in the message, exactly as in the
+oath ingest; one retell per member per five minutes; the text is capped at 2000 characters
+and stripped of control characters at storage and escaped at every point of display. A new
+player telling takes `chosen`, and a partial unique index on `(boss_id) where chosen` makes
+"at most one per boss" the database's rule rather than the bot's care, which is why choosing
+is always insert-unchosen-then-set. The Skald still writes `bosses.retelling` on every kill
+and now files the same text as a `skald` telling, which CLAIMS `chosen` in one statement and
+lets that index refuse it when a viking's telling already stands, so a regeneration is filed
+under an account rather than over it with no read-then-write window in between. Both readers
+sort `chosen` first and then newest, because the row lists are bounded at twenty and a kept
+telling must never age out of its own window. The war-room renders the chosen telling with a
+byline and folds the rest into a collapsed list; with no rows at all it falls back to
+`bosses.retelling`, so the page is unchanged on a database where that migration has not been
+applied. `author_discord_id` is REVOKEd from anon like
+`players.steam_id`, so `lib/data.ts getBossTellings` names its columns and must never go
+back to `select('*')`. The telling verbs are anchored at the start of the message, and
+`oaths.js` refuses a message that starts with one, because its own keyword search runs over
+the whole message and would otherwise read a story containing the word "oath" or "role" as
+the sender's own oath.
 
 **The relay cursors on insertion order, not on producer time.** `events.created_at` is
 supplied by whoever wrote the row: the log poller stamps a join or leave with the LOG
@@ -363,6 +390,7 @@ service-role key, either from a Vercel route or from the Discord bot.
 | `events` | `/api/webhook`, `/api/gs-ingest`, `lib/deaths.ts`, `lib/milestones.ts` | the saga feed: joins, leaves, deaths, bosses, raids, milestones |
 | `player_stats` | `/api/gs-ingest` (upsert) | leaderboard numbers plus the `gs_stats` jsonb long tail. Baselined per world by `lib/gs-baseline.ts`. |
 | `bosses` | `/api/gs-ingest` (update), bot `retelling.js` (update), `services/discord-bot/scripts/mark-boss.js` (manual) | the eight progression gates, `fight_stats` jsonb |
+| `boss_tellings` | bot `tellings.js` (insert, update), bot `retelling.js` via `recordSkaldTelling` | the war-room's sagas: the Skald's, and the ones vikings tell with `@Eilif retell`. **`db/2026-09-06_boss_tellings.sql` is UNAPPLIED**, so this is the twenty-first table only once Charlie runs it. `author_discord_id` is revoked from anon. |
 | `roadmap` | nothing in code (hand-edited in Supabase) | the living schedule |
 | `server_status` | `/api/webhook`, `/api/gs-ingest` | single row: online, player count, current players, world day |
 | `discord_events` | `/api/webhook` (`events_sync`, upsert and delete) | Discord scheduled events, rolled forward for recurrence |
@@ -379,9 +407,11 @@ service-role key, either from a Vercel route or from the Discord bot.
 | `ops_heartbeats` | `/api/ops/heartbeat`, `lib/ops/route-heartbeat.ts` | producer liveness. Service-role only. |
 | `ops_alerts` | `/api/ops/watchdog` (upsert) | watchdog alert state and re-alert timing. Service-role only. |
 
-That is all twenty, verified against the live project on 2026-09-05. One of `players`'s
-columns is narrower than the rest of the row: `steam_id` is revoked from the anon role by
-`db/2026-07-11_players_pii_revoke.sql`, so public reads never see it. `discord_id`,
+That is all twenty, verified against the live project on 2026-09-05 (`boss_tellings` is the
+twenty-first, and only once its migration is applied). Two columns are narrower than the
+rows they sit in: `players.steam_id` is revoked from the anon role by
+`db/2026-07-11_players_pii_revoke.sql`, and `boss_tellings.author_discord_id` by
+`db/2026-09-06_boss_tellings.sql`, so public reads never see either. `discord_id`,
 `discord_user_id` and `discord_username` **are** readable by anon over PostgREST: that
 migration revokes the blanket table grant and then deliberately re-grants those three,
 because the viking pages render them. If that is not what you want, it is a product
