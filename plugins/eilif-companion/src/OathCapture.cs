@@ -84,6 +84,27 @@ namespace EilifCompanion
     /// NOTE: normal "say" chat does not traverse ChatMessage and unknown /commands are swallowed
     /// client-side — oaths must be SHOUTED: `/s /oath I swear...` (documented on the Oath page).
     /// </summary>
+    // BOUND BY BARE NAME ON PURPOSE, and that is NOT an oversight against the "explicit argument
+    // types everywhere" rule ToolStaminaPatch.cs states (audit plugins-1.0 round 2). The two rules
+    // apply to two different shapes, and the deciding question is whether the PREFIX already pins
+    // the signature:
+    //   * ToolStamina's ScopePrefix/ScopeFinalizer take NO parameters, so the Type[] in the
+    //     attribute is the only thing pinning a signature there. Without it a new overload is an
+    //     ambiguous match and the hook is lost with nothing to fall back on. It belongs there.
+    //   * The prefixes here and on Patch_OnNewChatMessage_Pin declare the full
+    //     (GameObject, long, Vector3, Talker.Type, UserInfo, string) list, and Harmony binds patch
+    //     parameters by NAME and TYPE against the original. So the signature is ALREADY pinned, and
+    //     an explicit Type[] would only change which 1.0 shape survives:
+    //       - 1.0 ADDS a 7th parameter (what Iron Gate actually did to this method when UserInfo
+    //         arrived with crossplay): bare name still resolves uniquely, our six parameters still
+    //         bind by name, and oath capture, the chat mirror and pins all KEEP WORKING. An
+    //         explicit six-type array would fail to match and kill all three.
+    //       - 1.0 adds an OVERLOAD: bare name goes ambiguous and dies; explicit types would live.
+    //     A parameter-list change on this method has precedent; a same-name overload does not, so
+    //     the bare name is the side of the trade that keeps more features alive. Either way the
+    //     failure is caught and named by the apply loop's roster (see EilifCompanionPlugin.cs), so
+    //     this is a choice between "loud and still working" and "loud and dark", never a silent one.
+    // Do not "harmonise" this with ToolStamina's rule without re-reading the above.
     [HarmonyPatch(typeof(Chat), "OnNewChatMessage")]
     internal static class OathCapture
     {

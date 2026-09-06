@@ -43,6 +43,35 @@ namespace EilifCompanion
             }
         }
 
+        /// <summary>
+        /// The biome word, guaranteed to survive the poller's field parser.
+        ///
+        /// <c>Heightmap.Biome</c> is a <c>[Flags]</c> enum (verified against assembly_valheim
+        /// 0.221.12: None=0, Meadows=1 … Mistlands=0x200, All=0x37F). Today
+        /// <c>WorldGenerator.GetBiome</c> always hands back a single bit, so ToString gives one bare
+        /// word — but a value carrying two bits, or an unnamed one, formats as "Meadows, Swamp" or
+        /// "384", and the poller's regex ends
+        /// <c>\|\s*(\S+)\s*$</c> (services/log-poller/src/parser.js, RE.pos). A space in the last
+        /// field does not degrade the biome, it fails the WHOLE match, and the player's position is
+        /// dropped with no error anywhere. 1.0 adds Deep North content, so this is exactly the kind
+        /// of thing worth not betting on: whitespace is stripped, an empty result becomes "None".
+        /// </summary>
+        private static string BiomeWord(Heightmap.Biome biome)
+        {
+            string s = biome.ToString();
+            if (string.IsNullOrEmpty(s)) return "None";
+            var sb = new System.Text.StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c == ' ' || c == '\t') continue;   // "Meadows, Swamp" -> "Meadows,Swamp"
+                if (c < ' ' || c == '\u007f') continue;
+                if (c == '|') { sb.Append('/'); continue; } // never shift this line's own fields
+                sb.Append(c);
+            }
+            return sb.Length == 0 ? "None" : sb.ToString();
+        }
+
         private static void Emit()
         {
             var znet = ZNet.instance;
@@ -77,10 +106,17 @@ namespace EilifCompanion
                     var zdo = zdoMan?.GetZDO(peer.m_characterID);
                     if (zdo != null) pos = zdo.GetPosition();
 
+                    // A non-finite coordinate formats as "NaN" or "∞", which the poller's
+                    // `(-?[\d.]+)` field cannot match — so the WHOLE line is discarded silently and
+                    // this peer simply stops appearing on the map. Skipping the tick is the same
+                    // outcome, minus the mystery: there is no honest position to report.
+                    if (float.IsNaN(pos.x) || float.IsNaN(pos.z) ||
+                        float.IsInfinity(pos.x) || float.IsInfinity(pos.z)) continue;
+
                     string biome = "None";
                     try
                     {
-                        if (gen != null) biome = gen.GetBiome(pos.x, pos.z).ToString();
+                        if (gen != null) biome = BiomeWord(gen.GetBiome(pos.x, pos.z));
                     }
                     catch { biome = "None"; } // position is the load-bearing part; never fail on biome
 

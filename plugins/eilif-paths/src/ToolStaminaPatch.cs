@@ -148,30 +148,64 @@ namespace EilifPaths
         // NOTE: explicit argument types everywhere. Player.UpdateStats and Attack.Update have
         // same-named siblings/overloads in the game assembly, and a future update adding an overload to
         // any of these would otherwise turn a hook into an ambiguous-match failure at load time.
-        private static Site[] Sites()
+        //
+        // ONE FACTORY PER SITE, AND THAT SHAPE IS LOAD-BEARING (v1.5.0, audit plugins-1.0). This used
+        // to be a single method returning `new Site[] { new Site(typeof(Attack), …), … }`, which put
+        // NINE typeof tokens in ONE method body. A typeof against a type the game no longer has
+        // throws TypeLoadException, and it throws for the whole METHOD, so a single renamed or
+        // deleted class in 1.0 — FishingFloat and SE_Harpooned are the plausible ones, both sit on
+        // content Deep North touches — cost every one of the nine hooks at once and produced one
+        // vague "hook setup failed" line. Each lambda below compiles to its own method, so its
+        // typeof tokens are resolved only when THAT entry is built: the other eight hooks still go
+        // on, and the log names the one that did not.
+        //
+        // WHAT THIS DOES *NOT* BUY, so nobody under-reacts to an "8/9 applied" line: one lost site
+        // still calls MarkDegraded, which sets the single global Degraded flag, and CostMult() then
+        // takes Max(actionstamina, staminadrain) for every unclassified charge — i.e. the headline
+        // movement-stamina discount is gone on paths and roads whether one hook failed or nine.
+        // That is deliberate and it is the SAFE direction: with a hook missing, a tool charge is
+        // indistinguishable from a movement charge, so the discount cannot be applied honestly.
+        // Read an 8/9 as "one named feature lost AND the road stamina discount is off until it is
+        // fixed", not as "fishing only".
+        //
+        // Deliberately NOT AccessTools.TypeByName with string names: that would trade a compile-time
+        // check (a renamed type fails the launch-morning rebuild, loudly, on this machine) for a
+        // runtime string lookup that cannot fail until the server is already up.
+        private static readonly Func<Site>[] SiteFactories =
         {
-            return new Site[]
-            {
-                new Site(typeof(Attack), "Update", new Type[] { typeof(float) },
-                         "melee and ranged swings"),
-                new Site(typeof(Attack), "FireProjectileBurst", new Type[0],
-                         "projectile bursts"),
-                new Site(typeof(Humanoid), "BlockAttack", new Type[] { typeof(HitData), typeof(Character) },
-                         "blocking and parry"),
-                new Site(typeof(Player), "UpdatePlacement", new Type[] { typeof(bool), typeof(float) },
-                         "building, hoe and cultivator, piece removal"),
-                new Site(typeof(Player), "Repair", new Type[] { typeof(ItemDrop.ItemData), typeof(Piece) },
-                         "repairs"),
-                new Site(typeof(Player), "UpdateAttackBowDraw", new Type[] { typeof(ItemDrop.ItemData), typeof(float) },
-                         "bow and crossbow draw"),
-                new Site(typeof(Player), "UpdateActionQueue", new Type[] { typeof(float) },
-                         "crossbow reload"),
-                new Site(typeof(FishingFloat), "FixedUpdate", new Type[0],
-                         "fishing"),
-                new Site(typeof(SE_Harpooned), "UpdateStatusEffect", new Type[] { typeof(float) },
-                         "harpoon drag"),
-            };
-        }
+            () => new Site(typeof(Attack), "Update", new Type[] { typeof(float) },
+                           "melee and ranged swings"),
+            () => new Site(typeof(Attack), "FireProjectileBurst", new Type[0],
+                           "projectile bursts"),
+            () => new Site(typeof(Humanoid), "BlockAttack", new Type[] { typeof(HitData), typeof(Character) },
+                           "blocking and parry"),
+            () => new Site(typeof(Player), "UpdatePlacement", new Type[] { typeof(bool), typeof(float) },
+                           "building, hoe and cultivator, piece removal"),
+            () => new Site(typeof(Player), "Repair", new Type[] { typeof(ItemDrop.ItemData), typeof(Piece) },
+                           "repairs"),
+            () => new Site(typeof(Player), "UpdateAttackBowDraw", new Type[] { typeof(ItemDrop.ItemData), typeof(float) },
+                           "bow and crossbow draw"),
+            () => new Site(typeof(Player), "UpdateActionQueue", new Type[] { typeof(float) },
+                           "crossbow reload"),
+            () => new Site(typeof(FishingFloat), "FixedUpdate", new Type[0],
+                           "fishing"),
+            () => new Site(typeof(SE_Harpooned), "UpdateStatusEffect", new Type[] { typeof(float) },
+                           "harpoon drag"),
+        };
+
+        /// <summary>
+        /// Plain-string names for the factories above, IN THE SAME ORDER. Used only when a factory
+        /// throws before it can build its Site — the one case where there is no Site to ask for a
+        /// label, and the case that matters most, because it means a game type disappeared.
+        /// These are strings on purpose: a typeof here would reintroduce the very failure the
+        /// factories exist to contain.
+        /// </summary>
+        private static readonly string[] SiteLabels =
+        {
+            "Attack.Update", "Attack.FireProjectileBurst", "Humanoid.BlockAttack",
+            "Player.UpdatePlacement", "Player.Repair", "Player.UpdateAttackBowDraw",
+            "Player.UpdateActionQueue", "FishingFloat.FixedUpdate", "SE_Harpooned.UpdateStatusEffect",
+        };
 
         /// <summary>
         /// Applies every tool/weapon context hook, each one isolated: one failure never stops the others
@@ -194,11 +228,15 @@ namespace EilifPaths
                 }
 
                 int applied = 0;
-                Site[] sites = Sites();
-                foreach (Site site in sites)
+                int total = SiteFactories.Length;
+                for (int i = 0; i < total; i++)
                 {
+                    Site site = null;
                     try
                     {
+                        // The factory call is INSIDE the per-site try on purpose: this is where a
+                        // vanished game type surfaces, and it must cost one hook, not the batch.
+                        site = SiteFactories[i]();
                         MethodBase target = AccessTools.Method(site.Owner, site.Method, site.Args);
                         if (target == null)
                         {
@@ -216,7 +254,13 @@ namespace EilifPaths
                     }
                     catch (Exception ex)
                     {
-                        MarkDegraded("could not hook " + site.Label() + " (" + site.What + "): " + ex.Message);
+                        // `site` is null when the FACTORY itself threw — i.e. one of its typeof
+                        // tokens named a game type that is gone. SiteLabels carries the name for
+                        // exactly that case, so the line still says which hook was lost.
+                        string label = site != null
+                            ? site.Label() + " (" + site.What + ")"
+                            : SiteLabels[i] + " (its game type could not be loaded)";
+                        MarkDegraded("could not hook " + label + ": " + ex.Message);
                     }
                 }
 
@@ -224,7 +268,7 @@ namespace EilifPaths
                 {
                     if (EilifPathsPlugin.Log != null)
                         EilifPathsPlugin.Log.LogInfo(
-                            "[EilifPaths] tool/weapon stamina hooks: " + applied + "/" + sites.Length +
+                            "[EilifPaths] tool/weapon stamina hooks: " + applied + "/" + total +
                             " applied" + (Degraded ? " (DEGRADED - see the errors above)" : "") + ".");
                 }
                 catch { /* logging must never throw */ }

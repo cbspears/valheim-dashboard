@@ -68,10 +68,14 @@ namespace EilifCompanionClient
             try
             {
                 if (TombstoneKeeper.KeepTypes.Count == 0) return;
+                if (original == null) return;
                 if (ZoneSystem.instance == null ||
                     !ZoneSystem.instance.GetGlobalKey(GlobalKeys.DeathKeepEquip)) return;
 
-                foreach (var item in original.GetAllItems())
+                var items = original.GetAllItems();
+                if (items == null) return;
+
+                foreach (var item in items)
                 {
                     if (item == null || item.m_equipped) continue;
                     if (item.m_shared == null || item.m_shared.m_questItem) continue;
@@ -84,19 +88,39 @@ namespace EilifCompanionClient
             }
             catch (Exception ex)
             {
-                EilifMapTrackerPlugin.Log.LogWarning($"[EilifDeath] tombstone keep-list prefix failed: {ex.Message}");
+                // The flags set so far MUST still come off, and the finalizer does that whatever
+                // happened here — Flagged is only ever appended to after the flag is actually set.
+                EilifMapTrackerPlugin.Log?.LogWarning($"[EilifDeath] tombstone keep-list prefix failed: {ex.Message}");
             }
         }
 
         // Finalizer (not Postfix) so the temporary flags are removed even if the
         // patched method throws mid-move.
+        //
+        // NOTHING IN HERE MAY THROW. This runs on the death path of a live player: an exception
+        // escaping a finalizer replaces the original one and would leave the corpse half-built. The
+        // per-item catch was already there; the outer one covers the enumeration and the Clear, so
+        // a keep-list bug can never cost anyone their grave. The list is cleared in a finally
+        // because leaving stale entries would unflag the NEXT death's items at the wrong moment.
         private static void Finalizer()
         {
-            foreach (var item in Flagged)
+            try
             {
-                try { item.m_equipped = false; } catch { }
+                for (int i = 0; i < Flagged.Count; i++)
+                {
+                    try
+                    {
+                        var item = Flagged[i];
+                        if (item != null) item.m_equipped = false;
+                    }
+                    catch { }
+                }
             }
-            Flagged.Clear();
+            catch { }
+            finally
+            {
+                try { Flagged.Clear(); } catch { }
+            }
         }
     }
 }

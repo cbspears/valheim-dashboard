@@ -40,7 +40,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.3.2";
+        public const string PluginVersion = "0.3.3";
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
@@ -120,25 +120,43 @@ namespace EilifCompanionClient
             // undiagnosable from a player's log. Isolating each class makes a partial failure
             // LOUD instead: the survivors still apply and the count below says so out loud.
             // Same pattern (and same reason) as ../../eilif-paths/src/EilifPathsPlugin.cs.
+            //
+            // The DENOMINATOR is the fixed roster below, not a count of what enumerated (v0.3.3).
+            // AccessTools.GetTypesFromAssembly swallows a ReflectionTypeLoadException and returns
+            // only the types that LOADED — and a patch class fails to load when a game type in its
+            // own signature is gone, e.g. a Postfix taking `Player`. Such a class never reached the
+            // loop at all, so the old "3/3" happily printed while the death reporter was dead.
             var harmony = new Harmony(PluginGuid);
-            int classesApplied = 0, classesTotal = 0;
+            var applied = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
             foreach (Type t in AccessTools.GetTypesFromAssembly(typeof(EilifMapTrackerPlugin).Assembly))
             {
+                string cname = "?";
                 try
                 {
+                    if (t == null) continue;
+                    cname = t.Name;
                     if (t.GetCustomAttributes(typeof(HarmonyPatch), true).Length == 0) continue;
-                    classesTotal++;
+                    // ROSTER INVARIANT: "applied" means Patch() returned without throwing. That is
+                    // exact today because no patch class in this plugin has a [HarmonyPrepare]
+                    // method (verified: `grep -rn 'Prepare' plugins/*/src/*.cs` finds none).
+                    // PatchClassProcessor.Patch() returns null WITHOUT throwing when a Prepare()
+                    // returns false, so if anyone ever adds one, switch this to
+                    //   var done = harmony.CreateClassProcessor(t).Patch();
+                    //   if (done != null && done.Count > 0) applied.Add(name);
+                    // or the count silently reads healthy for a class that was skipped.
                     harmony.CreateClassProcessor(t).Patch();
-                    classesApplied++;
+                    applied.Add(cname);
                 }
                 catch (Exception ex)
                 {
-                    Log.LogError("[EilifDeath] could not apply " + (t != null ? t.Name : "?") + ": " + ex.Message);
+                    Log.LogError("[EilifDeath] could not apply " + cname + ": " + ex.Message +
+                                 " -> " + FeatureOf(cname) + ".");
                 }
             }
             // The one unambiguous grep for a post-rebuild verification: 3/3 is healthy, anything
-            // else means read the "could not apply" line(s) above it.
-            Log.LogInfo($"[EilifDeath] patch classes applied: {classesApplied}/{classesTotal}");
+            // else means read the "could not apply" / MISSING line(s) around it.
+            Log.LogInfo($"[EilifDeath] patch classes applied: {CountApplied(applied)}/{ExpectedPatchClasses.Length}");
+            ReportMissing(applied);
 
             if (TombstoneKeeper.KeepTypes.Count > 0)
                 Log.LogInfo($"[EilifDeath] tombstone keep-list armed ({TombstoneKeeper.KeepTypes.Count} item types; active only where deathkeepequip is set).");
@@ -147,7 +165,81 @@ namespace EilifCompanionClient
             Log.LogInfo($"[EilifDeath] death-cause reporter armed (posts source:'eilif-death' to {_url.Value} when the local player dies on a server).");
         }
 
+        // ---- The patch roster (v0.3.3, audit plugins-1.0) --------------------------------------
+        private static readonly string[] ExpectedPatchClasses =
+        {
+            "Patch_GameLogout",             // the fresh final map reading on a clean quit
+            "Patch_PlayerOnDeath",          // the authoritative death-cause report
+            "Patch_MoveInventoryToGrave",   // the tombstone keep-list
+        };
+
+        private static string FeatureOf(string patchClass)
+        {
+            switch (patchClass)
+            {
+                case "Patch_GameLogout":
+                    return "the final explored-map reading on a clean logout (the interval post and the disconnect fallback still run)";
+                case "Patch_PlayerOnDeath":
+                    return "the authoritative death cause; the dashboard falls back to the third-party 'enemyhit' catch-all for every death";
+                case "Patch_MoveInventoryToGrave":
+                    return "the tombstone keep-list; deaths drop everything vanilla would drop";
+                default:
+                    return "an unnamed feature";
+            }
+        }
+
+        private static int CountApplied(System.Collections.Generic.HashSet<string> applied)
+        {
+            int n = 0;
+            for (int i = 0; i < ExpectedPatchClasses.Length; i++)
+                if (applied.Contains(ExpectedPatchClasses[i])) n++;
+            return n;
+        }
+
+        /// <summary>One ERROR line per roster entry that did not go on — the only signal that exists
+        /// for a class the runtime dropped before the apply loop could see it.</summary>
+        private static void ReportMissing(System.Collections.Generic.HashSet<string> applied)
+        {
+            for (int i = 0; i < ExpectedPatchClasses.Length; i++)
+            {
+                if (applied.Contains(ExpectedPatchClasses[i])) continue;
+                Log?.LogError("[EilifDeath] MISSING patch class " + ExpectedPatchClasses[i] + " - " +
+                             FeatureOf(ExpectedPatchClasses[i]) + ".");
+            }
+        }
+
+        // Rate-limited fault reporting for the Update pump: an unguarded throw here lands in Unity's
+        // own loop, which logs it and calls Update again on the next frame — an unbounded error
+        // every frame in a PLAYER's log, and the map post stops for good either way.
+        private const double FaultCooldownSeconds = 60d;
+        private DateTime _faultLastUtc = DateTime.MinValue;
+        private int _faultSuppressed;
+
         private void Update()
+        {
+            try { UpdateCore(); }
+            catch (Exception ex)
+            {
+                try
+                {
+                    DateTime now = DateTime.UtcNow;
+                    if (_faultLastUtc != DateTime.MinValue && (now - _faultLastUtc).TotalSeconds < FaultCooldownSeconds)
+                    {
+                        if (_faultSuppressed < int.MaxValue) _faultSuppressed++;
+                        return;
+                    }
+                    int suppressed = _faultSuppressed;
+                    _faultSuppressed = 0;
+                    _faultLastUtc = now;
+                    Log?.LogWarning($"[EilifMap] update pump failed: {ex.Message}" +
+                                    (suppressed > 0 ? $" (+{suppressed} more in the last minute)" : "") +
+                                    ". Cartography posting will retry on the next tick; nothing else is affected.");
+                }
+                catch { /* the fault reporter must never fault */ }
+            }
+        }
+
+        private void UpdateCore()
         {
             bool connected = IsOnServer();
 

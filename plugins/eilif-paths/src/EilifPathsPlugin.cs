@@ -162,29 +162,49 @@ namespace EilifPaths
             // been — it is the one-glance post-update health check, and it must not move because a
             // dormant feature was added — and a disabled fallback leaves absolutely no hook on any
             // vanilla method, rather than a dozen hooks that early-return.
-            int classesApplied = 0, classesTotal = 0;
-            int fallbackApplied = 0, fallbackTotal = 0;
+            //
+            // The DENOMINATOR is a fixed roster (ExpectedCoreClasses below), never a count of the
+            // classes that happened to enumerate. AccessTools.GetTypesFromAssembly swallows a
+            // ReflectionTypeLoadException and hands back only the types that LOADED, and a patch
+            // class fails to load when a game type in its own signature is gone — so a boot that
+            // had lost Patch_UseStamina used to print a perfectly healthy "5/5". Now it reads 5/6
+            // and names the missing one.
+            var applied = new HashSet<string>(StringComparer.Ordinal);
             bool fallbackOn = VPlusFallback.Active;
             foreach (Type t in AccessTools.GetTypesFromAssembly(typeof(EilifPathsPlugin).Assembly))
             {
+                string cname = "?";
                 try
                 {
+                    if (t == null) continue;
+                    cname = t.Name;
                     if (t.GetCustomAttributes(typeof(HarmonyPatch), true).Length == 0) continue;
-                    bool isFallback = t.Name.StartsWith("Patch_VPF_", StringComparison.Ordinal);
+                    bool isFallback = cname.StartsWith("Patch_VPF_", StringComparison.Ordinal);
                     if (isFallback && !fallbackOn) continue;
-                    if (isFallback) fallbackTotal++; else classesTotal++;
+                    // ROSTER INVARIANT: "applied" means Patch() returned without throwing. That is
+                    // exact today because no patch class in this plugin has a [HarmonyPrepare]
+                    // method (verified: `grep -rn 'Prepare' plugins/*/src/*.cs` finds none).
+                    // PatchClassProcessor.Patch() returns null WITHOUT throwing when a Prepare()
+                    // returns false, so if anyone ever adds one, switch this to
+                    //   var done = harmony.CreateClassProcessor(t).Patch();
+                    //   if (done != null && done.Count > 0) applied.Add(name);
+                    // or the count silently reads healthy for a class that was skipped.
                     harmony.CreateClassProcessor(t).Patch();
-                    if (isFallback) fallbackApplied++; else classesApplied++;
+                    applied.Add(cname);
                 }
                 catch (Exception ex)
                 {
-                    Log.LogError("[EilifPaths] could not apply patch class " +
-                                 (t != null ? t.Name : "?") + ": " + ex.Message);
+                    Log.LogError("[EilifPaths] could not apply patch class " + cname + ": " +
+                                 ex.Message + " -> " + FeatureOf(cname) + ".");
                 }
             }
             if (fallbackOn)
-                Log.LogInfo("[EilifPaths] VPlusFallback patch classes: " + fallbackApplied + "/" +
-                            fallbackTotal + " applied.");
+            {
+                Log.LogInfo("[EilifPaths] VPlusFallback patch classes: " +
+                            CountApplied(applied, ExpectedFallbackClasses) + "/" +
+                            ExpectedFallbackClasses.Length + " applied.");
+                ReportMissing(applied, ExpectedFallbackClasses);
+            }
 
             // Tool/weapon context hooks are applied one by one (not by attribute) so a single
             // unresolvable target cannot take the rest of the plugin down with it. This ALWAYS runs,
@@ -202,7 +222,91 @@ namespace EilifPaths
                         ". Polling every " + GroundCheckRate.ToString("0.0", CultureInfo.InvariantCulture) + "s. " +
                         "Bed fire range: " + BedFire.Describe() + ". " +
                         "Workstation attachment range: " + StationRange.Describe() + ". " +
-                        "Core patch classes: " + classesApplied + "/" + classesTotal + " applied.");
+                        "Core patch classes: " + CountApplied(applied, ExpectedCoreClasses) + "/" +
+                        ExpectedCoreClasses.Length + " applied.");
+            ReportMissing(applied, ExpectedCoreClasses);
+        }
+
+        // ---- The patch roster (v1.5.0, audit plugins-1.0) --------------------------------------
+        // The list the "Core patch classes: N/M" health line is measured against. M must never be
+        // derived from what loaded (see the comment at the apply loop).
+        private static readonly string[] ExpectedCoreClasses =
+        {
+            "Patch_GetJogSpeedFactor",
+            "Patch_GetRunSpeedFactor",
+            "Patch_UseStamina",
+            "Patch_UpdateWalking",
+            "Patch_Bed_CheckFire",
+            "Patch_StationExtension_Awake",
+        };
+
+        // Applied only while [VPlusFallback] is on; counted separately for the same reason.
+        private static readonly string[] ExpectedFallbackClasses =
+        {
+            "Patch_VPF_Fireplace_Awake",
+            "Patch_VPF_CookingStation_UpdateCooking",
+            "Patch_VPF_Smelter_UpdateSmelter",
+            "Patch_VPF_ShieldGenerator_Start",
+            "Patch_VPF_ShieldGenerator_OnProjectileHit",
+            "Patch_VPF_ShieldGenerator_RPC_Attack",
+            "Patch_VPF_CraftingStation_Start",
+            "Patch_VPF_CraftingStation_CheckUsable",
+            "Patch_VPF_StationExtension_Awake",
+            "Patch_VPF_DropTable_GetDropList",
+            "Patch_VPF_Pickable_RPC_Pick",
+            "Patch_VPF_CharacterDrop_GenerateDropList",
+        };
+
+        /// <summary>What each roster entry buys, named on the failure line so a boot log says what
+        /// actually stopped working rather than only which class name was involved.</summary>
+        private static string FeatureOf(string patchClass)
+        {
+            switch (patchClass)
+            {
+                case "Patch_GetJogSpeedFactor": return "the jog-speed bonus on paths, roads and floors";
+                case "Patch_GetRunSpeedFactor": return "the run-speed bonus on paths, roads and floors";
+                case "Patch_UseStamina": return "the ENTIRE stamina discount (movement and tools alike)";
+                case "Patch_UpdateWalking": return "the walking-speed bonus (jog and run are unaffected)";
+                case "Patch_Bed_CheckFire": return "the widened bed 'needs a fire nearby' reach";
+                case "Patch_StationExtension_Awake": return "the extra crafting-station attachment reach";
+                case "Patch_VPF_Fireplace_Awake": return "infinite fireplace and torch fuel";
+                case "Patch_VPF_CookingStation_UpdateCooking": return "infinite oven fuel";
+                case "Patch_VPF_Smelter_UpdateSmelter": return "infinite hot tub fuel";
+                case "Patch_VPF_ShieldGenerator_Start":
+                case "Patch_VPF_ShieldGenerator_OnProjectileHit":
+                case "Patch_VPF_ShieldGenerator_RPC_Attack": return "one of the three shield-generator refuel points";
+                case "Patch_VPF_CraftingStation_Start": return "the 30m station build range and its no-spawn bubble";
+                case "Patch_VPF_CraftingStation_CheckUsable": return "no-roof crafting";
+                case "Patch_VPF_StationExtension_Awake": return "the V+ station attachment range (the [Workstation] bonus still applies)";
+                case "Patch_VPF_DropTable_GetDropList": return "the gathering bonus on trees, rocks and ore";
+                case "Patch_VPF_Pickable_RPC_Pick": return "the picking bonus on berries, mushrooms and cores";
+                case "Patch_VPF_CharacterDrop_GenerateDropList": return "the creature loot-amount bonus";
+                default: return "an unnamed feature";
+            }
+        }
+
+        private static int CountApplied(HashSet<string> applied, string[] roster)
+        {
+            int n = 0;
+            for (int i = 0; i < roster.Length; i++)
+                if (applied.Contains(roster[i])) n++;
+            return n;
+        }
+
+        /// <summary>
+        /// One ERROR line per roster entry that did not go on. This is the only signal there is for
+        /// a class the runtime dropped BEFORE the loop could see it — no exception, nothing else in
+        /// the log, and until now a clean-looking count.
+        /// </summary>
+        private static void ReportMissing(HashSet<string> applied, string[] roster)
+        {
+            for (int i = 0; i < roster.Length; i++)
+            {
+                if (applied.Contains(roster[i])) continue;
+                Log?.LogError("[EilifPaths] MISSING patch class " + roster[i] + " - " + FeatureOf(roster[i]) +
+                             " is not active. Re-check that method against this game build with " +
+                             "ilspycmd and rebuild.");
+            }
         }
 
         private static string F(ConfigEntry<float> c) => c.Value.ToString("0.##", CultureInfo.InvariantCulture);
@@ -212,6 +316,47 @@ namespace EilifPaths
         /// Logs exactly once per surface CHANGE at Info level so the owner can verify in one session.
         /// </summary>
         private void UpdateGround()
+        {
+            // InvokeRepeating keeps calling this on its timer whatever happens inside, so an
+            // unguarded throw here is an exception every 0.4s for the rest of the session AND
+            // leaves Current stuck on whatever surface it last saw. One catch, and the surface
+            // falls back to None (vanilla speed and stamina) rather than to a stale value.
+            //
+            // The line is RATE LIMITED (audit plugins-1.0 round 2). This poll fires 150 times a
+            // minute, so an unlimited warning here just trades an exception flood for a warning
+            // flood in the player's own log. Same 60s-with-a-count shape the Companion and the
+            // Client use for their Update pumps.
+            try { UpdateGroundCore(); }
+            catch (Exception ex)
+            {
+                try
+                {
+                    SetCurrent(PathType.None);
+                    DateTime now = DateTime.UtcNow;
+                    if ((now - _groundFaultLastUtc).TotalSeconds < GroundFaultCooldownSeconds)
+                    {
+                        _groundFaultSuppressed++;
+                    }
+                    else
+                    {
+                        int suppressed = _groundFaultSuppressed;
+                        _groundFaultSuppressed = 0;
+                        _groundFaultLastUtc = now;
+                        if (Log != null) Log.LogWarning("[EilifPaths] ground poll failed: " + ex.Message +
+                                                        (suppressed > 0 ? " (+" + suppressed + " more in the last minute)" : "") +
+                                                        " (surface reset to None, i.e. vanilla speed and stamina).");
+                    }
+                }
+                catch { /* logging must never throw out of the poll */ }
+            }
+        }
+
+        // Ground-poll fault throttle. DateTime.MinValue so the FIRST failure always reports.
+        private const double GroundFaultCooldownSeconds = 60d;
+        private DateTime _groundFaultLastUtc = DateTime.MinValue;
+        private int _groundFaultSuppressed;
+
+        private void UpdateGroundCore()
         {
             // This tick never runs nested inside a wrapped tool/weapon method, so the context depth
             // must be zero here. If it is not, something leaked — clear it (see ToolStaminaPatch.cs).
@@ -286,21 +431,35 @@ namespace EilifPaths
             }
             else
             {
-                float mv = Movement[t].Value, st = StaminaDrain[t].Value, ac = ActionStamina[t].Value;
+                float mv = Mult(Movement, t), st = Mult(StaminaDrain, t), ac = Mult(ActionStamina, t);
                 Log.LogInfo($"[EilifPaths] terrain: {t} (x{mv.ToString("0.##", CultureInfo.InvariantCulture)} speed, " +
                             $"x{st.ToString("0.##", CultureInfo.InvariantCulture)} movement stamina, " +
                             $"x{ac.ToString("0.##", CultureInfo.InvariantCulture)} tool stamina)");
             }
         }
 
-        internal static float MoveMult() =>
-            Current == PathType.None ? 1f : Movement[Current].Value;
+        /// <summary>
+        /// Look a multiplier up without ever being able to throw. These are read from inside Harmony
+        /// patch bodies that sit on Player.UseStamina and Character.UpdateWalking — code Valheim
+        /// runs several times a frame — and Harmony does NOT swallow an exception out of a patch: it
+        /// propagates straight into the game. A missing dictionary key here would therefore be a
+        /// hard movement break, not a lost bonus. 1.0 = vanilla is always the safe answer.
+        /// </summary>
+        private static float Mult(Dictionary<PathType, ConfigEntry<float>> table, PathType surface)
+        {
+            if (surface == PathType.None || table == null) return 1f;
+            ConfigEntry<float> entry;
+            if (!table.TryGetValue(surface, out entry) || entry == null) return 1f;
+            float v = entry.Value;
+            if (float.IsNaN(v) || float.IsInfinity(v) || v < 0f) return 1f;
+            return v;
+        }
+
+        internal static float MoveMult() => Mult(Movement, Current);
         /// <summary>Movement stamina multiplier for the current surface ('staminadrain').</summary>
-        internal static float StamMult() =>
-            Current == PathType.None ? 1f : StaminaDrain[Current].Value;
+        internal static float StamMult() => Mult(StaminaDrain, Current);
         /// <summary>Tool/weapon stamina multiplier for the current surface ('actionstamina').</summary>
-        internal static float ActionMult() =>
-            Current == PathType.None ? 1f : ActionStamina[Current].Value;
+        internal static float ActionMult() => Mult(ActionStamina, Current);
 
         /// <summary>
         /// The multiplier for the stamina charge being paid RIGHT NOW: 'actionstamina' while a wrapped
@@ -321,13 +480,23 @@ namespace EilifPaths
     // --- Harmony patches (same surface the old mod used) ---
 
     // Jog speed factor: multiply the vanilla result while on a surface.
+    //
+    // TRY/CATCH ON A THREE-LINE BODY IS NOT PARANOIA HERE. Harmony re-throws whatever a patch body
+    // throws into the ORIGINAL method, so an exception in this postfix is an exception inside
+    // Player.GetJogSpeedFactor, several times a frame, for as long as the surface stays set. The
+    // catch costs nothing when nothing is wrong and turns the worst case into "the bonus did not
+    // apply this frame". Same for every other body in this file.
     [HarmonyPatch(typeof(Player), "GetJogSpeedFactor")]
     internal static class Patch_GetJogSpeedFactor
     {
         private static void Postfix(ref float __result)
         {
-            if (EilifPathsPlugin.Current != EilifPathsPlugin.PathType.None)
-                __result *= EilifPathsPlugin.MoveMult();
+            try
+            {
+                if (EilifPathsPlugin.Current != EilifPathsPlugin.PathType.None)
+                    __result *= EilifPathsPlugin.MoveMult();
+            }
+            catch { /* leave __result at the vanilla value */ }
         }
     }
 
@@ -337,8 +506,12 @@ namespace EilifPaths
     {
         private static void Postfix(ref float __result)
         {
-            if (EilifPathsPlugin.Current != EilifPathsPlugin.PathType.None)
-                __result *= EilifPathsPlugin.MoveMult();
+            try
+            {
+                if (EilifPathsPlugin.Current != EilifPathsPlugin.PathType.None)
+                    __result *= EilifPathsPlugin.MoveMult();
+            }
+            catch { /* leave __result at the vanilla value */ }
         }
     }
 
@@ -366,25 +539,55 @@ namespace EilifPaths
     // Walk speed: the jog/run factors above don't touch walking (Character.UpdateWalking sets
     // speed = m_walkSpeed directly when walking). Modern vanilla m_walkSpeed is ~5 (it was 1.6
     // in 2021 — the old mod hard-set "1.6f * mult", which today would SLOW walking). Instead we
-    // MULTIPLY the current value for the local player only, then restore it in the postfix so
-    // character state is never permanently mutated and reverts cleanly off-path.
+    // MULTIPLY the current value for the local player only, then restore it in the FINALIZER so
+    // character state is never permanently mutated and reverts cleanly off-path — including when
+    // the original method throws, which is why it is a finalizer and not a postfix.
     [HarmonyPatch(typeof(Character), "UpdateWalking")]
     internal static class Patch_UpdateWalking
     {
+        // __state is assigned FIRST and unconditionally, so every path THROUGH THIS PREFIX leaves the
+        // finalizer either a real captured speed or the NaN sentinel. It does NOT cover the case
+        // where this prefix never runs at all — see the finalizer's guard for that one.
         private static void Prefix(Character __instance, out float __state)
         {
-            __state = __instance != null ? __instance.m_walkSpeed : 0f;
-            if (__instance != null && __instance == Player.m_localPlayer &&
-                EilifPathsPlugin.Current != EilifPathsPlugin.PathType.None)
+            __state = float.NaN; // sentinel: nothing to restore
+            try
             {
+                if (__instance == null) return;
+                __state = __instance.m_walkSpeed;
+                if (__instance != Player.m_localPlayer) return;
+                if (EilifPathsPlugin.Current == EilifPathsPlugin.PathType.None) return;
                 __instance.m_walkSpeed *= EilifPathsPlugin.MoveMult();
             }
+            catch { /* vanilla walk speed; the finalizer still restores whatever was captured */ }
         }
 
-        private static void Postfix(Character __instance, float __state)
+        // FINALIZER, NOT POSTFIX (v1.5.0). m_walkSpeed is real, shared character state that this
+        // prefix temporarily multiplies, and a postfix is SKIPPED when the original method throws.
+        // Character.UpdateWalking throwing once with a postfix restore would have left the local
+        // player permanently walking at 1.4x — and the next tick would multiply the multiplied
+        // value again. A finalizer runs on both paths and returns void, so the original exception
+        // is still rethrown untouched. Same convention as ToolStaminaPatch.ScopeFinalizer.
+        //
+        // THE GUARD IS `> 0f`, NOT JUST `!IsNaN` (audit plugins-1.0 round 2). Verified by decompiling
+        // the exact 0Harmony this plugin references: HarmonyManipulator.WriteFinalizers opens its
+        // try block at Body.Instructions[0], i.e. ABOVE the prefixes, and its catch handler calls
+        // every finalizer. So a THIRD-PARTY prefix on Character.UpdateWalking that throws before
+        // ours runs still lands here — with __state left at the zero-initialised local, never at the
+        // NaN sentinel, because our prefix never executed to write it. Restoring that zero would
+        // pin the local player's walk speed at 0 for the session (vanilla m_walkSpeed is 5) and it
+        // would not self-heal: the next tick captures 0, multiplies 0, restores 0. A genuine
+        // captured speed is always positive, and restoring a zero or a negative would be a no-op or
+        // worse, so "not a positive number" is exactly the set of values with nothing to restore.
+        private static void Finalizer(Character __instance, float __state)
         {
-            if (__instance != null)
+            try
+            {
+                if (__instance == null) return;
+                if (float.IsNaN(__state) || __state <= 0f) return; // sentinel, or a prefix that never ran
                 __instance.m_walkSpeed = __state;
+            }
+            catch { /* a patch body must never throw into game code */ }
         }
     }
 }

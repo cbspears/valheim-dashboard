@@ -21,10 +21,67 @@ namespace EilifCompanion
     public class EilifCompanionPlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
+
+        /// <summary>
+        /// ⚠ WIRE CONTRACT — DO NOT RENAME. BepInEx stamps every line this plugin logs with this
+        /// exact string as the log SOURCE ("[Info   :Eilif Companion] [EILIF_OATH] …"), and the SFTP
+        /// log poller anchors all four of its marker regexes to it:
+        /// services/log-poller/src/parser.js, `EILIF_PREFIX = ^\[\w+\s*:\s*Eilif Companion\]\s*`.
+        /// Changing this name silently kills oath capture, the chat mirror, pin capture and the live
+        /// position layer all at once — the plugin keeps logging happily and the poller stops seeing
+        /// a single marker. A rename needs a matching edit to that constant and to
+        /// services/log-poller/test-parser.js.
+        /// </summary>
         public const string PluginName = "Eilif Companion";
         public const string PluginVersion = "0.3.3";
 
         internal static ManualLogSource Log;
+
+        // ---- The patch roster (v0.3.3, audit plugins-1.0) --------------------------------------
+        //
+        // WHY A HARD-CODED LIST AND NOT JUST A COUNT. The apply loop below used to compute BOTH
+        // halves of its "patch classes applied: N/M" line from the types it could enumerate, and
+        // that number is not trustworthy across a game update. AccessTools.GetTypesFromAssembly
+        // swallows a ReflectionTypeLoadException and returns only the types that LOADED, and a
+        // patch class fails to load when a game type in its own signature is gone (a Prefix taking
+        // `UserInfo`, say). A class that vanishes that way never reaches the loop, so M shrank in
+        // step with N and a 1.0 boot that had silently lost the oath capture still printed the
+        // healthy-looking "1/1". The type-load failure that only breaks the ATTRIBUTE (typeof(Chat)
+        // missing) at least logged a line, but the headline number still read clean.
+        //
+        // So M is now a fixed expectation. 2/2 stays exactly what it has always meant, a boot that
+        // lost a class reads 1/2, and every missing name is named on its own MISSING line.
+        private static readonly string[] ExpectedPatchClasses =
+        {
+            "OathCapture",                    // [EILIF_OATH] + [EILIF_CHAT] capture
+            "Patch_OnNewChatMessage_Pin",     // [EILIF_PIN] capture
+        };
+
+        // Applied only while [ServerFallback] is on; counted separately, same reasoning.
+        private static readonly string[] ExpectedFallbackClasses =
+        {
+            "Patch_SF_ZNet_RPC_PeerInfo_PlayerCap",
+            "Patch_SF_ZSteamMatchmaking_RegisterServer_LobbySize",
+        };
+
+        // What each roster entry buys, for the MISSING line. Kept beside the roster so the two
+        // cannot drift.
+        private static string FeatureOf(string patchClass)
+        {
+            switch (patchClass)
+            {
+                case "OathCapture":
+                    return "in-game /oath capture AND the game->Discord chat mirror ([EILIF_OATH] / [EILIF_CHAT] lines stop)";
+                case "Patch_OnNewChatMessage_Pin":
+                    return "in-game /pin capture ([EILIF_PIN] lines stop; the dashboard map gets no new player pins)";
+                case "Patch_SF_ZNet_RPC_PeerInfo_PlayerCap":
+                    return "the player-cap lift (the join gate stays at the vanilla 10)";
+                case "Patch_SF_ZSteamMatchmaking_RegisterServer_LobbySize":
+                    return "the advertised Steam browser slot count (joining still works)";
+                default:
+                    return "an unnamed feature";
+            }
+        }
 
         // ---- Config ----
         private ConfigEntry<string> _voiceUrl;
@@ -137,31 +194,52 @@ namespace EilifCompanion
             // byte-identical vanilla IL — which is what keeps ValheimPlus, if it is still installed,
             // free to rewrite that same instruction without us in the way.
             var harmony = new Harmony(PluginGuid);
-            int classesApplied = 0, classesTotal = 0;
-            int fallbackApplied = 0, fallbackTotal = 0;
+            var applied = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
             bool fallbackOn = ServerFallback.Active;
             foreach (Type t in AccessTools.GetTypesFromAssembly(typeof(EilifCompanionPlugin).Assembly))
             {
+                string name = "?";
                 try
                 {
+                    if (t == null) continue;
+                    name = t.Name;
                     if (t.GetCustomAttributes(typeof(HarmonyPatch), true).Length == 0) continue;
-                    bool isFallback = t.Name.StartsWith("Patch_SF_", StringComparison.Ordinal);
+                    bool isFallback = name.StartsWith("Patch_SF_", StringComparison.Ordinal);
                     if (isFallback && !fallbackOn) continue;
-                    if (isFallback) fallbackTotal++; else classesTotal++;
+                    // ROSTER INVARIANT: "applied" means Patch() returned without throwing. That is
+                    // exact today because no patch class in this plugin has a [HarmonyPrepare]
+                    // method (verified: `grep -rn 'Prepare' plugins/*/src/*.cs` finds none).
+                    // PatchClassProcessor.Patch() returns null WITHOUT throwing when a Prepare()
+                    // returns false, so if anyone ever adds one, switch this to
+                    //   var done = harmony.CreateClassProcessor(t).Patch();
+                    //   if (done != null && done.Count > 0) applied.Add(name);
+                    // or the count silently reads healthy for a class that was skipped.
                     harmony.CreateClassProcessor(t).Patch();
-                    if (isFallback) fallbackApplied++; else classesApplied++;
+                    applied.Add(name);
                 }
                 catch (Exception ex)
                 {
-                    Log.LogError("[Eilif] could not apply " + (t != null ? t.Name : "?") + ": " + ex.Message);
+                    // Named, and with the consequence attached: "could not apply X" alone does not
+                    // tell whoever is reading the boot log at 06:00 whether anything they care
+                    // about just went dark.
+                    Log.LogError("[Eilif] could not apply " + name + ": " + ex.Message +
+                                 " -> " + FeatureOf(name) + ".");
                 }
             }
+
             if (fallbackOn)
-                Log.LogInfo("[Eilif] ServerFallback patch classes: " + fallbackApplied + "/" +
-                            fallbackTotal + " applied.");
+            {
+                Log.LogInfo("[Eilif] ServerFallback patch classes: " +
+                            CountApplied(applied, ExpectedFallbackClasses) + "/" +
+                            ExpectedFallbackClasses.Length + " applied.");
+                ReportMissing(applied, ExpectedFallbackClasses);
+            }
             // The one unambiguous post-rebuild grep: 2/2 is healthy (OathCapture +
-            // Patch_OnNewChatMessage_Pin), anything else means read the "could not apply" lines.
-            Log.LogInfo($"[Eilif] patch classes applied: {classesApplied}/{classesTotal}");
+            // Patch_OnNewChatMessage_Pin), anything else means read the MISSING lines below it.
+            // The denominator is the fixed roster, never a count of what happened to load, so a
+            // class the runtime could not even enumerate still shows up as a shortfall here.
+            Log.LogInfo($"[Eilif] patch classes applied: {CountApplied(applied, ExpectedPatchClasses)}/{ExpectedPatchClasses.Length}");
+            ReportMissing(applied, ExpectedPatchClasses);
 
             // Crossplay-only player caps: resolved by name and patched by hand, so a renamed or
             // deleted method in 1.0 is one warning line rather than a dead plugin. No-op when
@@ -174,8 +252,81 @@ namespace EilifCompanion
             Log.LogInfo($"[Eilif] {PluginName} v{PluginVersion} loaded. /oath capture armed, /pin capture armed, position emitter armed ({PositionEmitter.EmitIntervalSeconds:0}s).");
         }
 
+        private static int CountApplied(System.Collections.Generic.HashSet<string> applied, string[] roster)
+        {
+            int n = 0;
+            for (int i = 0; i < roster.Length; i++)
+                if (applied.Contains(roster[i])) n++;
+            return n;
+        }
+
+        /// <summary>
+        /// One ERROR line per roster entry that did not go on, naming what stopped working. This is
+        /// the line that has to exist for a class the runtime dropped BEFORE the loop could see it
+        /// (a game type gone from a patch method's own signature), where there is no exception to
+        /// report and nothing else in the log says a thing.
+        /// </summary>
+        private static void ReportMissing(System.Collections.Generic.HashSet<string> applied, string[] roster)
+        {
+            for (int i = 0; i < roster.Length; i++)
+            {
+                if (applied.Contains(roster[i])) continue;
+                Log?.LogError("[Eilif] MISSING patch class " + roster[i] + " - " + FeatureOf(roster[i]) +
+                             ". Re-check that method against this game build with ilspycmd and rebuild.");
+            }
+        }
+
         // Main-thread pump: poll timer + drain the outbound line queue.
+        //
+        // Every independent half is wrapped on its own (v0.3.3): a throw out of Update lands in
+        // Unity's own loop, which logs it and calls Update again next frame, so one broken feature
+        // used to mean an unbounded error every frame AND took the other three down with it for
+        // that frame. Segmented, a failed voice poll cannot stop the position emitter, and a failed
+        // key sweep cannot stop the voice.
         private void Update()
+        {
+            try { PumpSpeak(); } catch (Exception ex) { Fault("speak", ex); }
+            try { PositionEmitter.Tick(Time.unscaledDeltaTime); } catch (Exception ex) { Fault("position", ex); }
+            try { PumpWorldKeys(); } catch (Exception ex) { Fault("worldkeys", ex); }
+            try { PumpVoicePoll(); } catch (Exception ex) { Fault("voice", ex); }
+        }
+
+        // ---- Fault reporting for the Update pump ------------------------------------------------
+        // First failure of a given pump is an error line; after that the pump is allowed to keep
+        // running (a transient must heal itself) but says so at most once a minute, with the count
+        // of what it swallowed, so nothing is lost and nothing floods LogOutput.log — the file the
+        // SFTP poller drags down every 20 seconds.
+        private const double FaultCooldownSeconds = 60d;
+        private readonly System.Collections.Generic.Dictionary<string, DateTime> _faultLastUtc =
+            new System.Collections.Generic.Dictionary<string, DateTime>(StringComparer.Ordinal);
+        private readonly System.Collections.Generic.Dictionary<string, int> _faultSuppressed =
+            new System.Collections.Generic.Dictionary<string, int>(StringComparer.Ordinal);
+
+        private void Fault(string pump, Exception ex)
+        {
+            try
+            {
+                DateTime now = DateTime.UtcNow;
+                DateTime last;
+                if (_faultLastUtc.TryGetValue(pump, out last) && (now - last).TotalSeconds < FaultCooldownSeconds)
+                {
+                    int n;
+                    _faultSuppressed.TryGetValue(pump, out n);
+                    _faultSuppressed[pump] = n + 1;
+                    return;
+                }
+                int suppressed;
+                _faultSuppressed.TryGetValue(pump, out suppressed);
+                _faultSuppressed[pump] = 0;
+                _faultLastUtc[pump] = now;
+                Log?.LogError("[Eilif] " + pump + " pump failed: " + ex.Message +
+                              (suppressed > 0 ? " (+" + suppressed + " more in the last minute)" : "") +
+                              ". The other pumps are unaffected.");
+            }
+            catch { /* the fault reporter must never fault */ }
+        }
+
+        private void PumpSpeak()
         {
             // 1) Speak at most ONE queued line per LineSpacingSeconds (must happen on the main
             //    thread). A poll can return up to 3 lines; the rest wait in the queue rather than
@@ -189,21 +340,20 @@ namespace EilifCompanion
                 try { Speak(line); }
                 catch (Exception ex) { Log.LogWarning($"[Eilif] Failed to speak line {line?.id}: {ex.Message}"); }
             }
+        }
 
-            // Live player-position emitter (independent of the voice half; own 60s timer).
-            PositionEmitter.Tick(Time.unscaledDeltaTime);
+        // World-key enforcement (independent of the voice half; runs even when voice is dormant).
+        private void PumpWorldKeys()
+        {
+            if (_enforceList.Length == 0) return;
+            _enforceTimer += Time.unscaledDeltaTime;
+            if (_enforceTimer < EnforceIntervalSeconds) return;
+            _enforceTimer = 0f;
+            EnforceWorldKeys();
+        }
 
-            // World-key enforcement (independent of the voice half; runs even when voice is dormant).
-            if (_enforceList.Length > 0)
-            {
-                _enforceTimer += Time.unscaledDeltaTime;
-                if (_enforceTimer >= EnforceIntervalSeconds)
-                {
-                    _enforceTimer = 0f;
-                    EnforceWorldKeys();
-                }
-            }
-
+        private void PumpVoicePoll()
+        {
             if (_voiceDormant) return;
 
             // 2) Poll timer (real time, unaffected by game time scale).
@@ -216,7 +366,18 @@ namespace EilifCompanion
 
             string url = _voiceUrl.Value;
             string token = _voiceToken.Value;
-            _ = Task.Run(() => FetchAsync(url, token));
+            try
+            {
+                _ = Task.Run(() => FetchAsync(url, token));
+            }
+            catch (Exception ex)
+            {
+                // FetchAsync clears the flag in its own finally, but it never runs if the queue
+                // itself refuses the work. Without this the voice half would wedge shut for the
+                // life of the process on one failed Task.Run.
+                Interlocked.Exchange(ref _fetchInFlight, 0);
+                Log.LogWarning($"[Eilif] Voice poll could not be queued: {ex.Message}");
+            }
         }
 
         private static bool ServerReady()
@@ -425,6 +586,10 @@ namespace EilifCompanion
     // sending peer, not the client-supplied UserInfo.Name — otherwise a crafted
     // ChatMessage RPC could plant, rename or move another viking's map pins under
     // their name. See SpeakerIdentity.
+    // Bare-name binding here is deliberate for the same reason it is in OathCapture (this prefix
+    // declares the full parameter list, so the signature is already pinned and an explicit Type[]
+    // would only make a 1.0 parameter ADDITION fatal). The full reasoning lives in one place:
+    // src/OathCapture.cs, above its [HarmonyPatch] attribute. Read it before changing either.
     [HarmonyPatch(typeof(Chat), "OnNewChatMessage")]
     internal static class Patch_OnNewChatMessage_Pin
     {
