@@ -1,7 +1,7 @@
 -- 2026-09-06 · A second, off-PC watchdog pinger inside Supabase (pg_cron + pg_net).
 --
--- STATUS: UNAPPLIED. Needs one paste from Charlie (the WATCHDOG_TOKEN value lives
--- only in Vercel and the GitHub secret; nothing on this PC holds it).
+-- STATUS: APPLIED 2026-09-06 10:12 CT (Fable session). The token was ROTATED the same minute and set in
+-- Vercel (WATCHDOG_TOKEN), the GitHub Actions secret, and Supabase Vault (watchdog_token); job eilif-watchdog-ping every 5 min.
 --
 -- WHY: the GitHub-scheduled watchdog is declared '*/15 * * * *' but GitHub runs it
 -- roughly every four hours on this repo (observed 2026-09-06: 00:07, 04:38, 08:56,
