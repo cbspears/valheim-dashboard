@@ -1,5 +1,22 @@
 # Ops Cockpit v2: the plan
 
+> **This is the design record, not the operational document.** It is the plan the
+> five tabs were built from: the frozen `<InsightsStrip/>` contract (section 4),
+> the file-ownership split that let five tracks build in parallel (section 2),
+> the per-tab specs (section 9) and the known limits several glossary captions
+> link to directly (section 11). It is kept as written rather than folded into
+> the runbook, because it records what was decided and why.
+>
+> **For what actually shipped, read `docs/OPS-COCKPIT.md`**, sections 9 to 11.
+> Where the two disagree, that one is right. Integration changed four things this
+> file still describes in their pre-merge form: the three per-tab glossary
+> modules moved into `lib/ops/` and are now indexed with the shared registry;
+> `relayBacklog` on the Coming up tab is now `relayDrain`, because the Performance
+> tab has a different function of the same name; the relay thresholds and the
+> heartbeat headroom fraction are declared once each rather than per tab; and
+> every tab now reports a read that failed instead of rendering it as an empty
+> table.
+
 **Status:** spec + scaffolding landed 2026-09-06. Five builder tracks work from
 this document. `docs/OPS-COCKPIT.md` remains the runbook for the system as it
 exists (health model, watchdog, auth, backups); this file is the plan for what is

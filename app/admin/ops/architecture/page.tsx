@@ -3,6 +3,22 @@ import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { ArrowLeft, Maximize2 } from 'lucide-react';
+import { OpsNav } from '@/components/ops/OpsNav';
+import { Explain } from '@/components/ops/Explain';
+import { GLOSSARY } from '@/lib/ops/glossary';
+
+// THE CAPTIONS ON THIS PAGE, added at integration. The glossary carried twenty
+// `arch:` entries written for this diagram and this page mounted none of them,
+// so it was the one tab in the cockpit with no explain layer at all: 23 info
+// buttons on the overview, 19 on Performance, zero here. They are mounted on the
+// legend (what a zone is, what an arrow means) and on every row of the component
+// index. Three of those rows reuse the roster's own `component:` captions rather
+// than a second copy, because a component's explanation should not depend on
+// which page the reader found it on.
+//
+// Ids are read out of GLOSSARY by key rather than through glossaryEntry(), so a
+// renamed entry is a compile error here instead of a popover that throws when
+// somebody clicks it.
 import { COOKIE_NAME, verifySession } from '@/lib/ops/auth';
 
 // Auth-gated, static content, always rendered dynamically (never cached at build).
@@ -28,6 +44,9 @@ export default async function OpsArchitecturePage() {
 
   return (
     <div className="space-y-6">
+      {/* The cockpit tab bar, mounted the same way on every /admin/ops page. */}
+      <OpsNav active="architecture" />
+
       {/* Cockpit-styled nav chrome (sits in the app's dark theme) */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
@@ -76,28 +95,28 @@ export default async function OpsArchitecturePage() {
           {/* ============ LEGEND ============ */}
           <div className="legend" aria-label="legend">
             <div className="grp">
-              <h4>Zones (where code runs)</h4>
+              <h4>Zones (where code runs) <Explain entry={GLOSSARY['arch:zones']} /></h4>
               <div className="lg-row">
-                <span className="sw" style={{ background: 'var(--z-game-bg)', borderColor: 'var(--z-game)' }} /> Game &amp; player PCs
+                <span className="sw" style={{ background: 'var(--z-game-bg)', borderColor: 'var(--z-game)' }} /> Game &amp; player PCs <Explain entry={GLOSSARY['arch:zone-game']} />
               </div>
               <div className="lg-row">
-                <span className="sw" style={{ background: 'var(--z-host-bg)', borderColor: 'var(--z-host)' }} /> Host services (your PC · systemd)
+                <span className="sw" style={{ background: 'var(--z-host-bg)', borderColor: 'var(--z-host)' }} /> Host services (your PC · systemd) <Explain entry={GLOSSARY['arch:zone-host']} />
               </div>
               <div className="lg-row">
-                <span className="sw" style={{ background: 'var(--z-api-bg)', borderColor: 'var(--z-api)' }} /> Vercel · Next.js API
+                <span className="sw" style={{ background: 'var(--z-api-bg)', borderColor: 'var(--z-api)' }} /> Vercel · Next.js API <Explain entry={GLOSSARY['arch:zone-api']} />
               </div>
             </div>
             <div className="grp">
               <h4>&nbsp;</h4>
               <div className="lg-row">
-                <span className="sw" style={{ background: 'var(--z-db-bg)', borderColor: 'var(--z-db)' }} /> Supabase (Postgres + Storage)
+                <span className="sw" style={{ background: 'var(--z-db-bg)', borderColor: 'var(--z-db)' }} /> Supabase (Postgres + Storage) <Explain entry={GLOSSARY['arch:zone-db']} />
               </div>
               <div className="lg-row">
-                <span className="sw" style={{ background: 'var(--z-out-bg)', borderColor: 'var(--z-out)' }} /> Surfaces &amp; people
+                <span className="sw" style={{ background: 'var(--z-out-bg)', borderColor: 'var(--z-out)' }} /> Surfaces &amp; people <Explain entry={GLOSSARY['arch:zone-out']} />
               </div>
             </div>
             <div className="grp">
-              <h4>Arrows (how they talk)</h4>
+              <h4>Arrows (how they talk) <Explain entry={GLOSSARY['arch:transports']} /></h4>
               <div className="lg-row">
                 <span className="eln" style={{ borderColor: 'var(--e-post)' }} /> HTTPS POST (authenticated)
               </div>
@@ -411,7 +430,10 @@ export default async function OpsArchitecturePage() {
           </div>
 
           {/* ============ WALKTHROUGHS ============ */}
-          <h2 className="sec">Follow the data: four journeys</h2>
+          <h2 className="sec">
+            Follow the data: four journeys{' '}
+            <Explain entry={GLOSSARY['arch:journeys']} size="md" />
+          </h2>
           <p className="sec-sub">
             The arrows make more sense once you trace a single thing end to end. Here are the four
             flows that cover almost the whole system.
@@ -450,7 +472,7 @@ export default async function OpsArchitecturePage() {
                   into <code>identity_claims</code> and <b>DMs it privately</b>.
                 </li>
                 <li>
-                  In-game, the player shouts <code>/oath &lt;code&gt; — my vow</code>. The server
+                  In-game, the player shouts <code>/oath &lt;code&gt; my vow</code>. The server
                   echoes it to <b>LogOutput.log</b>.
                 </li>
                 <li>
@@ -517,7 +539,9 @@ export default async function OpsArchitecturePage() {
           </div>
 
           {/* ============ COMPONENT INDEX ============ */}
-          <h2 className="sec">Component index</h2>
+          <h2 className="sec">
+            Component index <Explain entry={GLOSSARY['arch:component-index']} size="md" />
+          </h2>
           <p className="sec-sub">
             Every moving part, what it does, and who it talks to. Component names link to the code on
             GitHub.
@@ -535,7 +559,8 @@ export default async function OpsArchitecturePage() {
               <tbody>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/tree/main/plugins/eilif-companion`} target="_blank" rel="noreferrer">eilif-companion</a>
+                    <a href={`${REPO}/tree/main/plugins/eilif-companion`} target="_blank" rel="noreferrer">eilif-companion</a>{' '}
+                    <Explain entry={GLOSSARY['arch:eilif-companion']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-game)' }} />
@@ -549,7 +574,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/tree/main/plugins/eilif-companion-client`} target="_blank" rel="noreferrer">eilif-companion-client</a>
+                    <a href={`${REPO}/tree/main/plugins/eilif-companion-client`} target="_blank" rel="noreferrer">eilif-companion-client</a>{' '}
+                    <Explain entry={GLOSSARY['arch:eilif-companion-client']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-game)' }} />
@@ -560,17 +586,20 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/tree/main/plugins/eilif-paths`} target="_blank" rel="noreferrer">eilif-paths</a>
+                    <a href={`${REPO}/tree/main/plugins/eilif-paths`} target="_blank" rel="noreferrer">eilif-paths</a>{' '}
+                    <Explain entry={GLOSSARY['arch:eilif-paths']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-game)' }} />
                     <span className="ztag">game</span>
                   </td>
                   <td>Client roads/paths mod (gameplay only).</td>
-                  <td>—</td>
+                  <td>none</td>
                 </tr>
                 <tr>
-                  <td className="comp">GsValheimStats</td>
+                  <td className="comp">
+                    GsValheimStats <Explain entry={GLOSSARY['arch:gsvalheimstats']} />
+                  </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-game)' }} />
                     <span className="ztag">game·3P</span>
@@ -583,7 +612,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/tree/main/services/log-poller`} target="_blank" rel="noreferrer">log-poller</a>
+                    <a href={`${REPO}/tree/main/services/log-poller`} target="_blank" rel="noreferrer">log-poller</a>{' '}
+                    <Explain entry={GLOSSARY['component:log-poller']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-host)' }} />
@@ -599,7 +629,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/blob/main/scripts/map-snapshot.mjs`} target="_blank" rel="noreferrer">map-snapshot</a>
+                    <a href={`${REPO}/blob/main/scripts/map-snapshot.mjs`} target="_blank" rel="noreferrer">map-snapshot</a>{' '}
+                    <Explain entry={GLOSSARY['component:map-snapshot']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-host)' }} />
@@ -610,7 +641,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/tree/main/services/discord-bot`} target="_blank" rel="noreferrer">discord-bot</a>
+                    <a href={`${REPO}/tree/main/services/discord-bot`} target="_blank" rel="noreferrer">discord-bot</a>{' '}
+                    <Explain entry={GLOSSARY['component:discord-bot']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-host)' }} />
@@ -624,7 +656,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/blob/main/app/api/gs-ingest/route.ts`} target="_blank" rel="noreferrer">/api/gs-ingest</a>
+                    <a href={`${REPO}/blob/main/app/api/gs-ingest/route.ts`} target="_blank" rel="noreferrer">/api/gs-ingest</a>{' '}
+                    <Explain entry={GLOSSARY['arch:api-gs-ingest']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-api)' }} />
@@ -638,7 +671,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/blob/main/app/api/webhook/route.ts`} target="_blank" rel="noreferrer">/api/webhook</a>
+                    <a href={`${REPO}/blob/main/app/api/webhook/route.ts`} target="_blank" rel="noreferrer">/api/webhook</a>{' '}
+                    <Explain entry={GLOSSARY['arch:api-webhook']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-api)' }} />
@@ -652,7 +686,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/blob/main/app/api/voice/route.ts`} target="_blank" rel="noreferrer">/api/voice</a>
+                    <a href={`${REPO}/blob/main/app/api/voice/route.ts`} target="_blank" rel="noreferrer">/api/voice</a>{' '}
+                    <Explain entry={GLOSSARY['arch:api-voice']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-api)' }} />
@@ -663,7 +698,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/tree/main/app/api/ops`} target="_blank" rel="noreferrer">/api/ops/*</a>
+                    <a href={`${REPO}/tree/main/app/api/ops`} target="_blank" rel="noreferrer">/api/ops/*</a>{' '}
+                    <Explain entry={GLOSSARY['arch:api-ops']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-api)' }} />
@@ -674,7 +710,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/tree/main/db`} target="_blank" rel="noreferrer">Supabase</a>
+                    <a href={`${REPO}/tree/main/db`} target="_blank" rel="noreferrer">Supabase</a>{' '}
+                    <Explain entry={GLOSSARY['arch:supabase']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-db)' }} />
@@ -688,7 +725,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/blob/main/lib/data.ts`} target="_blank" rel="noreferrer">Public dashboard</a>
+                    <a href={`${REPO}/blob/main/lib/data.ts`} target="_blank" rel="noreferrer">Public dashboard</a>{' '}
+                    <Explain entry={GLOSSARY['arch:public-dashboard']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-out)' }} />
@@ -699,7 +737,8 @@ export default async function OpsArchitecturePage() {
                 </tr>
                 <tr>
                   <td className="comp">
-                    <a href={`${REPO}/blob/main/app/admin/ops/page.tsx`} target="_blank" rel="noreferrer">/admin/ops cockpit</a>
+                    <a href={`${REPO}/blob/main/app/admin/ops/page.tsx`} target="_blank" rel="noreferrer">/admin/ops cockpit</a>{' '}
+                    <Explain entry={GLOSSARY['arch:ops-cockpit']} />
                   </td>
                   <td>
                     <span className="zdot" style={{ background: 'var(--z-out)' }} />

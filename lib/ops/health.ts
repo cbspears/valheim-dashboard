@@ -262,6 +262,20 @@ export interface HealthInput {
 }
 
 /** Queued longer than this with players online → the voice half is degraded. */
+/**
+ * How far into its stale window a component has to be before the cockpit says
+ * something about it while it is still, technically, healthy.
+ *
+ * A state chip is a cliff: healthy right up to `staleAfterSec` and then stale.
+ * A component sitting at 92% of its window has been declining for the whole of
+ * a slow failure nobody could see. Three surfaces soften that cliff, and they
+ * have to agree or the overview's warning card and the performance tab's gauge
+ * will contradict each other about the same component: the insights strip's
+ * headroom card, `heartbeatPressure()`'s "tightening" band, and the warning mark
+ * the gauges draw. This is that one number.
+ */
+export const HEADROOM_WARN_FRACTION = 0.7;
+
 export const VOICE_QUEUE_DEGRADED_SEC = 10 * 60;
 
 /**

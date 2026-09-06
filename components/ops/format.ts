@@ -13,9 +13,16 @@ export function timeAgoShort(iso: string | null | undefined): string {
   return `${Math.round(sec / 86400)}d ago`;
 }
 
-/** Compact age from a seconds value: "42s" / "5m" / "2h" / "—" for null. */
+/**
+ * Compact age from a seconds value: "42s" / "5m" / "2h", "no age" for null.
+ *
+ * A word rather than a dash. These pages carry a copy rule against em dashes,
+ * and a lone punctuation mark in a table cell is the one case where it also
+ * costs the reader something: it can mean zero, unknown, or not applicable, and
+ * on a health roster those are three different facts.
+ */
 export function ageLabel(sec: number | null): string {
-  if (sec === null) return '—';
+  if (sec === null) return 'no age';
   if (sec < 90) return `${Math.round(sec)}s`;
   if (sec < 90 * 60) return `${Math.round(sec / 60)}m`;
   if (sec < 48 * 3600) return `${Math.round(sec / 3600)}h`;
