@@ -423,7 +423,7 @@ Next.js 16 App Router, React 19, Tailwind v4, TypeScript. Public pages:
 | `/gallery` | photos ingested from Discord |
 | `/oath` | the oath wall |
 | `/mods` | the mod list from `config/mods.ts` |
-| `/commands` | the player register: every Discord verb, every `/s` shout, every notice the hall sends and every page, rendered from `config/commands.ts`, where each entry names the code it was derived from and `scripts/commands-page.test.mjs` fails the build if a verb, a shout prefix or a feature flag drifts away from it |
+| `/commands` | the player register: every Discord verb, every `/s` shout, every notice the hall sends and every page, rendered from `config/commands.ts`, where each entry names the code it was derived from and `scripts/commands-page.test.mjs` fails the build if a verb, a shout prefix, a permission gate, a feature flag or a `*_CHANNEL` route drifts away from it (which includes step 20b: lifting the pilot overrides re-points four notices at `#valheim` and this test says so) |
 | `/get-started` | pack code, Mac config bundle, connect details |
 | `/tv` | experimental TV mode, unlinked and noindexed (delete `app/tv` and `components/tv` to remove) |
 | `/admin/ops`, `/admin/ops/architecture` | the ops cockpit, cookie-gated |

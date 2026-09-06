@@ -563,6 +563,15 @@ export default function GetStartedPage() {
                 </p>
               </Step>
             </ol>
+
+            <p className="mt-6 border-t border-rune pt-4 text-xs text-muted">
+              That is the whole rite. Everything else {SERVER_NAME} answers to, in Discord and in
+              game, and every notice it sends back, is listed on the{' '}
+              <Link href="/commands" className="text-gold-light hover:underline">
+                Commands page
+              </Link>
+              .
+            </p>
           </CardBody>
         </Card>
 
