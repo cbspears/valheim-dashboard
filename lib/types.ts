@@ -235,6 +235,56 @@ export interface BossTelling {
   source: string;
   chosen: boolean;
   created_at: string;
+  /**
+   * The verdict of a telling vote (db/2026-09-06_telling_votes.sql): 'canon'
+   * for the telling the hall kept, 'apocryphal' for the one it did not.
+   *
+   * Optional AND nullable, and both matter. Null is a telling no vote has ruled
+   * on, which is every row that exists today. Undefined is a database where
+   * that migration has not run at all: `lib/data.ts getBossTellings` retries
+   * without the column rather than losing every telling on the page, so the
+   * field is simply absent and the war-room renders exactly as it does now.
+   */
+  standing?: 'canon' | 'apocryphal' | null;
+}
+
+/**
+ * What a map pin can be (`pins.kind`). Player pins are shouted in-game
+ * (`/pin <name>`, app/api/webhook/route.ts); 'boss' is written by
+ * /api/gs-ingest at the moment a forsaken falls, at the centroid of the war
+ * party, and is what the Discord bot's altar-tellings loop reads.
+ *
+ * The live atlas draws two glyphs (components/map/ZoomableMap.tsx), so an altar
+ * currently charts with the place-of-interest mark under the boss's name. The
+ * data is right and the picture is approximate; teaching the map a third glyph
+ * is a change to those components and not to this vocabulary.
+ */
+export type PinKind = 'base' | 'poi' | 'boss';
+
+/**
+ * One term of a hall office (db/2026-09-06_offices.sql). Today there is exactly
+ * one office, `storyteller`, and at most one open term (`until` null) at a
+ * time, which the database enforces with a partial unique index.
+ *
+ * `holder_discord_id` is DELIBERATELY ABSENT, exactly as it is on BossTelling:
+ * the column exists so the bot can let the Storyteller keep any telling and can
+ * mention them in a nudge, and it is REVOKEd from anon. `lib/data.ts getOffices`
+ * names its columns for that reason and must never go back to `select('*')`.
+ */
+export interface Office {
+  id: string;
+  /** 'storyteller' (checked in the database). */
+  office: string;
+  /** The holder as the Hall knows them, or null when the roster name was lost. */
+  holder_character: string | null;
+  since: string;
+  /** Null while the term is open. */
+  until: string | null;
+  /** 'vote' | 'named' (checked in the database). */
+  elected_by: string;
+  /** The act of the saga this term covered, for the former-holder badge. */
+  act: string | null;
+  created_at: string;
 }
 
 export interface DiscordEvent {

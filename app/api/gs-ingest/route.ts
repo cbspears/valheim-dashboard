@@ -30,6 +30,7 @@ import {
   type FightStats,
 } from '@/lib/boss-damage';
 import { foldFightStats } from '@/lib/fight-stats-cas';
+import { ALTAR_PIN_KIND, altarPinFor, altarPinName } from '@/lib/altar';
 import { evaluateAndRecord } from '@/lib/milestones';
 import { ingestDeathEvents, ingestEilifDeath } from '@/lib/deaths';
 import { clampEventTime } from '@/lib/event-time';
@@ -986,6 +987,14 @@ async function ingestBossMilestones(
       ? [...new Set(fighters[m.bossName])]
       : roster;
 
+    // Who swung hardest, as of the flip, for the altar pin's byline. Captured
+    // out of the fold rather than re-read afterwards, because the fold runs
+    // against the FRESH row on every compare-and-swap attempt and a read after
+    // the fact could land on a later damage fold's answer for a fight that was
+    // already sealed. Null whenever no verdict was carved (the degraded path
+    // below, or a boss whose damage nobody reported).
+    let topDamageAtFlip: string | null = null;
+
     // ONE guarded, compare-and-swapped write: the flip AND the fight_stats seed
     // together. Two separate writes is what this used to be, and the second one
     // was a blind read-modify-write that could discard a concurrent damage fold's
@@ -1031,6 +1040,8 @@ async function ingestBossMilestones(
         // null when a real bossKillEvents MVP already owns the verdict, which is
         // left untouched exactly as before.
         const sealed = sealClientDamageVerdict(existing) ?? existing;
+        const top = typeof sealed?.topDamagePlayer === 'string' ? sealed.topDamagePlayer.trim() : '';
+        topDamageAtFlip = top || null;
         return { ...(sealed ?? {}), fighters: fought, onlineAtKill: roster, source: 'gs-milestone' };
       },
       {
@@ -1061,6 +1072,12 @@ async function ingestBossMilestones(
         `[gs-ingest] boss milestone ${m.bossName}: recorded the kill without seeding fight_stats ` +
           `(the compare-and-swap could not land). The damage folds and bossKillEvents still fill it in.`,
       );
+      // The fold's last attempt was DISCARDED, and so is anything it computed.
+      // topDamageAtFlip is assigned inside the fold callback on every attempt,
+      // so without this it would still hold the verdict read from a row some
+      // other writer has since moved on from, and that stale name would go on
+      // the altar pin as the viking who hit hardest.
+      topDamageAtFlip = null;
     }
 
     felled++;
@@ -1077,8 +1094,117 @@ async function ingestBossMilestones(
       },
       created_at: killedAt,
     });
+
+    // The altar. Best-effort by contract, like every other enrichment here: a
+    // pin that cannot be written must never cost the hall its kill.
+    await recordBossAltar(client, {
+      bossName: m.bossName,
+      warParty: present,
+      byCharacterName: topDamageAtFlip,
+    });
   }
   return felled;
+}
+
+/**
+ * ONE PIN WHERE THE FORSAKEN FELL.
+ *
+ * The kill is the only moment anyone knows where a boss fight happened. The
+ * bosses row records that it happened and who was there; `player_positions`
+ * (fed by the companion plugin's `[EILIF_POS]` line every ~60 s) records where
+ * those people were standing. Averaging the war party's fresh positions puts a
+ * marker on the atlas at the altar, and gives the Discord bot's altar-tellings
+ * loop somewhere to speak that boss's saga.
+ *
+ * ALWAYS ON, and harmless on its own: with no fresh position it writes nothing,
+ * and the pin it does write is one row on a table the map already renders.
+ * `pins.kind` carries no check constraint, so 'boss' needs no migration.
+ *
+ * GUARDED IN CODE, NOT IN SCHEMA. A boss can only fall once (`.eq('is_killed',
+ * false)` above makes the flip exactly-once), so this runs once per boss in the
+ * ordinary case; the read below is what covers the extraordinary ones, a
+ * relaunched world reusing boss rows or a hand-run `mark-boss`. A unique index
+ * on (name, kind) would have been stricter and would also have made a duplicate
+ * a 500 on the ingest, which is the wrong trade for a decoration.
+ */
+async function recordBossAltar(
+  client: ReturnType<typeof db>,
+  {
+    bossName,
+    warParty,
+    byCharacterName,
+  }: { bossName: string; warParty: string[]; byCharacterName: string | null },
+): Promise<void> {
+  try {
+    const name = altarPinName(bossName);
+    if (!name || warParty.length === 0) return;
+
+    // MATCHED THE WAY THE OTHER WRITER MATCHES. app/api/webhook/route.ts's `pin`
+    // branch replaces a pin with `delete ... ilike name`, so a case-sensitive
+    // guard here and a case-insensitive one there would disagree about whether
+    // two pins are the same pin, and "Bonemass altar" would sit beside
+    // "bonemass altar" until the next /pin removed both. Boss names come from
+    // the `bosses` table and carry no % or _ , so this is a plain match.
+    const { data: existing, error: existErr } = await client
+      .from('pins')
+      .select('id')
+      .eq('kind', ALTAR_PIN_KIND)
+      .ilike('name', name)
+      .limit(1);
+    if (existErr) {
+      console.warn(`[gs-ingest] altar pin for ${bossName}: could not check for one already there — ${existErr.message}`);
+      return;
+    }
+    if (existing && existing.length > 0) return;
+
+    const { data: positions, error: posErr } = await client
+      .from('player_positions')
+      .select('character_name, x, z, updated_at')
+      .in('character_name', warParty);
+    if (posErr) {
+      console.warn(`[gs-ingest] altar pin for ${bossName}: could not read positions — ${posErr.message}`);
+      return;
+    }
+
+    const pin = altarPinFor(bossName, positions ?? [], { nowMs: Date.now() });
+    if (!pin) {
+      console.info(
+        `[gs-ingest] altar pin for ${bossName}: no war-party position inside the last five minutes, so no pin. ` +
+          'That is the ordinary case when the companion plugin is not emitting positions.',
+      );
+      return;
+    }
+
+    const { data: status } = await client
+      .from('server_status')
+      .select('world_day')
+      .eq('id', 1)
+      .maybeSingle();
+
+    const { error: insertErr } = await client.from('pins').insert({
+      name: pin.name,
+      kind: ALTAR_PIN_KIND,
+      // The viking who hit it hardest, when the fight record knows. Null is
+      // fine: an altar is a place, not a claim, and the pin reads the same
+      // without a name on it.
+      by_character_name: byCharacterName,
+      world_x: pin.world_x,
+      world_z: pin.world_z,
+      x: pin.x,
+      y: pin.y,
+      day: (status?.world_day as number | undefined) ?? null,
+    });
+    if (insertErr) {
+      console.warn(`[gs-ingest] altar pin for ${bossName} not written — ${insertErr.message}`);
+      return;
+    }
+    console.info(
+      `[gs-ingest] altar pin "${pin.name}" charted at ${Math.round(pin.world_x)}, ${Math.round(pin.world_z)} ` +
+        `from ${warParty.length} of the war party.`,
+    );
+  } catch (e) {
+    console.warn(`[gs-ingest] altar pin for ${bossName} skipped: ${(e as Error).message}`);
+  }
 }
 
 // (FightStats now lives in lib/boss-damage.ts — one definition, shared by this

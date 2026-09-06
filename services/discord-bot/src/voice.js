@@ -333,6 +333,53 @@ export const OATH_CALLBACKS = [
   "The oath is yours, {firstName}. The remembering is Eilif's work: {oath}.",
 ];
 
+// (h) THE OFFICE AND THE ALTAR. Three small pools that this engine never picks
+// from itself: they belong to the Storyteller of Eilif and to the boss-altar
+// tellings, and both of those live in their own modules behind their own flags
+// (services/discord-bot/src/storyteller.js, STORYTELLER=1; src/altar.js,
+// ALTAR_TELLINGS=1). They are HERE so that every line the hall can hear sits in
+// one file and is swept by one doctrine test, rather than scattered across
+// whichever module happened to need it.
+//
+// Each is filled and then spoken center-screen, so the same 150-character
+// ceiling the rest of this bank keeps applies to all three (scripts/
+// storyteller.test.mjs and scripts/altar.test.mjs check them filled).
+
+// (h1) The proclamation, spoken to the WHOLE hall the moment a Storyteller is
+// installed, by vote or by name. {firstName} is the new holder.
+export const STORYTELLER_PROCLAIM_LINES = [
+  'By the voice of the hall, {firstName} is named Storyteller. The tales are theirs to keep.',
+  'The hall has spoken. {firstName} keeps the tales of Eilif from this night on.',
+  "{firstName} takes the Storyteller's seat. What the warband does, {firstName} sets down.",
+  'Eilif hands the tales to {firstName}. Ink is heavier than it looks.',
+  'The office falls to {firstName}. Every fall of a forsaken now waits on a telling.',
+  'Hear it. {firstName} is Storyteller of Eilif, and the saga answers to them.',
+];
+
+// (h2) The nudge, spoken to the STORYTELLER ALONE about a boss nobody has told.
+// Second person throughout, so it is queued only when the plugin can aim a line
+// at one peer (VOICE_TARGETING=1); with targeting off, storyteller.js sends the
+// Discord half and no voice line at all. {boss} is the untold forsaken.
+export const STORYTELLER_NUDGE_LINES = [
+  'Storyteller, {boss} has fallen and no viking has told it. The page still shows the Skald.',
+  '{boss} waits on you, Storyteller. Nobody has set that fight down yet.',
+  'The fall of {boss} is untold, Storyteller. Eilif is patient and the page is bare.',
+  'You keep the tales, Storyteller, and {boss} has none. Only the Skald has spoken for it.',
+  'Eilif marks one gap in the saga: {boss}, untold. That one is yours, Storyteller.',
+];
+
+// (h3) The tail of an altar telling: the first sentence of the chosen telling is
+// spoken at the altar where the boss fell, and one of these closes it and names
+// who told it. {teller} is that viking, or the Skald.
+export const ALTAR_TELLING_TAILS = [
+  '{teller} tells the rest.',
+  'So says {teller}, who was there.',
+  'The rest of it belongs to {teller}.',
+  '{teller} set the rest of it down.',
+  'Ask {teller} for the rest of it.',
+  'That is {teller} speaking. The rest is on the page.',
+];
+
 // ── tiny deterministic RNG (mulberry32) + string hash (mirrors format.js) ──
 function mulberry32(a) {
   return function () {

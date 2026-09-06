@@ -107,6 +107,8 @@ import type {
   PotyHistoryEntry,
   Oath,
   Milestone,
+  Office,
+  PinKind,
 } from './types';
 import { AGGREGATE_STAT_COLUMNS, computeAggregates, type Aggregates } from './milestones';
 
@@ -455,7 +457,18 @@ function windowStartIso(days: number): string {
 export interface LivePin {
   id: string;
   name: string;
+  /**
+   * The kind the ATLAS can draw. `pins.kind` is wider than this (lib/types.ts
+   * PinKind); getPins folds everything that is not a base to the
+   * place-of-interest mark, because that is the glyph the renderer would use
+   * anyway. Read `pinKind` when the real value matters.
+   */
   kind: 'base' | 'poi';
+  /**
+   * The row's true `pins.kind`, including 'boss' for a fallen forsaken's altar.
+   * Optional so a caller that does not care is unaffected.
+   */
+  pinKind?: PinKind;
   by_character_name: string | null;
   x: number;
   y: number;
@@ -478,7 +491,21 @@ export const getPins = cache(async (): Promise<LivePin[]> => {
     .select('id, name, kind, by_character_name, x, y, day')
     .order('created_at', { ascending: true })
     .limit(1000);
-  return (data as LivePin[]) ?? [];
+  // NARROWED AT THE BOUNDARY, not typed as a wish. `pins.kind` is the wider
+  // PinKind vocabulary (lib/types.ts) and now carries 'boss' for the altars
+  // /api/gs-ingest charts at a kill, while the atlas draws exactly two glyphs
+  // (components/map/ZoomableMap.tsx MarkerGlyph, which is a `base ? ... : ...`).
+  // Casting a 'boss' row to LivePin would have made this file claim the page
+  // renders something it cannot; folding every other kind to the mark the
+  // renderer actually uses says the true thing instead, and `pinKind` keeps the
+  // real value for the callers that care which is which. Teaching the map a
+  // third glyph is a change to those components, not to this cast.
+  const rows = (data ?? []) as (Omit<LivePin, 'kind'> & { kind: PinKind })[];
+  return rows.map((p) => ({
+    ...p,
+    kind: p.kind === 'base' ? ('base' as const) : ('poi' as const),
+    pinKind: p.kind,
+  }));
 });
 
 /**
@@ -625,6 +652,11 @@ export const getBosses = cache(async (): Promise<Boss[]> => {
 // PLAYERS_PUBLIC_COLS above, so this is not merely tidy: `select('*')` here
 // would fail outright with "permission denied for column author_discord_id".
 const BOSS_TELLINGS_PUBLIC_COLS = 'id, boss_id, author_character, text, source, chosen, created_at';
+// The same list plus `standing`, which arrived in a LATER migration
+// (db/2026-09-06_telling_votes.sql). Named separately rather than appended,
+// because a column that does not exist yet makes the whole read fail: the
+// query below asks for this one first and falls back to the list above.
+const BOSS_TELLINGS_PUBLIC_COLS_V2 = `${BOSS_TELLINGS_PUBLIC_COLS}, standing`;
 
 /**
  * The tellings of one boss's fall (db/2026-09-06_boss_tellings.sql): the
@@ -652,18 +684,63 @@ const BOSS_TELLINGS_PUBLIC_COLS = 'id, boss_id, author_character, text, source, 
  */
 export const getBossTellings = cache(async (bossId: string): Promise<BossTelling[]> => {
   if (!bossId) return [];
-  const { data, error } = await db()
-    .from('boss_tellings')
-    .select(BOSS_TELLINGS_PUBLIC_COLS)
-    .eq('boss_id', bossId)
-    .order('chosen', { ascending: false })
-    .order('created_at', { ascending: false })
-    // Tie-break on id, so two tellings written in the same second are ordered
-    // the same way here and in the bot's numbered list.
-    .order('id', { ascending: false })
-    .limit(20);
+  const read = (cols: string) =>
+    db()
+      .from('boss_tellings')
+      .select(cols)
+      .eq('boss_id', bossId)
+      .order('chosen', { ascending: false })
+      .order('created_at', { ascending: false })
+      // Tie-break on id, so two tellings written in the same second are ordered
+      // the same way here and in the bot's numbered list.
+      .order('id', { ascending: false })
+      .limit(20);
+
+  // TWO MIGRATIONS, ONE READ. `standing` belongs to db/2026-09-06_telling_votes
+  // .sql, which can be applied long after the table itself. Asking for a column
+  // that does not exist fails the WHOLE query, so a war-room that named it
+  // unconditionally would lose every telling on the page the moment the second
+  // file was late. Ask for it, and on any error ask again without it: the only
+  // thing a hall running one migration loses is the apocryphal heading.
+  const withStanding = await read(BOSS_TELLINGS_PUBLIC_COLS_V2);
+  if (!withStanding.error) return (withStanding.data as unknown as BossTelling[]) ?? [];
+  const { data, error } = await read(BOSS_TELLINGS_PUBLIC_COLS);
   if (error) return [];
-  return (data as BossTelling[]) ?? [];
+  return (data as unknown as BossTelling[]) ?? [];
+});
+
+// Explicit column list for public office reads: every offices column EXCEPT
+// `holder_discord_id`, which is the Discord account behind the office. Paired
+// with the REVOKE SELECT ... / GRANT SELECT (cols) in db/2026-09-06_offices.sql
+// exactly like BOSS_TELLINGS_PUBLIC_COLS above, so `select('*')` here would
+// fail outright with "permission denied for column holder_discord_id".
+const OFFICES_PUBLIC_COLS = 'id, office, holder_character, since, until, elected_by, act, created_at';
+
+/**
+ * The roll of hall offices (db/2026-09-06_offices.sql), newest term first.
+ *
+ * ONE READ SERVES BOTH READERS. A viking's page needs to know whether they hold
+ * the office now and whether they have held it before; a war-room needs the
+ * current holder's name. Both are answered from the same short list by the pure
+ * helpers in components/viking/office.ts, rather than by two queries that could
+ * disagree with each other inside one render.
+ *
+ * BOUNDED AT 50 because a term is a deliberate act and fifty of them is more
+ * saga than this server will ever have. Newest first, so the cap drops ancient
+ * history rather than the term that is actually open.
+ *
+ * TOLERATES THE TABLE NOT EXISTING, for the same reason getBossTellings does:
+ * this migration is applied by hand, and a site rendered against a database
+ * without it must simply show no office rather than fail to render.
+ */
+export const getOffices = cache(async (): Promise<Office[]> => {
+  const { data, error } = await db()
+    .from('offices')
+    .select(OFFICES_PUBLIC_COLS)
+    .order('since', { ascending: false })
+    .limit(50);
+  if (error) return [];
+  return (data as unknown as Office[]) ?? [];
 });
 
 /**

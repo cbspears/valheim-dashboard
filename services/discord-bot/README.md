@@ -313,6 +313,98 @@ Discord rejects outright. If the seed itself fails at startup (Supabase unreacha
 **not started at all** for that run and the journal says so — an unseeded cursor would make every
 boss felled this season look fresh and open a retro poll on the first tick.
 
+## The Storyteller of Eilif (`STORYTELLER=1`, off by default)
+One viking keeps the tales. The office is a row in `offices`
+(`db/2026-09-06_offices.sql`), at most one holder at a time, and the database enforces that with a
+partial unique index on `(office) where until is null`.
+
+```
+@Eilif elect storyteller        open a 24 h reaction ballot   (jarls only)
+@Eilif close election           close it early and proclaim   (jarls only)
+@Eilif name storyteller <Char>  install a holder with no vote (jarls only)
+```
+
+- **The ballot is reactions, not a Discord poll.** An election has to be closable on command,
+  rewritten with its own result when it closes, and readable afterwards as an embed naming the
+  candidates. Discord's native poll (which the boss polls use) does none of the three.
+- **Who stands:** every viking whose Discord is **linked** and who has played in the last **14
+  days**, ranked by hours in that window, capped at ten. Unlinked vikings cannot stand: the office
+  has to be reachable for the nudge and identifiable for the site badge. Fewer than two candidates
+  and the verb refuses rather than posting a ballot of one.
+- **A tie goes to the viking higher on the ballot**, which is the one with more hours. It is a rule
+  rather than a coin flip, it reads the same every time, and the ballot's own footer says so.
+- **The proclamation** posts an embed and speaks ONE line to the whole hall, and it carries the
+  **backlog**: every boss that has fallen and that no viking has told. "Two tales wait for you,
+  Storyteller: Eikthyr and the Elder."
+- **Authority:** the holder may `@Eilif keep <Boss> <n>` on **any** telling, not only their own.
+  That is the whole power of the office. Everything else about `keep` is unchanged.
+- **Nudges:** a 30-minute loop sends **one** nudge per fallen-and-untold boss per term, 24 h after
+  the kill, or **7 days after the term opened** for a boss that fell before the holder took office
+  (a new Storyteller inherits a backlog and should not be nudged about all of it on their first
+  morning). It is marked in `office_nudges (boss_id, office_id)`, whose primary key IS the
+  idempotency. **This nudge is the only place the bot mentions a real user**, and it mentions
+  exactly one, with `allowed_mentions.users` pinned to that id.
+  The private in-game half is queued **only** with `VOICE_TARGETING=1`; without it there is no
+  voice line at all, because "your Storyteller is behind" broadcast to the hall is a different
+  message.
+- **On the site:** a viking's page shows "Storyteller of Eilif" beside their epithet (and
+  "Storyteller for the &lt;act&gt; act" for a former holder); the war-room's tellings card names the
+  current Storyteller. The **epithet engine is untouched** — an office is shown next to a title,
+  never folded into it.
+- After a further week untold, the war-room says so itself: *The Skald's draft stands, for want of
+  a storyteller.*
+
+## Telling votes (`TELLING_VOTES=1`, off by default)
+When a boss has two or more tellings from the warband, the hall can decide between them.
+
+```
+@Eilif vote tellings <Boss>     open a 24 h ballot   (Storyteller or a jarl)
+@Eilif close vote <Boss>        close it early       (Storyteller or a jarl)
+```
+
+One reaction per telling, the first **300 characters** of each on the ballot. The winner takes
+`chosen` (through the same insert-unchosen-then-set path `keep` uses, so the partial unique index
+still does the deciding) and is marked `standing = 'canon'`; the runner-up is marked
+`'apocryphal'` and the war-room gives it its own heading, **The apocryphal version** — the version
+the hall did not pick is still part of how the night is remembered. A telling nobody voted for is
+never called apocryphal. The Skald's own draft is not on the ballot: a vote exists to replace it.
+
+One count per boss at a time, and the ballot message is **edited** with its result rather than
+answered by a second post. A close **wipes the boss's standings first**, so a second count on the
+same boss cannot leave the first count's loser still marked apocryphal (the war-room shows one
+apocryphal telling and would quietly fold the other away). `standing` needs
+`db/2026-09-06_telling_votes.sql`; without it the count still rules and only the heading is missing.
+
+A ballot the bot **cannot read** is not a ballot of zero. A failed read at closing time leaves the
+count open and tries again on the next pass, three times, before closing on what it knows; the same
+rule holds for the election.
+
+## Altar tellings (`ALTAR_TELLINGS=1`, off by default)
+Where a forsaken fell, the hall remembers out loud.
+
+At the kill, `/api/gs-ingest` reads `player_positions` for the war party and, if at least one is
+fresher than five minutes, charts **one pin of kind `boss`** at their centroid, named
+`<Boss> altar` and credited to the top-damage viking. That half is **always on** and is harmless
+data (a pin named for a boss, guarded so a boss never gets a second one). It is deliberately not
+the bare boss name: `/api/webhook`'s `pin` branch replaces a pin **by name**, so an altar called
+"Bonemass" would be deleted the first time somebody shouted `/pin Bonemass` at the spot, and the
+boss is already dead.
+
+The flagged half is a 60-second loop: for every online viking whose position is fresher than 90 s
+and who is within **40 m** of an altar whose boss has a chosen telling, and who has not been told
+at that altar in **24 h**, it queues the telling's **first sentence** (cut at the sentence end, max
+120 chars) plus a line naming who told it. The whole line is capped at **150 characters**, the same
+ceiling every other in-game line keeps; the opening yields the room the closing line needs, so the
+teller's name is never the half that gets cut.
+
+> *The bog took two of us. Bren tells the rest.*
+
+⚠️ **It does nothing at all without `VOICE_TARGETING=1`.** The line carries `meta.target` and is
+meant for one viking; reading somebody's telling out to the whole server because a third party
+walked past would be the wrong message. With targeting off the loop enqueues nothing, and the
+startup line says which of the two it is doing. The 24-hour memory lives in `state.json` and is
+bounded oldest-first.
+
 ## Run as a service
 ```bash
 sudo cp eilif-discord-bot.service /etc/systemd/system/

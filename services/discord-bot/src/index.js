@@ -19,6 +19,9 @@ import { createTitlesAnnouncer } from './titles.js';
 import { createMilestonesAnnouncer } from './milestones.js';
 import { createChronicle } from './chronicle.js';
 import { createBossPolls, createDiscordPollAdapter, createDryRunPollAdapter } from './bosspoll.js';
+import { createStoryteller, createBallotAdapter } from './storyteller.js';
+import { createTellingVotes } from './tellings-vote.js';
+import { createAltarTellings } from './altar.js';
 import { recordLoopResult, loopsSnapshot, createHeartbeatSender } from './heartbeat.js';
 
 const DRY = process.env.DRY_RUN === '1' || process.argv.includes('--dry-run');
@@ -49,6 +52,17 @@ const DRY_LOOP = process.argv.includes('--loop');
 // startup line saying which way it is set, in live mode and in the dry run.
 const CHRONICLE_ON = process.env.WEEKLY_CHRONICLE === '1';
 const BOSS_POLLS_ON = process.env.BOSS_POLLS === '1';
+// Three more, on the same rule: read ONCE here, at startup, so a flag cannot be
+// half-on (a handler attached against a loop that was never started), and each
+// prints one startup line saying which way it is set. All three ship OFF.
+const STORYTELLER_ON = process.env.STORYTELLER === '1';
+const TELLING_VOTES_ON = process.env.TELLING_VOTES === '1';
+const ALTAR_TELLINGS_ON = process.env.ALTAR_TELLINGS === '1';
+// Read here too, because ALTAR_TELLINGS says something different depending on
+// it: with targeting off the altar loop enqueues NOTHING rather than reading a
+// viking's telling out to the whole server.
+const VOICE_TARGETING_ON = process.env.VOICE_TARGETING === '1';
+const OFFICE_CHANNEL = process.env.OFFICE_CHANNEL === 'server' ? 'server' : 'valheim';
 const CHRONICLE_CHANNEL = process.env.CHRONICLE_CHANNEL === 'server' ? 'server' : 'valheim';
 const BOSS_POLL_CHANNEL = process.env.BOSS_POLL_CHANNEL === 'server' ? 'server' : 'valheim';
 // Sunday 20:00 local, hour tunable the way RECAP_EVENING_HOUR is.
@@ -192,7 +206,10 @@ async function runLive() {
   // db/2026-09-06_boss_tellings.sql is applied every verb answers "the ledgers
   // are still being carved" and writes nothing.
   if (process.env.TELLINGS !== '0') {
-    createTellings({ client: poster.client }).attach();
+    // `office` is the STORYTELLER flag, so `keep` only ever consults the
+    // offices table when the office feature is on. With it off, `keep` is
+    // exactly the author-or-jarl rule it has always been.
+    createTellings({ client: poster.client, office: STORYTELLER_ON }).attach();
     extra += ', tellings on';
   }
 
@@ -355,6 +372,97 @@ async function runLive() {
     }`
   );
 
+  // ── The Storyteller of Eilif, telling votes, altar tellings ──────────────
+  //
+  // Three features, three flags, all OFF unless the flag is exactly '1'. They
+  // share one ballot adapter (reactions, edits and the single permitted user
+  // mention) and, where they need a clock, one 30-minute loop rather than three:
+  // an election closes on the hour it closes on, and a nudge that arrives half
+  // an hour late is still a nudge.
+  const ballotAdapter =
+    STORYTELLER_ON || TELLING_VOTES_ON
+      ? createBallotAdapter({
+          client: poster.client,
+          channelIds: { server: process.env.CHANNEL_SERVER, valheim: process.env.CHANNEL_VALHEIM },
+        })
+      : null;
+
+  let storytellerStarted = false;
+  if (STORYTELLER_ON) {
+    const storyteller = createStoryteller({
+      client: poster.client,
+      post,
+      adapter: ballotAdapter,
+      state,
+      saveState,
+      channel: OFFICE_CHANNEL,
+    });
+    storyteller.attach();
+    const interval = intervalMs(process.env.STORYTELLER_INTERVAL_MS, 1800000);
+    const storytellerLoop = safe('storyteller', () => storyteller.tick());
+    await storytellerLoop();
+    timers.push(setInterval(storytellerLoop, interval));
+    storytellerStarted = true;
+    extra += `, storyteller every ${interval}ms`;
+  }
+  console.log(
+    `[storyteller] ${
+      STORYTELLER_ON
+        ? `ON — \`@Eilif elect storyteller\` to #${OFFICE_CHANNEL}, nudges for untold falls` +
+          (VOICE_TARGETING_ON ? '' : ' (no private nudge line: VOICE_TARGETING is not 1)')
+        : 'off (set STORYTELLER=1 to enable)'
+    }`
+  );
+
+  let tellingVotesStarted = false;
+  if (TELLING_VOTES_ON) {
+    const tellingVotes = createTellingVotes({
+      client: poster.client,
+      adapter: ballotAdapter,
+      state,
+      saveState,
+      channel: OFFICE_CHANNEL,
+    });
+    tellingVotes.attach();
+    const interval = intervalMs(process.env.TELLING_VOTES_INTERVAL_MS, 1800000);
+    const votesLoop = safe('telling-votes', () => tellingVotes.tick());
+    await votesLoop();
+    timers.push(setInterval(votesLoop, interval));
+    tellingVotesStarted = true;
+    extra += `, telling votes every ${interval}ms`;
+  }
+  console.log(
+    `[telling-votes] ${
+      TELLING_VOTES_ON
+        ? `ON — \`@Eilif vote tellings <Boss>\` to #${OFFICE_CHANNEL}`
+        : 'off (set TELLING_VOTES=1 to enable)'
+    }`
+  );
+
+  // The altar loop is the one feature whose flag alone does not settle what it
+  // does: without VOICE_TARGETING it would have to speak one viking's telling to
+  // the entire server, so it stays silent instead. Said out loud here rather
+  // than discovered from an empty voice queue.
+  let altarStarted = false;
+  if (ALTAR_TELLINGS_ON && VOICE_TARGETING_ON) {
+    const altar = createAltarTellings({ state, saveState });
+    const interval = intervalMs(process.env.ALTAR_INTERVAL_MS, 60000);
+    const altarLoop = safe('altar-tellings', () => altar.tick());
+    await altarLoop();
+    timers.push(setInterval(altarLoop, interval));
+    altarStarted = true;
+    extra += `, altar tellings every ${interval}ms`;
+  }
+  console.log(
+    `[altar-tellings] ${
+      !ALTAR_TELLINGS_ON
+        ? 'off (set ALTAR_TELLINGS=1 to enable)'
+        : altarStarted
+          ? 'ON — a private telling at the altar where each forsaken fell'
+          : 'ON but silent: VOICE_TARGETING is not 1, and a telling at an altar must never be spoken to the whole hall'
+    }`
+  );
+
   // Ops cockpit heartbeat: reports this bot's liveness + its gated sub-loops'
   // last-run/last-error/enabled state, plus non-secret pilot-flag booleans the
   // cockpit needs to flag before launch. Best-effort — sendHeartbeat never
@@ -385,6 +493,12 @@ async function runLive() {
       // seed leaves the flag on and the loop asleep, and the cockpit should see
       // the second fact rather than wait forever for a tick that never comes.
       'boss-polls': { enabled: BOSS_POLLS_ON && bossPollsStarted, loop: 'boss-polls' },
+      // Same rule as boss-polls above: `enabled` is what actually RUNS. The
+      // altar loop can be flagged on and still not start (VOICE_TARGETING),
+      // and the cockpit should see the second fact.
+      storyteller: { enabled: STORYTELLER_ON && storytellerStarted, loop: 'storyteller' },
+      'telling-votes': { enabled: TELLING_VOTES_ON && tellingVotesStarted, loop: 'telling-votes' },
+      'altar-tellings': { enabled: ALTAR_TELLINGS_ON && altarStarted, loop: 'altar-tellings' },
     };
     const subLoops = {};
     let anyLoopFailing = false;
@@ -596,6 +710,35 @@ async function runDryRun({ loop = false } = {}) {
       BOSS_POLLS_ON
         ? `ON — first-blood polls to #${BOSS_POLL_CHANNEL} (rehearsed below; the poll is PRINTED, never sent)`
         : 'off (set BOSS_POLLS=1 to enable)'
+    }`
+  );
+  // The same three lines the live bot prints, so a rehearsal says out loud how
+  // the new flags are set. None of the three is REHEARSED below: the
+  // storyteller and telling-vote verbs are event handlers (a stub client never
+  // emits), their loops only act on a ballot that a live message opened, and
+  // the altar loop's whole output is a private voice line, which a dry run must
+  // not queue.
+  console.log(
+    `[storyteller] ${
+      STORYTELLER_ON
+        ? `ON — the office proclaims to #${OFFICE_CHANNEL} (not rehearsed: the verbs are event handlers)`
+        : 'off (set STORYTELLER=1 to enable)'
+    }`
+  );
+  console.log(
+    `[telling-votes] ${
+      TELLING_VOTES_ON
+        ? `ON — counts run in #${OFFICE_CHANNEL} (not rehearsed: the verbs are event handlers)`
+        : 'off (set TELLING_VOTES=1 to enable)'
+    }`
+  );
+  console.log(
+    `[altar-tellings] ${
+      !ALTAR_TELLINGS_ON
+        ? 'off (set ALTAR_TELLINGS=1 to enable)'
+        : VOICE_TARGETING_ON
+          ? 'ON — a private telling at each altar (not rehearsed: it would queue real voice lines)'
+          : 'ON but silent: VOICE_TARGETING is not 1, and a telling at an altar must never be spoken to the whole hall'
     }`
   );
   console.log(

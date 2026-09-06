@@ -32,10 +32,13 @@ import {
   getGalleryPhotos,
   getBosses,
   getPins,
+  getOffices,
   playtimeMinutesByCharacter,
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
 import { epithetsFor, generatedBioLine } from '@/lib/epithets';
+import { OfficeBadge } from '@/components/viking/OfficeBadge';
+import { officeLabelFor } from '@/components/viking/office';
 import {
   formatPlaytime,
   formatNumber,
@@ -109,7 +112,7 @@ interface Tile {
 export default async function VikingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  const [roster_, sessions, deaths, potyArchive, photos, bosses, pins] = await Promise.all([
+  const [roster_, sessions, deaths, potyArchive, photos, bosses, pins, offices] = await Promise.all([
     getPlayersWithStats(),
     getSessionsSince(70),
     getEventsSince(70, ['death']),
@@ -117,6 +120,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
     getGalleryPhotos(),
     getBosses(),
     getPins(),
+    getOffices(),
   ]);
 
   // The `players.total_playtime_minutes` column isn't kept fresh by the real
@@ -138,6 +142,12 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
 
   const epithet = epithetsFor(roster, { causesByName: causesByNameFrom(deaths) }).get(name)!;
 
+  // An OFFICE, shown beside the epithet and never folded into it: lib/epithets
+  // assigns one unique title per viking from what they did, and a seat in the
+  // hall is a different kind of fact. Null unless this viking holds, or has
+  // held, one (db/2026-09-06_offices.sql; empty before it is applied).
+  const officeLabel = officeLabelFor(offices, name);
+
   // Discord↔character link. `discord_user_id` is undefined pre-link (or
   // pre-migration) → `isLinked` false → the header callout + gallery hint
   // point the viking at the `@Eilif I am <name>` ritual.
@@ -150,6 +160,11 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
 
   // Places: real map pins credited to this exact viking (slug-equal author).
   const myPlaces = pins
+    // Boss altars carry the top-damage viking's name so the atlas can credit
+    // the fight, but nobody NAMED one: /api/gs-ingest charts them at the kill.
+    // "Places They Named" is about the in-game `/pin` shout, so they are not
+    // this viking's to claim.
+    .filter((p) => p.pinKind !== 'boss')
     .filter((p) => slugify(p.by_character_name ?? '') === slug)
     .map((p) => ({ id: p.id, name: p.name, kind: p.kind, day: p.day }));
 
@@ -249,7 +264,10 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
             </span>
           )}
         </div>
-        <p className="mt-1 font-display text-lg text-gold-light">{epithet.title}</p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2 font-display text-lg text-gold-light">
+          <span>{epithet.title}</span>
+          <OfficeBadge label={officeLabel} />
+        </p>
 
         <p className="mt-4 max-w-2xl text-sm leading-relaxed text-ash-dim">
           {viking.bio ? (

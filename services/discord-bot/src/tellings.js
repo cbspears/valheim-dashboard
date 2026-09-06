@@ -473,19 +473,36 @@ export async function recordSkaldTelling({ db, boss, text, log = console }) {
 // ── permissions ───────────────────────────────────────────────────────────
 
 /**
- * Who may choose which telling stands: the viking who told it, or a jarl of
- * this hall. The admin half is the SAME check the voice puppet uses
+ * Who may choose which telling stands: the viking who told it, the Storyteller
+ * of Eilif while that office is held and STORYTELLER=1, or a jarl of this hall.
+ * The admin half is the SAME check the voice puppet uses
  * (voice.js mayPuppet), including the guild pin: `member.permissions` is
  * authority in the guild the message came from, not in this one, so without it
  * the owner of any other guild the bot is in could re-choose our war room's
  * saga.
  */
-export function mayKeepTelling(member, telling, { guildId = null, adminRoleIds = [] } = {}) {
+export function mayKeepTelling(
+  member,
+  telling,
+  { guildId = null, adminRoleIds = [], storytellerDiscordId = null } = {},
+) {
   const authorId = telling?.author_discord_id;
   const senderId = member?.user?.id ?? member?.id ?? null;
   if (authorId && senderId && authorId === senderId) return true;
   if (!member) return false; // a direct message has no member, so it has no permissions
   if (guildId && member.guild?.id !== guildId) return false;
+  // THE STORYTELLER OF EILIF (db/2026-09-06_offices.sql) may keep any telling,
+  // which is the whole authority the office carries. Passed in rather than read
+  // here so the office is only ever consulted when STORYTELLER=1: with the flag
+  // off this is null and the rule is exactly what it was before the office
+  // existed.
+  //
+  // BELOW THE GUILD PIN, deliberately, and unlike the author check above. An
+  // author may re-choose their own telling from anywhere, because it is theirs;
+  // the office belongs to THIS hall, so its authority has to be exercised from
+  // inside it. Without the pin, a message from any other guild the bot sits in
+  // would carry the office with it.
+  if (storytellerDiscordId && senderId && String(storytellerDiscordId) === senderId) return true;
   if (member.permissions?.has?.('Administrator')) return true;
   if (member.permissions?.has?.('ManageGuild')) return true;
   return adminRoleIds.some((id) => member.roles?.cache?.has?.(id));
@@ -493,7 +510,7 @@ export function mayKeepTelling(member, telling, { guildId = null, adminRoleIds =
 
 // ── the handler ───────────────────────────────────────────────────────────
 
-export function createTellings({ client, log = console, db: injectedDb }) {
+export function createTellings({ client, log = console, db: injectedDb, office = false }) {
   // `injectedDb` is a test seam, the same one createVoiceEngine and
   // createIdentityLink use. Production passes nothing and builds the real
   // service client.
@@ -510,6 +527,34 @@ export function createTellings({ client, log = console, db: injectedDb }) {
 
   // discordId to the ms of that member's last accepted retell.
   const lastTellAt = new Map();
+
+  // THE STORYTELLER, cached for a minute.
+  //
+  // `office` is index.js's STORYTELLER flag, read once at startup. With the
+  // office off this never touches the offices table at all, so applying
+  // db/2026-09-06_offices.sql (or not applying it) cannot change what `keep`
+  // does today. With it on, one read serves every `keep` for a minute: the
+  // holder changes at an election, never while a viking is typing.
+  const OFFICE_CACHE_MS = 60_000;
+  let officeCache = { at: 0, discordId: null };
+  async function storytellerDiscordId() {
+    if (!office) return null;
+    if (officeCache.at && Date.now() - officeCache.at < OFFICE_CACHE_MS) return officeCache.discordId;
+    try {
+      const { data, error } = await db
+        .from('offices')
+        .select('holder_discord_id')
+        .eq('office', 'storyteller')
+        .is('until', null)
+        .maybeSingle();
+      // A missing table is a hall with no office, which is a null holder and
+      // the pre-office rule. It is never worth failing a `keep` over.
+      officeCache = { at: Date.now(), discordId: error ? null : (data?.holder_discord_id ?? null) };
+    } catch {
+      officeCache = { at: Date.now(), discordId: null };
+    }
+    return officeCache.discordId;
+  }
 
   function cooldownLeftMs(discordId) {
     const at = lastTellAt.get(discordId);
@@ -708,10 +753,13 @@ export function createTellings({ client, log = console, db: injectedDb }) {
       );
       return;
     }
-    if (!mayKeepTelling(message.member, row, { guildId, adminRoleIds })) {
+    const keeper = await storytellerDiscordId();
+    if (!mayKeepTelling(message.member, row, { guildId, adminRoleIds, storytellerDiscordId: keeper })) {
       await reply(
         message,
-        'Only the viking who told it, or a jarl of this hall, may choose which telling stands.',
+        keeper
+          ? 'Only the viking who told it, the Storyteller of Eilif, or a jarl of this hall, may choose which telling stands.'
+          : 'Only the viking who told it, or a jarl of this hall, may choose which telling stands.',
       );
       return;
     }

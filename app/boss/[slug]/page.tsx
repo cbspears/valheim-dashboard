@@ -23,8 +23,10 @@ import {
   getGalleryPhotos,
   getUpcomingEvents,
   getAllPlayers,
+  getOffices,
 } from '@/lib/data';
 import { slugify, vikingPath, matchVikingName, resolvePhotoViking } from '@/lib/slug';
+import { currentHolder, currentOffice } from '@/components/viking/office';
 
 // SIXTY SECONDS OF ISR (2026-09-06). A Forsaken's page changes on exactly two
 // events: the kill that flips it, and a photo or a boss night being added. Both
@@ -84,7 +86,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
   if (!boss) notFound();
 
   if (boss.is_killed) {
-    const [photos, roster, tellings] = await Promise.all([
+    const [photos, roster, tellings, offices] = await Promise.all([
       getGalleryPhotos(),
       getAllPlayers(),
       // The tellings of this fall: the Skald's, and any a viking has told with
@@ -92,6 +94,11 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
       // db/2026-09-06_boss_tellings.sql is applied, which is exactly the case
       // BossTellings falls back to `boss.retelling` for.
       getBossTellings(boss.id),
+      // The roll of hall offices (db/2026-09-06_offices.sql). Empty before that
+      // migration, and empty while the office is vacant, which is the same
+      // page either way: no Storyteller line, and the untold clock runs from
+      // the kill instead of from a term.
+      getOffices(),
     ]);
     const nameLower = boss.name.toLowerCase();
     const depiction = photos.find((p) => p.caption?.toLowerCase().includes(nameLower)) ?? null;
@@ -164,6 +171,13 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
           tellings={tellings}
           fallback={boss.retelling ?? null}
           notes={boss.notes}
+          storyteller={currentHolder(offices)}
+          killedAt={boss.killed_at}
+          // Empty on every hall that has not run db/2026-09-06_offices.sql and
+          // opened a term, which is what keeps the untold line off a war room
+          // whose Storyteller has not shipped.
+          officeKnown={offices.length > 0}
+          officeSince={currentOffice(offices)?.since ?? null}
         />
 
         {/* The Depiction */}

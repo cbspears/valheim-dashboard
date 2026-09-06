@@ -215,6 +215,9 @@ only component holding a Supabase key directly. Loops, with their intervals:
 | recap | one `node-cron` job, `RECAP_EVENING_HOUR` (default 23) America/Chicago | the evening recap and Player of the Day |
 | `boss-polls` | `BOSS_POLLS_INTERVAL_MS`, default 60 s | watches `bosses` for a fresh kill and posts one native Discord poll naming who takes first blood on the next boss, plus a follow-up when it falls. **Off unless `BOSS_POLLS=1`** |
 | chronicle | one `node-cron` job, `0 <CHRONICLE_HOUR> * * 0` (Sunday, default 20:00) America/Chicago | the weekly Skald's Chronicle embed. **Off unless `WEEKLY_CHRONICLE=1`** |
+| `storyteller` | `STORYTELLER_INTERVAL_MS`, default 30 m | closes a due election ballot, then owes at most one nudge about a fallen boss no viking has told. **Off unless `STORYTELLER=1`** |
+| `telling-votes` | `TELLING_VOTES_INTERVAL_MS`, default 30 m | closes any telling vote whose 24 h are up. **Off unless `TELLING_VOTES=1`** |
+| `altar-tellings` | `ALTAR_INTERVAL_MS`, default 60 s | speaks a boss's chosen telling to a viking standing at its altar. **Off unless `ALTAR_TELLINGS=1` AND `VOICE_TARGETING=1`** |
 
 Recaps are gated by `RECAPS_START`. Gallery ingest, oath ingest, identity linking and
 player tellings are Discord event handlers rather than loops, each behind its own env flag.
@@ -245,6 +248,82 @@ back to `select('*')`. The telling verbs are anchored at the start of the messag
 `oaths.js` refuses a message that starts with one, because its own keyword search runs over
 the whole message and would otherwise read a story containing the word "oath" or "role" as
 the sender's own oath.
+
+**The Storyteller of Eilif (`services/discord-bot/src/storyteller.js`, off unless
+`STORYTELLER=1`).** Tellings made a boss's saga writable by anyone; nobody was responsible for the
+falls that stayed unwritten. `db/2026-09-06_offices.sql` adds `offices` (one row per term, holder,
+`since`/`until`, `elected_by`, `act`) with a partial unique index on `(office) where until is null`,
+so "one holder at a time" is the database's rule and installing a new one is
+close-the-old-term-then-insert rather than a read-then-write race. `@Eilif elect storyteller`
+(guild admins) posts a REACTION ballot over every linked viking who has played in the last fourteen
+days, ranked by hours in that window, capped at the ten marks a ballot carries; it closes on its own
+after 24 h or on `@Eilif close election`, and a tie goes to the viking higher on the ballot, which
+the ballot's own footer says out loud. Reactions rather than the native Discord poll that
+`bosspoll.js` uses, because an election has to be closable on command, rewritten in place with its
+result, and readable afterwards as an embed naming the candidates, and a native poll does none of
+those. `@Eilif name storyteller <Char>` installs one without a vote. The proclamation is an embed
+plus ONE spoken line to the whole hall, carrying the backlog: every fallen boss no viking has told.
+The office's whole authority is that its holder may `keep` any telling rather than only their own,
+which `tellings.js` takes as an injected id so that with the flag off it never reads the table at
+all. A 30-minute loop nudges the holder once per untold fall, 24 h after the kill or seven days
+after the term opened for a boss felled before it, marked in `office_nudges (boss_id, office_id)`
+whose primary key IS the idempotency (a column on `boss_tellings` could not carry it, because a
+boss with no telling has no row there). **That nudge is the only real user mention this bot makes**,
+pinned to one id through the ballot adapter's own `sendMentioning`; the private in-game half is
+queued only under `VOICE_TARGETING=1`, because a broadcast would tell the whole hall that their
+Storyteller is behind. A count the bot cannot READ is not a count of zero: `readBallot` answers null
+for a rate limit, a failed fetch and a deleted message alike, so a close on null leaves the ballot
+open and retries, up to `MAX_BALLOT_READ_TRIES` (three) before it gives up and closes on what it
+knows. Without that, one bad minute at the 24-hour mark would discard a day of real ballots and
+announce in writing that nobody voted. The site reads the same roll for the badge beside a viking's
+epithet, the name on the war-room's tellings card, and the "The Skald's draft stands, for want of a
+storyteller." line a week after a nudge went unanswered; that line is gated on the roll being
+non-empty (`officeKnown`), so a hall that has never had the office never asks for one.
+`lib/epithets.ts` is untouched, because an office is a different kind of fact from a title someone
+earned.
+
+**Telling votes (`services/discord-bot/src/tellings-vote.js`, off unless `TELLING_VOTES=1`).**
+`@Eilif keep` is one viking's decision. When a boss has two or more accounts from the warband, the
+Storyteller or a jarl can call `@Eilif vote tellings <Boss>` and let the hall decide: one reaction
+per telling, the first 300 characters of each on the ballot, closing after 24 h or on
+`@Eilif close vote <Boss>`. The winner takes `chosen` through the same insert-unchosen-then-set path
+`keep` uses, so the partial unique index still does the deciding, and is marked
+`standing = 'canon'`; the runner-up is marked `'apocryphal'` and the war room gives it its own
+heading rather than folding it in with the older tellings, because the version the hall did not pick
+is still part of how the night is remembered. A telling nobody voted for is never called apocryphal,
+and the Skald's own draft is not on the ballot at all: a vote exists to replace it. One count per
+boss at a time, keyed by boss id in `state.json`, and the ballot message is EDITED with its result
+rather than answered by a second post. A close WIPES the boss's standings before writing the new
+ones, the way `setChosen` clears `chosen`: two counts on one boss would otherwise leave two rows
+marked apocryphal, and the war room shows one and folds the other into the collapsed list with no
+heading, hiding the verdict the hall just reached. The unreadable-ballot deferral above applies here
+too, and from the same constant. `standing` is a separate migration
+(`db/2026-09-06_telling_votes.sql`), which is why `lib/data.ts getBossTellings` asks for the column
+and RE-ASKS without it on any error: naming a column that does not exist yet fails the whole query,
+and a war room that lost every telling because the second file was late would be a far worse outcome
+than a missing heading. That migration also has to re-`grant select (standing)`, because
+`boss_tellings` had its blanket grant revoked to hide `author_discord_id` and Postgres does not
+extend a column grant to a column added afterwards.
+
+**Altar tellings (`services/discord-bot/src/altar.js` and `lib/altar.ts`, off unless
+`ALTAR_TELLINGS=1`).** The kill is the only moment anyone knows WHERE a boss fight happened, so
+`ingestBossMilestones` now spends it: it reads `player_positions` for the war party and, if at least
+one row is fresher than five minutes, charts one pin of kind `boss` at their centroid, projected
+with the identical expression the `/pin` branch of `/api/webhook` uses (`lib/altar.ts worldToMap`;
+`lib/altar.test.mjs` reads the webhook's source and fails if the two ever drift). That half is
+ALWAYS ON and is harmless data. The pin is named `<Boss> altar` rather than the bare boss name
+deliberately, because the `pin` branch REPLACES a pin by name and an altar called "Bonemass" would
+be deleted the first time a viking shouted `/pin Bonemass` at the spot, with the boss already dead
+and nothing to put it back. The flagged half is a 60-second loop: an online viking whose position is
+fresher than 90 s, within forty metres of an altar whose boss has a chosen telling, and not told at
+that altar in 24 h, hears the telling's first sentence (cut at the sentence end, 120 characters) and
+who told it. The COMPOSED line is capped at 150 characters, the ceiling every other in-game pool
+keeps: the opening and the tail are drawn independently and the sum of their own caps is 196, so the
+opening yields whatever room the tail needs rather than the tail being cut off the viking's name. It carries `meta.target` and is queued ONLY under `VOICE_TARGETING=1`; with targeting
+off the loop enqueues nothing rather than reading one viking's telling out to the whole server, and
+the startup line says which of the two it is doing. The 24-hour memory is bounded oldest-first in
+`state.json`, and is written BEFORE the enqueue: a missed telling is a small loss, a stutter at an
+altar every sixty seconds is not.
 
 **The relay cursors on insertion order, not on producer time.** `events.created_at` is
 supplied by whoever wrote the row: the log poller stamps a join or leave with the LOG
@@ -344,6 +423,7 @@ Next.js 16 App Router, React 19, Tailwind v4, TypeScript. Public pages:
 | `/gallery` | photos ingested from Discord |
 | `/oath` | the oath wall |
 | `/mods` | the mod list from `config/mods.ts` |
+| `/commands` | the player register: every Discord verb, every `/s` shout, every notice the hall sends and every page, rendered from `config/commands.ts`, where each entry names the code it was derived from and `scripts/commands-page.test.mjs` fails the build if a verb, a shout prefix or a feature flag drifts away from it |
 | `/get-started` | pack code, Mac config bundle, connect details |
 | `/tv` | experimental TV mode, unlinked and noindexed (delete `app/tv` and `components/tv` to remove) |
 | `/admin/ops`, `/admin/ops/architecture` | the ops cockpit, cookie-gated |
@@ -390,14 +470,14 @@ service-role key, either from a Vercel route or from the Discord bot.
 | `events` | `/api/webhook`, `/api/gs-ingest`, `lib/deaths.ts`, `lib/milestones.ts` | the saga feed: joins, leaves, deaths, bosses, raids, milestones |
 | `player_stats` | `/api/gs-ingest` (upsert) | leaderboard numbers plus the `gs_stats` jsonb long tail. Baselined per world by `lib/gs-baseline.ts`. |
 | `bosses` | `/api/gs-ingest` (update), bot `retelling.js` (update), `services/discord-bot/scripts/mark-boss.js` (manual) | the eight progression gates, `fight_stats` jsonb |
-| `boss_tellings` | bot `tellings.js` (insert, update), bot `retelling.js` via `recordSkaldTelling` | the war-room's sagas: the Skald's, and the ones vikings tell with `@Eilif retell`. **`db/2026-09-06_boss_tellings.sql` is UNAPPLIED**, so this is the twenty-first table only once Charlie runs it. `author_discord_id` is revoked from anon. |
+| `boss_tellings` | bot `tellings.js` (insert, update), bot `retelling.js` via `recordSkaldTelling` | the war-room's sagas: the Skald's, and the ones vikings tell with `@Eilif retell`. `db/2026-09-06_boss_tellings.sql` was APPLIED on 2026-09-06, so this is the twenty-first table. `author_discord_id` is revoked from anon; `standing` is a LATER column (`db/2026-09-06_telling_votes.sql`) and is not there yet. |
 | `roadmap` | nothing in code (hand-edited in Supabase) | the living schedule |
 | `server_status` | `/api/webhook`, `/api/gs-ingest` | single row: online, player count, current players, world day |
 | `discord_events` | `/api/webhook` (`events_sync`, upsert and delete) | Discord scheduled events, rolled forward for recurrence |
 | `gallery_photos` | bot `gallery.js` (insert, delete), `/api/webhook` (update, for pin linking) | Discord-ingested screenshots |
 | `poty_history` | bot `recap.js` | Player of the Day archive |
 | `oaths` | `/api/webhook` (insert, delete), bot `oaths.js` and `voice.js` | the oath wall |
-| `pins` | `/api/webhook` (insert, delete) | named places from `/pin` |
+| `pins` | `/api/webhook` (insert, delete), `/api/gs-ingest` (insert, boss altars) | named places from `/pin`, plus one `kind = 'boss'` altar per fallen forsaken, charted at the war party's centroid |
 | `voice_lines` | bot `milestones.js`, `titles.js`, `voice.js` (insert and update), `/api/voice` (update to spoken) | the in-game speech queue. No public-read policy. |
 | `milestones` | `lib/milestones.ts` via `/api/gs-ingest`, bot `milestones.js` | Great Deeds, their progress and announce state |
 | `title_history` | bot `titles.js` | every title change |
@@ -406,12 +486,19 @@ service-role key, either from a Vercel route or from the Discord bot.
 | `player_positions` | `/api/webhook` (upsert) | live positions for the map layer and `/tv` |
 | `ops_heartbeats` | `/api/ops/heartbeat`, `lib/ops/route-heartbeat.ts` | producer liveness. Service-role only. |
 | `ops_alerts` | `/api/ops/watchdog` (upsert) | watchdog alert state and re-alert timing. Service-role only. |
+| `offices` | bot `storyteller.js` (insert, update) | terms of the Storyteller of Eilif, at most one open. **`db/2026-09-06_offices.sql` is UNAPPLIED.** `holder_discord_id` is revoked from anon. |
+| `office_nudges` | bot `storyteller.js` (insert) | which fallen boss each term has already been nudged about. Same migration, and RLS with NO select policy: bot bookkeeping, service-role only. |
 
-That is all twenty, verified against the live project on 2026-09-05 (`boss_tellings` is the
-twenty-first, and only once its migration is applied). Two columns are narrower than the
+That is all twenty-one, verified against the live project on 2026-09-06: the twenty that were
+there on 2026-09-05 plus `boss_tellings`, whose migration was applied that morning. Two of the
+rows above are UNAPPLIED migration files rather than live tables: `offices` and `office_nudges`
+(`db/2026-09-06_offices.sql`); a third file adds one column, `boss_tellings.standing`
+(`db/2026-09-06_telling_votes.sql`), which is why `lib/data.ts getBossTellings` asks for that
+column and asks again without it when the read fails. Three columns are narrower than the
 rows they sit in: `players.steam_id` is revoked from the anon role by
-`db/2026-07-11_players_pii_revoke.sql`, and `boss_tellings.author_discord_id` by
-`db/2026-09-06_boss_tellings.sql`, so public reads never see either. `discord_id`,
+`db/2026-07-11_players_pii_revoke.sql`, `boss_tellings.author_discord_id` by
+`db/2026-09-06_boss_tellings.sql`, and `offices.holder_discord_id` by
+`db/2026-09-06_offices.sql`, so public reads never see any of them. `discord_id`,
 `discord_user_id` and `discord_username` **are** readable by anon over PostgREST: that
 migration revokes the blanket table grant and then deliberately re-grants those three,
 because the viking pages render them. If that is not what you want, it is a product
@@ -487,7 +574,14 @@ Also read by `scripts/map-snapshot.mjs`, which loads this file plus `.env.local`
 `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT_MS`, `OPS_HEARTBEAT_URL`,
 `OPS_HEARTBEAT_TOKEN`, `DRY_RUN`, and, for the two loops that ship off,
 `BOSS_POLLS`, `BOSS_POLLS_INTERVAL_MS`, `BOSS_POLL_CHANNEL`, `WEEKLY_CHRONICLE`,
-`CHRONICLE_CHANNEL`, `CHRONICLE_HOUR`.
+`CHRONICLE_CHANNEL`, `CHRONICLE_HOUR`, `STORYTELLER`, `STORYTELLER_INTERVAL_MS`,
+`OFFICE_CHANNEL`, `TELLING_VOTES`, `TELLING_VOTES_INTERVAL_MS`, `ALTAR_TELLINGS`,
+`ALTAR_INTERVAL_MS`.
+
+`ALTAR_TELLINGS=1` is the one flag that is not sufficient on its own: the altar loop is
+also gated on `VOICE_TARGETING=1`, and with targeting off it starts nothing and says so
+on its startup line, because the alternative would be reading one viking's telling out to
+the whole server.
 
 **Launch values (pilot overrides to revert):** `RECAPS_START` becomes `2026-09-09`;
 `RECAP_CHANNEL`, `MILESTONE_CHANNEL`, `OATH_CHANNEL` and `BOSS_CHANNEL` are **removed**

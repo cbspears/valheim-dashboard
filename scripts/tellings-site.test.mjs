@@ -142,6 +142,30 @@ const telling = (over = {}) => ({
     'ahead of the date sort, or the bound could still drop it');
   ok(/\.limit\(20\)/.test(body), 'and still bounds the window at twenty');
 
+  // TWO MIGRATIONS, ONE READ, AND THE FALLBACK IS THE LOAD-BEARING HALF.
+  //
+  // `standing` belongs to db/2026-09-06_telling_votes.sql, which is UNAPPLIED:
+  // production answers a select naming it with 42703. Worse than a missing
+  // column, boss_tellings has had its blanket SELECT grant revoked to hide
+  // author_discord_id, and Postgres does not extend a column grant to a column
+  // added later, so naming `standing` unconditionally would cost the war room
+  // EVERY telling rather than one heading. Deleting the second read is
+  // invisible to tsc, invisible to a build against a database that HAS the
+  // column, and fatal against the one that does not, which is the database the
+  // site is deployed against today. So it is pinned here.
+  ok(/BOSS_TELLINGS_PUBLIC_COLS_V2/.test(data), 'getBossTellings names a second, wider column list');
+  const colsV2 = /const BOSS_TELLINGS_PUBLIC_COLS_V2 = `\$\{BOSS_TELLINGS_PUBLIC_COLS\}, standing`/.test(data);
+  ok(colsV2, 'which is the first list plus standing, rather than a second hand-typed copy of it');
+  ok(/const withStanding = await read\(BOSS_TELLINGS_PUBLIC_COLS_V2\);/.test(body),
+    'it asks for standing first');
+  ok(/if \(!withStanding\.error\) return/.test(body),
+    'and only keeps that answer when the read did not fail');
+  const afterGuard = body.slice(body.indexOf('if (!withStanding.error) return'));
+  ok(/await read\(BOSS_TELLINGS_PUBLIC_COLS\)/.test(afterGuard),
+    'a failed read asks AGAIN without the column, which is what keeps the war room whole before the migration');
+  ok(afterGuard.indexOf('if (error) return [];') > 0,
+    'and only an empty list when even that fails');
+
   // The page must not have kept its own copy of the old render.
   const page = readFileSync(new URL('../app/boss/[slug]/page.tsx', import.meta.url), 'utf8');
   ok(/<BossTellings/.test(page), 'the war-room renders the tellings component');
