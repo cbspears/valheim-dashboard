@@ -412,7 +412,7 @@ Check it: `systemctl list-timers 'eilif-*'`,
      `update public.bosses set name = 'Forsaken VIII' where sort_order = 8 and name = 'The Bog Witch';`
    - **Not every dated file is meant to run.** `db/2026-08-24_loa_zero_baseline.sql`
      is headed `NOT APPLIED. Charlie's call.` and is a hand-targeted UPDATE against one
-     player's baseline; `db/2026-09-06_death_ceiling.sql` is headed `STATUS: UNAPPLIED`
+     player's baseline; `db/2026-09-06_death_ceiling.sql` is headed `STATUS: APPLIED 2026-09-06`
      and is Charlie's decision. A filename-order replay runs both. Today they are
      harmless on a rebuilt database (the row the first targets does not exist), but read
      each file's first line and skip the ones marked unapplied.

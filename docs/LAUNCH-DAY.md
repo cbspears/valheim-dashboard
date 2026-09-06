@@ -46,8 +46,8 @@ is no rule anywhere for what to do when it does not. Decide the cutoffs **now**,
 
 | Steam still shows 0.221.12 at… | Then |
 |---|---|
-| **09:00 CT** | GO-A is already tight. Say so in `#valheim`, keep going, and treat 11:00 as the real gate. |
-| **11:00 CT** | **GO-A is arithmetically impossible** — the index lag alone runs past 17:00. Declare **vanilla night** now rather than at 15:00, so the crew gets six hours of notice instead of two. The box stays on 0.221.12, the wipe and the world and the Casual tier all still happen, and the pack is not re-minted. |
+| **09:00 CT** | GO-A is already tight. Say so in `#valheim`, keep going, and treat noon as the real gate. |
+| **12:00 CT** | **Charlie's cutoff (decided 2026-09-06): still no 1.0 at noon means vanilla night.** Declare it now rather than at 15:00, so the crew gets five hours of notice. The box stays on 0.221.12, the wipe and the world and the Casual tier all still happen, and the pack is not re-minted. By the documented durations GO-A is already arithmetically out of reach from about 11:00 (the index lag alone runs past 17:00), so a 1.0 that lands between 11:00 and noon buys a stretch, not a plan: expect the pack to be importable around 17:00 to 18:00 at best, and treat that hour as a bonus if it comes. |
 | **15:00 CT** | Step 17's normal go/no-go, with vanilla night and slip-to-Thursday both still on the table. |
 
 **Charlie owns these two numbers.** They cost nothing to set today and they are the only
@@ -1374,7 +1374,7 @@ place above; this table is only the index.
 | 33 | Step 14: only AzuCraftyBoxes is costly to pull | Three are. Pulling the **GS Emitter** stops the roster, the world day, boss detection and every Great Deed, and makes post-start preflight unpassable; pulling **WebMap** makes 20d step 3's gate unsatisfiable. Both are vanilla-night class, not quick fixes. |
 | 34 | Nothing anywhere about HookGenPatcher, MMHOOK or the BepInEx cache | All three survive the Steam Update built against 0.221.12, and a thrown preload patcher presents as **no plugins at all**. Branch added at step 14, with the BepInEx-version-moved branch beside it. |
 | 35 | Step 6's third backup: prose, no command, no size | A pasteable SFTP batch, a measured size (worlds_local 78 MB, BepInEx ~25 MB, `Backups/` to be sized on the day) and a rate (~0.8 MB/s), plus "do not `get -r` the whole nest". |
-| 36 | No rule for **1.0 being late** | Two cutoffs in the shape-of-the-day table: 09:00 CT is tight, **11:00 CT makes GO-A arithmetically impossible** and vanilla night should be called then rather than at 15:00. Charlie owns both numbers. |
+| 36 | No rule for **1.0 being late** | Two cutoffs in the shape-of-the-day table: 09:00 CT is tight, **noon CT is Charlie's hard cutoff (2026-09-06)** and vanilla night is called then rather than at 15:00. Charlie owns both numbers. |
 | 37 | 20e: "fresh heartbeats … for both plugins" | `companion-voice` has **never** reported one and cannot before a player joins (`alertsOnSilence: false`, and the poll needs a connected peer). It reads `unknown` at 20e and that is correct; the real check moved to step 22. |
 
 Also corrected in place, from the same pass: the Hold rules said **two** known-spurious

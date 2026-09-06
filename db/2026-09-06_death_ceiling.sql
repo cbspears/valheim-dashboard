@@ -1,6 +1,6 @@
 -- 2026-09-06 · ingest_death(): per-character death ceiling (T-3 audit, data area).
 --
--- STATUS: UNAPPLIED. Charlie's decision (overnight report, "Your calls").
+-- STATUS: APPLIED to production 2026-09-06 07:50 CT (Charlie: "you decide"; ceiling 5 per 2-minute span).
 -- Idempotent: create or replace; safe to run twice; safe while the bot and site run.
 --
 -- WHAT: anyone holding the public modpack can post client death reports with
