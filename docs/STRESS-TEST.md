@@ -47,6 +47,16 @@ fails, and prints a one-screen summary either way.
    (which is why `2026-07-04_a_pins.sql` carries that `a_`), the undated initial
    schema is stamped first, and `2026-08-24_loa_zero_baseline.sql` is skipped
    because it was never applied to production.
+   **The skip list is one hand-maintained name, and three newer files now need
+   the same treatment.** `db/2026-09-06_ops_db_size_rpc.sql` and
+   `db/2026-09-06_ops_heartbeat_log.sql` are headed `STATUS: UNAPPLIED` and are
+   genuinely absent from production, but the rebuild replays them anyway — so a
+   rebuilt local stack is **ahead** of prod, carrying `ops_heartbeat_log` and
+   `ops_size_report()` that production does not have. A green local run therefore
+   does not prove the production schema for the Performance tab's exact-size
+   branch or the heartbeat-history panel, both of which degrade silently on prod.
+   Read each file's own first line before trusting a local result that depends on
+   one of them.
 3. **Copies the repo to scratch and builds it** with the local Supabase in the
    environment. That is what "repointed" means here: `NEXT_PUBLIC_*` is inlined
    at build time (§2), so building the copy against the local stack is the only
@@ -259,7 +269,10 @@ npx supabase@2.116.0 init
 ```
 
 Copy the repo's schema in, timestamp-prefixed in **date order**, skipping
-`db/2026-08-24_loa_zero_baseline.sql` (never applied) and `db/demo-archive/`:
+`db/2026-08-24_loa_zero_baseline.sql` (never applied) and `db/demo-archive/`.
+Skip any other file whose first line says `STATUS: UNAPPLIED` as well, or the local
+stack ends up ahead of production rather than matching it — as of 2026-09-06 that is
+`db/2026-09-06_ops_db_size_rpc.sql` and `db/2026-09-06_ops_heartbeat_log.sql`:
 
 ```bash
 R=~/Projects/valheim-dashboard
@@ -309,16 +322,34 @@ Two ways out. Either rebuild with the local values in the environment, or — to
 test the exact bytes that are in production — copy the tree to scratch and
 repoint the copy:
 
-**Exclude the service `.env` files.** `services/discord-bot/.env`,
+**Exclude every `.env` file, not just the service ones.** `services/discord-bot/.env`,
 `services/log-poller/.env` and `services/stats-parser/.env` hold the live Discord
 bot token, the production service-role key and the GTX box's SFTP credentials.
 They are gitignored, so `tar` takes them unless told not to, and the copy is
 world-readable inside the scratch tree. Nothing in the local run needs them.
 
+**The repo root's `.env.local` is the one that used to slip through**, and it is the
+worst one: it carries `SUPABASE_SERVICE_ROLE_KEY`, `WEBHOOK_SECRET` and `BOARDS_TOKEN`
+for **production**. The old excludes and the old verify line both matched the literal
+name `.env` and never `.env.local`, so the check printed `0` on a tree that held the
+production service-role key. The patterns below are `.env*` for that reason.
+
+**A scratch copy must never talk to production.** Next auto-loads `.env.local` from the
+project root, so a build or a `next start` in `$S/site` uses whatever it finds there.
+Write a **local-only** `$S/site/.env.local` pointing at `http://127.0.0.1:54321` before
+anything runs, or, if you deliberately want to read production, use the **read-only anon
+key** and nothing else. Never copy the service-role key into a scratch tree.
+
+**And the build itself carries secrets.** `next build` inlines `NEXT_PUBLIC_*` into
+`.next`, and the server bundle embeds whatever server-only values were in the environment
+at build time — including `SUPABASE_SERVICE_ROLE_KEY`. `$S/site/.next` is therefore a
+credential, not a cache. **Delete the whole scratch tree when the run is finished**
+(`rm -rf $S`), and do not leave it in a world-readable `/tmp` overnight.
+
 ```bash
 S=/tmp/eilif-stress
 tar cf - --exclude=node_modules --exclude=.git --exclude='.next/cache' \
-  --exclude='.next/dev' --exclude='.env' --exclude='services/*/.env' \
+  --exclude='.next/dev' --exclude='.env*' --exclude='services/*/.env*' \
   --exclude='.vercel' -C ~/Projects/valheim-dashboard . | (mkdir -p $S/site && cd $S/site && tar xf -)
 # A REAL directory, not a symlink: Turbopack refuses one that leaves the project
 # root ("Symlink [project]/node_modules is invalid, it points out of the filesystem
@@ -329,8 +360,13 @@ cp -al ~/Projects/valheim-dashboard/node_modules $S/site/node_modules
 # replace the inlined prod URL and anon key inside $S/site/.next with the local ones,
 # and write a local-only $S/site/.env.local
 grep -rl "<prod-supabase-ref>" $S/site/.next | wc -l   # must print 0
-find $S/site -name '.env' -not -path '*/node_modules/*' | wc -l   # must print 0
+find $S/site -name '.env*' -not -path '*/node_modules/*' | wc -l   # must print 0
+#      ^^^^^ the glob matters: '.env' alone never matched .env.local, which is the file
+#            that holds the production service-role key.
 ```
+
+When the run is over: `rm -rf $S`. The `.next` in there was built with real secrets in the
+environment and is not something to leave lying about.
 
 Then run it:
 

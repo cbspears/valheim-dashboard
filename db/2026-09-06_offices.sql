@@ -1,5 +1,4 @@
 -- APPLIED to production 2026-09-06 ~11:10 CT (Fable session). Feature stays OFF until STORYTELLER=1 in the bot .env.
--- STATUS: UNAPPLIED. Hand-applied by Charlie (AGENTS.md "Database / migrations").
 -- The Storyteller of Eilif: public.offices and public.office_nudges.
 --
 -- WHY. `boss_tellings` (db/2026-09-06_boss_tellings.sql) lets any linked viking

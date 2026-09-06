@@ -101,8 +101,9 @@ PITR) and **GitHub Actions**, which runs one scheduled job.
   |  EilifPaths, ValheimPlus, PlantEverything, AzuCraftyBoxes, BepInExPack     |
   +---------------------------------------------------------------------------+
 
-  GITHUB ACTIONS (every 15 min)  ->  GET /api/ops/watchdog (Bearer WATCHDOG_TOKEN)
-                                     which reads Supabase and posts to Discord itself
+  SUPABASE pg_cron (every 5 min) ->  GET /api/ops/watchdog (Bearer WATCHDOG_TOKEN)
+  GITHUB ACTIONS (declares */15,     which reads Supabase and posts the alert to the
+    observed ~every 4 hours)         ops channel itself
 ```
 
 Two facts the diagram cannot show but that explain most of the design:
@@ -140,8 +141,9 @@ open.
 
 `services/log-poller/`, `WorkingDirectory=.../services/log-poller`,
 `ExecStart=/opt/eilif/node src/index.js`. Reference unit file in the repo is
-`services/log-poller/valheim-log-poller.service`; **the live unit is
-`eilif-log-poller.service`** and the repo copy still carries the old name.
+`services/log-poller/eilif-log-poller.service`, matching **the live unit,
+`eilif-log-poller.service`**. It used to be named `valheim-log-poller.service`; that copy
+was renamed on 2026-09-06 and the old name is gone from the repo.
 
 Tails `BepInEx/LogOutput.log` over SFTP every `POLL_INTERVAL_MS` (default 20 s), parses
 new bytes, and POSTs event objects to `/api/webhook`. Types it posts: `join`, `leave`,
@@ -424,10 +426,22 @@ runtime cannot stop world backups.
 
 ### 3.6 The off-PC watchdog
 
-`.github/workflows/watchdog.yml` runs every 15 minutes and every `workflow_dispatch`, and
-does nothing but `curl` `GET https://valheim-dashboard.vercel.app/api/ops/watchdog` with
+**There are two pingers on this route, not one.** The one that actually keeps a cadence is
+a Supabase `pg_cron` job, `eilif-watchdog-ping` (`db/2026-09-06_watchdog_pgcron.sql`,
+applied 2026-09-06 10:12 CT). It fires **every 5 minutes** from inside the database, reads
+the bearer token out of Supabase Vault, and hits the same URL.
+
+`.github/workflows/watchdog.yml` is the second. It declares `*/15`, but in practice fires
+about **every 4 hours** — GitHub de-prioritises scheduled runs, so the number in that file
+is an intention rather than an observation. It also runs on `workflow_dispatch`, and does
+nothing but `curl` `GET https://valheim-dashboard.vercel.app/api/ops/watchdog` with
 `Authorization: Bearer $WATCHDOG_TOKEN` (a GitHub repository secret). Any non-2xx fails
 the job, which GitHub emails about.
+
+Silencing the watchdog means silencing **both**: `gh workflow disable` for the GitHub half
+and `select cron.unschedule('eilif-watchdog-ping');` for the Supabase half. Re-arming means
+both again, and forgetting the Supabase half is why a "quiet" stopped window still alerts
+five minutes in.
 
 All the work happens in the route: it reads `ops_heartbeats` and `server_status` directly
 from Supabase, decides which components are down, and posts to Discord itself using the
@@ -502,7 +516,7 @@ service-role key, either from a Vercel route or from the Discord bot.
 | `events` | `/api/webhook`, `/api/gs-ingest`, `lib/deaths.ts`, `lib/milestones.ts` | the saga feed: joins, leaves, deaths, bosses, raids, milestones |
 | `player_stats` | `/api/gs-ingest` (upsert) | leaderboard numbers plus the `gs_stats` jsonb long tail. Baselined per world by `lib/gs-baseline.ts`. |
 | `bosses` | `/api/gs-ingest` (update), bot `retelling.js` (update), `services/discord-bot/scripts/mark-boss.js` (manual) | the eight progression gates, `fight_stats` jsonb |
-| `boss_tellings` | bot `tellings.js` (insert, update), bot `retelling.js` via `recordSkaldTelling` | the war-room's sagas: the Skald's, and the ones vikings tell with `@Eilif retell`. `db/2026-09-06_boss_tellings.sql` was APPLIED on 2026-09-06, so this is the twenty-first table. `author_discord_id` is revoked from anon; `standing` is a LATER column (`db/2026-09-06_telling_votes.sql`) and is not there yet. |
+| `boss_tellings` | bot `tellings.js` (insert, update), bot `retelling.js` via `recordSkaldTelling` | the war-room's sagas: the Skald's, and the ones vikings tell with `@Eilif retell`. `db/2026-09-06_boss_tellings.sql` was APPLIED on 2026-09-06, so this is the twenty-first table. `author_discord_id` is revoked from anon. `standing` came later, in `db/2026-09-06_telling_votes.sql`, and **that file was APPLIED the same day at ~11:10 CT** — the column is live and granted to anon; the vote that writes it stays dark until `TELLING_VOTES=1`. |
 | `roadmap` | nothing in code (hand-edited in Supabase) | the living schedule |
 | `server_status` | `/api/webhook`, `/api/gs-ingest` | single row: online, player count, current players, world day |
 | `discord_events` | `/api/webhook` (`events_sync`, upsert and delete) | Discord scheduled events, rolled forward for recurrence |
@@ -518,19 +532,25 @@ service-role key, either from a Vercel route or from the Discord bot.
 | `player_positions` | `/api/webhook` (upsert) | live positions for the map layer and `/tv` |
 | `ops_heartbeats` | `/api/ops/heartbeat`, `lib/ops/route-heartbeat.ts` | producer liveness. Service-role only. |
 | `ops_alerts` | `/api/ops/watchdog` (upsert) | watchdog alert state and re-alert timing. Service-role only. |
-| `offices` | bot `storyteller.js` (insert, update) | terms of the Storyteller of Eilif, at most one open. **`db/2026-09-06_offices.sql` is UNAPPLIED.** `holder_discord_id` is revoked from anon. |
+| `offices` | bot `storyteller.js` (insert, update) | terms of the Storyteller of Eilif, at most one open. **`db/2026-09-06_offices.sql` was APPLIED 2026-09-06 ~11:10 CT**; the table is live and empty, because the feature stays off until `STORYTELLER=1` in the bot `.env`. `holder_discord_id` is revoked from anon, so an anon `select=*` answers 42501 rather than listing rows. |
 | `office_nudges` | bot `storyteller.js` (insert) | which fallen boss each term has already been nudged about. Same migration, and RLS with NO select policy: bot bookkeeping, service-role only. |
-| `tales` | bot `tales.js` (insert, update, delete) | the Storyteller's account of a NIGHT rather than of a boss, keyed by `told_for`, the Central calendar day it is about. Rendered inside that night's Saga episode and at `/events/storyteller`. **`db/2026-09-06_tales.sql` is UNAPPLIED.** `author_discord_id` is revoked from anon. |
+| `tales` | bot `tales.js` (insert, update, delete) | the Storyteller's account of a NIGHT rather than of a boss, keyed by `told_for`, the Central calendar day it is about. Rendered inside that night's Saga episode and at `/events/storyteller`. **`db/2026-09-06_tales.sql` was APPLIED 2026-09-06 ~12:35 CT.** Tales are always on, behind no flag. `author_discord_id` is revoked from anon. |
 
-That is all twenty-two, verified against the live project on 2026-09-06: the twenty that were
-there on 2026-09-05, plus `boss_tellings`, whose migration was applied that morning, plus `tales`.
-Three of the rows above are UNAPPLIED migration files rather than live tables: `offices` and
-`office_nudges` (`db/2026-09-06_offices.sql`, whose own first line now says it was applied to
-production at ~11:10 CT on 2026-09-06; that file and this paragraph disagree, and whichever
-workflow applied it should settle which is right) and `tales`
-(`db/2026-09-06_tales.sql`); a third file adds one column, `boss_tellings.standing`
-(`db/2026-09-06_telling_votes.sql`), which is why `lib/data.ts getBossTellings` asks for that
-column and asks again without it when the read fails. Three columns are narrower than the
+That is all twenty-two, verified against the live project on 2026-09-06. **Every one of them
+is a live table.** The four newest all landed the same day and were all applied by hand the
+same day: `boss_tellings` (~09:35 CT), `offices` and `office_nudges` (~11:10 CT), the
+`boss_tellings.standing` column from `db/2026-09-06_telling_votes.sql` (~11:10 CT) and
+`tales` (~12:35 CT). An earlier version of this paragraph called three of them UNAPPLIED,
+which was true when it was written and false four hours later; each migration file's own
+**first line** is the record, and each of them now states one status. The only `db/*.sql`
+files still genuinely unapplied against production are
+`db/2026-09-06_ops_db_size_rpc.sql` and `db/2026-09-06_ops_heartbeat_log.sql` — plus one
+file that sits between the two states: `db/2026-09-06_death_ceiling.sql` was applied at
+07:50 CT and then edited, so production still returns `ignored` where the file now returns
+`capped`, its header reads **NEEDS RE-APPLYING**, and `lib/deaths.ts` keys its
+per-character warning on `capped`. Re-run it before launch.
+`lib/data.ts getBossTellings` still asks for `standing` and asks again without it when the
+read fails; that fallback is now belt and braces rather than a live path. Three columns are narrower than the
 rows they sit in: `players.steam_id` is revoked from the anon role by
 `db/2026-07-11_players_pii_revoke.sql`, `boss_tellings.author_discord_id` by
 `db/2026-09-06_boss_tellings.sql`, and `offices.holder_discord_id` by
@@ -654,10 +674,10 @@ STOP. `docs/LAUNCH-DAY.md` step 1 never used it and is correct as written.
 
 | Plugin | Side | Repo version | GUID | What it hooks |
 |---|---|---|---|---|
-| `plugins/eilif-companion` | server only | 0.3.3 (box runs 0.3.2) | `media.blockspace.eilif.companion` | `Chat.OnNewChatMessage` Prefix (oath and pin capture), `ZNet.RPC_PeerInfo`, `ZSteamMatchmaking.RegisterServer`, and `ZNet.GetNrOfPlayers` plus `ServerFallback.PlayerLimit` for the dormant V+ fallback. `ZoneSystem.SendGlobalKeys` is called by reflection, not patched |
+| `plugins/eilif-companion` | server only | 0.3.3 (box runs 0.3.2; `dist` rebuilt 2026-09-06, still against the 0.221.12 assemblies). Its 0.3.3 source carries the per-player **voice targeting** the `/api/voice` `target` field needs | `media.blockspace.eilif.companion` | `Chat.OnNewChatMessage` Prefix (oath and pin capture), `ZNet.RPC_PeerInfo`, `ZSteamMatchmaking.RegisterServer`, and `ZNet.GetNrOfPlayers` plus `ServerFallback.PlayerLimit` for the dormant V+ fallback. `ZoneSystem.SendGlobalKeys` is called by reflection, not patched |
 | `plugins/eilif-boards` | server only | 0.2.0 | `media.blockspace.eilif.boards` | **no Harmony patches at all.** It reads and writes sign ZDO text and replicates by revision |
-| `plugins/eilif-companion-client` | client, ships in the pack | 0.3.2 (published to Thunderstore 2026-09-05) | `net.eilif.companionclient` | `Player.OnDeath` (death reporter), `Inventory.MoveInventoryToGrave` (tombstone keep-list), `Game.Logout` (final cartography post) |
-| `plugins/eilif-paths` | client, ships in the pack | 1.5.0 (Thunderstore latest is 1.4.0) | `net.eilif.paths` | `Player.GetJogSpeedFactor`, `GetRunSpeedFactor`, `UseStamina`, `Character.UpdateWalking`, `Bed.CheckFire`, `StationExtension.Awake`, `CraftingStation.Start` and `CheckUsable`, and, only when the V+ fallback is switched on, `Fireplace.Awake`, `CookingStation.UpdateCooking`, `Smelter.UpdateSmelter`, `ShieldGenerator.*`, `Pickable.RPC_Pick`, `DropTable.GetDropList` and `CharacterDrop.GenerateDropList`. `Minimap.Explore` is called by reflection, not patched |
+| `plugins/eilif-companion-client` | client, ships in the pack | **0.3.3**, and 0.3.3 is what is published (Thunderstore, 2026-09-06 10:01 CT; `dist` rebuilt 2026-09-06, still against the 0.221.12 assemblies) | `net.eilif.companionclient` | `Player.OnDeath` (death reporter), `Inventory.MoveInventoryToGrave` (tombstone keep-list), `Game.Logout` (final cartography post). Voice targeting is the **Companion's** half, not this one. |
+| `plugins/eilif-paths` | client, ships in the pack | **1.5.0**, and 1.5.0 is what is published (Thunderstore, 2026-09-06 10:01 CT; `dist` rebuilt 2026-09-06, still against the 0.221.12 assemblies) | `net.eilif.paths` | Always on: `Player.GetJogSpeedFactor`, `GetRunSpeedFactor`, `UseStamina`, `Character.UpdateWalking`, `Bed.CheckFire`, `StationExtension.Awake` — the six the `Core patch classes: 6/6` line counts. Only when the V+ fallback is switched on: `CraftingStation.Start` and `CheckUsable` (the 30 m station build range and no-roof crafting, `VPlusFallbackPatch.cs`), `Fireplace.Awake`, `CookingStation.UpdateCooking`, `Smelter.UpdateSmelter`, `ShieldGenerator.*`, `Pickable.RPC_Pick`, `DropTable.GetDropList` and `CharacterDrop.GenerateDropList`. `Minimap.Explore` is called by reflection, not patched |
 
 Three things about them that are not obvious:
 
@@ -798,13 +818,15 @@ Three files hold a version list for the seven packed mods and must be edited tog
 `MODS` in `scripts/mint-pack.mjs` (the renderer of record), `PACK_V12_PINS` in
 `scripts/launch-preflight.mjs`, and the player-facing list in `config/mods.ts`.
 
-**State as of 2026-09-05.** Pack of record is **v11** (`01a0440c-b54a-8d15-5882-22f86a4333b4`),
-which pins EilifCompanionClient 0.2.0 and EilifPaths 1.4.0. EilifCompanionClient **0.3.2
-is published** (Thunderstore, 2026-09-05), and its staging directory
-`plugins/thunderstore/EilifCompanionClient-0.3.2/` plus zip are still on disk. EilifPaths
-is at **1.5.0 in the repo with nothing staged**; Thunderstore still serves 1.4.0, so a
-v12 mint needs that package built and published first, then the index wait in rule 1.
-`CONFIG_BUNDLE_URL` still points at
+**State as of 2026-09-06 10:01 CT.** Pack of record is **v11**
+(`01a0440c-b54a-8d15-5882-22f86a4333b4`), which pins EilifCompanionClient 0.2.0 and
+EilifPaths 1.4.0. Both Eilif client packages are now **published**: EilifCompanionClient
+**0.3.3** and EilifPaths **1.5.0**, uploaded together on 2026-09-06 at 10:01 CT and
+byte-identical to `plugins/thunderstore/EilifCompanionClient-0.3.3/` and
+`plugins/thunderstore/EilifPaths-1.5.0/`. The listing index has caught up, so **a v12 mint
+waits on no upload and no index window.** A published version is immutable, so if the 1.0
+rebuild on the 9th changes either client DLL it goes up as **0.3.4** or **1.5.1**
+(`docs/LAUNCH-DAY.md` step 16). `CONFIG_BUNDLE_URL` still points at
 `/downloads/eilif-configs-pack-v11.zip` and has to be repointed by hand after a re-mint;
 the bundle script prints the reminder but does not do it.
 
@@ -849,9 +871,12 @@ Verification before calling anything done, in order: `npx tsc --noEmit`, `npm te
 
 Things that are true today and will surprise someone if they are not written down.
 
-1. **The live poller unit is `eilif-log-poller.service`; the repo reference file is still
-   named `services/log-poller/valheim-log-poller.service`.** `AGENTS.md` repeats the old
-   name. The unit that is running is the `eilif-` one.
+1. ~~**The live poller unit is `eilif-log-poller.service`; the repo reference file is still
+   named `valheim-log-poller.service`.**~~ **Closed 2026-09-06.** The reference file was
+   renamed to `services/log-poller/eilif-log-poller.service` and `AGENTS.md`,
+   `services/log-poller/README.md` and `docs/LAUNCH-DAY.md` were all corrected in the same
+   pass. `docs/PROJECT.md:75` still describes the old reference filename and is the last
+   thing to tidy.
 2. **The live bot unit still carries `Environment=RECAPS_START=2026-07-04`**, which beats
    the `.env` file. Verified on the host 2026-09-05. `cutover-env.sh --apply` removes it.
 3. **`.env.local.example` is incomplete.** It is documented as the source of truth for the
@@ -867,8 +892,8 @@ Things that are true today and will surprise someone if they are not written dow
    plugins.
 7. **The tombstone keep-list has never run on a live server.** Pack v11 pins
    EilifCompanionClient 0.2.0, so it is dark for every player until v12 is minted, even
-   though 0.3.2 is published on Thunderstore. The pack pin, not the published version, is
-   what players get.
+   though **0.3.3 is published on Thunderstore** (2026-09-06). The pack pin, not the
+   published version, is what players get.
 8. **`eilif-stats-parser` is retired** (2026-08-23) and is not in the restart order. Its
    `ops_heartbeats` row is left in the database on purpose (deleting rows is Charlie's
    call), and `lib/ops/health.ts` no longer reads it. `type:'stats'` on `/api/webhook` is

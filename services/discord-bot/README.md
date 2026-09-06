@@ -264,9 +264,21 @@ empty hall — **and** never within `VOICE_MIN_GAP_MS` (default 30 min) of the m
 of *any* kind. A 60s tick accumulates online-minutes whenever `server_status.player_count > 0`; at
 120 accumulated minutes it queues one line and resets (if the gap isn't clear the cadence is *held*,
 not thrown away). **Any** event or manual line also resets the clock. The accumulator lives in
-`state.json`, so restarts don't double-speak. Ambient content rotates over atmosphere lines and
-dated **callbacks** to deaths from ~1/2/4 weeks ago, never repeating a template within its last 5
-uses.
+`state.json`, so restarts don't double-speak. Ambient content rotates over atmosphere lines,
+dated **callbacks** to deaths from ~1/2/4 weeks ago, and **oath quote-backs**, never repeating a
+template within its last 5 uses.
+
+**The oath quote-back is about a quarter of all ambient lines** (`OATH_AMBIENT_SHARE = 0.25`,
+`voice.js`). It reads the `oaths` table for a viking who is **linked and online**, and speaks that
+viking's own sworn words back into the hall (`oathQuote()` trims and quotes; `speakableOath()`
+rejects anything that will not read aloud, so a viking with a one-word or unspeakable oath is
+simply skipped and another pool is used). The line is second-person, and **with `VOICE_TARGETING`
+unset it still goes to the whole hall** — which is fine, because every template carries
+`{firstName}` and names who is being addressed. `VOICE_TARGETING=1` makes those lines private to
+the swearer, and needs Companion **0.3.3 or later** on the box (`voice targeting: supported` in the
+boot log); the `/api/voice` route refuses to hand a targeted line to a plugin that did not
+advertise the capability, so the wrong order costs silence rather than a private line on
+everyone's screen.
 
 **Whispers on quiet nights** — a *pool swap* for that same ambient slot, not extra volume (same
 clock, same gap): when exactly **1** viking is online, Eilif whispers to them by name; when **2–3**
@@ -466,6 +478,35 @@ meant for one viking; reading somebody's telling out to the whole server because
 walked past would be the wrong message. With targeting off the loop enqueues nothing, and the
 startup line says which of the two it is doing. The 24-hour memory lives in `state.json` and is
 bounded oldest-first.
+
+## Invariants
+
+Seven rules the red-team rounds established. They are cheap to break by accident in a new
+loop, and each one exists because something got through. **If the relay goes quiet on
+launch night, number 6 is the first thing to check.**
+
+1. **Every embed goes through `clampEmbed()`** (`src/discord.js:87`). Discord rejects the
+   whole message when any field is over length, so an unclamped embed is a loop that stops
+   posting rather than a line that looks odd.
+2. **Content-only messages carry `SuppressEmbeds`.** A player-typed death cause or
+   character name that happens to be a URL made the bot post a live link and Discord
+   rendered the attacker's preview card under it. This is the second lock, at the one place
+   every loop posts through.
+3. **Every player-typed field goes through `nameMd()` or `safeText()`** (`src/format.js:94`
+   and `:105`), which defang URLs and neutralise markdown. The first lock.
+4. **Every reply to a member goes through `replyPayload()`** (`src/format.js:927`).
+5. **Every handler gates on `MENTION_STRICT`** (`src/discord.js:48`:
+   `ignoreEveryone`, `ignoreRoles`, `ignoreRepliedUser`) **and on the guild pin**
+   (`GUILD_ID`, `src/gallery.js:203`, `src/voice.js:1093-1100`). An `@everyone`, a role
+   mention or a reply-ping is not a mention of this bot, and a message from another guild is
+   not a message to this hall.
+6. **`state.json` is written atomically** — to a per-loop sibling, then renamed
+   (`src/state.js`). A torn write is how the relay cursor gets lost.
+7. **The relay STALLS on 401, 403 and 404 instead of skipping** (`src/relay.js:276`,
+   `ENVIRONMENT_STATUSES`). Those three mean the environment is wrong — token, channel or
+   permissions — not that one message is bad, and skipping past them silently drops every
+   event in the gap. A stalled relay is the visible symptom of a broken token or a channel
+   the bot cannot see.
 
 ## Run as a service
 ```bash

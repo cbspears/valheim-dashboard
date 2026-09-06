@@ -81,9 +81,23 @@ dotnet build -c Release        # outputs + OVERWRITES dist/EilifCompanionClient.
    `bash scripts/verify-restart.sh <World>`. The server has to be up and correct before the pack is
    minted — otherwise the pack pins client DLLs against a server nobody has proven.
 3. Import the new local DLL into the r2modman profile (or bump the pinned Thunderstore version if
-   it was published), launch once, join, confirm the plugin's boot lines.
+   it was published), launch once, join, confirm the plugin's boot lines **in the player-side
+   `BepInEx/LogOutput.log` inside the r2modman profile** — this is a client plugin and never
+   appears in the server's log:
+
+   - **`MISSING patch class` — zero lines is healthy, and this is the first grep.** A plugin prints
+     its `Loading [...]` line whether or not its Harmony patches went on, so `Loading` proves the
+     DLL was chainloaded and nothing more. Each hit names the class **and the feature that died
+     with it** (`EilifMapTrackerPlugin.cs:206`).
+   - **`[EilifDeath] patch classes applied: 3/3`** — the logout map post, the death-cause report and
+     the tombstone keep-list. The denominator is a fixed roster in the source, never a count of what
+     loaded, so a class the runtime could not enumerate still shows as a shortfall. Anything under
+     3/3 means one of those three is gone with nothing else saying so.
+   - `[EilifDeath] tombstone keep-list armed (N item types; …)` and the two `loaded` lines.
 4. **Only then** export the pack code, and wait for the Thunderstore listing index if any pinned
-   version is newly published.
+   version is newly published. **0.3.3 is already published** (2026-09-06 10:01 CT) and a published
+   Thunderstore version is immutable, so a 1.0 rebuild that changes this DLL goes up as **0.3.4**,
+   never as a re-upload of 0.3.3.
 
 ## Gotchas confirmed during this warm-check
 

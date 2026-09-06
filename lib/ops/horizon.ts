@@ -978,7 +978,7 @@ export const LAUNCH_STEPS: LaunchStep[] = [
   { n: 13, title: 'Fill the Start form and Start', owner: 'Charlie', note: 'Death penalty back to Casual.' },
   { n: 14, title: 'Pull anything that failed to load, then Stop and Start again', owner: 'Charlie' },
   { n: 15, title: 'Read the boot and write down what actually loaded', owner: 'Claude' },
-  { n: 16, title: 'Client zips to Charlie, and start the index clock', owner: 'Both', note: 'EilifPaths 1.5.0 upload is the longest pole.' },
+  { n: 16, title: 'Client zips to Charlie, and start the index clock', owner: 'Both', note: 'Both client packages are live on Thunderstore since 2026-09-06. Re-upload only if the 1.0 rebuild changes a DLL (0.3.4 / 1.5.1).' },
   { n: 17, title: '15:00 CT go or no-go', owner: 'Charlie' },
   { n: 18, title: 'Wait for the index, then mint pack v12', owner: 'Claude' },
   { n: 19, title: 'Rebuild the Mac config bundle, then the site config and deploy', owner: 'Both' },

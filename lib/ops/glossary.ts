@@ -244,14 +244,20 @@ export const GLOSSARY = {
   'component-version': {
     id: 'component-version',
     title: 'Version',
+    // REWRITTEN 2026-09-06 (T-3 audit ops-4). This used to explain the column as
+    // the way to tell whether a host unit was restarted — a reading that could
+    // never happen, because no component sent a version at all and every one of
+    // the fifteen rows read "unknown". The bot and the poller now put their
+    // package.json version on every heartbeat, so this describes what each row
+    // ACTUALLY shows, including the three that still show nothing and why.
     what:
-      'Whatever the component put in the version field of its own heartbeat. For the dashboard row it is the Vercel commit SHA, which is unset for CLI deploys and then falls back to a build-time constant. Third-party pieces report nothing and read "unknown".',
+      'Whatever the component put in the version field of its own heartbeat. The Discord bot and the log poller send their package.json version, added 2026-09-06, so each of those rows keeps reading "unknown" until its unit is restarted on that code. The dashboard row is the Vercel commit SHA, which a CLI deploy does not set, so it reads "unknown" too until a build carries one. The map snapshotter, the server emitter and the database send none at all.',
     why:
-      'It is the only place the cockpit can tell you which build is actually running, which matters most on the one day of the year when four plugins get recompiled and re-uploaded by hand.',
+      'It is the one field on this page that comes from the running build rather than from what the repo says should be running. That matters most on the one day of the year when four plugins get recompiled and every service is restarted by hand.',
     healthy:
-      'A version string that matches what you last deployed. "unknown" is honest rather than wrong: the emitter is a third-party mod and never reports one.',
+      'A version string that matches the code you deployed, or an honest "unknown" for the pieces that do not report one. "unknown" on the bot or the poller after a restart means the restart did not pick up this code.',
     whenRed:
-      'A version that is behind what you deployed means the host unit was not restarted, or the DLL swap did not take. On launch day the authority is bash scripts/verify-restart.sh Eilif, which reads the plugin list off the box itself rather than trusting a heartbeat.',
+      'A version behind what you deployed means the host unit was not restarted on it. But note what this column CANNOT answer: the service versions move only when somebody bumps a package.json, so two different builds can both read the same number, and it says nothing about a plugin on the game box. For "was this restarted, and on what", the authority is bash scripts/verify-restart.sh Eilif, which reads the plugin list and the game version off the box itself, plus the unit\'s own startup log. On this page the Age column is the better tell: a restart resets the heartbeat clock.',
     link: { href: LAUNCH_STEP_15, label: 'Launch day, step 15' },
   },
   'component-notes': {
@@ -848,7 +854,7 @@ export const GLOSSARY = {
     id: 'watchdog-loop',
     title: 'The off-PC watchdog',
     what:
-      'A GitHub Actions schedule that calls GET /api/ops/watchdog on Vercel every 15 minutes, evaluates the same components this page shows, and posts to Discord when one of them is unhealthy. Its state lives in one ops_alerts row.',
+      'Two off-PC pingers call GET /api/ops/watchdog on Vercel: a Supabase pg_cron job (eilif-watchdog-ping) every 5 minutes, and a GitHub Actions schedule declared every 15 minutes that in practice fires about every 4 hours. The route evaluates the same components this page shows and posts to the ops channel when one of them is unhealthy, de-duplicating between pingers. Its state lives in one ops_alerts row.',
     why:
       'This page is pull-only: somebody has to open it. Every host-side producer runs on Charlie’s PC, so a PC that is off takes down the producers and the person most likely to notice, at the same time. A seven hour outage and a six day server outage both went unseen exactly that way.',
     healthy:

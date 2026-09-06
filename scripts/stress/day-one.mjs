@@ -595,27 +595,58 @@ async function verify() {
   const bossRows = events.filter((e) => e.type === 'boss' && e.metadata?.boss === 'Eikthyr');
   check('exactly one boss event row', bossRows.length === 1, `${bossRows.length} rows of type 'boss' for Eikthyr`);
 
-  // THE ONE DEED DAY ONE IS ABOUT. `First of the Forsaken` is boss_kills_total >= 1,
-  // and Eikthyr is down — but evaluateAndRecord() has exactly one call site in
-  // the repo, inside the `source: 'client'` branch of app/api/gs-ingest/route.ts;
-  // ingestBossMilestones(), the server branch that flips the boss, never
-  // re-evaluates the collective deeds. (Cited by symbol on purpose: route.ts is
-  // being edited by other work this week and any line number goes stale in
-  // hours. `grep -n evaluateAndRecord app/api/gs-ingest/route.ts` finds both.)
-  // So if the warband logs off inside the ~120 s before the next client
-  // snapshot, the marquee day-one deed never fires.
-  const bossDeed = milestones.find((m) => m.metric === 'boss_kills_total' && m.threshold === 1);
-  check('the first-boss deed fired with the kill', Boolean(bossDeed?.achieved_at),
-    bossDeed
-      ? `"${bossDeed.title}" achieved_at=${bossDeed.achieved_at ?? 'null'} while bosses.is_killed=${eik?.is_killed}`
-      : 'no boss_kills_total>=1 milestone row found');
+  // THE DEED DAY ONE USED TO BE ABOUT, AND WHY IT IS NOT ANY MORE.
+  //
+  // This block hard-asserted `First of the Forsaken` (boss_kills_total >= 1),
+  // because evaluateAndRecord() once had a single call site — inside the
+  // `source: 'client'` branch of app/api/gs-ingest/route.ts — so a warband that
+  // logged off in the ~120 s before the next client snapshot never fired the
+  // marquee day-one deed. Both halves of that changed on 2026-09-06:
+  //
+  //   * the route gained a second call site in the felled branch
+  //     (`if (felled > 0) await evaluateAndRecord(client)`), so the kill itself
+  //     re-runs the collective evaluator. Cited by symbol on purpose —
+  //     `grep -n evaluateAndRecord app/api/gs-ingest/route.ts` finds both, and
+  //     line numbers in that file go stale in hours.
+  //   * db/2026-09-06_deeds_boss_chain_out_first_mile.sql DELETED boss-first,
+  //     boss-half and boss-all (Charlie: "the boss timeline already tells it")
+  //     and added explored-first-mile. Production carries 36 deeds and no
+  //     boss_kills_total row at all, so the old assertion could only ever
+  //     report a red line on a night that went perfectly.
+  //
+  // What replaces it is derived from the ledger instead of from a deed's name,
+  // so the next deed edit cannot stale it the way that one did.
+
+  // (a) the stack under test really is on the current schema. A rehearsal stack
+  // rebuilt from a stale db/ still carries the retired chain, and every deed
+  // check below would then be measuring a world production does not have. This
+  // is the line that fails in that case, and it says why.
+  const retiredChain = milestones.filter((m) => m.metric === 'boss_kills_total');
+  check('the retired boss-kill deed chain is absent (stack matches db/)', retiredChain.length === 0,
+    retiredChain.length
+      ? `${retiredChain.map((m) => m.id).join(', ')} still present — rebuild this stack from db/*.sql`
+      : `${milestones.length} deeds, none on boss_kills_total`);
 
   const achieved = milestones.filter((m) => m.achieved_at);
   check('at least one Great Deed crossed', achieved.length >= 1,
     achieved.map((m) => m.title).join(', ') || 'none');
+
+  // (b) every deed that shows as crossed was crossed BY THIS EVENING. This is
+  // the invariant the boss-deed check was reaching for — that the kill and the
+  // evening's stats drive the ledger — and it is also the one that catches the
+  // wipe failure: a deed left achieved by the pilot world carries an
+  // achieved_at from days ago, long before the boot stage ran.
+  const bootAt = (st.stagesRun ?? []).find((s) => s.stage === 'boot')?.at;
+  const floor = bootAt ? Date.parse(bootAt) : st.startedAt;
+  const stale = achieved.filter((m) => Date.parse(m.achieved_at) < floor);
+  check('every crossed deed was crossed by this evening, not inherited', stale.length === 0,
+    stale.length
+      ? `${stale.map((m) => `"${m.title}" at ${m.achieved_at}`).join(', ')} predates the boot stage (${new Date(floor).toISOString()})`
+      : `${achieved.length} crossed since ${new Date(floor).toISOString()}: ${achieved.map((m) => m.title).join(', ') || 'none'}`);
   check('no deed achieved twice', new Set(achieved.map((m) => m.id)).size === achieved.length,
     `${achieved.length} achieved, ${new Set(achieved.map((m) => m.id)).size} distinct`);
-  // A day-one ledger should be nearly empty. If most of the 38 deeds have fired
+  // A day-one ledger should be nearly empty. If most of the ledger's deeds have
+  // fired (36 in production since 2026-09-06; counted, never hard-coded)
   // the world baseline did not neutralise the lifetime careers.
   check('the day-one ledger is still nearly empty', achieved.length <= 4,
     `${achieved.length} of ${milestones.length} deeds achieved`);

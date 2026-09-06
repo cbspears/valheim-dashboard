@@ -20,7 +20,7 @@ four custom plugins for the 1.0 recompile, prints what to stage where, and with
 ## The launch-morning sequence (2026-09-09) — moved
 
 **The launch-morning sequence now lives in `docs/LAUNCH-DAY.md`,** as one numbered,
-time-boxed, 22-step run from "Valheim 1.0 is out on Steam" to "players are in", with the
+time-boxed, 23-step run (0 through 22) from "Valheim 1.0 is out on Steam" to "players are in", with the
 owner, the exact command, the line to look for and the "if it fails" branch on every step.
 It reconciles the six places this morning used to be described in, and where it disagrees
 with anything below, **it wins**.
@@ -416,8 +416,10 @@ Five findings, in the order they cost the most:
 5. **`ops_alerts` is neither wiped nor listed as deliberately untouched.** The
    watchdog's state row (`state`, `signature`, `since`, `alert_count`) survives
    the wipe, and nothing in this runbook mentions the watchdog at all, even
-   though `.github/workflows/watchdog.yml` pings every 15 minutes and the
-   launch-day sequence stops all three producers for most of the day. Expect
+   though two pingers hit `/api/ops/watchdog` (a Supabase `pg_cron` job,
+   `eilif-watchdog-ping`, every 5 minutes, plus `.github/workflows/watchdog.yml`
+   about every 4 hours) and the launch-day sequence stops all three producers
+   for most of the day. Expect
    Discord alerts for the planned outage, and a "down for X" duration measured
    from before the cutover.
    **Resolved 2026-09-05 (review pass), in the sequence rather than here:**
@@ -569,6 +571,21 @@ the 9th puts it back.
   `title_history` (the Crowning Log) is deleted **first and explicitly** — its
   `player_id` FK cascades from `players`, but 10 pilot rows were still live in
   prod on 2026-09-03, so it is no longer left to the cascade.
+- **Added 2026-09-06**, four tables that shipped to production the same morning
+  and were in neither list until the T-3 audit found them:
+  - `boss_tellings` — the pilot world's accounts of a boss fall, including
+    ChÆrleif's `chosen` Eikthyr telling. Resetting `bosses` does not clear them
+    (a telling is its own row), and `pickTelling()` returns the chosen row
+    first, so the pilot's saga would have reappeared at launch night's first
+    kill with the real telling filed underneath it.
+  - `tales` — nights of the hall recounted by the Storyteller and jarls; every
+    row's `told_for` is a pilot date, so all of them are false history.
+  - `office_nudges` — which boss each office term has already been nudged
+    about; deleted **before** `offices` for the `title_history` reason (its
+    `office_id` FK cascades, and the explicit delete keeps the printed count
+    honest). Composite PK, so the wipe filters on `boss_id`.
+  - `offices` — terms of the Storyteller. Empty in prod today (`STORYTELLER=1`
+    is unset), so this is latent until that one `.env` line is added.
 - **Resets state only** (definitions/rows stay):
   - `milestones` — zeroes `achieved_at` / `achieved_value` / `announced_at` /
     `meta` on rows currently marked achieved.
@@ -609,7 +626,9 @@ the 9th puts it back.
   script also picks up any other bucket whose id contains "map").
 - **Local state files**: `services/log-poller/state.json`,
   `services/discord-bot/state.json` (announced bosses, voice/discovery dedupe,
-  POTY recap streaks all live in this one file), and
+  POTY recap streaks, plus the two boss-telling-dependent keys added 2026-09-06:
+  `altar.told`, which viking heard which chosen telling, and `offices`, the open
+  ballot cursor pointing at a term row this wipe deletes), and
   `scripts/.map-snapshot-state.json`. `services/stats-parser` had no local state
   file and is retired regardless.
 
@@ -624,10 +643,11 @@ before, which is worse than being in the wrong one. It is the watchdog's dedupe
 memory (`db/2026-08-21_ops_alerts.sql`: one row, `key='watchdog'`, carrying
 `state`, `signature`, `since` and `alert_count`), and it survives the wipe. Two
 consequences on launch morning, neither of them fatal and both surprising if
-nobody said so first: `.github/workflows/watchdog.yml` pings every 15 minutes and
-`/api/ops/watchdog` posts to Discord, so the hours in which all three producers
-are deliberately stopped will generate a real alert plus a re-alert every six
-hours; and the `since` that drives the "down for X" line is measured from
+nobody said so first: two pingers hit `/api/ops/watchdog` (a Supabase `pg_cron`
+job, `eilif-watchdog-ping`, every 5 minutes, and `.github/workflows/watchdog.yml`
+about every 4 hours) and the route posts to the ops channel itself, so the hours
+in which all three producers are deliberately stopped will generate a real alert
+within five minutes plus a re-alert every six hours; and the `since` that drives the "down for X" line is measured from
 whenever that episode began, which is before the cutover rather than after it. (`poty_history` **is** wiped — its
 migration documents a pre-launch wipe. `server_status` **is** reset now, see
 above.)

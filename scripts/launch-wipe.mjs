@@ -452,6 +452,40 @@ const DELETE_TABLES = [
   // Bonemass is in progress with a June target date. Wiped here so a future
   // page (or a curious SQL editor) can never resurrect that false progress.
   { table: 'roadmap', pk: 'id' },
+  // ── the four tables the 2026-09-06 features added (audit T-3 data-0) ──────
+  // These four went into production on 2026-09-06, hours after this list was
+  // last reviewed, and none of them was in it. The order below is deliberate:
+  // children before parents, exactly like title_history before players.
+  //
+  // boss_tellings: one row per account of a boss fall. The pilot world already
+  //   holds two for Eikthyr (the Skald's, and ChÆrleif's, which is `chosen`).
+  //   The `bosses` reset below clears is_killed/retelling, but a telling is its
+  //   own row and survived that reset entirely: on launch night the first real
+  //   Eikthyr kill re-renders /boss/eikthyr, and components/boss/tellings.ts
+  //   pickTelling() returns the CHOSEN row first — so the pilot's saga comes
+  //   back, and services/discord-bot/src/tellings.js claimChosen()/
+  //   recordSkaldTelling() take the chosen flag only when NO row holds it, so
+  //   launch night's real telling files itself underneath the pilot's instead
+  //   of replacing it. FK boss_id is `on delete cascade` on bosses, but bosses
+  //   rows are UPDATEd here, never deleted, so nothing else clears these.
+  { table: 'boss_tellings', pk: 'id' },
+  // tales: nights of the hall recounted by the Storyteller and jarls. Every row
+  //   is about a night on the PILOT world (told_for is a pilot date), so all of
+  //   them are false history the moment the new world starts.
+  { table: 'tales', pk: 'id' },
+  // office_nudges BEFORE offices, for the same reason title_history goes before
+  //   players: its office_id FK is `on delete cascade`, so deleting offices
+  //   would take these rows silently and only while that FK is in place.
+  //   Deleting it explicitly and first keeps the printed "deleted N row(s)"
+  //   line honest. Composite PK (boss_id, office_id) — boss_id is NOT NULL, so
+  //   `boss_id=not.is.null` is still a match-every-row filter.
+  { table: 'office_nudges', pk: 'boss_id' },
+  // offices: terms of the Storyteller. Empty in production today because
+  //   STORYTELLER=1 is not set, so this is latent — but the flag is one .env
+  //   line, and a term opened during the pilot would otherwise carry its holder
+  //   (and the `until is null` open-term index) onto the new world, where the
+  //   site's former-holder badge and the bot's nudge clock would both be wrong.
+  { table: 'offices', pk: 'id' },
 ];
 
 // State-only resets: definitions/rows stay, only the "has this happened" state
@@ -549,7 +583,17 @@ function localStateFiles() {
       file: path.join(STATE_ROOT, 'services/log-poller/state.json'),
     },
     {
-      label: 'discord-bot state (announcedBosses, voice ambient/discovery dedupe, POTY recap streaks)',
+      // The boss_tellings-dependent state lives in here too, and deleting the
+      // whole file is what resets it: `altar.told` (services/discord-bot/src/
+      // altar.js:252-254 — which viking heard which boss's chosen telling at
+      // which altar, keyed by the boss ids the wipe keeps) and `offices` (
+      // storyteller.js:694-695 — the open ballot cursor, whose office row this
+      // wipe deletes). A surviving state.json would leave the altar loop silent
+      // for the pilot's listeners and the ballot pointing at a term that no
+      // longer exists.
+      label:
+        'discord-bot state (announcedBosses, voice ambient/discovery dedupe, POTY recap streaks, ' +
+        'altar.told telling dedupe, offices ballot cursor)',
       file: path.join(STATE_ROOT, 'services/discord-bot/state.json'),
     },
     {
@@ -846,6 +890,10 @@ function printPostWipeChecklist() {
   12. /admin/ops cockpit shows fresh heartbeats; milestones unachieved; bosses
       not killed; the Crowning Log (title_history) is empty; players list starts
       empty and repopulates from real joins.
+  13. /boss/eikthyr shows no telling at all (no "as told by ...", no "Other
+      tellings") and /saga shows no tales. If either still renders pilot text,
+      boss_tellings or tales did not clear -- re-run the dry run and read those
+      two counts.
 
   Adjacent tables intentionally NOT touched by this script: discord_events,
   ops_heartbeats, ops_alerts (the watchdog's dedupe memory -- it keeps its

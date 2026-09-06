@@ -149,15 +149,25 @@ echo "  2. GTX (server STOPPED): BepInEx/config/net.cproudlock.gsvalheimstats.cf
 # Following the old line under time pressure minted a pack every client rejects,
 # so this now prints the runbook's own flag set and sends the operator there.
 #
-# The bundle line below is deliberately NOT a paste-able command either:
-# build-config-bundle.mjs REQUIRES --pack-number and --pack-date (it prints usage and
-# exits 2 without them) and wants the same pins the mint used. The command to run is the
-# one `mint-pack.mjs --publish` prints in its own checklist, which forwards every changed
-# pin plus --no-vplus/--fallback. See docs/LAUNCH-DAY.md step 19.
+# THE BUNDLE LINE IS A COMMAND THAT RUNS (fixed 2026-09-06, T-3 audit ops-27).
+# It used to print `node scripts/build-config-bundle.mjs --world $W, deploy.` —
+# which looks pasteable and exits 2, because that script REQUIRES --pack-number
+# and --pack-date as well. Now it prints every flag with a placeholder in the two
+# the operator has to decide, so pasting it and filling in <N> and the date is a
+# run rather than a usage screen.
+#
+# Note the flag sets are NOT the same: $M above is mint-pack's, and --cap is
+# mint-pack's alone (build-config-bundle rejects it as an unknown argument). The
+# pins and --no-vplus/--fallback ARE shared, so they are repeated here rather
+# than being reached for out of $M. `mint-pack.mjs --publish` prints this same
+# line already filled in from the mint it just did; that one is the authority.
 echo "  3. Pack: docs/LAUNCH-DAY.md steps 16 and 18 (throwaway test mint, then dry-run, mint, publish)."
 echo "        M=\"--world $W --paths 1.5.0 --companion-client <ver> --no-vplus --fallback on --cap <N>\""
-echo "        Then MODPACK_PROFILE_CODE + MODPACK_VERSION_LABEL in config/server.ts,"
-echo "        node scripts/build-config-bundle.mjs --world $W, deploy."
+echo "        Then MODPACK_PROFILE_CODE + MODPACK_VERSION_LABEL in config/server.ts, and the bundle:"
+echo "        node scripts/build-config-bundle.mjs --world $W --pack-number <N> --pack-date '<Mon D, YYYY>' \\"
+echo "          --paths 1.5.0 --companion-client <ver> --no-vplus --fallback on"
+echo "        (fill in <N> and the date; --cap is mint-pack's flag only. mint-pack --publish"
+echo "         prints this line already filled in — use that one. Then deploy.)"
 
 # A cutover that could not finish must not exit 0 — the operator's next step is
 # to start the bot, and this is the one failure they cannot see from its logs.

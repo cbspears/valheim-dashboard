@@ -24,7 +24,9 @@ import {
   getUpcomingEvents,
   getAllPlayers,
   getOffices,
+  getPins,
 } from '@/lib/data';
+import { findAltarPin } from '@/components/boss/altar';
 import { slugify, vikingPath, matchVikingName, resolvePhotoViking } from '@/lib/slug';
 import { currentHolder, currentOffice } from '@/components/viking/office';
 
@@ -49,10 +51,6 @@ export async function generateStaticParams() {
   const bosses = await getBosses();
   return bosses.map((b) => ({ slug: slugify(b.name) }));
 }
-
-// Bosses with a marked altar on the demo atlas — see config/map-demo.generated.ts.
-// Hardcoded here since the map's marker set is demo-only content, not queryable data.
-const BOSSES_ON_MAP = new Set(['eikthyr', 'the elder']);
 
 /** 82 → "1m 22s", 45 → "45s", 3600 → "1h 0m". Guards non-finite input. */
 function formatFightLength(sec: number): string | null {
@@ -86,7 +84,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
   if (!boss) notFound();
 
   if (boss.is_killed) {
-    const [photos, roster, tellings, offices] = await Promise.all([
+    const [photos, roster, tellings, offices, pins] = await Promise.all([
       getGalleryPhotos(),
       getAllPlayers(),
       // The tellings of this fall: the Skald's, and any a viking has told with
@@ -99,12 +97,17 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
       // page either way: no Storyteller line, and the untold clock runs from
       // the kill instead of from a term.
       getOffices(),
+      // The atlas, for the altar link below. /api/gs-ingest charts a pin of kind
+      // 'boss' named "<Boss> altar" where the war party stood when this one
+      // fell, so the link is driven by whether that pin EXISTS rather than by a
+      // list somebody typed. Same cached read /map and /viking already do.
+      getPins(),
     ]);
     const nameLower = boss.name.toLowerCase();
     const depiction = photos.find((p) => p.caption?.toLowerCase().includes(nameLower)) ?? null;
     // Prefer the explicit Discord↔character link, then loose name matching.
     const depictionPoster = resolvePhotoViking(depiction, roster);
-    const onMap = BOSSES_ON_MAP.has(nameLower);
+    const altarPin = findAltarPin(pins, boss.name);
 
     return (
       <div className="flex flex-col gap-8">
@@ -280,7 +283,10 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
           );
         })()}
 
-        {onMap && (
+        {/* Only when the altar is really charted. A boss that fell with nobody's
+            position fresh enough to place gets no pin and no link, which is the
+            honest page: there is nothing on the atlas to go and look at. */}
+        {altarPin && (
           <Link
             href="/map"
             className="gold-ring inline-flex w-fit items-center gap-2 text-sm text-gold-light transition-colors hover:text-gold"

@@ -303,13 +303,29 @@ game-server outage both went unnoticed. The watchdog is the **push** half,
 and deliberately shares none of that fate-sharing:
 
 ```
-GitHub Actions (every 15 min)  →  Vercel /api/ops/watchdog  →  Supabase
-                                          │                     (read)
-                                          └→ Discord (bot-token REST)
+Supabase pg_cron (every 5 min)  ┐
+                                ├→ Vercel /api/ops/watchdog  →  Supabase
+GitHub Actions (~every 4 h)     ┘            │                    (read)
+                                             └→ Discord (bot-token REST)
 ```
 
 Nothing in that chain touches the PC, so "the PC is off" is exactly the
 case it still reports.
+
+**There are TWO pingers, since 2026-09-06.** They hit the same route and
+`ops_alerts` de-duplicates, so they cannot double-post:
+
+| Pinger | Declared | Observed | Why |
+|---|---|---|---|
+| Supabase `pg_cron` job **`eilif-watchdog-ping`** (`db/2026-09-06_watchdog_pgcron.sql`, applied 2026-09-06 10:12 CT) | `*/5 * * * *` | every 5 min | `net.http_get` from the database itself, with the bearer held in Supabase Vault as `watchdog_token`. Off the PC and up whenever the site is. |
+| `.github/workflows/watchdog.yml` | `*/15 * * * *` | **about every 4 hours** (2026-09-06: 00:07, 04:38, 08:56, 12:43 UTC) | GitHub's scheduler is best-effort and throttles this repo hard. It is the backup, not the primary. |
+
+**Silencing means both.** `gh workflow disable watchdog.yml` on its own
+leaves the database job pinging three times as often; the other half is
+`select cron.unschedule('eilif-watchdog-ping');` in the SQL editor, and
+re-arming is `gh workflow enable` plus re-running the `cron.schedule(...)`
+block at the bottom of that migration. `docs/LAUNCH-DAY.md` step 5 and 20e
+carry both, because launch morning is the one planned outage.
 
 **Auth.** `Authorization: Bearer $WATCHDOG_TOKEN`, fail-closed in the same
 style as the heartbeat route: unset env → `503` for everyone, wrong token →
@@ -332,11 +348,14 @@ only the thresholds differ:
 | game-server (`server_status` freshness + `is_online`) | 120s | 20 min |
 
 These are **looser than the cockpit's** on purpose. The cockpit's 180s bot
-threshold is right for a human staring at the page; this path is polled
-every 15 minutes by GitHub's best-effort scheduler, so any threshold at or
+threshold is right for a human staring at the page; this path used to be
+polled only by GitHub's best-effort scheduler, so any threshold at or
 below the poll interval would fire on scheduler jitter alone — and a
 watchdog that cries wolf gets muted, which puts us back where we started.
-Worst-case detection latency is threshold + one ping interval (~35–60 min).
+Worst-case detection latency is threshold + one ping interval, which the
+5-minute `pg_cron` job brought down from ~35 to 60 minutes to **threshold +
+5 minutes**. The thresholds were not tightened to match, deliberately: the
+same jitter argument applies to a database that has just been restarted.
 
 `is_online` is a secondary signal here: the ingest paths only ever set it
 *true*, so freshness is what actually catches a dead server.
@@ -368,11 +387,16 @@ the alert decision. Add `?dry=1` to evaluate **without** posting to Discord
 or touching the state row — use that when tuning thresholds.
 
 **Env / secrets.** Vercel (Production): `WATCHDOG_TOKEN`, `DISCORD_TOKEN`,
-`WATCHDOG_CHANNEL_ID`, optional `WATCHDOG_MENTION` (a `<@id>`/`<@&id>`
-prefix — without it, mentions are suppressed entirely). GitHub repository
-secret: `WATCHDOG_TOKEN`, the same value. Note GitHub disables scheduled
+`WATCHDOG_CHANNEL_ID` — the **ops channel**, where every alert and every
+recovery lands — and optional `WATCHDOG_MENTION` (a `<@id>`/`<@&id>`
+prefix — without it, mentions are suppressed entirely; **there is no
+mentionable bot role**, so leaving it unset is the current state). GitHub
+repository secret: `WATCHDOG_TOKEN`. Supabase Vault: `watchdog_token`, the
+same value again, read by the `pg_cron` job. **The token was rotated across
+all three on 2026-09-06**, so rotating it again means all three or the
+pinger that misses out starts returning 401. Note GitHub disables scheduled
 workflows after 60 days of repo inactivity — re-enable from the Actions tab
-if that ever happens.
+if that ever happens; the `pg_cron` job has no such expiry.
 
 ---
 

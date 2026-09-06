@@ -168,6 +168,12 @@ inside a stopped window, and it must be the same window as the game update:
   plugin load failure, no exception, the plugin just never registers). Source comments in all three
   `src/*.cs` files say so where the next edit is most likely to land. Verify after any rebuild:
   `strings -e l dist/EilifBoards.dll | grep -i valuetuple` must print nothing.
+- **There is no `patch classes applied` line here, and that is correct.** EilifBoards uses **no
+  Harmony patches at all** — it reads and writes sign ZDO text and replicates by revision — so the
+  `MISSING patch class` grep that the other three plugins live or die by has nothing to say about
+  this one. After a 1.0 rebuild the boot proof for Boards is its own
+  `Eilif Boards <ver> loaded. Enabled=true, Url=…` line plus a fresh `boards-plugin` heartbeat in
+  the ops cockpit, which it writes on a timer whether or not anyone is playing.
 - **The JSON contract classes must stay `public`.** `BoardsResponse` / `BoardsPayload` are filled by
   `DataContractJsonSerializer` via reflection. Making them `internal` turns every field into a
   `CS0649` "never assigned" warning (10 of them). `../eilif-companion` has the same classes public

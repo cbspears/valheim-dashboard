@@ -1,5 +1,4 @@
 -- APPLIED to production 2026-09-06 ~12:35 CT (Fable session).
--- STATUS: UNAPPLIED. Hand-applied by Charlie (AGENTS.md "Database / migrations").
 -- Tales of the hall: public.tales.
 --
 -- WHY. `boss_tellings` (db/2026-09-06_boss_tellings.sql) is bound to a boss:

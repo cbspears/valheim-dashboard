@@ -4,8 +4,31 @@
 // swallows its own errors).
 
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 
 const loops = new Map();
+
+// THE VERSION EVERY HEARTBEAT CARRIES (2026-09-06, T-3 audit ops-4).
+//
+// The cockpit has always had a Version column and the heartbeat sender has
+// always accepted a `version`, but no call site ever passed one, so every host
+// row on /admin/ops read "unknown" while the glossary explained the column as
+// the way to tell which build is running. Read once here rather than at each
+// call site: the sender wraps every outgoing heartbeat, so one default reaches
+// all of them and no caller has to remember.
+//
+// Best effort by construction. A heartbeat that cannot be sent because a
+// package.json moved is strictly worse than a cockpit row reading "unknown", so
+// a failure here yields null and nothing else changes.
+const PKG_VERSION = (() => {
+  try {
+    const raw = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+    const v = JSON.parse(raw)?.version;
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+})();
 
 // undici has no default timeout; a stalled heartbeat socket must not pile up
 // behind the 60s heartbeat interval.
@@ -305,7 +328,15 @@ export function createHeartbeatSender(component, logger = console) {
     logger.warn?.(`[heartbeat] no dashboard URL (set OPS_HEARTBEAT_URL or WEBHOOK_URL) — ${component} heartbeats disabled`);
     return async () => {};
   }
-  return async ({ status = 'ok', error, metrics, version, instance } = {}) => {
+  // `version` defaults to this package's own version. A caller may still pass
+  // one and it wins; an explicit null stays null. No call site in the bot passes
+  // one today: there is exactly one, `createHeartbeatSender('discord-bot')` in
+  // index.js, and it names the component only (scripts/heartbeat-version.test.mjs
+  // holds that). The parameter exists so a sender reporting somebody ELSE's version
+  // does not have to route around this default. The `companion-voice` heartbeat
+  // is NOT such a caller: it is written by the /api/voice route on the site, not
+  // by this process.
+  return async ({ status = 'ok', error, metrics, version = PKG_VERSION, instance } = {}) => {
     try {
       // The bot, and only the bot, carries its own schedule up to the cockpit.
       // Inside the try and behind a never-throwing helper, so the worst case is

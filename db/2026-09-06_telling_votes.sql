@@ -1,5 +1,4 @@
 -- APPLIED to production 2026-09-06 ~11:10 CT (Fable session). Feature stays OFF until TELLING_VOTES=1 in the bot .env.
--- STATUS: UNAPPLIED. Hand-applied by Charlie (AGENTS.md "Database / migrations").
 -- One new column: public.boss_tellings.standing.
 --
 -- WHY. When a boss has two or more player tellings, the hall can vote on which

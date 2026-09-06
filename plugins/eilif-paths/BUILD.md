@@ -128,7 +128,25 @@ convention as `ToolStaminaPatch.ScopeFinalizer` and `eilif-companion-client`'s `
 **If a 1.0 rebuild ever renames one of these back to `Postfix`, the restore silently stops covering
 the throw path** — the class count stays 12/12 either way, so the count will not catch it.
 
-**Boot lines a 1.0 rebuild should grep for (1.5.0):** three, not one.
+**The first grep after a 1.0 rebuild: `MISSING patch class`.** Zero lines is healthy. A plugin
+prints its `Loading [...]` line whether or not its Harmony patches went on, so `Loading` proves the
+DLL was chainloaded and nothing more; each `MISSING patch class` line names the class **and the
+feature that died with it** (`EilifPathsPlugin.cs:306`). Read it in the **player's**
+`BepInEx/LogOutput.log` inside the r2modman profile — EilifPaths is a client plugin and never
+appears in the server's log. Alongside it, two counts that must be exact:
+
+- **`[EilifPaths] Core patch classes: 6/6`** — jog speed, run speed, stamina, walking, bed, station.
+- **`[EilifPaths] tool/weapon stamina hooks: 9/9 applied`**, with **no `(DEGRADED - see the errors
+  above)`** suffix. These nine are applied one by one on purpose, so a single unresolvable target
+  costs one hook rather than the plugin. **8/9 is not "one small feature lost"** — it means a Valheim
+  method this plugin patches was renamed or removed, and the discount it bought is silently back to
+  vanilla.
+
+Both denominators are fixed rosters in the source (`ExpectedCoreClasses`, `SiteLabels`), never a
+count of what happened to load, so a class the runtime could not even enumerate still shows as a
+shortfall.
+
+**Boot lines a 1.0 rebuild should grep for (1.5.0), on the fallback half:** three, not one.
 `VPlusFallback patch classes: 12/12 applied.` (section on and healthy),
 `VPlusFallback: disabled (ValheimPlus present).` (off because V+ is doing the job), and
 `[Warning] VPlusFallback: OFF and no ValheimPlus installed` (off with **nothing** providing the
@@ -164,7 +182,14 @@ start fighting. Keep it a postfix.
    `[EilifPaths] terrain: …` lines plus the `Bed fire range: +8m` /
    `Workstation attachment range: +10m` boot lines match expectations.
 5. **Only then** export the pack code, and wait for the Thunderstore listing index if any pinned
-   version is newly published.
+   version is newly published. **1.5.0 is already published** (2026-09-06 10:01 CT) and a published
+   Thunderstore version is immutable, so a 1.0 rebuild that changes this DLL goes up as **1.5.1**,
+   never as a re-upload of 1.5.0. Bump `EilifPaths.csproj` **after** the rebuild, not before:
+   `launch-preflight`'s `PACK_V12_PINS` reads this csproj directly
+   (`scripts/launch-preflight.mjs:95`), so a version that is not yet uploaded makes its pin gate
+   FAIL on a 404. `mint-pack` pins from its own `MODS` table and the `--paths` flag rather than
+   from the csproj, but it checks whatever version you pass it, so the same 404 reaches it as
+   soon as you type the new number.
 
 ## Gotchas confirmed during this warm-check
 

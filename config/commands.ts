@@ -242,7 +242,15 @@ export const DISCORD_COMMANDS: DiscordCommand[] = [
     who: 'any member',
     what: 'The picture is copied into the hall’s own store and appears on the Gallery, with your words as its caption. If the caption names a place someone has pinned, the photo is tied to that pin on the map. Eilif reacts with a frame when it lands.',
     example: '@Eilif the longhouse at last, roof and all',
-    note: 'Works in any channel of the hall, because no gallery channel is set. Images up to 12 MB, and a few at a time. An admin can pull a photo back down by reacting with a bin on the post.',
+    // WORDED SO THE PAGE CANNOT LIE (T-3 audit site-6). This used to read "Works
+    // in any channel of the hall, because no gallery channel is set" -- a claim
+    // about the bot's .env, which the site never sees and Vercel has no variable
+    // for. Any channel of the hall IS the setting (Charlie, 2026-09-06:
+    // CHANNEL_GALLERY stays unset), so the fact stays; the reason it was true,
+    // which the site cannot stand behind, is gone. scripts/commands-page.test.mjs
+    // holds "any channel" to the deployed bot's env, so if that decision is ever
+    // reversed the tripwire goes red instead of the page going quietly wrong.
+    note: 'Works in any channel of the hall. Images up to 12 MB, and a few at a time. An admin can pull a photo back down by reacting with a bin on the post.',
     source: 'services/discord-bot/src/gallery.js createGalleryIngest, handleMessage, galleryChannelId',
     flag: 'GALLERY_INGEST',
   },

@@ -10,7 +10,8 @@ Written 2026-09-05 by reconciling six descriptions of the same morning that did 
 agree with each other. What each source said, and where each contradiction was resolved,
 is in the "Contradictions this file settled" table at the bottom.
 
-One numbered sequence, twenty-two steps. Every step carries: **who**, **the exact
+One numbered sequence, twenty-three steps, 0 through 22 — the same count the ops cockpit's
+Coming up tab prints. Every step carries: **who**, **the exact
 command**, **the line to look for**, and **if it fails**. Steps marked
 **CHARLIE ONLY** need the GTX panel, SFTP writes to the box, a Thunderstore account, a
 Vercel token or `sudo` — an agent cannot do them and must not try.
@@ -26,14 +27,17 @@ Before anything: `export NVM_DIR=~/.config/nvm; . $NVM_DIR/nvm.sh; nvm use 20`.
 | **before the day, by 2026-09-08** | **Step 0. The launch world is generated and handed over.** Nothing on the 9th can start without it, and it does not exist yet. | **Charlie** |
 | 1.0 appears on Steam → +90 min | Steps 1 to 6. Rebuild, stage, stop the services, take the only copies. Nothing on the box has moved. | Claude |
 | +90 min → +3 h | Steps 7 to 14. The stopped window: Steam Update, DLL swap, V+ out, cfgs in, world up, Start. | **Charlie** |
-| after the first Start | Steps 15 to 17. Read the boot, hand the client zips over, start the Thunderstore index clock. | Claude + Charlie |
-| index clock + 40 to 80 min | Steps 18 to 21. Mint, bundle, deploy, wipe, restart, verify. | Claude (deploy is Charlie's trigger) |
+| after the first Start | Steps 15 to 17. Read the boot; confirm the two client packages, and re-upload only if the rebuild changed a DLL. | Claude + Charlie |
+| then, or +40 to 80 min if a re-upload was needed | Steps 18 to 21. Mint, bundle, deploy, wipe, restart, verify. | Claude (deploy is Charlie's trigger) |
 | 15:00 CT | **Go / no-go, Charlie's call.** GO-A, vanilla night, or slip to Thursday. | **Charlie** |
 | 17:00 to 17:30 CT | Step 22. GO post, then Session Zero. | Charlie posts, Claude watches |
 
 The Thunderstore listing index lags an upload by **40 to 80 minutes** and no script can
-shorten it. Step 16 starts that clock as early as the day allows, which is why the client
-zips are handed over before the pack is minted rather than with it.
+shorten it. **That wait is off the critical path as of 2026-09-06 10:01 CT**, when both
+client packages went up and the index caught up the same morning. It comes back only on
+one branch: the 1.0 rebuild changes a client DLL, that DLL is uploaded as `0.3.4` or
+`1.5.1` at step 16, and the mint at step 18 waits on the index again. Step 16 is written
+to find that out as early as the boot allows.
 
 ### If 1.0 has not shipped by the morning
 
@@ -47,12 +51,57 @@ is no rule anywhere for what to do when it does not. Decide the cutoffs **now**,
 | Steam still shows 0.221.12 at… | Then |
 |---|---|
 | **09:00 CT** | GO-A is already tight. Say so in `#valheim`, keep going, and treat noon as the real gate. |
-| **12:00 CT** | **Charlie's cutoff (decided 2026-09-06): still no 1.0 at noon means vanilla night.** Declare it now rather than at 15:00, so the crew gets five hours of notice. The box stays on 0.221.12, the wipe and the world and the Casual tier all still happen, and the pack is not re-minted. By the documented durations GO-A is already arithmetically out of reach from about 11:00 (the index lag alone runs past 17:00), so a 1.0 that lands between 11:00 and noon buys a stretch, not a plan: expect the pack to be importable around 17:00 to 18:00 at best, and treat that hour as a bonus if it comes. |
+| **12:00 CT** | **Charlie's cutoff (decided 2026-09-06): still no 1.0 at noon and tonight is not a 1.0 night.** Declare it now rather than at 15:00, so the crew gets five hours of notice. What gets declared is **HOLD ON 0.221.12**, spelled out in full just below this table — **not** step 17's vanilla night, which needs a 1.0 box and cannot exist on this branch. By the documented durations GO-A is already arithmetically out of reach from about 11:00, so a 1.0 that lands between 11:00 and noon buys a stretch, not a plan. |
 | **15:00 CT** | Step 17's normal go/no-go, with vanilla night and slip-to-Thursday both still on the table. |
 
 **Charlie owns these two numbers.** They cost nothing to set today and they are the only
 thing standing between "1.0 is late" and an afternoon that drifts into a decision made at
 17:15.
+
+#### HOLD ON 0.221.12 — what the noon branch actually is
+
+Three postures wear different names on purpose, and only one of them is called vanilla
+night. **Read this section and step 17's definition together. "Vanilla night" is defined
+once, at step 17, and means nothing else anywhere in this file.**
+
+| Posture | The box | The players | The cap |
+|---|---|---|---|
+| **GO-A** | 1.0, eight plugins minus ValheimPlus | pack v12 | 20 |
+| **HOLD ON 0.221.12** (the noon branch) | **0.221.12, unchanged**, all eight plugins including ValheimPlus | **pack v12, re-minted for the world name** | 20 |
+| **Vanilla night (GO-B)** (step 17) | **1.0**, `BepInEx/plugins/` moved aside | **no pack at all, plain Valheim** | 10 |
+
+On the noon branch steps 1 to 14 are skipped whole: no rebuild, no Steam Update, no DLL
+swap, no V+ removal, no `[ServerFallback]` cfg. Boards, in-game voice, oaths, pins, stats,
+Great Deeds and the map all keep working, because nothing on the box moved. **The wipe, the
+new world `Eilif`, the Casual tier, the `.env` reverts at 20b and the deploy at 19 all still
+happen**, so the day still runs steps 12, 13 and 18 through 22.
+
+**The pack IS re-minted on this branch, and skipping it costs stats.** Pack v11 ships
+`config/net.cproudlock.gsvalheimstatsclient.cfg` with `World = EilifRehearsal`, and
+`/api/gs-ingest` drops any client payload whose `world` does not equal
+`GS_EXPECTED_WORLD` — silently, with nothing in the cockpit. Step 19 sets
+`GS_EXPECTED_WORLD=Eilif`, so a player still importing v11 files stats under the old world
+name and every one of their `source: 'client'` stat merges is discarded. (Deaths and the
+explored-map percentage survive: EilifCompanionClient reads the live world from
+`ZNet.GetWorldName()` rather than from the cfg. It is the cumulative stats that go dark.)
+The mint is the v11 pin set with one flag changed, no `--no-vplus` and no `--fallback`,
+because ValheimPlus is still installed and still enforcing:
+
+```bash
+node scripts/mint-pack.mjs --world Eilif --dry-run
+node scripts/mint-pack.mjs --world Eilif
+node scripts/mint-pack.mjs --world Eilif --publish --version-label 'Pack v12 · Sep 9'
+```
+
+A bare `--world` renders v11's pins exactly, so **every pin is already indexed and the
+listing wait is zero.** Then step 19 as written, and the GO post has to tell everyone to
+**update their profile from the new code** — a re-mint reaches nobody who keeps the profile
+they already have, because r2modman writes the cfg on import.
+
+There is no flag that mints a pack with no mods in it. **If Charlie would rather not
+re-mint at all on this branch, then say so out loud and leave `GS_EXPECTED_WORLD` unset**
+(the pilot default, "accept any world"), which keeps all three producers ingesting. What
+must not happen is moving the env to `Eilif` while the pack still says `EilifRehearsal`.
 
 ---
 
@@ -126,19 +175,20 @@ Facts as of 2026-09-05, verified by execution, that the morning assumes:
   AzuCraftyBoxes 1.8.15 — eight plugins.
 - In the repo, built for the morning: Companion **0.3.3** (carries `[ServerFallback]`),
   Boards 0.2.0, EilifPaths **1.5.0** (carries `[VPlusFallback]`), Client **0.3.3** (bumped
-  2026-09-05 evening: the hardening pass changed the DLL, and Thunderstore's 0.3.2 is immutable).
-- On Thunderstore: `Eilif-EilifCompanionClient-0.3.2` is **live** (still works; 0.3.3 adds a
-  startup health line **and** wraps `Update()` in a rate-limited try/catch — see step 16,
-  where the pin-0.3.2-or-upload-0.3.3 decision is written out).
-  `Eilif-EilifCompanionClient-0.3.3` and `Eilif-EilifPaths-1.5.0` are **live on Thunderstore**
-  (uploaded 2026-09-06 10:01 CT; the r2modman listing index catches up within ~80 min).
-  `Eilif-EilifPaths-1.5.0` is **not uploaded** — the package API 404s it. Until Charlie
-  uploads it, `--paths 1.5.0` cannot be minted, and `--fallback on` is refused without
-  `--paths 1.5.0`. This is the single longest pole in the day. Uploading it before the 9th
-  removes the 40-to-80-minute lag from the critical path but takes the version number with
-  it, and the morning's rebuild produces a **different** 1.5.0 — see the branch at step 16.
-  `plugins/thunderstore/EilifPaths-1.5.0/` and its zip exist since 2026-09-05 evening (built
-  against 0.221.12); step 4 re-stages them only if the 1.0 rebuild changes the DLL.
+  2026-09-05 evening because the hardening pass changed the DLL, and published 2026-09-06).
+- On Thunderstore: `Eilif-EilifCompanionClient-0.3.3` and `Eilif-EilifPaths-1.5.0` are both
+  **live since 2026-09-06 10:01 CT**, byte-identical to the staged zips, and the listing
+  index has already caught up (`launch-preflight` grades both pins "version exists;
+  community latest"). **There is no upload on the critical path and no 40-to-80-minute wait
+  in front of the mint.** `--paths 1.5.0` mints and `--fallback on` is accepted today.
+  What step 16 is now for: a published Thunderstore version cannot be replaced, so **if the
+  1.0 rebuild at step 2 changes either client DLL, that DLL goes up under a new number —
+  `0.3.4` for the Client, `1.5.1` for EilifPaths — and the `$M` pin moves with it.** If the
+  rebuild leaves them unchanged, 0.3.3 and 1.5.0 are the pins and step 16 is a five-minute
+  confirmation. `plugins/thunderstore/EilifPaths-1.5.0/` and
+  `plugins/thunderstore/EilifCompanionClient-0.3.3/` and their zips are the **pre-1.0**
+  builds (staged 2026-09-05 evening against 0.221.12); step 4 re-stages them only if the
+  1.0 rebuild changes the DLL.
 - `config/server.ts` `MAX_PLAYERS` is **20**, `MODPACK_VERSION_LABEL` is `Pack v11 · Aug 27`,
   `LAUNCH_NOTICE` is empty by decision, `DISCORD_URL` is empty.
 - Port 3000 on the box is **OPEN** (HTTP 200). The GTX ticket was skipped. It is not a
@@ -219,6 +269,27 @@ updating. Wait. Every rebuild below would otherwise produce 0.221.12 plugins wea
 
 ## Step 2 — Rebuild all four plugins against the 1.0 assemblies · Claude
 
+> **Read this before you type the command. Both client versions are already published.**
+> `EilifPaths 1.5.0` and `EilifCompanionClient 0.3.3` went up on 2026-09-06 10:01 CT, and a
+> published Thunderstore version cannot be replaced. The csprojs still say `1.5.0` and
+> `0.3.3`, so this rebuild produces **different DLLs under version numbers that are already
+> taken** — different for two independent reasons, both documented in
+> `rebuild-plugins.sh --help`: the 1.0 assemblies change the compiled code, and SourceLink
+> stamps `AssemblyInformationalVersion = "<ver>+<HEAD sha>"`, which moves on the 9th no
+> matter what.
+>
+> **Leave the csprojs alone until this build has run.** `launch-preflight`'s
+> `PACK_V12_PINS` reads both csprojs directly (`scripts/launch-preflight.mjs:82`, `:95-96`),
+> so bumping one now makes its pin gate ask Thunderstore for `Eilif-EilifPaths-1.5.1`, get a
+> 404 and FAIL until something is uploaded under that number. `mint-pack` does **not** read
+> the csprojs — it pins from its own `MODS` baselines and the `--paths` /
+> `--companion-client` flags — but it checks whatever version you name it, so a bumped
+> csproj reaches it the moment you copy the new number onto your own command line. The
+> decision belongs at step 16,
+> with the rebuild's own answer in hand: if a client DLL changed, bump to **1.5.1** /
+> **0.3.4**, re-stage, and upload that; if it did not, the published 1.5.0 / 0.3.3 are the
+> pins and nothing is uploaded at all. Step 16 spells out how to tell.
+
 ```bash
 bash scripts/rebuild-plugins.sh --dry-run     # read the plan first
 bash scripts/rebuild-plugins.sh               # type REBUILD at the prompt (or --yes)
@@ -262,19 +333,49 @@ treat the GTX Start at step 13 as the first real load test. Do not skip it silen
 So the stopped window is a file copy and not a build.
 
 ```bash
-bash scripts/rebuild-plugins.sh --stage ~/eilif-launch-dlls --skip-refresh
+bash scripts/rebuild-plugins.sh --stage ~/eilif-launch-dlls --skip-refresh \
+  --only eilif-companion,eilif-boards
 ```
 
-The directory argument covers the **two server DLLs** only. The two client DLLs always
-land in the repo's `plugins/thunderstore/<Name>-<ver>/` with `manifest.json` bumped, and
-`--stage <dir>` does not change that.
+> **`--only` is not optional on the 9th, and this is the one place where the runbook and
+> the tool would otherwise tell you opposite things.** `--stage` refuses to write a client
+> build into `plugins/thunderstore/<Pkg>-<ver>/` when `<ver>` is already published, and
+> since 2026-09-06 10:01 CT **both** client versions are (`EilifPaths 1.5.0`,
+> `EilifCompanionClient 0.3.3`). A bare `--stage` therefore prints
+>
+> ```
+> REFUSED  EilifPaths 1.5.0 — Eilif/EilifPaths 1.5.0 is already published on Thunderstore.
+> ```
+>
+> for both client plugins, then exits **1** with `2 check(s) failed. Do not stage any of
+> this.` — while the two server DLLs have in fact already copied, because the refusal is
+> per plugin and the loop runs on. Reading that exit as "the stage failed" and re-running
+> it is how ten minutes disappear at 09:30. The refusal is correct
+> (`scripts/rebuild-plugins.sh:603-620`); the two client plugins simply have no business
+> being staged at this step.
+>
+> **Do not answer it with `--allow-published`.** The flag exists, and the refusal text
+> offers it, but it is for a local build you never intend to upload. Here it would
+> overwrite the DLL inside `plugins/thunderstore/EilifPaths-1.5.0/` — the directory whose
+> zip is already live and immutable — and destroy the repo's copy of what players actually
+> downloaded. **Do not answer it by bumping the csprojs either**, which is the refusal's
+> other suggestion: see the blockquote at the head of step 2. The client question belongs
+> to step 16, which does the bump, the re-stage and the upload in the right order.
+
+The directory argument covers the **two server DLLs** only. Client DLLs always land in the
+repo's `plugins/thunderstore/<Name>-<ver>/` with `manifest.json` bumped, and
+`--stage <dir>` does not change that — which is exactly why they are excluded here.
 
 **Look for:** one md5 and one exact SFTP destination per server DLL
-(`191.101.30.229_6028/BepInEx/plugins/<Folder>/<Name>.dll`). **Keep those md5s** — they
-are what you compare against the copy on the box at step 9.
+(`191.101.30.229_6028/BepInEx/plugins/<Folder>/<Name>.dll`), and a closing
+`All plugins built and checked.` **Keep those md5s** — they are what you compare against
+the copy on the box at step 9.
 
-**If it fails:** re-run step 2 first; `--skip-refresh` assumes `libs/` is already the 1.0
-set.
+**If it fails:** a `REFUSED` line means `--only` was dropped — re-run with it, and note
+that the server DLLs staged anyway, so check `~/eilif-launch-dlls` before you rebuild
+anything. A compile error means `libs/` is not the 1.0 set that `--skip-refresh` assumes,
+so re-run step 2 without `--skip-refresh`. Anything else: the failing check names the file
+it could not copy.
 
 **Rollback:** free.
 
@@ -298,25 +399,49 @@ node scripts/launch-preflight.mjs --world Eilif --phase pre-wipe
 `eilif-discord-bot` or `eilif-stats-parser` is active, and warns on the other two.
 
 The live unit names are `eilif-discord-bot`, `eilif-log-poller`, `eilif-map-snapshot`.
-**There is no `valheim-log-poller.service`** — that name survives in `AGENTS.md` (lines 76
-and 79) and `services/log-poller/README.md` (lines 44 to 50) and is wrong in both.
-`docs/PROJECT.md` was corrected 2026-09-05 and is right; the repo's *reference unit file*
-under `services/log-poller/` genuinely still carries the old filename, which is what
-`docs/ARCHITECTURE.md` documents.
+**There is no `valheim-log-poller.service`.** That name used to survive in `AGENTS.md` and
+`services/log-poller/README.md`; **both were corrected on 2026-09-06**, along with
+`docs/PROJECT.md` (2026-09-05) and the repo's reference unit file, which is now
+`services/log-poller/eilif-log-poller.service`. One mention survives and it is harmless:
+`docs/PROJECT.md:75` still describes the repo's *reference file* as
+`valheim-log-poller.service`, which is now the wrong filename rather than a wrong unit name
+(`services/log-poller/package.json` also carries `"name": "valheim-log-poller"`, which is
+the npm package and has nothing to do with systemd). Anywhere else, if you see that name
+used as a **unit**, you are reading a printed copy older than the 6th.
 
 > **The watchdog keeps running through all of this, and that is not a fault.**
-> `.github/workflows/watchdog.yml` pings `/api/ops/watchdog` from GitHub every 15 minutes
-> and nothing in this sequence stops it. From this step until 20d the producers are down on
-> purpose, so expect Discord alerts on the watchdog channel: the bot and the poller cross
-> their 20-minute threshold first, the game server crosses its 20 minutes once Charlie
-> Stops the box at step 7, and map-snapshot crosses 45 minutes. They land in **`#server`**
-> (`WATCHDOG_CHANNEL_ID`, set 2026-09-05). It is **not** one alert every 15 minutes — `ops_alerts` dedupes, so it posts on the first ok→unhealthy
-> transition, again each time *which* components are unhealthy changes, and then at most
-> once every 6 hours (`docs/OPS-COCKPIT.md` §7). Call it a handful of messages across the
-> day. **Do not mute it and do not disable the workflow to make them stop** — a muted
-> watchdog on launch night is the exact failure it exists to prevent. If Charlie wants
-> silence anyway, the only clean way is to disable the *ops watchdog* workflow from the
-> GitHub Actions tab and **re-enable it at 20e**, and that is a decision, not a step.
+> **There are TWO pingers, not one, and they hit the same route:**
+>
+> | Pinger | Declared | What it actually does |
+> |---|---|---|
+> | Supabase `pg_cron` job **`eilif-watchdog-ping`** (`db/2026-09-06_watchdog_pgcron.sql`, applied 2026-09-06 10:12 CT) | `*/5 * * * *` | **Every 5 minutes**, from the database, `net.http_get` on `/api/ops/watchdog` with the Vault-held bearer. It runs whether or not this PC is up, which is the whole point of it. |
+> | `.github/workflows/watchdog.yml` | `*/15 * * * *` | **About every 4 hours** in practice — GitHub's scheduler is best-effort and this repo observed 00:07, 04:38, 08:56 and 12:43 UTC on 2026-09-06. Do not plan around 15 minutes. |
+>
+> From this step until 20d the producers are down on purpose, so expect Discord alerts: the
+> bot and the poller cross their 20-minute threshold first, the game server crosses its 20
+> minutes once Charlie Stops the box at step 7, and map-snapshot crosses 45 minutes. Alerts
+> and recoveries land in the **ops channel** (`WATCHDOG_CHANNEL_ID` on Vercel), not in
+> `#valheim` where the crew is reading. It is **not** one alert per ping — `ops_alerts`
+> dedupes, so it posts on the first ok→unhealthy transition, again each time *which*
+> components are unhealthy changes, and then at most once every 6 hours
+> (`docs/OPS-COCKPIT.md` §7). Call it a handful of messages across the day.
+>
+> **Do not mute it and do not disable it to make them stop** — a muted watchdog on launch
+> night is the exact failure it exists to prevent. If Charlie wants silence anyway,
+> **disabling the GitHub workflow alone does nothing**: the database job keeps pinging three
+> times as often. Both halves have to go down, and both are re-armed at 20e:
+>
+> ```bash
+> gh workflow disable watchdog.yml        # GitHub half
+> ```
+> ```sql
+> -- Supabase SQL editor, project owner. The other half.
+> select cron.unschedule('eilif-watchdog-ping');
+> ```
+>
+> Re-arming is `gh workflow enable watchdog.yml` plus re-running the `cron.schedule(...)`
+> block at the bottom of `db/2026-09-06_watchdog_pgcron.sql` verbatim. **That is a decision,
+> not a step**, and whoever makes it owns putting both halves back at 20e.
 
 **Look for:** the three bridge units `inactive`, `eilif-stats-parser (retired)`
 `inactive`, and every WARN in the "pilot overrides" and "world wiring" sections still
@@ -415,7 +540,7 @@ world that has booted on 1.0 cannot be opened by 0.221.12 again.
 > | Item 2, "today only the Companion plugin injects" keep-gear | The panel tier has read `casual` since 2026-09-05 and the game grants it — but the tier belongs to the world, so re-set it on the new Start form. |
 > | Item 2's V+ `[Chat]` line, a half-sentence with unbalanced parens | One instruction: leave `[Chat]` enabled, because server-wide `/s` shouts need it, and oath and pin capture read those shouts. |
 > | Item 6, "`TITLE_CHANNEL` / any other `*_CHANNEL=server` line → **remove**" | **The one that would have cost something.** `services/discord-bot/src/index.js:229` and `:627` read `TITLE_CHANNEL === 'valheim' ? 'valheim' : 'server'`, so an **absent** `TITLE_CHANNEL` routes launch-night titles to `#server`. It now says SET it to `valheim`, and points at `cutover-env.sh --apply`, which does. |
-> | Item 7, "Companion Client 0.3.0 if it shipped", no other pins | Points at `$M` in step 16 as the pin set of record; records that Client 0.3.2 is published and 0.3.3 staged. |
+> | Item 7, "Companion Client 0.3.0 if it shipped", no other pins | Points at `$M` in step 16 as the pin set of record. **Client 0.3.3 and Paths 1.5.0 are both published** (2026-09-06 10:01 CT); the earlier "0.3.2 published, 0.3.3 staged" reading of this row is dead. |
 > | Item 11, "port 3000 closed" | Port 3000 will read **OPEN**: the ticket was skipped by decision, a known exposure and not a hold. Also: the plugin count is the one you wrote down, not a hard-coded 8. |
 >
 > Its restart-order half (items 8 to 10) and its "adjacent tables NOT touched" note were
@@ -698,6 +823,45 @@ bash scripts/verify-restart.sh Eilif
 (`verify-restart.sh` takes a world name and **has no `--help`** — a flag is treated as a
 world name and the script runs anyway against the live box.)
 
+### 15.1 — The patch-class health check. Do this FIRST, before anything else in this step.
+
+**A plugin can print its `Loading [...]` line while a patch class silently failed**, and a
+1.0 assembly bump is exactly what causes that. `Loading [...]` proves the DLL was
+chainloaded; it proves nothing about whether the Harmony patches inside it went on. Every
+Eilif plugin logs its own answer, and this is the one grep that names a dead feature by
+name. Run it against the boot log `verify-restart.sh` pulls:
+
+```bash
+# zero lines is healthy. Every hit names the patch class AND the feature that died.
+grep -n 'MISSING patch class' <the boot LogOutput.log>
+
+# then the counts. On the SERVER boot log there are two, and both are exact:
+grep -nE '\[Eilif\] patch classes applied:|\[Eilif\] ServerFallback patch classes:' <log>
+```
+
+| Line | Healthy reading | Where |
+|---|---|---|
+| `[Eilif] patch classes applied: 2/2` | **2/2.** `OathCapture` and `Patch_OnNewChatMessage_Pin` — oath, chat and pin capture. | server boot log, always |
+| `[Eilif] ServerFallback patch classes: 2/2 applied.` | **2/2**, and it prints **only when `[ServerFallback] Enabled = true`** (step 11). Its absence on a V+ night is correct. | server boot log, `--no-vplus` night |
+| `[EilifDeath] patch classes applied: 3/3` | **3/3.** Logout map post, death cause, tombstone keep-list. | **a player's own** `LogOutput.log` — step 22 |
+| `[EilifPaths] Core patch classes: 6/6` | **6/6.** Jog, run, stamina, walking, bed, station. | **a player's own** log — step 22 |
+| `[EilifPaths] VPlusFallback patch classes: N/N applied.` | prints only with `--fallback on`. | **a player's own** log — step 22 |
+| `[EilifPaths] tool/weapon stamina hooks: 9/9 applied` | **9/9**, and no `(DEGRADED …)` suffix. | **a player's own** log — step 22 |
+
+**The two `[Eilif]` lines are the only ones on the box.** `EilifDeath` and `EilifPaths` are
+client plugins, so their counts live in a player's `LogOutput.log` and cannot be read here —
+ask the first viking in at step 22 for those four lines, and grep their log for
+`MISSING patch class` too. `EilifBoards` has no Harmony patches at all and so has no count.
+
+**8/9 is not "one small feature lost".** A shortfall means a Valheim method this plugin
+patches was renamed or removed in 1.0, and the feature behind it is simply gone with nothing
+else saying so. The denominators are fixed rosters in the source, never a count of what
+happened to load, so a class the runtime could not even enumerate still shows as a
+shortfall. Any number below the full one, or any `MISSING patch class` line, goes in the
+written list at the bottom of this step and is an input to step 17's go/no-go.
+
+### 15.2 — the rest of the boot
+
 **Look for:** the game version line, one `Loading [...]` line per surviving plugin with its
 version, `panel tier: casual`, `ingest status: 200`, the port-3000 check, and — the one
 worth spelling out — the `[EILIF_KEY] runtime world keys (N): … deathkeepequip …` line.
@@ -727,151 +891,107 @@ banned.
 
 ---
 
-## Step 16 — Client zips to Charlie, and start the index clock · Claude prepares, **CHARLIE uploads**
+## Step 16 — Confirm the two client packages, and re-upload only if a DLL moved · Claude prepares, **CHARLIE uploads if there is anything to upload**
 
-Do this **as early as the boot allows**. The 40-to-80-minute listing lag is the longest
-pole in the afternoon and nothing shortens it.
+**Both client packages are already live.** `Eilif/EilifCompanionClient` **0.3.3** and
+`Eilif/EilifPaths` **1.5.0** went up on **2026-09-06 10:01 CT**, byte-identical to the
+zips staged in this repo, and the r2modman listing index caught up the same morning. The
+40-to-80-minute lag that used to own this step is **off the critical path**.
 
-`--stage` has already put each client DLL in `plugins/thunderstore/<Name>-<ver>/` with the
-manifest version bumped, **and that is all it writes.** Three things describe the release
-and none of them can be built:
+So this step exists for exactly one question, and step 2 has already answered it:
 
-1. `README.md` — the package page, still a copy of the previous version's
-2. `CHANGELOG.md` — same
-3. the manifest **description** and **dependencies**
-
-**Fourth, and it is the last chance:** `EilifPaths-1.5.0/README.md` carries **two em
-dashes** (lines 5 and 27, both inherited verbatim from the published 1.4.0 page), and the
-copy doctrine says player-facing copy carries no em or en dashes. Both are two commas'
-worth of work. `EilifCompanionClient-0.3.3/README.md` and both CHANGELOGs are already
-clean. A published Thunderstore version cannot be replaced, only deprecated — so the
-manifest description, the dashes and the re-zip all happen in one sitting, before the
-upload.
-
-Fix all of it, then zip:
+> ### Did the 1.0 rebuild change either client DLL?
 
 ```bash
-(cd plugins/thunderstore/EilifPaths-1.5.0 && zip -qr ../EilifPaths-1.5.0.zip . -x '*.zip' 'UPLOAD.md')
+# From step 2's staging summary, or re-read it:
+bash scripts/rebuild-plugins.sh --dry-run
 ```
 
-**`plugins/thunderstore/EilifPaths-1.5.0/` and its zip now exist** (staged 2026-09-05
-evening against 0.221.12), alongside `EilifPaths`, `-1.1.0`, `-1.3.0`, `-1.4.0` and
-`EilifCompanionClient-0.3.3/`, so the `zip` line above runs today. It is step 4 that
-re-stages the directory, and only if the 1.0 rebuild changes the DLL — until step 4 has run
-on the 9th, that zip is the **pre-1.0** build.
+| Answer | What step 16 is |
+|---|---|
+| **No, both client DLLs are unchanged** | Nothing to upload. The pins are the published **`--paths 1.5.0 --companion-client 0.3.3`**, `launch-preflight` grades both "version exists; community latest", and you go straight to step 18 with no index wait. Five minutes, most of it reading. |
+| **Yes, one or both changed** | That DLL is uploaded under a **new version number**, because **a published Thunderstore version cannot be replaced, only deprecated**. EilifPaths becomes **1.5.1**; EilifCompanionClient becomes **0.3.4**. Follow the re-upload procedure below, and the index clock starts here. |
 
-**Two of the three items above are done; one is not** (re-checked 2026-09-06):
+**A changed DLL is the normal case, not the exception**, and it changes for two independent
+reasons that `rebuild-plugins.sh --help` documents: the 1.0 assemblies change the compiled
+code, and the .NET 8 SDK's SourceLink stamps
+`AssemblyInformationalVersion = "<ver>+<HEAD sha>"`, which moves on the 9th no matter what.
+Read the summary rather than assuming either way.
 
-| # | Item | State |
-|---|---|---|
-| 1 | `README.md` | **Done** (rewritten 2026-09-05 22:49). It now carries an "If ValheimPlus ever goes missing" section naming `[VPlusFallback]` in player-facing language, and `EilifPaths-1.5.0.zip` was re-zipped at 22:49 from the edited file — the README inside the zip and on disk are the same bytes. Nothing to redo. |
-| 2 | `CHANGELOG.md` | **Done.** It documents `[VPlusFallback]` in full — every setting, and that they all stand down while V+ is loaded. |
-| 3 | manifest **description** | **Outstanding.** The only difference from `EilifPaths-1.4.0/manifest.json` is `version_number`; the description is still the unchanged paths/stamina blurb and never says `VPlusFallback`. This is the string mod managers show under the package name. |
+**What must not happen:** minting `--paths 1.5.0` or `--companion-client 0.3.3` after the
+rebuild changed those DLLs. The mint would succeed — both versions exist, so nothing
+refuses it — and every player would be handed the **pre-1.0** client DLL against a 1.0
+server, which takes the `[VPlusFallback]` half down with it. That is why the question above
+is answered before the mint and not after.
 
-Thunderstore renders the **README** as the package page, not the CHANGELOG. The README is
-now right; the **description is not**, and a published version cannot be replaced. Fix item
-3 **before** the `zip` line, then re-zip.
+### If a DLL moved: the re-upload
 
-The old one-line gate (`diff` the two READMEs) now passes and no longer covers the gap that
-is still open. Check all three at once instead:
+1. **Bump the csproj**, so the rebuild and the stage both carry the new number:
+   `plugins/eilif-paths/EilifPaths.csproj` → `<Version>1.5.1</Version>`, and/or
+   `plugins/eilif-companion-client/EilifCompanionClient.csproj` → `<Version>0.3.4</Version>`.
+   **Do not bump these before step 2 has run.** `launch-preflight`'s `PACK_V12_PINS` reads
+   the two csprojs directly, so a number that is not yet uploaded makes its pin gate FAIL on
+   a 404 until it is. (`mint-pack` takes its pins from its own `MODS` baselines and your
+   `--paths` / `--companion-client` flags rather than from the csproj — but it checks the
+   version you hand it, so the same 404 reaches it through `$M` below.)
+2. **Re-stage.** `--stage` refreshes the staging directory and never re-zips:
+   ```bash
+   bash scripts/rebuild-plugins.sh --only eilif-paths --stage
+   bash scripts/rebuild-plugins.sh --only eilif-companion-client --stage
+   ```
+3. **Write the release paperwork.** `--stage` puts the DLL in
+   `plugins/thunderstore/<Name>-<ver>/` with the manifest version bumped, **and that is all
+   it writes.** Three things describe a release and none of them can be built:
+   `README.md` (the package page), `CHANGELOG.md`, and the manifest **description** and
+   **dependencies**. Copy them forward from the 1.5.0 / 0.3.3 directories and edit.
+   **Copy doctrine applies: no em dashes, no en dashes.**
+4. **Fix the description this time.** `EilifPaths-1.5.0` shipped with **1.4.0's blurb** —
+   byte-identical, the paths-and-stamina paragraph, no mention of `[VPlusFallback]` — and it
+   is permanent, because a published version cannot be replaced. The README (which is what
+   Thunderstore renders as the package page) is correct and says it properly; only the
+   one-line summary mod managers show under the package name is wrong. **A 1.5.1 is the
+   chance to fix it. Write the description before the zip.**
+5. **Zip, then prove the zip matches the directory:**
+   ```bash
+   (cd plugins/thunderstore/EilifPaths-1.5.1 && zip -qr ../EilifPaths-1.5.1.zip . -x '*.zip' 'UPLOAD.md')
+   unzip -o plugins/thunderstore/EilifPaths-1.5.1.zip -d /tmp/p151 >/dev/null && \
+     diff -r /tmp/p151 plugins/thunderstore/EilifPaths-1.5.1 -x '*.zip'
+   diff <(python3 -c "import json;print(json.load(open('plugins/thunderstore/EilifPaths-1.5.0/manifest.json'))['description'])") \
+        <(python3 -c "import json;print(json.load(open('plugins/thunderstore/EilifPaths-1.5.1/manifest.json'))['description'])")
+                                                                    # must NOT be empty
+   ```
+   The `diff -r` is the one that matters: `--stage` refreshes the directory and leaves the
+   same-named zip holding the previous build, and nothing else compares the two.
+6. **Charlie uploads**, and `$M` changes to match: `--paths 1.5.1`, `--companion-client
+   0.3.4`, or both. Steps 18 and 19 reuse the same `$M`.
+7. **Now the index clock runs.** Both uploads share one window, so do them together. Nothing
+   shortens it and a code minted inside it fails for every player with "mod not found".
 
-```bash
-diff plugins/thunderstore/EilifPaths-{1.4.0,1.5.0}/README.md      # must NOT be empty (passes today)
-diff <(python3 -c "import json;print(json.load(open('plugins/thunderstore/EilifPaths-1.4.0/manifest.json'))['description'])") \
-     <(python3 -c "import json;print(json.load(open('plugins/thunderstore/EilifPaths-1.5.0/manifest.json'))['description'])")
-                                                                  # must NOT be empty (FAILS today)
-unzip -o plugins/thunderstore/EilifPaths-1.5.0.zip -d /tmp/p150 >/dev/null && \
-  diff -r /tmp/p150 plugins/thunderstore/EilifPaths-1.5.0 -x '*.zip'   # zip matches the directory
-```
-
-`rebuild-plugins.sh --stage` refreshes the staging **directory** and never re-zips, and
-nothing compares the two — so after step 4 runs on the 9th the directory holds the
-1.0-compiled DLL while the same-named zip still holds the 2026-09-05 pre-1.0 build. The
-third command above is what catches that.
-
-To stage the directory on its own without a full rebuild pass:
-
-```bash
-bash scripts/rebuild-plugins.sh --only eilif-paths --stage
-```
-
-An EilifPaths 1.5.0 page that says nothing about `[VPlusFallback]` while the pack ships
-`Enabled = true` is a disclosure gap, not a cosmetic one.
-
-### Two uploads, not one — and neither version is published
-
-Re-checked against the Thunderstore package API on **2026-09-06**:
-
-| Package | Published latest | Staged in the repo | Upload needed? |
-|---|---|---|---|
-| `Eilif/EilifPaths` | **1.4.0** (2026-08-24) | **1.5.0** (`plugins/thunderstore/EilifPaths-1.5.0.zip`, 39,072 B) | **REQUIRED.** `--fallback on` is refused without `--paths 1.5.0` or newer, so a `--no-vplus` pack cannot mint at all until this is up. This is the longest pole in the day. |
-| `Eilif/EilifCompanionClient` | **0.3.2** (2026-09-05 22:11 UTC) | **0.3.3** (`plugins/thunderstore/EilifCompanionClient-0.3.3.zip`, 29,676 B) | **Optional — Charlie's call, made before the 9th.** |
-
-**The client decision, stated once.** The repo is at 0.3.3 because the 2026-09-05 hardening
-pass changed the DLL, and 0.3.2 on Thunderstore is immutable. Two workable branches:
-
-- **Pin 0.3.2** (published). `--companion-client 0.3.2` mints today. But
-  `launch-preflight.mjs`'s built-in `PACK_V12_PINS` derives the client pin from the csproj,
-  so it computes **0.3.3** and grades a pin the pack does not contain — **pass `--pins` at
-  20c and 20e** or those gates FAIL on a phantom. You are already passing `--pins` on a
-  `--no-vplus` night for the ValheimPlus entry, so this costs nothing extra.
-- **Upload 0.3.3.** Then `$M` uses 0.3.3 and the gates grade what the pack holds. The two
-  uploads **share one index window**, so putting both up together costs no extra clock —
-  whereas discovering the second upload at 20c costs the full 40 to 80 minutes again with
-  no way to shorten it.
-
-The line that used to sit here — *"0.3.2 is live, so if the Client DLL did not change in
-the 1.0 rebuild there is nothing to upload for it"* — is misleading and was removed: the
-DLL **already** changed, before the 1.0 rebuild. What the 0.3.3 bump actually carries is
-also more than the "startup health line" the facts block claims: it wraps `Update()` in a
-rate-limited try/catch, and under 0.3.2 a throw there lands in Unity's loop, logs every
-frame in the player's log and stops that player's map reports permanently. On a
-recompile day that is the argument **for** uploading 0.3.3, not against it.
-
-> ### If EilifPaths 1.5.0 was already published before the 9th
->
-> Uploading it early is the obvious way to take the 40-to-80-minute lag off the critical
-> path, and it has a trap in it. **A published Thunderstore version cannot be replaced.**
-> `EilifPaths.csproj:8` is pinned at `<Version>1.5.0</Version>`, so step 2 rebuilds *1.5.0*
-> against the 1.0 assemblies — a different DLL under a version number that is already taken.
-> It differs for two independent reasons, and `rebuild-plugins.sh --help` documents both:
-> the 1.0 assemblies change the compiled code, and the .NET 8 SDK's SourceLink stamps
-> `AssemblyInformationalVersion = "1.5.0+<HEAD sha>"`, which moves on the 9th no matter what.
->
-> A pack pinning `--paths 1.5.0` would then hand every player the **pre-1.0** client DLL
-> while the server runs 1.0. So if 1.5.0 is already up when the morning starts:
->
-> 1. bump `plugins/eilif-paths/EilifPaths.csproj` to `<Version>1.5.1</Version>` **before**
->    step 2, so the rebuild and the stage both carry the new number;
-> 2. upload `EilifPaths-1.5.1` here;
-> 3. change `--paths 1.5.0` to `--paths 1.5.1` in `$M` where it is defined at step 16;
->    step 18 reuses the same `$M` on all three of its lines.
->
-> `--fallback on` accepts 1.5.1 for the same reason it accepts 1.5.0: it refuses anything
-> **older** than 1.5.0, because that is where the `[VPlusFallback]` section arrived.
->
-> The same rule applies to `EilifCompanionClient`: 0.3.2 **is** published and immutable. The
-> 2026-09-05 hardening already changed the DLL, so the repo is at **0.3.3** with its zip staged.
-> If the 1.0 rebuild changes it again, that is 0.3.4, never a re-upload.
-
-Then spend the wait on the one link no script can check — mint under a throwaway profile
-name and import it in r2modman by hand (Settings → Import/Export → Import profile), then
-delete the profile:
+### The pin set, and the one link no script can check
 
 ```bash
-M="--world Eilif --paths 1.5.0 --companion-client <ver> --no-vplus --fallback on --cap 20"
+# $M — one definition for steps 16, 18 and 19. Use the numbers step 2 produced.
+M="--world Eilif --paths <1.5.0 or 1.5.1> --companion-client <0.3.3 or 0.3.4> --no-vplus --fallback on --cap 20"
 node scripts/mint-pack.mjs $M --profile-name 'Eilif TEST'
 ```
 
-**Look for:** the package page shows the new version, and the throwaway profile imports
-with every mod and the cfgs already filled in.
+Then import that throwaway profile in r2modman by hand (Settings → Import/Export → Import
+profile) and delete it. `--pins` is still needed at 20c and 20e for the **ValheimPlus**
+entry on a `--no-vplus` night — preflight's built-in `PACK_V12_PINS` still contains it.
+The client half of that argument is spent: preflight derives the client pins from the
+csprojs, so after step 2 and any bump above they are exactly what the pack holds.
+
+**Look for:** if nothing was uploaded, `launch-preflight`'s Modpack-pins block reads
+`version exists; community latest` for both Eilif rows. If something was uploaded, the
+package page shows the new version and the throwaway profile imports with every mod and the
+cfgs already filled in.
 
 **If it fails:** an upload that will not land, or an index that has not caught up by 15:00
-CT, is a **vanilla-night** trigger. Nothing about a slow index is broken and re-minting
-does not help.
+CT, is a **vanilla-night** trigger (step 17). Nothing about a slow index is broken and
+re-minting does not help.
 
-**Rollback:** a Thunderstore version cannot be unpublished, only deprecated. Get the
-README and manifest right before the upload, not after.
+**Rollback:** a Thunderstore version cannot be unpublished, only deprecated. Get the README,
+the description and the zip right before the upload, not after.
 
 > **A TEST mint is indistinguishable from a real one once it leaves the screen.** The
 > bytes uploaded are deliberately identical to what `--publish` uploads; "TEST" is a label
@@ -887,12 +1007,28 @@ it stops the afternoon from drifting into a decision made at 17:15 with the crew
 
 **GO-A — the plan above.** Continue to step 18.
 
-**Vanilla night (GO-B).** The server runs 1.0 with `BepInEx/plugins/` moved aside, players
-launch plain Valheim with no pack at all, and the cap is 10. Pick this when the game is
-fine but our side is not: a plugin will not compile, a third-party mod takes the world
-load down, or the Thunderstore index has not caught up. It costs the dashboard stats,
-in-game voice, oaths, pins, boards and the map. The wipe, the world, the Casual tier and
-the Discord side all still happen exactly as written. Then:
+**Vanilla night (GO-B). This is the file's only definition of the phrase, and nothing else
+in the day may be called vanilla night.** The server runs **1.0** with
+`BepInEx/plugins/` moved aside, **players launch plain Valheim with no pack at all**, and
+the cap is the vanilla **10**. Pick this when the game is fine but our side is not: a
+plugin will not compile, a third-party mod takes the world load down, or a client DLL had
+to be re-uploaded at step 16 and its listing index has not caught up by 15:00. It costs the
+dashboard stats, in-game voice, oaths, pins, boards and the map. The wipe, the world, the
+Casual tier and the Discord side all still happen exactly as written.
+
+**No pack is minted on this branch** — there is no `mint-pack.mjs` flag that renders an
+empty pack, and nobody is importing one, so the pack's `World =` line reaches nobody. Leave
+`GS_EXPECTED_WORLD` alone: with no `GsValheimStatsClient` and no `EilifCompanionClient` on
+any player's machine there are no client payloads for it to grade, and the only producer
+left is the server-side GS Emitter, which the guard does not apply to. Tell players in the
+GO post to **launch plain Valheim**, not to update their profile.
+
+**What this is not.** The noon-CT branch ("HOLD ON 0.221.12", in the shape-of-the-day
+section) is a fully modded night on a **0.221.12** box with the cap at 20 and pack v12
+re-minted for the world name. It is the near-opposite of this branch and it is never called
+vanilla night. Do not carry `--posture GO-B` or `BepInEx/plugins/` into it.
+
+Then, on a real GO-B:
 
 - add `--posture GO-B` to **every** `launch-preflight.mjs` run so the mod-dependent checks
   report instead of failing, and
@@ -911,10 +1047,14 @@ Post whichever it is in `#valheim` **at the moment it is decided.** Copy: vault
 
 ---
 
-## Step 18 — Wait for the index, then mint pack v12 · Claude
+## Step 18 — Mint pack v12 (after the index, if step 16 uploaded anything) · Claude
 
-A code minted inside the listing window fails for every player with "mod not found".
-Rehearse until it clears, then test-mint, then publish. **All three lines, in order.**
+**If step 16 uploaded nothing, there is no wait here** — every pin, both Eilif packages
+included, has been in the listing index since 2026-09-06. Go straight to the three lines.
+**If step 16 uploaded a `1.5.1` or a `0.3.4`, the 40-to-80-minute window is running and this
+is where it is waited out:** a code minted inside it fails for every player with "mod not
+found". Rehearse until it clears, then test-mint, then publish. **All three lines, in
+order.**
 
 ```bash
 # $M is the flag set from step 16
@@ -991,6 +1131,49 @@ Then the site config:
   only an edit if the cap changed).
 - `config/mods.ts` — every version that moved, **and delete the rows for mods this pack no
   longer ships**, or `/mods` advertises a mod nobody has.
+
+  **The version is not the only thing that moves. Three descriptions become wrong at the
+  v12 mint, and deleting the ValheimPlus row takes the page's only mention of the raised
+  player cap and infinite fuel with it.** Those two comforts move to Eilif Companion
+  `[ServerFallback]` and EilifPaths `[VPlusFallback]`, and neither of those descriptions
+  mentions them today. `/mods` is what a player reads to find out what they are running, so
+  paste these three in with the versions. They are written in the register the page already
+  uses, and they carry no dashes:
+
+  1. **Eilif Paths**, version `1.5.0`:
+
+     > Dirt paths, paved roads, and floors you have built move you 40% faster, and running,
+     > jumping, swimming and hauling on them cost a quarter of the usual stamina. Tools and
+     > weapons are left out: a swing, a block, a drawn bow or a hoe costs normal stamina on
+     > a path or road, and nothing at all on a floor you built. Beds also accept a fire 8
+     > metres further off, and crafting upgrades attach 10 metres further out at every
+     > station. With ValheimPlus gone this mod also carries the comforts it used to hold:
+     > fires, ovens, hot tubs and shield generators burn without fuel, workbenches build out
+     > to 30 metres and need no roof, and gathering, picking and loot all run 30% richer.
+     > Those last ones run on whichever machine owns the ground, so a fire or a berry bush
+     > close to the world's first spawn behaves the old way. Replaces the abandoned Useful
+     > Paths, whose path detection broke years ago. Ships in the modpack.
+
+  2. **Eilif Companion** (server-side, no version shown to players, but the text changes):
+
+     > The voice of the Hall itself: it carries the in-game /oath swearing and speaks as
+     > Eilif. It holds the world's death rule steady, so the gear you are wearing stays with
+     > you when you fall and the rest waits in your tombstone. With ValheimPlus gone it is
+     > also what keeps the hall's doors wide, holding the server at 20 vikings instead of the
+     > ten Valheim allows on its own. Built just for this server; nothing to install.
+
+  3. **Eilif Companion Client**, version `0.3.3`:
+
+     > Your explored-map percentage flows to the Cartographer leaderboard automatically while
+     > you play, with no setup and nothing to upload. It names exactly what killed you the
+     > moment you die, the creature or the hazard, so How We Die and the Saga show the real
+     > cause instead of a guess. New in this pack: a keep-list, so the tools and gear a viking
+     > cannot afford to lose stay on you through a death that would otherwise scatter them.
+     > Ships in the modpack.
+
+  If the night keeps ValheimPlus (V+ ships a 1.0 build, step 10's "if it fails" branch),
+  keep the ValheimPlus row and use the **existing** Paths and Companion text instead: the
+  fallback halves stand down while V+ is loaded, and advertising them would be a lie.
 - `app/get-started/page.tsx` — **three** edits, not two. Do not trust this count either:
   **grep the file for every pinned version number before you deploy.**
 
@@ -1113,6 +1296,19 @@ Three things `cutover-env.sh` **cannot** do, which it prints:
 2. The GS Emitter cfg `World =` on the box, in a stopped window — done at step 12.
 3. The pack mint — done at step 18.
 
+**A fourth, which it does not print: `update config/commands.ts channels after cutover.`**
+The `/commands` page is in the NavBar, so it is player-facing on launch night, and it says
+**`#server` for five notifications that this step moves to `#valheim`** — boss kill, recap,
+Great Deeds, titles and the oath echo. It is **not** derived from the running config:
+`config/commands.ts` carries the literal strings `where: 'Discord, in #server'` and
+`channel: 'server'` on those five entries, and the file's own header says it has to be
+re-pointed in the same pass as 20b. Nothing changes automatically. So after `--apply`:
+edit those five entries to `#valheim` / `'valheim'`, run
+`npx tsx scripts/commands-page.test.mjs` (the tripwire compares the page against the live
+`.env`, so it passes today and fails the moment 20b runs without this edit), and **deploy** —
+step 19's deploy is already behind you, so this needs its own. *(Code changes are the other
+track's; this is the reminder that they are needed.)*
+
 **Also not automated anywhere:** rotate `GS_EMITTER_TOKEN` and `VOICE_API_TOKEN` to fresh
 values in **three** places each — the cfg on the box, Vercel, and `.voice-token`. The box
 half needs a stopped window, so either do it at step 12 or accept that the pilot tokens
@@ -1223,8 +1419,24 @@ step 20a untouched. Its recovery message therefore measures "down for X" from wh
 first component went stale back at step 5, hours before the cutover, not from anything a
 player saw. Post-launch it self-corrects on the next transition; nothing needs editing.
 
-**If the watchdog workflow was disabled at step 5 for quiet, re-enable it now**, from the
-GitHub Actions tab, and confirm the next scheduled run is green before anyone goes to bed.
+**If the watchdog was silenced at step 5 for quiet, re-arm BOTH halves now.** There are two
+pingers and disabling one leaves the other running, so putting one back is only half the
+job:
+
+```bash
+gh workflow enable watchdog.yml     # or the GitHub Actions tab
+```
+```sql
+-- Supabase SQL editor. Re-run the cron.schedule(...) block at the bottom of
+-- db/2026-09-06_watchdog_pgcron.sql verbatim.
+select * from cron.job where jobname = 'eilif-watchdog-ping';   -- one row = armed
+```
+
+The database job is the one that matters tonight: it fires every 5 minutes, and the GitHub
+one has been observed running about every 4 hours whatever its cron line says. Confirm the
+job row is back and that a 200 lands within ten minutes
+(`select status_code, created from net._http_response order by id desc limit 3;`) before
+anyone goes to bed. Alerts and recoveries go to the **ops channel**.
 
 ---
 
@@ -1265,8 +1477,11 @@ because it sits behind **two** independent 60 s caches — the page's own ISR wi
 minutes after the boss timeline has already turned over. The boss row is the surface that
 turns **first**, which makes it the wrong thing to judge the wipe on. Look for the Earned
 Deeds card reading **"Nothing earned yet"** with "The first deed is still ahead" under it,
-and all **38** deeds sitting at zero in the upcoming list. Only then read `/map` for the new
-world.
+and **every deed in the upcoming list at zero.** Grade the list, not a number: the ladder
+moves (it went from 38 to **36** on 2026-09-06 when the Bosses-slain chain was retired and
+The First Mile was added), and a count written down here goes stale the next time a deed is
+edited. What the wipe has to produce is "nothing earned, everything at zero", which stays
+true whatever the ladder holds. Only then read `/map` for the new world.
 
 ## Step 21 — Charlie's own last look · **CHARLIE ONLY**
 
@@ -1306,6 +1521,22 @@ correct — see 20e); armor and held weapon survive the test death; and the oath
 `/oath` and `#valheim` within a minute. The oath test exercises the same plugin as the
 voice, so if the oath lands and the voice component stays `unknown`, the voice half is the
 thing to look at.
+
+**Ask the first viking in for the four client patch-class lines.** Step 15.1 could only read
+the two `[Eilif]` counts, because `EilifDeath` and `EilifPaths` run on the player's machine.
+Their `BepInEx/LogOutput.log` (inside the r2modman profile folder) carries the rest, and
+this is the first chance anyone has had to read them on a 1.0 client:
+
+```
+grep -E 'MISSING patch class|patch classes applied:|Core patch classes:|stamina hooks:' LogOutput.log
+```
+
+Healthy is **zero** `MISSING patch class` lines plus `[EilifDeath] patch classes applied:
+3/3`, `[EilifPaths] Core patch classes: 6/6` and `[EilifPaths] tool/weapon stamina hooks:
+9/9 applied` with no `(DEGRADED …)`. On a `--fallback on` pack there is a
+`[EilifPaths] VPlusFallback patch classes: N/N applied.` line too. A shortfall names the
+feature that died in the same line; write it into the GO post rather than letting people
+find it.
 
 **If the test death drops gear:** the tier is not Casual. **Stop before anyone builds** and
 go back to step 13.
@@ -1350,12 +1581,12 @@ printable HTML runbook · **E** vault `04-Launch-Readiness-Checklist.md` fast pa
 | 14 | **`mint-pack.mjs --publish` checklist ends "deploy, then Stop/Start the server"** | H | Same as #8: wrong for launch day. Left as printed output (script logic is another track's scope); step 19 overrides it. |
 | 15 | **Companion on the box is 0.3.0** | G | **Stale.** Verified live: **0.3.2**. The launch build is **0.3.3**. |
 | 16 | **"Panel death penalty STILL easy" / keep-gear is plugin-only** | G | **Stale.** Verified live: panel tier `casual`, durable. |
-| 17 | **Companion Client 0.3.0 "staged and zipped, not uploaded"** | G | **Stale.** `Eilif-EilifCompanionClient-0.3.2` is live on Thunderstore. |
-| 18 | **`valheim-log-poller.service`** | `AGENTS.md` (76, 79), `services/log-poller/README.md` (44-50) | The live unit is **`eilif-log-poller.service`**. There is no unit by the old name. `docs/PROJECT.md` was corrected in the same pass and is **not** one of the stale sources. |
+| 17 | **Companion Client 0.3.0 "staged and zipped, not uploaded"** | G | **Stale.** `Eilif-EilifCompanionClient` is live on Thunderstore: 0.3.2 from 2026-09-05, and **0.3.3** since 2026-09-06 10:01 CT. |
+| 18 | **`valheim-log-poller.service`** | `AGENTS.md` (76, 79), `services/log-poller/README.md` (44-50) | The live unit is **`eilif-log-poller.service`**. **Closed 2026-09-06:** both sources were corrected, and the repo's reference unit file was renamed to `services/log-poller/eilif-log-poller.service`, so the old name is gone from the repo entirely. `docs/PROJECT.md` was never one of the stale sources; it now describes a reference filename that no longer exists and is the last thing left to tidy. |
 | 19 | **`LAUNCH_NOTICE` is "already set in `config/server.ts`"** | vault comms piece 1 | It is `''` by Charlie's 2026-09-05 no-banner decision. |
 | 20 | **"`docs/LAUNCH-WIPE.md` step 16 already carries the edit"** | vault comms | It was step 17 there and is step 19 here. Cross-doc step numbers are why this file exists. |
 | 21 | **`ServerFallback: disabled` is the failure line to grep** | A | Only when V+ is present. With V+ gone the line is the longer `OFF and no ValheimPlus installed…` warning. Step 11's table has all four. |
-| 22 | **The step numbering itself** | A(19) B(8) C(9) D(12) E(12) | One sequence, 22 steps (plus step 0, which is not on the day). Everything else points here. |
+| 22 | **The step numbering itself** | A(19) B(8) C(9) D(12) E(12) | One sequence, **23 steps: 0 through 22**, and step 0 is not on the day. The ops cockpit's Coming up tab counts it the same way. Everything else points here. |
 
 Five more were found on the review pass and settled the same way:
 
@@ -1363,8 +1594,8 @@ Five more were found on the review pass and settled the same way:
 |---|---|---|---|
 | 23 | **Nobody owned generating the launch world** | none of them | It appeared as an upload in A and here, and as an open Charlie to-do in E, and in no sequence at all. **Step 0**, due 2026-09-08, with the 0.221.12-vs-1.0 tradeoff named. Without it the stopped window stalls after the point of no return. |
 | 24 | **`launch-wipe.mjs`'s own `POST-WIPE CHECKLIST`** | H | Prints at step 6 **and** 20a and disagreed with this file eight ways, including telling the operator to **remove** `TITLE_CHANNEL` when an absent one routes titles to `#server` and `cutover-env.sh` sets it. **Fixed in the script itself on 2026-09-06** (the rehearsal track owned it): the printed block and this file now agree. What changed is tabulated at step 6. |
-| 25 | **The watchdog is not mentioned anywhere in the sequence** | A carried the finding, no sequence carried the fix | Pings every 15 min from GitHub through a planned outage that runs from step 5 to 20d. Named at step 5 (what alerts, how often, why not to mute it) and at 20e (`ops_alerts` survives the wipe, so the all-clear's duration is measured from before the cutover). |
-| 26 | **`EilifPaths 1.5.0` cannot be re-uploaded once published** | none of them | The csproj is pinned at 1.5.0 and SourceLink restamps on every HEAD move, so an early upload and the morning's rebuild are different DLLs under one immutable version. Branch added at step 16: bump to **1.5.1** and pin `--paths 1.5.1`. |
+| 25 | **The watchdog is not mentioned anywhere in the sequence** | A carried the finding, no sequence carried the fix | Named at step 5 (what alerts, how often, why not to mute it) and at 20e (`ops_alerts` survives the wipe, so the all-clear's duration is measured from before the cutover). **Re-settled 2026-09-06:** there are **two** pingers, not one. Supabase `pg_cron` job `eilif-watchdog-ping` runs **every 5 minutes** and the GitHub workflow runs about **every 4 hours** whatever its `*/15` line says. Silencing or re-arming means both halves; step 5 and 20e carry the commands. Alerts land in the **ops channel**. |
+| 26 | **`EilifPaths 1.5.0` cannot be re-uploaded once published** | none of them | The csproj is pinned at 1.5.0 and SourceLink restamps on every HEAD move, so an early upload and the morning's rebuild are different DLLs under one immutable version. **This stopped being hypothetical at 2026-09-06 10:01 CT**, when 1.5.0 and 0.3.3 both went up. Step 16 is now written around it as the main path, not a blockquote: re-upload only if step 2 changed a DLL, and then as **1.5.1 / 0.3.4**, with the csproj bump AFTER the rebuild so the pin gates do not fail on a 404. |
 | 27 | **`docs/OPS-COCKPIT.md`'s launch-revert remediation** | one of the six sources, never reconciled | Listed only `RECAP_CHANNEL`, `MILESTONE_CHANNEL` and `RECAPS_START`, missed `OATH_CHANNEL`, `BOSS_CHANNEL` and `TITLE_CHANNEL` entirely, and pointed at the superseded vault outline. Now points at `cutover-env.sh --apply` and step 20b. |
 
 ### Corrected again on the T-3 re-audit (2026-09-06)
@@ -1377,12 +1608,12 @@ place above; this table is only the index.
 | 28 | Step 19: **"two edits, not one"** to `app/get-started/page.tsx` | **Three.** The update card's self-check sentence (lines 609-610) pins Eilif Paths 1.4.0 and tells a stale-pack player they are current. Step 19 now carries a grep instead of a count. |
 | 29 | Step 20's page check: open each page **twice** and grade `/world` on its boss row | Do not count requests (production: one stale answer; a cold local build: two). Grade `/world` on its **Great Deeds** numbers, which sit behind a second 60 s cache and turn last. Read it in a never-opened tab or with `curl` — the client Router Cache is **30 s**, not the 300 s the old note assumed. |
 | 30 | Step 10: delete the **directory** `BepInEx/plugins/ValheimPlus/` | It is a loose **file**, `BepInEx/plugins/ValheimPlus.dll`, and V+ prints that path itself on every boot. `docs/PACK.md` rule 6 fixed in the same pass; `scripts/mint-pack.mjs:800` still prints the folder form. |
-| 31 | Step 16 table: the EilifPaths 1.5.0 README is outstanding, and one `diff` is the gate | The README was rewritten and re-zipped 2026-09-05 22:49. The **manifest description** is what is still outstanding, and the old `diff` gate now passes without covering it. Three checks replace it. |
-| 32 | Step 16: "0.3.2 is live, so … there is nothing to upload" for the client | **Two uploads, not one.** EilifPaths 1.5.0 is required; EilifCompanionClient 0.3.3 is optional but the client DLL already changed. Pin 0.3.2 **and pass `--pins`**, or upload both together in one index window. |
+| 31 | Step 16 table: the EilifPaths 1.5.0 README is outstanding, and one `diff` is the gate | The README was rewritten and re-zipped 2026-09-05 22:49. The **manifest description** was the item still outstanding. **Closed the hard way 2026-09-06:** 1.5.0 shipped carrying 1.4.0's description verbatim, and a published version cannot be replaced, so that is permanent for 1.5.0. The README, which is what Thunderstore renders as the package page, is correct. Step 16 now says to write the description for **1.5.1** if there is one. |
+| 32 | Step 16: "0.3.2 is live, so … there is nothing to upload" for the client | **Settled by the upload.** Charlie put both up on 2026-09-06 at 10:01 CT, so the pin-0.3.2-or-upload-0.3.3 branch is gone. `PACK_V12_PINS` derives 0.3.3 and 1.5.0 from the csprojs and both grade PASS. `--pins` is still needed at 20c and 20e for the **ValheimPlus** entry on a `--no-vplus` night, and for nothing else. |
 | 33 | Step 14: only AzuCraftyBoxes is costly to pull | Three are. Pulling the **GS Emitter** stops the roster, the world day, boss detection and every Great Deed, and makes post-start preflight unpassable; pulling **WebMap** makes 20d step 3's gate unsatisfiable. Both are vanilla-night class, not quick fixes. |
 | 34 | Nothing anywhere about HookGenPatcher, MMHOOK or the BepInEx cache | All three survive the Steam Update built against 0.221.12, and a thrown preload patcher presents as **no plugins at all**. Branch added at step 14, with the BepInEx-version-moved branch beside it. |
 | 35 | Step 6's third backup: prose, no command, no size | A pasteable SFTP batch, a measured size (worlds_local 78 MB, BepInEx ~25 MB, `Backups/` to be sized on the day) and a rate (~0.8 MB/s), plus "do not `get -r` the whole nest". |
-| 36 | No rule for **1.0 being late** | Two cutoffs in the shape-of-the-day table: 09:00 CT is tight, **noon CT is Charlie's hard cutoff (2026-09-06)** and vanilla night is called then rather than at 15:00. Charlie owns both numbers. |
+| 36 | No rule for **1.0 being late** | Two cutoffs in the shape-of-the-day table: 09:00 CT is tight, **noon CT is Charlie's hard cutoff (2026-09-06)**, and the night is called then rather than at 15:00. **Corrected the same day:** the noon branch was written as "vanilla night", which is step 17's name for a 1.0 box with `BepInEx/plugins/` moved aside and no pack. The noon branch is the near-opposite — a fully modded **0.221.12** box, cap 20 — so it now has its own name, **HOLD ON 0.221.12**, its own posture table, and its own answer for the pack and `GS_EXPECTED_WORLD`. |
 | 37 | 20e: "fresh heartbeats … for both plugins" | `companion-voice` has **never** reported one and cannot before a player joins (`alertsOnSilence: false`, and the poll needs a connected peer). It reads `unknown` at 20e and that is correct; the real check moved to step 22. |
 
 Also corrected in place, from the same pass: the Hold rules said **two** known-spurious
@@ -1390,6 +1621,24 @@ preflight FAILs where there are **three** (port 3000 is the third, a known expos
 the GTX ticket was skipped on 2026-09-05); step 12's `vplus-data/…_mapSync.dat` sits under
 `BepInEx/`; and step 15's `[EILIF_KEY]` Look-for now names the **runtime world keys** line,
 because `enforced world key` correctly never prints while the panel tier is Casual.
+
+### Corrected on the T-2 pass (2026-09-06, afternoon)
+
+Eight more, all of them caused by the same morning's own work: the 10:01 CT uploads, the
+noon cutoff decision, the deeds change and the pg_cron watchdog each landed in one or two
+documents and left the rest behind. Row 45 is the one that would have cost time on the
+day rather than only credibility.
+
+| # | What this file said | Corrected to |
+|---|---|---|
+| 38 | The facts block said both packages are **live** and, three lines later, that EilifPaths 1.5.0 is **not uploaded** and is "the single longest pole in the day" | Both are **live since 2026-09-06 10:01 CT**, byte-identical to the staged zips, index caught up. The stale half is gone and the shape-of-the-day table no longer budgets an index wait it does not need. |
+| 39 | Step 16: "Two uploads, not one — and neither version is published", a readiness table grading EilifPaths **REQUIRED**, and a pin-0.3.2-or-upload-0.3.3 decision | Step 16 is now one question — **did the 1.0 rebuild change either client DLL?** — with two answers: nothing to upload, or upload it as **1.5.1 / 0.3.4** because a published version is immutable. The csproj bump belongs **after** step 2, never before, or every pin gate FAILs on a 404. |
+| 40 | Step 2 carried no warning that the versions it builds are already taken | A blockquote at the head of step 2, before the command, with the forward pointer to step 16 and the reason not to bump the csprojs early. |
+| 41 | The noon-CT row called its branch **vanilla night**, the same words step 17 uses for a 1.0 box with the plugins moved aside | Named **HOLD ON 0.221.12**, with a three-row posture table, what still runs, and what happens to the pack. Step 17 now carries the file's only definition of "vanilla night" and says out loud what the noon branch is not. |
+| 42 | The noon row said "the pack is not re-minted" while the world still changes | Pack v11 ships `World = EilifRehearsal` and step 19 sets `GS_EXPECTED_WORLD=Eilif`, so that pairing silently discards every `GsValheimStatsClient` stat merge. The row now re-mints for the world name (`--world Eilif`, v11 pins, zero index wait) or leaves `GS_EXPECTED_WORLD` unset, and says which. |
+| 43 | Step 15 never mentioned `MISSING patch class` or the patch-class counts | **Step 15.1**, run first: zero `MISSING patch class` lines, `[Eilif] patch classes applied: 2/2`, and `2/2` on `ServerFallback` when it is on. The four client-side counts (`3/3`, `6/6`, `9/9`, and the fallback line) are read from a player's own log at step 22, because those plugins do not run on the box. |
+| 44 | Step 5 and 20e described a single GitHub pinger "every 15 minutes"; the post-wipe check said "all **38** deeds" | Two pingers (`pg_cron` every 5 min, GitHub about every 4 h), silenced and re-armed as a pair, landing in the **ops channel**. The deed check reads **every deed in the upcoming list at zero** — production went from 38 to 36 on 2026-09-06 and a hard-coded count goes stale on the next deed edit. |
+| 45 | Step 4's command was a bare `--stage`, and its "if it fails" said re-run step 2 | **The runbook and the tool now disagreed at the point of no return.** `rebuild-plugins.sh` gained a duplicate-version refusal, and since 10:01 CT both client versions are published — so a bare `--stage` **REFUSES** both client plugins, exits 1 with "Do not stage any of this", and has already copied the two server DLLs. Step 4 now passes `--only eilif-companion,eilif-boards`, and says why the refusal's own two suggestions are both wrong here: `--allow-published` would overwrite the directory whose zip is already live, and bumping the csprojs is step 16's move, not step 4's. |
 
 ---
 

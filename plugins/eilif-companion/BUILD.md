@@ -8,7 +8,11 @@ byte-identical to that install — no drift found. dotnet SDK on this machine: *
 launch-day rebuild needs **no network access** for NuGet. Full build (`dotnet build -c Release`)
 takes under 2s.
 
-## Deploying **0.3.3** (built 2026-09-05, staged, NOT uploaded)
+## Deploying **0.3.3** (built 2026-09-05, staged, NOT yet on the box)
+
+> "NOT uploaded" here means **not yet SFTP'd onto the GTX box**, which is a stopped-window job.
+> Eilif Companion is server-only and is **never** published to Thunderstore, so nothing on this
+> page is about a package upload. The two client plugins are the published ones.
 
 `dist/EilifCompanion.dll` is now **0.3.3**, and it **supersedes the staged 0.3.2** — 0.3.2 was built
 2026-09-04 but never reached the box, so there is nothing to reconcile: upload 0.3.3 and 0.3.2 is
@@ -187,9 +191,20 @@ stopped window: **Panel Stop** → SFTP-upload `dist/EilifCompanion.dll` over
 few seconds after the process exits) → **Panel Start** (Stop → Start, never Restart) → then grep
 `LogOutput.log` for:
 
-1. **`Eilif Companion 0.3.2`** — the version actually loaded.
-2. **`[Eilif] patch classes applied: 2/2`** — both hooks on (OathCapture + the pin capture); anything
-   else means read the `[Eilif] could not apply <Class>: <message>` lines above it.
+1. **`MISSING patch class`** — **zero lines is healthy, and this is the first grep after a 1.0
+   rebuild.** A plugin prints its `Loading [...]` line whether or not its Harmony patches went on,
+   so `Loading` proves the DLL was chainloaded and nothing more. Each `MISSING patch class` line
+   names the class **and the feature that died with it**
+   (`EilifCompanionPlugin.cs:288`). One hit is one feature gone, silently, with nothing else
+   saying so.
+2. **`Eilif Companion 0.3.3`** — the version actually loaded.
+3. **`[Eilif] patch classes applied: 2/2`** — both hooks on (OathCapture + the pin capture); anything
+   else means read the `[Eilif] could not apply <Class>: <message>` lines above it. The denominator
+   is a fixed roster in the source, never a count of what loaded, so a class the runtime could not
+   even enumerate still shows as a shortfall.
+4. **`[Eilif] ServerFallback patch classes: 2/2 applied.`** — prints **only** when
+   `[ServerFallback] Enabled = true`. Its absence on a night that still runs ValheimPlus is
+   correct.
 
 Then have someone shout `/s /oath I will hold the north` and confirm a raw-case
 `[EILIF_OATH] <Name> | I will hold the north` line appears — mixed case is the proof the 0.3.1 hook is

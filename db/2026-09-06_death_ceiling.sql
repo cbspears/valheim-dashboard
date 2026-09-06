@@ -1,6 +1,12 @@
 -- 2026-09-06 · ingest_death(): per-character death ceiling (T-3 audit, data area).
 --
--- STATUS: APPLIED to production 2026-09-06 07:50 CT (Charlie: "you decide"; ceiling 5 per 2-minute span).
+-- STATUS: RE-APPLIED to production 2026-09-06 13:45 CT (returns 'capped' on a ceiling refusal).
+-- "you decide"; ceiling 5 per 2-minute span), but this file changed afterwards: the
+-- ceiling now returns 'capped' where it used to return 'ignored', so production and
+-- this file disagree until someone re-runs it. Re-apply before launch -- lib/deaths.ts
+-- keys its per-character warning on 'capped', and until this is re-applied a ceiling
+-- refusal is still logged as "no players row yet", which is the wrong story.
+-- Re-applying is safe at any time: create or replace, no data touched, no downtime.
 -- Idempotent: create or replace; safe to run twice; safe while the bot and site run.
 --
 -- WHAT: anyone holding the public modpack can post client death reports with
@@ -12,6 +18,16 @@
 -- a forger is bounded to a few rows a minute instead of thousands, and each
 -- refusal raises a Postgres WARNING that the database log shows.
 --
+-- WHY THE RETURN WORD CHANGED (2026-09-06, T-3 audit site-3). This returned
+-- 'ignored', which ingest_death already used for "there is no players row to hang
+-- this death on" -- an outcome that self-heals the moment the poller's join path
+-- creates the row. lib/deaths.ts therefore reported every ceiling refusal to the
+-- Vercel log as "no players row yet", and on the gs batch path did not report it at
+-- all. Two causes with opposite meanings behind one word, and the only honest record
+-- of the refusal was a Postgres WARNING in a log nobody watches on launch night. The
+-- ceiling now returns its own word, 'capped'; 'ignored' keeps its old meaning
+-- exactly. Nothing else in the function changed.
+--
 -- Everything else is byte-for-byte db/2026-09-04_ingest_death.sql (advisory
 -- lock, replay idempotency, eilif/gs cross-upgrade). If that file changes,
 -- regenerate this one from it rather than editing both.
@@ -19,7 +35,7 @@
 -- Apply: paste into the Supabase SQL editor, or psql -f this file.
 -- Rollback: re-run db/2026-09-04_ingest_death.sql.
 -- Verified 2026-09-06 on the local rehearsal stack (rolled back): seven rapid gs
--- deaths for one character -> inserted x5, ignored x2; five rows stored.
+-- deaths for one character -> inserted x5, capped x2; five rows stored.
 
 create or replace function public.ingest_death(
   p_name text,
@@ -103,15 +119,15 @@ begin
     -- with reporter = victim passes every identity gate. This bounds the damage:
     -- more than v_ceiling deaths for one character inside +/- v_ceiling_window of
     -- the reported time is not how Valheim works (respawn alone takes longer), so
-    -- the report is ignored and a WARNING lands in the Postgres log.
+    -- the report is refused with 'capped' and a WARNING lands in the Postgres log.
     if (select count(*) from public.events
           where type = 'death'
             and character_name = p_name
             and created_at >= p_at - v_ceiling_window
             and created_at <= p_at + v_ceiling_window) >= v_ceiling then
-      raise warning 'ingest_death: ceiling for % (% deaths within % of %); report ignored',
+      raise warning 'ingest_death: ceiling for % (% deaths within % of %); report capped',
         p_name, v_ceiling, v_ceiling_window, p_at;
-      return 'ignored';
+      return 'capped';
     end if;
     insert into public.events (type, player_id, character_name, metadata, created_at)
     values ('death', p_player_id, p_name, v_meta, p_at);
@@ -159,15 +175,15 @@ begin
   -- with reporter = victim passes every identity gate. This bounds the damage:
   -- more than v_ceiling deaths for one character inside +/- v_ceiling_window of
   -- the reported time is not how Valheim works (respawn alone takes longer), so
-  -- the report is ignored and a WARNING lands in the Postgres log.
+  -- the report is refused with 'capped' and a WARNING lands in the Postgres log.
   if (select count(*) from public.events
         where type = 'death'
           and character_name = p_name
           and created_at >= p_at - v_ceiling_window
           and created_at <= p_at + v_ceiling_window) >= v_ceiling then
-    raise warning 'ingest_death: ceiling for % (% deaths within % of %); report ignored',
+    raise warning 'ingest_death: ceiling for % (% deaths within % of %); report capped',
       p_name, v_ceiling, v_ceiling_window, p_at;
-    return 'ignored';
+    return 'capped';
   end if;
   insert into public.events (type, player_id, character_name, metadata, created_at)
   values ('death', p_player_id, p_name, v_meta, p_at);
@@ -176,7 +192,7 @@ end;
 $$;
 
 comment on function public.ingest_death(text, uuid, timestamptz, jsonb, text) is
-  'Atomic cross-producer death ingest for /api/gs-ingest (lib/deaths.ts). Serializes per character with pg_advisory_xact_lock so two simultaneous reports of one death cannot both insert. Returns inserted|upgraded|dropped|duplicate|ignored.';
+  'Atomic cross-producer death ingest for /api/gs-ingest (lib/deaths.ts). Serializes per character with pg_advisory_xact_lock so two simultaneous reports of one death cannot both insert. Returns inserted|upgraded|dropped|duplicate|capped|ignored. ''capped'' is the per-character ceiling refusing a report; ''ignored'' means there was no players row to hang it on.';
 
 -- service_role ONLY. The site reads with the anon key under RLS and must never
 -- be able to write events through an RPC.

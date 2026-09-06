@@ -66,26 +66,39 @@ Thunderstore under the `Eilif` namespace: **publish the plugin first, wait for t
 then mint.** The order is not negotiable. `plugins/eilif-companion-client/PACK.md` and each
 `plugins/thunderstore/<pkg>/UPLOAD.md` cover the upload side.
 
-**State as of 2026-09-06** (re-checked against the Thunderstore package API; the earlier
-paragraph here said the staged client was 0.3.2 and Thunderstore's latest was 0.2.0, and
-both halves went stale on 2026-09-05):
+**State as of 2026-09-06 10:01 CT.** This table has gone stale twice in twenty-four hours,
+so treat it as a snapshot and **ask the API when it matters**:
+
+```bash
+for n in EilifPaths EilifCompanionClient; do
+  curl -s "https://thunderstore.io/api/experimental/package/Eilif/$n/" \
+    | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['full_name'], d['latest']['version_number'], d['latest']['date_created'])"
+done
+# or, with the pins and the listing index graded for you:
+node scripts/launch-preflight.mjs --world <World> --phase pre-wipe   # "Modpack pins on Thunderstore"
+```
 
 | Package | Published (immutable) | Staged in this repo |
 |---|---|---|
-| `Eilif/EilifCompanionClient` | **0.3.2**, uploaded 2026-09-05 22:11 UTC | **0.3.3** (`plugins/thunderstore/EilifCompanionClient-0.3.3/`) |
-| `Eilif/EilifPaths` | **1.4.0**, 2026-08-24 | **1.5.0** (`plugins/thunderstore/EilifPaths-1.5.0/`) — the build that adds `[VPlusFallback]` |
+| `Eilif/EilifCompanionClient` | **0.3.3**, uploaded 2026-09-06 10:01 CT | **0.3.3** — the same bytes (`plugins/thunderstore/EilifCompanionClient-0.3.3/`) |
+| `Eilif/EilifPaths` | **1.5.0**, uploaded 2026-09-06 10:01 CT | **1.5.0** — the same bytes (`plugins/thunderstore/EilifPaths-1.5.0/`); the build that adds `[VPlusFallback]` |
+
+Published and staged are the same number on both rows, and the listing index has caught up,
+so **`--paths 1.5.0 --fallback on` mints today and nothing waits on an upload.**
 
 Pack v11 pins Companion Client **0.2.0**, which is why the tombstone keep-list is dark for
-everyone until v12 is minted. `plugins/thunderstore/<Name>-<ver>/` is the source of truth
-for what is staged right now, and it moves — read it rather than this table when they
-disagree. A re-mint that pins an unpublished version is refused until that package is
-uploaded and the index rebuilds; that refusal is the tool working, not a bug.
+everyone until v12 is minted. A re-mint that pins an unpublished version is refused until
+that package is uploaded and the index rebuilds; that refusal is the tool working, not a
+bug.
 
-**Never hard-code a client version in a command you are about to copy.** 0.3.2 is published
-and therefore immutable, and it was compiled against 0.221.12 — a pack minted with
-`--companion-client 0.3.2` after the box has gone to 1.0 hands every player a pre-1.0 client
-DLL. The worked examples below use `<ver>` for that reason; `docs/LAUNCH-DAY.md` step 16
-defines it once as `$M` and steps 18 and 19 reuse it.
+**Never hard-code a client version in a command you are about to copy.** **Every published
+Eilif client version, 0.3.3 and 1.5.0 included, was compiled against 0.221.12**, and a
+published Thunderstore version can never be replaced. So a pack minted with
+`--companion-client 0.3.3` after the box has gone to 1.0 hands every player a pre-1.0
+client DLL, unless the 1.0 rebuild left that DLL unchanged. If the rebuild changes it, the
+new build goes up as **0.3.4** or **1.5.1** and the pin moves with it. The worked examples
+below use `<ver>` for that reason; `docs/LAUNCH-DAY.md` step 16 defines it once as `$M` and
+steps 18 and 19 reuse it.
 
 **3. AzuCraftyBoxes moves in lockstep.** Its `Prevent Pulling Logic` hotkey setting is
 client-side and *not* server-synced, so only the pack can unbind Alt+O fleet-wide (that
@@ -348,6 +361,16 @@ published, so an accidental edit fails `npm test` instead of silently shipping. 
 change a template **on purpose**, update those hashes in the same commit, and say in the
 commit message which setting moved.
 
+**The companion-client cfg is the one place a template does not carry the whole schema.**
+`net.eilif.companionclient.cfg` ships only the `[Map]` section and stamps a writer header of
+`0.1.0`, on the reasoning that the schema had not moved since. **That stopped being true in
+0.3.0**, which added a fourth binding: `[Death] KeepItemTypes`, the tombstone keep-list
+(`EilifMapTrackerPlugin.cs`). The pack does not pin it, so **BepInEx appends `[Death]` at the
+plugin's own default on each player's first run**. That is benign at the default and is the
+deliberate state, but it means the keep-list is not something the pack can set. If a
+non-default keep-list is ever wanted it needs a fresh cfg capture from a real r2modman run of
+the pinned build, plus `--companion-cfg-version` to move the header, and not a flag.
+
 A template can also carry a `{{#NAME}}` ... `{{/NAME}}` block, each marker alone on its own
 line. A kept block loses only its two marker lines, so a rendered file is byte-identical to
 one written without the machinery; a dropped block takes its whole body with it. That is how
@@ -382,7 +405,15 @@ curl -sL -H 'User-Agent: eilif-pack-check' \
   https://thunderstore.io/api/experimental/legacyprofile/get/<code>/ \
   | tail -n +2 | base64 -d > profile.zip
 unzip -o profile.zip -d unpacked
+chmod -R u+rwX unpacked        # NOT optional on Linux. See below.
 ```
+
+**The `chmod` is what stops a fake panic.** An r2modman-exported zip stores `config/`
+without the directory execute bit, so `unzip` recreates it as `drw-------` and nothing can
+list what is inside it. Every cfg then reads as missing and `--compare-to` prints **seven
+`FAIL` lines and "rendered pack does NOT match the reference"** on a pack that is perfectly
+fine. Reproduced against pack v11 on 2026-09-06: seven FAILs before the `chmod`, clean
+after it.
 
 Then diff `unpacked/` against a `--dry-run` render, or point the minter straight at it:
 

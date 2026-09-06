@@ -65,7 +65,7 @@ journalctl -u eilif-log-poller -f
 | `DISCORD_TOKEN` + `CHAT_CHANNEL_ID` | — | chat-mirror fallback: bot-token post (`🗨️ **Name:** text`) |
 | `STALE_LOG_THRESHOLD_MS` | `1800000` (30 min) | log silent this long ⇒ game server treated as DOWN |
 | `SERVER_DOWN_REALERT_MS` | `21600000` (6 h) | while down, repeat the Discord alert at most this often |
-| `ALERT_CHANNEL_ID` | falls back to `CHAT_CHANNEL_ID` | where down/up alerts are posted |
+| `ALERT_CHANNEL_ID` | falls back to `CHAT_CHANNEL_ID` | the **ops channel**: where server down/up alerts, SFTP auth failures and identity-mismatch warnings are posted. All three go through `postAlert()` (`poller.js:320`, `:493-514`, `:793`). Set 2026-09-06 to a dedicated channel, so `#server` no longer sees "Eilif server is BACK UP" — nothing on `/commands` ever promised it there, but the hall used to see it. |
 | `ALERT_DISCORD_WEBHOOK` | falls back to `CHAT_DISCORD_WEBHOOK` | webhook alert target if no bot token |
 
 ## Server-liveness detection

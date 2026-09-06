@@ -1,5 +1,4 @@
 -- APPLIED to production 2026-09-06 ~09:35 CT (Fable session): table, RLS, anon column grants, backfill verified.
--- STATUS: UNAPPLIED. Hand-applied by Charlie (AGENTS.md "Database / migrations").
 -- Player retellings of a boss fall: public.boss_tellings.
 --
 -- WHY. `bosses.retelling` holds exactly ONE saga per boss and only the Skald

@@ -687,10 +687,28 @@ export default function GetStartedPage() {
         <SectionTitle icon={<Wrench size={18} />}>When something won&apos;t cooperate</SectionTitle>
         <Card>
           <CardBody>
+            {/* BOTH BRANCHES, BECAUSE THERE ARE TWO (T-3 audit site-5). This used to
+                say only "let Steam finish updating Valheim, then import the new pack
+                code posted in Discord", which is right on the 1.0 night and wrong on
+                the other one: if 1.0 is late at noon CT the hall stays on the older
+                build and no new pack is minted, so a player who has already let Steam
+                update cannot join at all and the pack code the sentence promises does
+                not exist. The launch announcement is the single thing a player has to
+                read either way, so the copy points at it rather than at a branch.
+                It says "the launch announcement in Discord" and not "the GO post":
+                GO post is a runbook word (docs/LAUNCH-DAY.md step 22) that the bot
+                never posts and no player page ever defines, so it would send a reader
+                looking for a thing with no name in the hall. The rest of this page
+                already says "announced in Discord" for the same event. */}
             <Trouble symptom="“Incompatible version” during launch week (Sept 9 to 12)">
-              That is almost always the game build, not your mods. Valheim goes to 1.0 on Sept 9
-              and {SERVER_NAME} moves the same day. Let Steam finish updating Valheim, then import
-              the new pack code posted in Discord. Nothing else needs re-installing.
+              That is almost always the game build, not your mods. Valheim goes to 1.0 on Sept 9,
+              and the launch announcement in Discord says which build {SERVER_NAME} is on that
+              night: if it says 1.0, let Steam finish updating Valheim and import the new pack code
+              posted with it; if it says the hall is holding on the older build, do not let Steam
+              update yet and keep the pack code you already have. To hold the update, set Steam → Library →
+              Valheim → Properties → Updates to{' '}
+              <span className="text-ash">Only update this game when I launch it</span>. Nothing
+              else needs re-installing.
             </Trouble>
             <Trouble symptom="“Incompatible version” or the join is refused">
               Your mods don&apos;t match the server. Re-import the modpack code (step 3) so every

@@ -288,7 +288,15 @@ function eilifCausePatch(p: ParsedEilifDeath, existing: Record<string, unknown>)
 
 export type EilifDeathResult = {
   ok: boolean;
-  status: 'inserted' | 'upgraded' | 'duplicate' | 'ignored';
+  /**
+   * 'capped' is the per-character ceiling refusing the report. It is separate
+   * from 'ignored' on purpose: 'ignored' self-heals (the poller's join path
+   * creates the players row and the next death lands), 'capped' does not -- that
+   * death is gone. /api/gs-ingest answers the plugin with 'ignored' either way,
+   * so the wire shape the pack was built against is unchanged; the difference is
+   * for the Vercel log an operator reads on launch night.
+   */
+  status: 'inserted' | 'upgraded' | 'duplicate' | 'capped' | 'ignored';
   reason?: string;
   cause?: string;
 };
@@ -318,13 +326,41 @@ export type EilifDeathResult = {
 /** Postgres `undefined_function`, and PostgREST's schema-cache equivalent. */
 const RPC_MISSING_CODES = new Set(['42883', 'PGRST202']);
 
-type IngestDeathOutcome = 'inserted' | 'upgraded' | 'dropped' | 'duplicate' | 'ignored';
+// 'capped' is the per-character ceiling (db/2026-09-06_death_ceiling.sql) refusing
+// a report: more than 5 deaths for one character inside a two-minute span. It used
+// to come back as 'ignored', which meant something else entirely and self-healing
+// -- see the WHY THE RETURN WORD CHANGED block in that migration.
+type IngestDeathOutcome = 'inserted' | 'upgraded' | 'dropped' | 'duplicate' | 'capped' | 'ignored';
 
 type RpcResult =
   | { ok: true; status: IngestDeathOutcome }
   | { ok: false; missing: boolean; message: string };
 
 let warnedRpcMissing = false;
+
+/**
+ * The one place a ceiling refusal is written down where an operator will see it.
+ *
+ * WHY THIS IS A WARN AND NOT AN INFO. A 'capped' death is GONE -- there is no
+ * retry, no self-heal, nothing downstream that fills it back in. On launch night
+ * it means one of two things and both want a human: a viking is dying faster than
+ * Valheim allows (so the ceiling is wrong for how this server plays), or somebody
+ * is posting forged reports at the unauthenticated client URL. The character name
+ * and the count are what tell those apart at a glance, so both are in the line.
+ *
+ * Until db/2026-09-06_death_ceiling.sql is RE-APPLIED, production still returns
+ * 'ignored' here and this line cannot fire; the death is logged as "no players row
+ * yet" instead. That is the whole reason the migration needs a re-run.
+ */
+function warnCappedDeaths(source: 'eilif' | 'gs', name: string, count: number): void {
+  console.warn(
+    `[deaths] ${source} death report(s) for "${name}" CAPPED by the per-character ceiling ` +
+      `(db/2026-09-06_death_ceiling.sql: more than 5 deaths inside a two-minute span) — ` +
+      `${count} report${count === 1 ? '' : 's'} refused and NOT stored. Unlike "no players row yet" ` +
+      `this does not self-heal: either the ceiling is too low for how this server plays, or ` +
+      `someone is forging reports at the unauthenticated client URL.`,
+  );
+}
 
 /**
  * Call `ingest_death` for ONE death. Never throws: any failure comes back as
@@ -380,7 +416,14 @@ async function callIngestDeath(
 
   // `returns text` comes back as a bare string.
   const status = typeof data === 'string' ? data : '';
-  if (status === 'inserted' || status === 'upgraded' || status === 'dropped' || status === 'duplicate' || status === 'ignored') {
+  if (
+    status === 'inserted' ||
+    status === 'upgraded' ||
+    status === 'dropped' ||
+    status === 'duplicate' ||
+    status === 'capped' ||
+    status === 'ignored'
+  ) {
     if (warnedRpcMissing) {
       warnedRpcMissing = false; // the migration landed — say so once if it drops out again
     }
@@ -482,6 +525,11 @@ export async function ingestEilifDeath(
         return { ok: true, status: 'upgraded', cause: p.cause };
       case 'duplicate':
         return { ok: true, status: 'duplicate', reason: 'already reported', cause: p.cause };
+      case 'capped':
+        // The per-character ceiling refused it. NOT 'ignored': that word means
+        // "no players row yet" and self-heals, this one means the death is gone.
+        warnCappedDeaths('eilif', p.player, 1);
+        return { ok: false, status: 'capped', reason: 'per-character death ceiling', cause: p.cause };
       default:
         // 'ignored' — nothing nearby to upgrade and no players row to hang a new
         // row on. Self-heals: the poller's join path creates the row.
@@ -706,6 +754,8 @@ export async function ingestDeathEvents(
   const ordered = [...fresh].sort((a, b) => Date.parse(a.occurredIso) - Date.parse(b.occurredIso));
 
   const insertedViaRpc: typeof fresh = [];
+  /** character -> how many of its reports the per-character ceiling refused. */
+  const cappedByName = new Map<string, number>();
   for (let i = 0; i < ordered.length; i++) {
     const p = ordered[i];
     const rpc = await callIngestDeath(client, {
@@ -731,8 +781,17 @@ export async function ingestDeathEvents(
         `[deaths] gs death for "${p.name}" at ${p.occurredIso} dropped (atomic rpc) — our own plugin ` +
           `already reported this death with the authoritative HitType cause (±3 min).`,
       );
+    } else if (rpc.status === 'capped') {
+      // Counted per character rather than logged per death: a forged burst is
+      // exactly the case that would otherwise fill the log with identical lines,
+      // and the count is the part that matters. One line per character, below.
+      cappedByName.set(p.name, (cappedByName.get(p.name) ?? 0) + 1);
     }
   }
+  // BEFORE this existed the gs batch path logged nothing at all for a ceiling
+  // refusal: only 'inserted' and 'dropped' had a branch, so a capped report was
+  // silent in the Vercel log (T-3 audit site-3).
+  for (const [name, count] of cappedByName) warnCappedDeaths('gs', name, count);
   if (insertedViaRpc.length > 0) {
     console.info(`[deaths] ${insertedViaRpc.length} gs death row(s) inserted (atomic rpc).`);
     await dropCauselessPollerTwins(client, insertedViaRpc);

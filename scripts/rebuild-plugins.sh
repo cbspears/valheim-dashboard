@@ -14,6 +14,7 @@
 #   bash scripts/rebuild-plugins.sh --source-revision <sha>   # reproduce a committed DLL exactly
 #   bash scripts/rebuild-plugins.sh --stage                   # ... then stage the artifacts
 #   bash scripts/rebuild-plugins.sh --stage ~/eilif-launch-dlls   # ... into a named dir
+#   bash scripts/rebuild-plugins.sh --stage --allow-published # ... over the duplicate-version refusal
 #
 # --stage takes an optional directory for the SERVER DLLs; without one it uses
 # $EILIF_STAGE_DIR, or $TMPDIR/eilif-launch-dlls. Client DLLs always go into the repo's
@@ -77,7 +78,30 @@
 #     NOT written for you: a seeded package dir carries the PREVIOUS version's
 #     store page, and the script names all three so they cannot be forgotten.
 #     Charlie uploads the zip; this script never touches Thunderstore.
-#   * Nothing is staged at all if any plugin failed its checks, gate before copy.
+#   * Nothing is staged at all if any plugin failed its checks OR carries a
+#     version already published on Thunderstore. Both gates are settled before
+#     the first copy, so a refused run leaves the staging tree untouched.
+#
+# THE DUPLICATE-VERSION REFUSAL (2026-09-06, T-3 audit plugins-0). A Thunderstore
+# version is IMMUTABLE once uploaded. On 2026-09-06 at 10:01 CT both client
+# packages went live at the numbers their csprojs still carry — EilifPaths 1.5.0
+# and EilifCompanionClient 0.3.3 — so the launch-morning 1.0 rebuild would have
+# produced DIFFERENT DLLs under those same numbers and staged them into the exact
+# directories whose zips are already published, with nothing saying so. Two ways
+# that ends, both on launch morning: the upload is rejected as a duplicate
+# version, or the pack pins the published number and hands every player a
+# 0.221.12 client DLL against a 1.0 server.
+#
+# So before staging ANYTHING this script asks Thunderstore, for every CLIENT
+# plugin in the run, whether that exact version exists (GET
+# /api/experimental/package/Eilif/<Pkg>/<ver>/) and REFUSES the whole staging
+# step when one does, naming the version to bump to. The refusal is settled
+# before the first file is copied, so a refused run leaves the staging tree
+# exactly as it found it -- server DLLs included. It never edits a
+# csproj: which number comes next is a release decision. If the API cannot be
+# reached the state is UNKNOWN and staging is allowed with a loud warning — a
+# network hiccup must not block a stopped window. --allow-published skips the
+# refusal for a rebuild you do not intend to upload.
 # --dry-run --stage prints that whole plan and writes nothing.
 #
 # Requires: dotnet 8 (~/.dotnet), bash, md5sum, strings (binutils).
@@ -136,6 +160,11 @@ ONLY=""
 SOURCE_REV=""
 ASSUME_YES=0
 STAGE=0
+# --allow-published: stage a client plugin whose version is ALREADY on
+# Thunderstore. Off by default, because a published version is immutable: the
+# upload is rejected as a duplicate, and if the pack pins that number anyway
+# every player gets the OLD DLL. See published_state() below.
+ALLOW_PUBLISHED=0
 # Defaults to a temp dir so a bare --stage never writes somewhere surprising. On
 # launch morning pass the session scratchpad explicitly, so the coordinator and
 # this script are looking at the same files.
@@ -153,8 +182,15 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1; shift ;;
     --skip-refresh) SKIP_REFRESH=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
+    --allow-published) ALLOW_PUBLISHED=1; shift ;;
     -h|--help)
-      sed -n '2,86p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      # Print the WHOLE comment header, however long it grows. This used to be
+      # `sed -n '2,86p'`, a line number that stopped matching the header the
+      # first time the header gained a paragraph: --help then ended mid-sentence
+      # inside the duplicate-version section and silently dropped the
+      # "Requires:" and "Network:" paragraphs (T-3 fix pass). Read to the first
+      # line that is not a comment instead, so the two can never drift.
+      awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
       exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
@@ -223,6 +259,61 @@ newest_package_dir() {
   printf '%s' "$best" | grep -v '^$' | sort -t'|' -k1,1V | tail -1 | cut -d'|' -f2-
 }
 
+# ── Thunderstore: is this version already published? ────────────────────────
+#
+# A published version is IMMUTABLE. The per-version endpoint is the exact
+# question: 200 means that number is taken forever, 404 means it is free.
+# Anything else (a timeout, a 5xx, no curl at all) means we could not tell, and
+# "could not tell" must never read as "taken" — that would block a stopped
+# window over a network hiccup.
+# >>> ts-version-check (extracted verbatim by scripts/rebuild-plugins.test.mjs,
+# which runs it in a bare shell with a stub curl. Keep this block self-contained:
+# nothing in it may read a variable the rest of the script sets, except
+# ALLOW_PUBLISHED, which the test sets too.)
+TS_NAMESPACE="Eilif"
+declare -A PUBLISHED_STATE=()   # pkg-ver -> published | free | unknown:<code>
+
+# $1 package name, $2 version. Echoes one of:
+#   published        the version exists on Thunderstore and is immutable
+#   free             404, nothing there, safe to upload
+#   overridden       --allow-published was given; not checked at all
+#   unknown:<detail> could not tell (no curl, a timeout, a 5xx)
+# Cached per (pkg,ver) so the plan and the staging gate cost one request.
+published_state() {
+  local pkg="$1" ver="$2" key="$1-$2" code
+  if [[ -n "${PUBLISHED_STATE[$key]:-}" ]]; then printf '%s' "${PUBLISHED_STATE[$key]}"; return; fi
+  # The operator's own override is its OWN state, not an `unknown:`. It used to
+  # come back as `unknown:--allow-published`, and both message sites strip the
+  # `unknown:` prefix and print it as a failure to reach Thunderstore — so on
+  # launch morning, inside a stopped window, "you told me to skip this check"
+  # read as "the network is down" (T-3 fix pass).
+  if [[ $ALLOW_PUBLISHED == 1 ]]; then PUBLISHED_STATE[$key]="overridden"; printf '%s' "${PUBLISHED_STATE[$key]}"; return; fi
+  if ! command -v curl >/dev/null 2>&1; then
+    PUBLISHED_STATE[$key]="unknown:no-curl"; printf '%s' "${PUBLISHED_STATE[$key]}"; return
+  fi
+  code="$(curl -s -o /dev/null -m 12 -w '%{http_code}' \
+    "https://thunderstore.io/api/experimental/package/$TS_NAMESPACE/$pkg/$ver/" 2>/dev/null)"
+  case "$code" in
+    200) PUBLISHED_STATE[$key]="published" ;;
+    404) PUBLISHED_STATE[$key]="free" ;;
+    *)   PUBLISHED_STATE[$key]="unknown:http-${code:-none}" ;;
+  esac
+  printf '%s' "${PUBLISHED_STATE[$key]}"
+}
+
+# 1.5.0 -> 1.5.1, 0.3.3 -> 0.3.4. Only ever SUGGESTED, never written: which
+# component moves is a release decision (a 1.0 recompile has been a patch bump
+# every time so far, but that is a judgement, not a rule).
+next_patch() {
+  local v="$1" major minor patch
+  # Whole-string match before splitting: "1.5" splits to patch="" and a laxer
+  # guard would happily suggest "1.5.1" for it.
+  [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { printf '%s' "$v"; return; }
+  IFS='.' read -r major minor patch <<< "$v"
+  printf '%s.%s.%s' "$major" "$minor" "$((patch + 1))"
+}
+# <<< ts-version-check
+
 # ── plan ────────────────────────────────────────────────────────────────────
 say ""
 say "${BOLD}Plugin rebuild — ${#PLUGINS[@]} plugin(s), $( [[ $DRY_RUN == 1 ]] && echo 'DRY RUN (nothing is written)' || echo 'live build' )${OFF}"
@@ -253,6 +344,23 @@ for p in "${PLUGINS[@]}"; do
   say "  $i. $p ($name $ver)"
   say "     ${DIM}refresh-libs.sh  →  dotnet build -c Release  →  md5/size diff  →  version + ValueTuple check${OFF}"
   say "     ${DIM}staging: ${STAGING[$p]}${OFF}"
+  # Say it here, in the plan, not only at the staging gate: the point of knowing
+  # is to bump the csproj BEFORE the stopped window, not to discover it inside one.
+  if [[ "${SIDE[$p]}" == CLIENT ]]; then
+    tsstate="$(published_state "${TS_PACKAGE[$p]}" "$ver")"
+    case "$tsstate" in
+      published)
+        say "     ${RED}Thunderstore: ${TS_PACKAGE[$p]} $ver is ALREADY PUBLISHED and immutable.${OFF}"
+        say "     ${RED}  Bump <Version> in plugins/$p/*.csproj to $(next_patch "$ver") before building for upload.${OFF}"
+        say "     ${DIM}  --stage refuses this version. --allow-published overrides (local use only).${OFF}" ;;
+      free)
+        say "     ${DIM}Thunderstore: ${TS_PACKAGE[$p]} $ver is not published yet — free to upload${OFF}" ;;
+      overridden)
+        say "     ${YLW}Thunderstore: NOT CHECKED for ${TS_PACKAGE[$p]} $ver — you passed --allow-published${OFF}" ;;
+      *)
+        say "     ${YLW}Thunderstore: could not check ${TS_PACKAGE[$p]} $ver (${tsstate#unknown:}) — confirm by hand${OFF}" ;;
+    esac
+  fi
   if [[ $STAGE == 1 ]]; then
     if [[ "${SIDE[$p]}" == SERVER ]]; then
       say "     ${DIM}--stage: cp → $STAGE_DIR/$name.dll, print md5 + SFTP dest ${SFTP_DEST[$p]}${OFF}"
@@ -468,10 +576,55 @@ done
 # any of this" printed underneath files that are already on disk and a manifest
 # that is already bumped is worse than one that never started: a half-staged tree
 # is exactly what gets uploaded by mistake on a morning like this one.
+
+# THE DUPLICATE-VERSION GATE. Every CLIENT plugin's Thunderstore state is settled
+# here, before the staging loop copies its first file, and a published version is
+# counted as a failure so the "$FAILURES check(s) failed" gate below skips staging
+# for EVERY plugin rather than for this one.
+#
+# It used to live inside the staging loop, one plugin at a time. That looked
+# equivalent and was not: the loop copies each plugin as it reaches it, so the
+# server DLLs (or any client whose turn came before the refused one) were already
+# written to $STAGE_DIR by the time the refusal fired — and the run then ended
+# with "Do not stage any of this." printed over files that were on disk. Under
+# --only the copies could even be the whole point of the run. The state is known
+# at plan time anyway (the plan prints it), so nothing is paid for asking early.
+if [[ $STAGE == 1 ]]; then
+  for p in "${PLUGINS[@]}"; do
+    [[ "${SIDE[$p]}" == CLIENT ]] || continue          # server plugins have no package
+    [[ "${BUILT_OK[$p]:-0}" == 1 ]] || continue        # already failing; do not pile on
+    pkg="${TS_PACKAGE[$p]}"; ver="${BUILT_VER[$p]}"; name="${BUILT_NAME[$p]}"
+    tsstate="$(published_state "$pkg" "$ver")"
+    if [[ "$tsstate" == published ]]; then
+      say "  ${RED}REFUSED${OFF} $name $ver — ${BOLD}Eilif/$pkg $ver is already published on Thunderstore.${OFF}"
+      say "         ${RED}A published version is immutable. Staging this build would put a different${OFF}"
+      say "         ${RED}DLL in the directory whose zip is already live, and the upload would be${OFF}"
+      say "         ${RED}rejected as a duplicate version.${OFF}"
+      say "         ${BOLD}Bump it first:${OFF} set <Version> to ${BOLD}$(next_patch "$ver")${OFF} in plugins/$p/$(basename "$(ls "$REPO/plugins/$p"/*.csproj 2>/dev/null | head -1)"), then re-run."
+      say "         ${DIM}This script does not bump it for you: which number comes next is a release decision.${OFF}"
+      say "         ${DIM}https://thunderstore.io/package/$TS_NAMESPACE/$pkg/${OFF}"
+      say "         ${DIM}--allow-published stages it anyway, for a build you do not intend to upload.${OFF}"
+      FAILURES=$((FAILURES + 1))
+      continue
+    fi
+    if [[ "$tsstate" == overridden ]]; then
+      say "  ${YLW}WARN${OFF}   $name $ver — Thunderstore was NOT CHECKED: you passed --allow-published."
+      say "         ${YLW}Staging anyway. Do not upload this zip without confirming by hand that${OFF}"
+      say "         ${YLW}$pkg $ver is not already published:${OFF}"
+      say "         ${DIM}https://thunderstore.io/package/$TS_NAMESPACE/$pkg/${OFF}"
+    elif [[ "$tsstate" != free ]]; then
+      say "  ${YLW}WARN${OFF}   $name $ver — could not reach Thunderstore (${tsstate#unknown:})."
+      say "         ${YLW}Confirm by hand that $pkg $ver is not published before you upload:${OFF}"
+      say "         ${DIM}https://thunderstore.io/package/$TS_NAMESPACE/$pkg/${OFF}"
+    fi
+  done
+fi
+
 if [[ $STAGE == 1 && $FAILURES -gt 0 ]]; then
   hr
   say ""
   say "${RED}${BOLD}Staging skipped: $FAILURES check(s) failed.${OFF}"
+  say "  ${DIM}(a build check, or a client version that is already published on Thunderstore)${OFF}"
   say "  Nothing was copied and no manifest was touched. Fix the failures above and"
   say "  re-run. Individual plugins that passed are not staged either, because a"
   say "  partly-staged directory is indistinguishable from a complete one an hour later."
@@ -513,6 +666,10 @@ if [[ $STAGE == 1 ]]; then
     # CLIENT: plugins/thunderstore/<Pkg>-<ver>/ is the upload staging dir.
     pkg="${TS_PACKAGE[$p]}"
     tsdir="$REPO/plugins/thunderstore/$pkg-$ver"
+
+    # The duplicate-version refusal is NOT here: it runs above, before this loop
+    # copies its first file. See "THE DUPLICATE-VERSION GATE".
+
     seed=""   # per-plugin: without this the next plugin inherits the last one's seed
     if [[ ! -d "$tsdir" ]]; then
       seed="$(newest_package_dir "$pkg")"

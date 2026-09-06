@@ -1,16 +1,27 @@
--- APPLIED TO PROD. Verified 2026-09-06 (T-3 audit, data area): all 34 db/*.sql files were
--- replayed into an empty Postgres and the resulting 38-row Great Deeds ladder was diffed
--- field by field against production (anon GET on `milestones`) — 0 rows only on one side,
--- 0 rows differing. This file's 38 rows ARE the live ladder.
+-- APPLIED TO PROD (2026-08-22), and SUPERSEDED on 2026-09-06. DO NOT RE-RUN THIS FILE
+-- ALONE. It is no longer a safe no-op: it is `delete from public.milestones;` followed
+-- by 38 literal rows, and production now carries **36**. Two later files moved
+-- the ladder past this one:
+--   • db/2026-09-06_deeds_boss_chain_out_first_mile.sql — retires `boss-first`,
+--     `boss-half` and `boss-all` (redundant with the boss timeline) and adds
+--     `explored-first-mile` (The First Mile, 1% explored).
+--   • db/2026-09-06_deed_copy.sql — the copy pass over the surviving rows.
+-- Replaying this file resurrects the three retired boss deeds, DELETES The First Mile,
+-- and reverts the copy pass. If a rebuild-from-db/ replay runs the whole directory in
+-- filename order that is harmless, because both 2026-09-06 files land after it; running
+-- this one on its own is what breaks the live ladder.
+-- (`scripts/launch-wipe.mjs` does NOT re-seed — it only nulls `achieved_at` — so the
+-- launch wipe is not affected either way.)
 --
 -- Collective Milestones ("Great Deeds") — LAUNCH RESEED of the definition set.
 --
--- STATUS: APPLIED (see line 1). Idempotent — delete-all + insert of literals, so
--- re-running it is safe and is a no-op against the current ladder. The header used to
--- read "⚠️ UNAPPLIED / hand-apply when Charlie chooses"; that was wrong for at least
--- two weeks, and on launch morning a wrong applied-status is the expensive kind of
--- wrong (AGENTS.md: never assume a migration ran because the file exists — which cuts
--- both ways, and this file is the reason the rule needed a re-read).
+-- The header used to read "⚠️ UNAPPLIED / hand-apply when Charlie chooses"; that was
+-- wrong for at least two weeks, and on launch morning a wrong applied-status is the
+-- expensive kind of wrong (AGENTS.md: never assume a migration ran because the file
+-- exists — which cuts both ways, and this file is the reason the rule needed a re-read).
+-- It then read "idempotent … re-running it is safe and is a no-op against the current
+-- ladder", verified against the 38-row ladder of 2026-09-06 01:20 CT. That verification
+-- expired nine hours later, when the ladder became 36. The block above replaces it.
 --
 -- Same engine, same table, same column shape as db/2026-07-05_milestones.sql
 -- (the DDL of record). Like db/2026-07-06_milestones_rebalance.sql this is a
