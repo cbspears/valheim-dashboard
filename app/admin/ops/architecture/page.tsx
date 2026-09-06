@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
-import { ArrowLeft, Maximize2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
+import { FullscreenButton } from '@/components/ops/FullscreenButton';
 import { OpsNav } from '@/components/ops/OpsNav';
 import { Explain } from '@/components/ops/Explain';
 import { GLOSSARY } from '@/lib/ops/glossary';
@@ -33,7 +34,6 @@ export const metadata: Metadata = {
 };
 
 const REPO = 'https://github.com/cbspears/valheim-dashboard';
-const FULLSCREEN = 'https://claude.ai/code/artifact/3182f247-c9bf-442a-bbf7-3163ea1e176d';
 
 export default async function OpsArchitecturePage() {
   // ---- Auth gate (fail closed) — same check the cockpit uses -----------------
@@ -56,15 +56,7 @@ export default async function OpsArchitecturePage() {
           <ArrowLeft size={15} />
           Back to cockpit
         </Link>
-        <a
-          href={FULLSCREEN}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-md border border-rune bg-surface-raised px-3 py-1.5 text-xs font-medium text-ash-dim transition hover:border-gold-dim hover:text-ash"
-        >
-          <Maximize2 size={14} />
-          Full-screen version
-        </a>
+        <FullscreenButton target=".eilif-arch" className="inline-flex items-center gap-1.5 rounded-md border border-rune bg-surface-raised px-3 py-1.5 text-xs font-medium text-ash-dim transition hover:border-gold-dim hover:text-ash" />
       </div>
 
       {/* ================================================================== */}
@@ -85,10 +77,8 @@ export default async function OpsArchitecturePage() {
               all talking to each other. This map traces every hop: what talks to what, over which
               transport, with what auth. Boxes link into{' '}
               <strong>github.com/cbspears/valheim-dashboard</strong>. Start with the simple view,
-              then follow the arrows into the detail and the walkthroughs.{' '}
-              <a href={FULLSCREEN} target="_blank" rel="noreferrer">
-                Open the full-screen version ↗
-              </a>
+              then follow the arrows into the detail and the walkthroughs. The Full screen button
+              above shows this map on the whole screen; Escape brings the cockpit back.
             </p>
           </header>
 
@@ -792,7 +782,8 @@ export default async function OpsArchitecturePage() {
             --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
             --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
           }
-          @media (prefers-color-scheme:dark){.eilif-arch{
+          @media (prefers-color-scheme:dark){.eilif-arch:fullscreen{overflow:auto;padding:24px;background:var(--bg,#0f1115)}
+.eilif-arch{
             --bg:#0e1216; --bg-sunk:#090c0f; --surface:#161c22; --surface-2:#1b2229;
             --ink:#e7edf2; --ink-soft:#a9b6c2; --ink-faint:#7c8b98; --line:#29323b; --line-soft:#212a32;
             --gold:#d9a441; --gold-bg:#2a2413;
