@@ -16,8 +16,12 @@ export function GreatDeedsCard({ summary }: { summary: MilestoneSummary }) {
 
   return (
     <Card>
+      {/* "Great Deeds", not "Milestones": the in-game [board:deeds] sign
+          (lib/boards.ts) and the bot's Discord embed both announce these as
+          Great Deeds, and this card's own body already says "deed" throughout.
+          One name across all three surfaces. */}
       <CardHeader
-        title="Milestones"
+        title="Great Deeds"
         icon={<Trophy size={16} />}
         action={
           <Link
@@ -33,7 +37,7 @@ export function GreatDeedsCard({ summary }: { summary: MilestoneSummary }) {
           <EmptyState
             icon={<Trophy size={28} />}
             title="No deeds tracked yet"
-            message="Server-wide milestones, from distance sailed to foes felled to timber raised, are tallied here as the warband reaches them together."
+            message="Deeds the whole warband earns together, from distance sailed to foes felled to timber raised, are tallied here as you reach them."
           />
         ) : (
           <>

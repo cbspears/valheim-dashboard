@@ -28,8 +28,13 @@ function noDeedsTracked(summary: MilestoneSummary): boolean {
   return summary.achieved.length === 0 && summary.upcoming.length === 0;
 }
 
+// "Great Deeds", not "Milestones", in every player-facing string in this file: the
+// headings above these cards (app/world/page.tsx), the Hall card
+// (components/milestones/GreatDeedsCard.tsx), the in-game [board:deeds] sign
+// (lib/boards.ts) and the bot embed (services/discord-bot/src/milestones.js) all
+// say Great Deed. The DB table and the types keep the older `milestone` name.
 const NOTHING_TRACKED_MESSAGE =
-  'Milestones are server-wide goals: total distance sailed, foes felled, hours lived, timber raised. Once the warband is under way, earned and upcoming deeds will both be listed here.';
+  'Great Deeds are server-wide goals: total distance sailed, foes felled, hours lived, timber raised. Once the warband is under way, earned and upcoming deeds will both be listed here.';
 
 /**
  * Everything the warband has achieved together, most recent first, with the
@@ -48,7 +53,7 @@ export function EarnedDeeds({ summary }: { summary: MilestoneSummary }) {
             message={
               noDeedsTracked(summary)
                 ? NOTHING_TRACKED_MESSAGE
-                : "The first milestone is still ahead, and every viking's tally counts toward it."
+                : "The first deed is still ahead, and every viking's tally counts toward it."
             }
           />
         ) : (
@@ -100,7 +105,7 @@ export function HorizonDeeds({ summary }: { summary: MilestoneSummary }) {
             message={
               noDeedsTracked(summary)
                 ? NOTHING_TRACKED_MESSAGE
-                : 'The warband has reached every milestone set for it. New deeds can be added any time.'
+                : 'The warband has reached every deed set for it. New deeds can be added any time.'
             }
           />
         ) : (

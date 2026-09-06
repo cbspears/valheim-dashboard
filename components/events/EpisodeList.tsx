@@ -24,7 +24,8 @@ function episodeDate(iso: string): string {
 function daysLabel(range: [number, number] | null): string | null {
   if (!range) return null;
   const [lo, hi] = range;
-  return lo === hi ? `Day ${lo}` : `Days ${lo}–${hi}`;
+  // Hyphen, not an en dash: no en/em dashes in player-facing text (CLAUDE.md).
+  return lo === hi ? `Day ${lo}` : `Days ${lo}-${hi}`;
 }
 
 /** "3.5" -> "3.5", "4.0" -> "4" — hours read cleanly on the stat row. */
@@ -72,7 +73,7 @@ function EpisodeCard({ ep }: { ep: Episode }) {
 
   return (
     <Card className="p-5">
-      {/* header line: Episode N · Sat, Jun 28 · Days 88–91 */}
+      {/* header line: Episode N · Sat, Jun 28 · Days 88-91 */}
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] font-medium uppercase tracking-[0.18em] text-gold-dim">
         <span>Episode {ep.number}</span>
         <span className="text-rune-bright">·</span>

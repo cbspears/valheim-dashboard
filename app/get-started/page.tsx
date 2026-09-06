@@ -51,11 +51,13 @@ const R2MODMAN_ALL_URL = 'https://github.com/ebkr/r2modmanPlus/releases/latest';
 // Macheim — the macOS-native Valheim mod manager. r2modman has no Mac build, and
 // on Apple Silicon Macheim runs the game under Rosetta so the x64 mod loader can
 // hook in. Direct .dmg so Mac players skip the GitHub releases page.
-// ⚠️ When bumping: the asset FILENAME version trails the release TAG (a Tauri
-// build quirk — tag v1.0.1 ships Macheim_1.0.0_aarch64.dmg), so copy the exact
-// asset URL off the release rather than templating it from the tag.
+// ⚠️ When bumping: NEVER template this from the tag. Read the exact asset name
+// off the release and curl it before shipping. The old pin here
+// (Macheim_1.0.0_aarch64.dmg under tag v1.0.1) 404'd from the live page; the
+// v1.0.1 release actually ships Macheim_1.0.1_aarch64.dmg. Verified 200 with
+// `curl -sIL <url>` on 2026-09-05 (6,024,201 bytes, matches the GitHub API).
 const MACHEIM_APPLE_SILICON_URL =
-  'https://github.com/lofcgi/macheim/releases/download/v1.0.1/Macheim_1.0.0_aarch64.dmg';
+  'https://github.com/lofcgi/macheim/releases/download/v1.0.1/Macheim_1.0.1_aarch64.dmg';
 const MACHEIM_ALL_URL = 'https://github.com/lofcgi/macheim/releases/latest';
 
 // The pack's seven .cfg files, zipped, for the Mac path: Macheim cannot read an
@@ -187,7 +189,7 @@ export default function GetStartedPage() {
       <PageHeader slot="get-started">
         <SectionHeader
           title="Get Started"
-          subtitle={`New to ${SERVER_NAME}? Log on and install the mods in five steps. About 15 minutes, no experience needed. Then the three things to do once you're in.`}
+          subtitle={`New to ${SERVER_NAME}? Log on and install the mods in five steps. About 15 minutes, no experience needed. Then the two things to do once you're in.`}
           icon={<Compass size={22} />}
         />
       </PageHeader>
@@ -268,8 +270,8 @@ export default function GetStartedPage() {
                 </div>
                 <p className="text-xs text-muted">
                   The download starts right away. Run the installer, click through it, and open
-                  r2modman. It keeps itself updated from then on. There is no Mac version. On a Mac, use
-                  the Apple Silicon setup below instead.{' '}
+                  r2modman. It keeps itself updated from then on. On a Mac, use the Apple Silicon
+                  setup below instead.{' '}
                   <Ext href={R2MODMAN_ALL_URL}>All downloads</Ext>
                 </p>
                 <p className="text-xs text-muted">
@@ -404,13 +406,38 @@ export default function GetStartedPage() {
                 up the mod loader and installs Rosetta automatically (on Apple Silicon the mods run
                 under Rosetta).
               </li>
+              {/* CUTOVER ANCHOR: "install these seven" (docs/LAUNCH-DAY.md step 19).
+                  Step 19 still tells the editor to search this file for the phrase
+                  "install these seven". The wording it names was replaced on
+                  2026-09-05 (it sent Mac players at "latest version" of mods the
+                  server version-checks), so this comment is what that search lands
+                  on. What step 19 actually needs doing here at the v12 mint:
+                    1. CONFIG_BUNDLE_URL above -> the new bundle filename.
+                    2. Every version number in the list below -> the v12 export.r2x
+                       values. There are seven and all of them can move.
+                    3. On a --no-vplus mint: delete "ValheimPlus (Grantapher) 9.17.1"
+                       from the list AND delete the "The server checks your
+                       ValheimPlus and AzuCraftyBoxes" sentence under it, which is
+                       false once the box is not running V+ either.
+                  Versions below are pack v11, decoded from MODPACK_PROFILE_CODE in
+                  config/server.ts on 2026-09-05. /mods (config/mods.ts) must agree. */}
               <li>
                 <span className="font-mono text-xs text-gold-light">4.</span>{' '}Add the mods.
                 Macheim can&apos;t read r2modman codes. Open the{' '}
-                <span className="text-ash">Mods</span> tab and install these seven, latest version:
+                <span className="text-ash">Mods</span> tab and install these at the exact versions
+                the pack pins, not the newest ones:
                 <span className="mt-1 block text-ash">
-                  BepInExPack Valheim, ValheimPlus (Grantapher), PlantEverything, AzuCraftyBoxes,
-                  GsValheimStatsClient, Eilif Paths, Eilif Companion Client
+                  BepInExPack Valheim 5.4.2333, ValheimPlus (Grantapher) 9.17.1, PlantEverything
+                  1.20.0, AzuCraftyBoxes 1.8.15, GsValheimStatsClient 0.2.12, Eilif Paths 1.4.0,
+                  Eilif Companion Client 0.2.0
+                </span>
+                <span className="mt-1 block text-xs text-muted">
+                  The server checks your ValheimPlus and AzuCraftyBoxes against its own, so a newer
+                  copy is turned away at the door. The{' '}
+                  <Link href="/mods" className="text-gold-light hover:underline">
+                    Mods page
+                  </Link>{' '}
+                  always carries the current list.
                 </span>
                 <span className="mt-2 block">
                   Then download the{' '}
@@ -462,7 +489,7 @@ export default function GetStartedPage() {
       {/* ══════════════ PART TWO — NOW THAT YOU'RE ASHORE ══════════════ */}
       <section>
         <SectionTitle icon={<ScrollText size={20} />}>
-          Once you&apos;re in, do these two things!
+          Once you&apos;re in, do these two things
         </SectionTitle>
 
         <Card>
@@ -652,8 +679,9 @@ export default function GetStartedPage() {
         <Card>
           <CardBody>
             <Trouble symptom="“Incompatible version” during launch week (Sept 9 to 12)">
-              That almost always means the game version, not the mods. Check the notice at the top
-              of this page before re-installing anything.
+              That is almost always the game build, not your mods. Valheim goes to 1.0 on Sept 9
+              and {SERVER_NAME} moves the same day. Let Steam finish updating Valheim, then import
+              the new pack code posted in Discord. Nothing else needs re-installing.
             </Trouble>
             <Trouble symptom="“Incompatible version” or the join is refused">
               Your mods don&apos;t match the server. Re-import the modpack code (step 3) so every
@@ -689,9 +717,9 @@ export default function GetStartedPage() {
             </Trouble>
             <Trouble symptom="“Failed to connect” / can't reach the server">
               An admin may be restarting it (check{' '}
-              <span className="font-mono text-xs">#server</span> in Discord), or your game version
-              does not match the server (see the notice at the top of this page). Double-check the
-              address and that the password is exactly{' '}
+              <span className="font-mono text-xs">#server</span> in Discord), or your game build
+              does not match the server&apos;s: let Steam finish any Valheim update, then re-import
+              the current pack code. Double-check the address and that the password is exactly{' '}
               <span className="text-ash">{SERVER_PASSWORD}</span> (capital L).
             </Trouble>
           </CardBody>

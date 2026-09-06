@@ -154,7 +154,12 @@ export function LiveWorld({
         </div>
       ) : (
         <p className="mt-3 text-center text-xs text-muted">
-          The saga replay unlocks as in-game days bank. So far {frames.length === 1 ? 'one day' : `${frames.length} days`} archived.
+          The saga replay unlocks as in-game days bank.{' '}
+          {frames.length === 0
+            ? 'No day has been archived yet.'
+            : frames.length === 1
+              ? 'One day archived so far.'
+              : `${frames.length} days archived so far.`}
         </p>
       )}
     </div>

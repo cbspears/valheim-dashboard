@@ -163,7 +163,7 @@ export function ZoomableMap({
                 top: `${m.y * 100}%`,
                 transform: `translate(-50%, -50%) scale(${1 / zoom})`,
               }}
-              aria-label={`${m.name} — ${kindLabel(m.kind)}${m.by ? `, pinned by ${m.by}` : ''}${isNew ? ', named on this day' : ''}${count ? `, ${count} photo${count === 1 ? '' : 's'}` : ''}`}
+              aria-label={`${m.name}, ${kindLabel(m.kind)}${m.by ? `, pinned by ${m.by}` : ''}${isNew ? ', named on this day' : ''}${count ? `, ${count} photo${count === 1 ? '' : 's'}` : ''}`}
             >
               <div
                 className={`flex flex-col items-center gap-0.5${
