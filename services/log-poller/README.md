@@ -41,13 +41,13 @@ LOG_SOURCE=file LOG_PATH=./fixtures/sample-session.log npm start
 ```
 
 ## Run as a service
-Edit `valheim-log-poller.service` if your Node path differs (it points at the nvm Node 20 binary),
+Edit `eilif-log-poller.service` if your Node path differs (it points at the nvm Node 20 binary),
 then:
 ```bash
-sudo cp valheim-log-poller.service /etc/systemd/system/
+sudo cp eilif-log-poller.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now valheim-log-poller
-journalctl -u valheim-log-poller -f
+sudo systemctl enable --now eilif-log-poller
+journalctl -u eilif-log-poller -f
 ```
 
 ## Config (`.env`)

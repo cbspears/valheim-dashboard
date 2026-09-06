@@ -7,6 +7,7 @@ import { readFile, writeFile, stat } from 'node:fs/promises';
 import { LogParser, isArrivalShout } from './parser.js';
 import { createHeartbeatSender } from './heartbeat.js';
 import {
+
   evaluateLiveness,
   normalizeLiveness,
   logAgeSec,
@@ -46,6 +47,17 @@ const WEBHOOK_RETRY_DEFAULT_MS = 1000;
  * else one second — clamped to [0, 10 s]. Exported so the clamp is testable
  * without actually sleeping for it.
  */
+// Player-typed character names reach Discord verbatim here, so clip them, escape
+// Discord markdown, and defang anything that would render as a live link. Mirrors
+// services/discord-bot/src/format.js nameMd; keep the two in step.
+function safeChatName(name, max = 24) {
+  return String(name ?? '')
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028\u2029]/g, '')
+    .slice(0, max)
+    .replace(/[\\*_`~|>]/g, '\\$&')
+    .replace(/\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/gi, '[link] ');
+}
+
 export function webhookRetryDelayMs(headerValue, body) {
   let after = parseFloat(headerValue ?? '');
   if (!Number.isFinite(after)) {
@@ -568,7 +580,7 @@ export class Poller {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ ...body, allowed_mentions: { parse: [] } }),
         });
-      let res = await send({ username: name.slice(0, 80), content: text });
+      let res = await send({ username: safeChatName(name, 80), content: text, flags: 4 });
       if (res.status === 400) {
         res = await send({ content: `**${name}:** ${text}` });
       }
@@ -588,8 +600,11 @@ export class Poller {
         authorization: `Bot ${this.cfg.discordToken}`,
       },
       body: JSON.stringify({
-        content: `🗨️ **${name}:** ${text}`,
+        content: `🗨️ **${safeChatName(name)}:** ${text}`,
         allowed_mentions: { parse: [] },
+        // SUPPRESS_EMBEDS: a URL shouted in-game must never unfurl a preview in
+        // #server (same rule the bot applies to every player-typed field).
+        flags: 4,
       }),
     });
     if (!res.ok) {

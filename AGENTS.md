@@ -73,10 +73,10 @@ Deploys are Charlie's call to trigger, not an agent's.
 | Service | Dir | Unit | Purpose |
 |---|---|---|---|
 | Discord bot | `services/discord-bot/` | `eilif-discord-bot.service` | `npm start` (or `npm run dry-run`). Relays events, recaps, milestones, chat mirror. |
-| Log poller | `services/log-poller/` | `valheim-log-poller.service` | `npm start`. Tails `BepInEx/LogOutput.log` over SFTP → derives presence/sessions/deaths → `/api/webhook`. |
+| Log poller | `services/log-poller/` | `eilif-log-poller.service` | `npm start`. Tails `BepInEx/LogOutput.log` over SFTP → derives presence/sessions/deaths → `/api/webhook`. |
 | Map snapshot | (root `scripts/map-snapshot.mjs`) | `eilif-map-snapshot.service` | `node scripts/map-snapshot.mjs --loop`. Pulls WebMap `map.png`/`fog.png` over SFTP on a cadence. |
 
-Reference unit files live under `services/*/` for inspection; the live units are `/etc/systemd/system/eilif-*.service` and `valheim-log-poller.service` on the host. Each service has its own `.env` (gitignored) — see each directory for its required vars.
+Reference unit files live under `services/*/` for inspection; the live units are `/etc/systemd/system/eilif-*.service` and `eilif-log-poller.service` on the host. Each service has its own `.env` (gitignored) — see each directory for its required vars.
 
 ## Database / migrations
 
