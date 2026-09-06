@@ -6,7 +6,9 @@ import { SignatureWall } from '@/components/oath/SignatureWall';
 import { getOaths } from '@/lib/data';
 import { SERVER_NAME, DISCORD_BOT_HANDLE } from '@/config/server';
 
-export const dynamic = 'force-dynamic';
+// SIXTY SECONDS OF ISR (2026-09-06). An oath is sworn once, in game, and the
+// wall is otherwise unchanging. A new signature joins it within the minute.
+export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: 'The Oath',

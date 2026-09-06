@@ -161,6 +161,24 @@ function fishCount(row: Record<string, unknown>): number {
   return 0;
 }
 
+/**
+ * Exactly the `player_stats` columns the metrics below read, as a PostgREST
+ * select list. Both callers of computeAggregates (the evaluator at the bottom of
+ * this file and lib/data.getMilestoneAggregates) used `select('*')`, which drags
+ * every viking's whole `gs_stats` blob — weapons, pickups, per-boss damage,
+ * baselines — across the wire so eight numbers can be summed. Measured against
+ * production with five vikings on it: 12,794 bytes wide, 6,761 narrow. The
+ * evaluator runs on EVERY client snapshot that merges, which at twenty vikings
+ * on a two-minute emit cycle is one POST every six seconds all evening.
+ *
+ * KEEP IN STEP WITH METRICS. A metric that reads a column missing from this list
+ * silently aggregates zero; PostgREST 400s on a column that does not exist, which
+ * the callers swallow, so a typo here stops deeds recording rather than crashing.
+ * scripts/milestones.test.mjs asserts the two stay in step.
+ */
+export const AGGREGATE_STAT_COLUMNS =
+  'deaths, kills, damage_dealt, resources_harvested, items_crafted, structures_built, map_explored_pct, gs_stats';
+
 export const METRICS: Record<string, (a: AggregateInput) => number> = {
   // Per-mode distances (metres) — sail vs walk/run split lives in gs_stats.
   sail_total: (a) => a.stats.reduce((t, r) => t + distances(r).sail, 0),
@@ -415,9 +433,15 @@ export async function evaluateAndRecord(
   if (defs.length === 0) return { crossed: 0 }; // all earned — nothing to do
 
   // 2. One batch of reads → the aggregate map.
+  // Narrow selects on both wide tables (2026-09-06). `sessions` is read whole —
+  // playtime_total_hours is an all-time figure and must stay that way — but a
+  // session row is only ever used for its name, its start and its length, so the
+  // other three columns are 58 % of a transfer that grows for the whole season
+  // (34 rows = 7,965 bytes wide, 3,313 narrow). player_stats is the same story
+  // in one blob: see AGGREGATE_STAT_COLUMNS.
   const [statsRes, sessionsRes, onlineRes, bossesRes] = await Promise.all([
-    client.from('player_stats').select('*'),
-    client.from('sessions').select('*'),
+    client.from('player_stats').select(AGGREGATE_STAT_COLUMNS),
+    client.from('sessions').select('character_name, joined_at, duration_minutes'),
     client.from('players').select('character_name, is_online'),
     // The authoritative "which Forsaken are down" — see AggregateInput.bossesKilled.
     client.from('bosses').select('is_killed'),

@@ -20,7 +20,27 @@ import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import { getBosses, getGalleryPhotos, getUpcomingEvents, getAllPlayers } from '@/lib/data';
 import { slugify, vikingPath, matchVikingName, resolvePhotoViking } from '@/lib/slug';
 
-export const dynamic = 'force-dynamic';
+// SIXTY SECONDS OF ISR (2026-09-06). A Forsaken's page changes on exactly two
+// events: the kill that flips it, and a photo or a boss night being added. Both
+// reach the page within the minute, and the eight of them stop re-reading the
+// roster and the gallery on every view.
+export const revalidate = 60;
+
+/**
+ * The eight Forsaken, by slug. Without this a dynamic segment is rendered fresh
+ * on EVERY request no matter what `revalidate` says — measured on the scratch
+ * build: three Supabase reads per view, three again on the next view. With it
+ * the eight pages are built once and refreshed on the 60 s window above.
+ *
+ * `dynamicParams` stays at its default (true), so a ninth Forsaken added to the
+ * table after a deploy still renders on demand rather than 404ing, and a
+ * database that is unreachable at build time yields an empty list and exactly
+ * today's behaviour rather than a failed build.
+ */
+export async function generateStaticParams() {
+  const bosses = await getBosses();
+  return bosses.map((b) => ({ slug: slugify(b.name) }));
+}
 
 // Bosses with a marked altar on the demo atlas — see config/map-demo.generated.ts.
 // Hardcoded here since the map's marker set is demo-only content, not queryable data.

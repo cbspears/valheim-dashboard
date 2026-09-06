@@ -10,6 +10,8 @@
 //
 // Run: npx tsx scripts/milestones.test.mjs
 import {
+  AGGREGATE_STAT_COLUMNS,
+  METRICS,
   computeAggregates,
   evaluateMilestones,
   evaluateAndRecord,
@@ -19,6 +21,73 @@ import {
   metricInfo,
 } from '../lib/milestones.ts';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+
+// ── the narrow select must still cover every metric ──────────────────────────
+// Both callers of computeAggregates now ask Supabase for AGGREGATE_STAT_COLUMNS
+// instead of `*`. A metric that reads a column left out of that list does not
+// throw — it quietly aggregates zero, and a Great Deed stops advancing with no
+// error anywhere.
+//
+// Checked TWO WAYS, because each catches what the other cannot.
+//
+// 1. AT RUNTIME. Build one synthetic player_stats row containing NOTHING but the
+//    columns AGGREGATE_STAT_COLUMNS names, give every one of them a non-zero
+//    value, feed non-zero sessions/bosses alongside it, and require every metric
+//    to come out non-zero. This is the assertion that matters: it does not care
+//    HOW a metric reaches into the row, so a metric written as `myHelper(r)` —
+//    which is already how sail_total, walk_run_total and fish_total work, via
+//    distances() and fishCount() defined above the METRICS block — is covered
+//    exactly like a bare `r.deaths`. Drop a column from the select list and the
+//    metric that needs it returns 0 and this fails by name.
+{
+  const cols = AGGREGATE_STAT_COLUMNS.split(',').map((c) => c.trim());
+  assert.ok(cols.length >= 8, `AGGREGATE_STAT_COLUMNS looks truncated: ${AGGREGATE_STAT_COLUMNS}`);
+  assert.ok(Object.keys(METRICS).length > 0, 'METRICS is not empty');
+
+  // Distinct non-zero values so a metric cannot pass by reading the wrong
+  // column. `gs_stats` is the one non-scalar: give it every sub-shape the
+  // helpers read.
+  const probeRow = {};
+  cols.forEach((c, i) => {
+    probeRow[c] =
+      c === 'gs_stats'
+        ? { distances: { walk: 11, run: 13, sail: 17 }, fish: [{ item: 'Fish1', count: 19 }] }
+        : 100 + i;
+  });
+  const probe = computeAggregates({
+    stats: [probeRow],
+    sessions: [{ character_name: 'Probe', joined_at: '2026-01-01T00:00:00Z', duration_minutes: 600 }],
+    onlineNames: new Set(),
+    bossesKilled: 3,
+  });
+  for (const key of Object.keys(METRICS)) {
+    assert.ok(
+      Number.isFinite(probe[key]) && probe[key] > 0,
+      `metric ${key} aggregated to ${probe[key]} from a row built out of AGGREGATE_STAT_COLUMNS — ` +
+        `it reads a player_stats column the select list omits, and would silently read zero in production`,
+    );
+  }
+}
+
+// 2. BY SOURCE. The runtime probe proves every metric CAN be satisfied by the
+//    select list; this proves no metric names a column outside it, which would
+//    make PostgREST 400 the whole read (callers swallow that into `?? []`, so
+//    every deed bar would go to zero at once).
+{
+  const cols = new Set(AGGREGATE_STAT_COLUMNS.split(',').map((c) => c.trim()));
+  const src = readFileSync(new URL('../lib/milestones.ts', import.meta.url), 'utf8');
+  const metricsBlock = src.slice(src.indexOf('export const METRICS'), src.indexOf('export function computeAggregates'));
+  const read = new Set();
+  for (const m of metricsBlock.matchAll(/sumStats\(a\.stats,\s*'([a-z_]+)'\)/g)) read.add(m[1]);
+  for (const m of metricsBlock.matchAll(/\br\.([a-z_]+)/g)) read.add(m[1]);
+  // distances() and fishCount() both read the one blob; they are called by name.
+  if (/distances\(|fishCount\(/.test(metricsBlock)) read.add('gs_stats');
+  assert.ok(read.size >= 8, `expected to find the metric column reads, found ${read.size}`);
+  for (const c of read) {
+    assert.ok(cols.has(c), `METRICS reads player_stats.${c} but AGGREGATE_STAT_COLUMNS omits it`);
+  }
+}
 
 // ── aggregate maths ──────────────────────────────────────────────────────────
 const stats = [

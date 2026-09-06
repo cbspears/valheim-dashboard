@@ -7,7 +7,10 @@ import { getGalleryPhotos, getAllPlayers } from '@/lib/data';
 import { resolvePhotoViking } from '@/lib/slug';
 import { SERVER_NAME, DISCORD_BOT_HANDLE } from '@/config/server';
 
-export const dynamic = 'force-dynamic';
+// SIXTY SECONDS OF ISR (2026-09-06). Photos arrive through the Discord bot,
+// minutes apart at best, so a per-request read bought nothing. A screenshot
+// posted now appears here within the minute.
+export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: 'Gallery',

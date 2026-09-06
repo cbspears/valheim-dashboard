@@ -8,7 +8,15 @@ import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import { getBosses, getUpcomingEvents, getMilestones, getMilestoneAggregates } from '@/lib/data';
 import { summarizeMilestones, groupUpcomingChains } from '@/lib/milestones';
 
-export const dynamic = 'force-dynamic';
+// SIXTY SECONDS OF ISR, NOT PER-REQUEST (2026-09-06). Nothing on this page is
+// live: it is the Forsaken timeline, the Great Deeds ledger and the calendar.
+// A boss falling, a deed landing or a gathering being scheduled shows up within
+// a minute instead of instantly, and in exchange every viking and every friend
+// refreshing this page during launch night shares one render (four Supabase
+// reads, one of them four hundred days of sessions) rather than each paying for
+// their own. The moment a boss falls is announced in Discord and in game, not
+// discovered by staring at this page.
+export const revalidate = 60;
 export const metadata: Metadata = { title: 'World' };
 
 export default async function WorldPage() {
@@ -68,7 +76,7 @@ export default async function WorldPage() {
 
           <section className="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid lg:items-start">
             <SectionHeader
-              title="Milestones earned"
+              title="Great Deeds earned"
               subtitle={earnedSubtitle}
               icon={<Trophy size={22} />}
             />
@@ -77,7 +85,7 @@ export default async function WorldPage() {
 
           <section className="min-w-0 lg:row-span-2 lg:grid lg:grid-rows-subgrid lg:items-start">
             <SectionHeader
-              title="Milestones ahead"
+              title="Great Deeds ahead"
               subtitle={horizonSubtitle}
               icon={<CircleDashed size={22} />}
             />

@@ -79,14 +79,20 @@ export function describeEvent(e: GameEvent): EventPresentation {
       return { icon: MessageSquare, accent: 'text-frost', label: 'Chat', description: `${name}: ${msg}` };
     }
     case 'milestone': {
-      // Collective milestone ("Great Deed") — server-wide, no character attached.
+      // Collective milestone. Player-facing name is "Great Deed" everywhere: the
+      // /world headings, the Hall card, the in-game [board:deeds] sign
+      // (lib/boards.ts) and the bot embed (services/discord-bot/src/milestones.js).
+      // Only the DB table and the event type keep the older `milestone` name.
       const title = str(meta, 'title') ?? 'A great deed';
       const line = str(meta, 'line');
+      // Colon and full stop, never an em dash: no em/en dashes in player-facing
+      // text (CLAUDE.md copy doctrine). This description renders on /events and,
+      // for a deed inside the recent window, on the Hall's Recent Saga card.
       return {
         icon: Crown,
         accent: 'text-gold-light',
-        label: 'Milestone',
-        description: line ? `${title} — ${line}` : `${title} — a great deed achieved together.`,
+        label: 'Great Deed',
+        description: line ? `${title}: ${line}` : `${title}. A great deed achieved together.`,
       };
     }
     case 'craft': {
@@ -98,6 +104,7 @@ export function describeEvent(e: GameEvent): EventPresentation {
       return { icon: MapPin, accent: 'text-frost', label: 'Discovery', description: `${name} discovered ${place}` };
     }
     default:
-      return { icon: Swords, accent: 'text-ash-dim', label: e.type, description: `${name} — ${e.type}` };
+      // Colon, not an em dash (CLAUDE.md copy doctrine).
+      return { icon: Swords, accent: 'text-ash-dim', label: e.type, description: `${name}: ${e.type}` };
   }
 }

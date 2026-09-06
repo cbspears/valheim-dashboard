@@ -39,8 +39,24 @@ export const metadata: Metadata = {
   description: `The known world of ${SERVER_NAME}: only what the warband has charted.`,
 };
 
-// the live snapshot check must run per-request
-export const dynamic = 'force-dynamic';
+// SIXTY SECONDS OF ISR, AND WHAT THAT ACTUALLY COSTS (2026-09-06). The
+// composite this page shows is itself only redrawn every five minutes by
+// eilif-map-snapshot, and the staleness badge trips at six hours
+// (MAP_STALE_AFTER_MS), so a per-request render was re-reading three storage
+// objects and two tables to show the same picture. One render a minute now
+// serves everybody.
+//
+// Be honest about the staleness: 60 s is the FLOOR, not the ceiling, and it is
+// not only the caption. ISR is stale-while-revalidate — the first request after
+// the window expires is served the OLD render and only triggers the new one, so
+// on a quiet route the staleness is bounded by the gap between visitors rather
+// than by the window. And LiveWorld builds the composite's `src` as
+// `current.webp?t=<liveMap.updatedAt>`, so the freshness value doubles as the
+// image cache-buster: a frozen render pins the picture too, not just the "last
+// charted" line under it. Busy nights are unaffected; the quiet hours and the
+// first look after a world wipe are the cases to know about — see the ISR note
+// at the top of lib/data.ts for the launch-morning consequence.
+export const revalidate = 60;
 
 export default async function MapPage() {
   const [liveMap, pins, photosByPin] = await Promise.all([
@@ -48,6 +64,11 @@ export default async function MapPage() {
     getPins(),
     getPhotosByPin(),
   ]);
+
+  // The scrubber under the map only exists once two in-game days are archived
+  // (LiveWorld `replayReady`). On a freshly wiped world there is nothing to
+  // press, so the footnote must not tell anyone to press play.
+  const replayReady = (liveMap?.frames.length ?? 0) >= 2;
 
   return (
     <div>
@@ -133,11 +154,11 @@ export default async function MapPage() {
               Post a screenshot in Discord, tag the bot, and{' '}
               <span className="font-semibold text-ash">name the place in your caption</span>, e.g.{' '}
               <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
-                @Eilif sunset at Draugheim
+                @Eilif sunset at Odinshold
               </span>
               . The photo lands in the{' '}
               <span className="text-ash">Gallery</span> and on{' '}
-              <span className="text-ash">Draugheim&apos;s marker</span>{' '}here. Click any marker to
+              <span className="text-ash">Odinshold&apos;s marker</span>{' '}here. Click any marker to
               see its album. Pin first or photo first, either order works: a photo naming a place
               that isn&apos;t pinned yet attaches itself the moment the pin appears.
             </p>
@@ -202,7 +223,11 @@ export default async function MapPage() {
             How it works: the server tracks everywhere the warband has been and renders the charted
             world; the dashboard pulls a fresh masked snapshot every 5 minutes and archives one
             frame per in-game day. Watching the light spread across the dark is the story of the
-            season, and press play above to replay it. The finale gets the full replay.
+            season.{' '}
+            {replayReady
+              ? 'Press play above to replay it.'
+              : 'The replay opens as soon as a second in-game day is archived.'}{' '}
+            The finale gets the full replay.
           </span>
         </p>
       </div>

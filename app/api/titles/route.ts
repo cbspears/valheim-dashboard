@@ -1,6 +1,5 @@
 import {
   getPlayersWithStats,
-  getOnlinePlayers,
   getSessionsSince,
   getEventsSince,
   playtimeMinutesByCharacter,
@@ -40,9 +39,9 @@ interface TitlesResponse {
 
 // Module-level = per serverless instance, exactly like /api/boards. This route is
 // UNAUTHENTICATED and CORS-open by design (the bot and any status widget read it
-// from anywhere), and every hit costs FOUR Supabase reads — the full roster with
-// stats, the online set, 70 days of sessions and 70 days of death events — plus
-// the whole epithet engine. A 60 s window makes a flood cost at most one read
+// from anywhere), and every hit costs FOUR Supabase reads — the roster, its
+// stats, 70 days of sessions and 70 days of death events — plus the whole
+// epithet engine. A 60 s window makes a flood cost at most one read
 // cycle a minute per instance while staying far fresher than the bot's own
 // titles loop (10 min). `?fresh=1` skips it for a manual check.
 const CACHE_TTL_MS = 60_000;
@@ -60,14 +59,20 @@ export async function GET(request: Request) {
     return Response.json(cache.body, { headers: CORS_HEADERS });
   }
 
-  const [withStats, online, sessions, deaths] = await Promise.all([
+  const [withStats, sessions, deaths] = await Promise.all([
     getPlayersWithStats(),
-    getOnlinePlayers(),
     getSessionsSince(70),
     getEventsSince(70, ['death']),
   ]);
 
-  const onlineNames = new Set(online.map((p) => p.character_name));
+  // The online set comes out of the roster we already fetched, not a second
+  // `is_online = true` read. Route handlers get NONE of the per-request
+  // memoization a page render gets — measured on the scratch build, this route
+  // was issuing the identical `players` query twice — and deriving it here also
+  // means the roster and the online set can never be two different snapshots.
+  const onlineNames = new Set(
+    withStats.filter((p) => p.is_online).map((p) => p.character_name),
+  );
   const playtimeByName = playtimeMinutesByCharacter(sessions, onlineNames);
   const roster: PlayerWithStats[] = withStats.map((p) => ({
     ...p,

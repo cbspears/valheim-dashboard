@@ -7,7 +7,11 @@ import { EpisodeList } from '@/components/events/EpisodeList';
 import { getAllEvents, getSessionsSince, getEventsSince, getOaths, getPinsForEpisodes } from '@/lib/data';
 import { buildEpisodes } from '@/lib/episodes';
 
-export const dynamic = 'force-dynamic';
+// SIXTY SECONDS OF ISR (2026-09-06). The Saga is a record of what already
+// happened — 200 events, 70 days of sessions, the oaths and the pins, five
+// reads and the two largest payloads on the site. A new deed or death joining
+// the feed a minute late costs the reader nothing; #server already told them.
+export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: 'The Saga',

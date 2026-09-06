@@ -37,6 +37,7 @@ import {
   stripLeadingSeparators,
 } from '@/lib/webhook/oath';
 import { shouldReplayGuard, planJoinSession, sessionDurationMinutes } from '@/lib/webhook/presence';
+import { planRosterSync, type RosterRow } from '@/lib/webhook/roster';
 import { shouldDedupeDeath, deathDedupeBounds } from '@/lib/webhook/dedupe';
 import { clampEventTime } from '@/lib/event-time';
 
@@ -244,48 +245,86 @@ export async function POST(request: Request) {
             .map((n) => n.trim())
         : [];
 
-      // Ensure each online name exists, then mark it online + seen.
-      for (const name of onlineNames) {
-        const { data: existing, error: lookupErr } = await db
-          .from('players')
-          .select('id')
-          .eq('character_name', name)
-          .limit(1)
-          .maybeSingle();
-        // A failed lookup must not be read as "no such player" — that would
-        // insert a DUPLICATE players row for someone who already exists.
-        if (lookupErr) {
-          console.error(`[webhook] sync: players lookup for "${name}" failed — ${lookupErr.message}`);
-          continue;
-        }
-        if (existing?.id) {
+      // ONE ROSTER READ, THEN AT MOST THREE WRITES — regardless of how many
+      // vikings are aboard (2026-09-06).
+      //
+      // This used to be a sequential loop: one SELECT and one UPDATE per name,
+      // so the poller's two-minute roster sync cost 2N + 3 serialized calls,
+      // forty-three of them at a full hall of twenty, each paying its own
+      // latency to Supabase on a free-plan connection budget.
+      //
+      // NO CHARACTER NAME GOES INTO A POSTGREST FILTER. `metadata.online` is
+      // producer-supplied, and postgrest-js's `.in()` quotes a value only when
+      // it contains one of `,()` and NEVER escapes an embedded double quote
+      // (node_modules/@supabase/postgrest-js/dist/index.mjs, `in()` +
+      // PostgrestReservedCharsRegexp) — so `x","Bren` inside an `in.(…)` list
+      // silently becomes two list entries and matches a row nobody asked for,
+      // with HTTP 200 and no error. `players` is one row per viking (a hall of
+      // twenty), so the whole roster costs less than the loop it replaced: read
+      // it and intersect in JS. That set arithmetic is planRosterSync, which is
+      // pure and covered by lib/webhook/roster.test.mjs — this is a write path
+      // that cannot be rehearsed against production, so the part that decides
+      // who is online is tested away from the database.
+      const { data: rosterRows, error: rosterErr } = await db
+        .from('players')
+        .select('id, character_name, is_online')
+        .limit(1000);
+
+      // A failed read must not be read as "no such player" — that would insert
+      // a DUPLICATE players row for everyone who already exists, and mark
+      // nobody offline. Skip both halves; server_status below still refreshes,
+      // and the next sync (two minutes later) tries again.
+      if (rosterErr) {
+        console.error(`[webhook] sync: players roster read failed — ${rosterErr.message}`);
+      } else {
+        const plan = planRosterSync(onlineNames, (rosterRows ?? []) as RosterRow[]);
+
+        // Aboard: flip them all online together, by id.
+        if (plan.onlineIds.length > 0) {
           await db
             .from('players')
             .update({ is_online: true, last_seen_at: occurredIso })
-            .eq('id', existing.id);
-        } else {
-          await db.from('players').insert({
-            character_name: name,
+            .in('id', plan.onlineIds);
+        }
+
+        // Marked online but not in this roster message: they left without a
+        // clean leave line. Offline by ID, never by name.
+        if (plan.offlineIds.length > 0) {
+          await db.from('players').update({ is_online: false }).in('id', plan.offlineIds);
+        }
+
+        // Names nobody has ever seen.
+        //
+        // A PLAIN INSERT, NOT AN UPSERT. `onConflict: 'character_name'` would
+        // resolve to a real ON CONFLICT target and fail the whole statement
+        // with 42P10 if `players_character_name_key`
+        // (db/2026-07-25_players_unique_name.sql) is not live — and nothing in
+        // this repo or its docs records that file having been applied. A plain
+        // INSERT needs no constraint and is exactly what the per-name loop did.
+        // The only way it can fail is a viking joining in the milliseconds
+        // between the read above and this write, which the per-name retry
+        // absorbs: bounded by the player cap, and reached only on an error.
+        if (plan.unseenNames.length > 0) {
+          const newRow = (character_name: string) => ({
+            character_name,
             first_seen_at: occurredIso,
             last_seen_at: occurredIso,
             is_online: true,
           });
+          const { error: insErr } = await db.from('players').insert(plan.unseenNames.map(newRow));
+          if (insErr) {
+            console.warn(
+              `[webhook] sync: bulk insert of ${plan.unseenNames.length} new player row(s) failed ` +
+                `(${insErr.message}) — retrying one at a time`,
+            );
+            for (const name of plan.unseenNames) {
+              const { error: oneErr } = await db.from('players').insert(newRow(name));
+              if (oneErr) {
+                console.error(`[webhook] sync: creating player "${name}" failed — ${oneErr.message}`);
+              }
+            }
+          }
         }
-      }
-
-      // Everyone not in the online set is offline. Compute the offline set by ID
-      // in JS — never interpolate a character name (client-controlled) into a
-      // PostgREST filter string.
-      const onlineSet = new Set(onlineNames);
-      const { data: currentlyOnline } = await db
-        .from('players')
-        .select('id, character_name')
-        .eq('is_online', true);
-      const goneIds = (currentlyOnline ?? [])
-        .filter((r) => !onlineSet.has(r.character_name as string))
-        .map((r) => r.id as string);
-      if (goneIds.length > 0) {
-        await db.from('players').update({ is_online: false }).in('id', goneIds);
       }
 
       const statusUpdate: Record<string, unknown> = {
