@@ -100,14 +100,18 @@ Facts as of 2026-09-05, verified by execution, that the morning assumes:
   WebMap 2.7.1, V+ 0.9.17.1, PlantEverything 1.20.0, ServersideQoL 1.8.0,
   AzuCraftyBoxes 1.8.15 — eight plugins.
 - In the repo, built for the morning: Companion **0.3.3** (carries `[ServerFallback]`),
-  Boards 0.2.0, EilifPaths **1.5.0** (carries `[VPlusFallback]`), Client **0.3.2**.
-- On Thunderstore: `Eilif-EilifCompanionClient-0.3.2` is **live**.
+  Boards 0.2.0, EilifPaths **1.5.0** (carries `[VPlusFallback]`), Client **0.3.3** (bumped
+  2026-09-05 evening: the hardening pass changed the DLL, and Thunderstore's 0.3.2 is immutable).
+- On Thunderstore: `Eilif-EilifCompanionClient-0.3.2` is **live** (still works; 0.3.3 only
+  changes the startup health line). `plugins/thunderstore/EilifCompanionClient-0.3.3.zip` and
+  `plugins/thunderstore/EilifPaths-1.5.0.zip` are staged and ready for Charlie to upload.
   `Eilif-EilifPaths-1.5.0` is **not uploaded** — the package API 404s it. Until Charlie
   uploads it, `--paths 1.5.0` cannot be minted, and `--fallback on` is refused without
   `--paths 1.5.0`. This is the single longest pole in the day. Uploading it before the 9th
   removes the 40-to-80-minute lag from the critical path but takes the version number with
   it, and the morning's rebuild produces a **different** 1.5.0 — see the branch at step 16.
-  `plugins/thunderstore/EilifPaths-1.5.0/` does not exist yet either; step 4 creates it.
+  `plugins/thunderstore/EilifPaths-1.5.0/` and its zip exist since 2026-09-05 evening (built
+  against 0.221.12); step 4 re-stages them only if the 1.0 rebuild changes the DLL.
 - `config/server.ts` `MAX_PLAYERS` is **20**, `MODPACK_VERSION_LABEL` is `Pack v11 · Aug 27`,
   `LAUNCH_NOTICE` is empty by decision, `DISCORD_URL` is empty.
 - Port 3000 on the box is **OPEN** (HTTP 200). The GTX ticket was skipped. It is not a
@@ -651,8 +655,9 @@ so if the Client DLL did not change in the 1.0 rebuild there is nothing to uploa
 > `--fallback on` accepts 1.5.1 for the same reason it accepts 1.5.0: it refuses anything
 > **older** than 1.5.0, because that is where the `[VPlusFallback]` section arrived.
 >
-> The same rule applies to `EilifCompanionClient 0.3.2`, which **is** already published: if
-> its DLL changes in the 1.0 rebuild it needs 0.3.3, not a re-upload of 0.3.2.
+> The same rule applies to `EilifCompanionClient`: 0.3.2 **is** published and immutable. The
+> 2026-09-05 hardening already changed the DLL, so the repo is at **0.3.3** with its zip staged.
+> If the 1.0 rebuild changes it again, that is 0.3.4, never a re-upload.
 
 Then spend the wait on the one link no script can check — mint under a throwaway profile
 name and import it in r2modman by hand (Settings → Import/Export → Import profile), then
