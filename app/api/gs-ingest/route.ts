@@ -1201,9 +1201,24 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client', r
     );
     if (outcome !== 'gave-up' || !nextFightStats) continue;
 
-    // Graceful degradation (fight_stats column missing, or the row is under such
-    // contention that six compare-and-swaps all missed): merge onto the latest
-    // boss event row for this boss instead.
+    // Graceful degradation: merge onto the latest boss event row for this boss
+    // instead, so the fight summary is at least somewhere.
+    //
+    // WHICH give-ups this actually catches, because the guard above decides it
+    // and the answer is narrower than it looks (2026-09-06). It needs
+    // `nextFightStats`, which only exists if the fold RAN, so:
+    //   • six compare-and-swap misses in a row — caught, the fold ran on each.
+    //   • a rev shape no filter can match (lib/fight-stats-cas revOf) — caught,
+    //     the fold is run once before the helper refuses.
+    //   • the fight_stats COLUMN missing, or any other error on the helper's own
+    //     read — NOT caught. That fails before the fold, so nextFightStats is
+    //     still null and the `continue` above skips this block. The comment here
+    //     used to claim it covered exactly that case; it does not, and the
+    //     column does exist in production, so nothing is broken. Anyone
+    //     reinstating a pre-migration path needs to know the difference.
+    // ingestBossMilestones' own degraded flip does NOT have this problem: it
+    // seeds `presentAtFlip` from the payload before the CAS runs, so a read
+    // error there still registers the kill.
     const { data: ev } = await client
       .from('events')
       .select('id, metadata')

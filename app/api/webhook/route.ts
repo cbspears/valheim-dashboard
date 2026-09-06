@@ -41,6 +41,14 @@ import { planRosterSync, type RosterRow } from '@/lib/webhook/roster';
 import { shouldDedupeDeath, deathDedupeBounds } from '@/lib/webhook/dedupe';
 import { clampEventTime } from '@/lib/event-time';
 
+/**
+ * How many `players` rows one roster sync will read. Fifty times the twenty-seat
+ * hall, so it is a bound on a runaway and never a filter in normal play — and
+ * hitting it stands the insert half down rather than forking the table further
+ * (see the sync handler below).
+ */
+const ROSTER_READ_LIMIT = 1000;
+
 // Always run on the Node.js runtime (we need the service role key + full SDK)
 // and never cache — every webhook mutates state and must execute on request.
 export const dynamic = 'force-dynamic';
@@ -268,7 +276,7 @@ export async function POST(request: Request) {
       const { data: rosterRows, error: rosterErr } = await db
         .from('players')
         .select('id, character_name, is_online')
-        .limit(1000);
+        .limit(ROSTER_READ_LIMIT);
 
       // A failed read must not be read as "no such player" — that would insert
       // a DUPLICATE players row for everyone who already exists, and mark
@@ -277,7 +285,29 @@ export async function POST(request: Request) {
       if (rosterErr) {
         console.error(`[webhook] sync: players roster read failed — ${rosterErr.message}`);
       } else {
-        const plan = planRosterSync(onlineNames, (rosterRows ?? []) as RosterRow[]);
+        const roster = (rosterRows ?? []) as RosterRow[];
+        const plan = planRosterSync(onlineNames, roster);
+
+        // A TRUNCATED ROSTER MUST NOT MINT ROWS (2026-09-06). The read above is
+        // capped and has no ORDER BY, so at the cap the rows that come back are
+        // an arbitrary subset — and any viking outside it looks UNSEEN to
+        // planRosterSync, gets a fresh row every sync, and grows the table that
+        // truncated the read in the first place. That is the 2026-07-25 fork
+        // incident (325 duplicate rows in a week) with its own accelerator
+        // attached. Fifty times the player cap is not a number this table
+        // reaches by playing: reaching it IS the incident. So the flips still
+        // run (they are by id, and marking a known row online or offline is
+        // always safe) and only the CREATE half stands down, loudly, until
+        // somebody dedupes by character_name.
+        const rosterTruncated = roster.length >= ROSTER_READ_LIMIT;
+        if (rosterTruncated) {
+          console.error(
+            `[webhook] sync: the players read came back at its ${ROSTER_READ_LIMIT}-row cap, so ` +
+              `"never seen before" cannot be trusted and no new player rows will be created. The ` +
+              `table has forked — dedupe players by character_name (oldest row per name wins) and ` +
+              `apply db/2026-07-25_players_unique_name.sql.`,
+          );
+        }
 
         // Aboard: flip them all online together, by id.
         if (plan.onlineIds.length > 0) {
@@ -304,7 +334,7 @@ export async function POST(request: Request) {
         // The only way it can fail is a viking joining in the milliseconds
         // between the read above and this write, which the per-name retry
         // absorbs: bounded by the player cap, and reached only on an error.
-        if (plan.unseenNames.length > 0) {
+        if (plan.unseenNames.length > 0 && !rosterTruncated) {
           const newRow = (character_name: string) => ({
             character_name,
             first_seen_at: occurredIso,

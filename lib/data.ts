@@ -9,23 +9,69 @@
 // wall) instead set `export const revalidate = 60` and are served from the ISR
 // cache — see each page for the staleness it accepts.
 //
-// TWO THINGS ABOUT THAT ISR THAT ARE EASY TO GET WRONG:
+// THREE THINGS ABOUT THAT ISR THAT ARE EASY TO GET WRONG:
 //
 //   • 60 s is the FLOOR, not the ceiling. Next serves stale-while-revalidate:
 //     the first request after the window expires gets the OLD render and only
 //     kicks off the new one. On a busy night nobody notices; on a quiet route
 //     the staleness is bounded by the gap between visitors.
-//   • A WORLD WIPE NEEDS A WARM-UP. `revalidate` pages are prerendered AT BUILD
-//     TIME, so whatever the database held when `vercel deploy` ran is baked into
-//     the deployment — and docs/LAUNCH-DAY.md deploys at step 19 and wipes at
-//     step 20. There is no invalidator anywhere in this repo (nothing calls
-//     revalidateTag/revalidatePath; the tags below are decorative), so after a
-//     wipe the six ISR routes must be hit TWICE each — once to serve the stale
-//     copy and trigger regeneration, once to see the wiped world — or the first
-//     viking of the new season reads the old one's ledger. The routes are
-//     /world, /events, /gallery, /oath, /map and the eight /boss/<slug> pages.
-//     Dynamic routes (/, /players, /viking/[slug], /tv, /admin/ops, every /api/*)
-//     are not affected and need no warm-up.
+//   • FIVE MINUTES IN THE READER'S BROWSER, not sixty seconds. Making a page
+//     static also turns on Next's client Router Cache for it: production answers
+//     every static route with `x-nextjs-stale-time: 300` and the dynamic routes
+//     with no such header at all. That is THIRTEEN data-bearing URLs, not five:
+//     the eight /boss/<slug> pages carry the same 300, because /boss/[slug] is
+//     `revalidate = 60` with generateStaticParams. (/mods and /get-started carry
+//     it too and do not matter — they render config, not the database.) Measured
+//     on the live site 2026-09-06: 300 on /world /events /map /oath /gallery and
+//     /boss/eikthyr, no such header on / or /players. So
+//     a viking who reaches /world through the NavBar — a `next/link` client
+//     navigation, which is how the site is actually used — is served the RSC
+//     payload their browser already has, for up to 300 s, WITHOUT asking the
+//     server. Each page below says a change "shows up within the minute"; that
+//     is true of the server's copy and not of a tab that has already been there.
+//     A hard reload (or a fresh tab, or curl) is the only thing that beats it,
+//     which is also why the launch-morning wipe check at docs/LAUNCH-DAY.md
+//     step 20d must be run on a page that was never opened before the wipe —
+//     otherwise it can read "the page did not turn" while the server is fine.
+//   • A WORLD WIPE NEEDS A WARM-UP, AND COUNTING REQUESTS IS THE WRONG CHECK.
+//     `revalidate` pages are prerendered AT BUILD TIME, so whatever the database
+//     held when `vercel deploy` ran is baked into the deployment — and docs/LAUNCH-DAY.md
+//     deploys at step 19 and wipes at step 20. There is no invalidator anywhere
+//     in this repo (nothing calls revalidateTag/revalidatePath; the tags below
+//     are decorative), so after a wipe the ISR routes have to be walked until
+//     they show the new world, or the first viking of the new season reads the
+//     old one's ledger.
+//
+//     WALK THEM BY CONTENT, NOT BY COUNT. Regeneration is asynchronous, and how
+//     long it takes is a property of the machine, not of the code — which is
+//     exactly why counting requests is the wrong check. Both measurements, so
+//     nobody over-waits or under-waits from one anecdote:
+//
+//       - PRODUCTION, /world polled every few seconds (2026-09-06): HIT at
+//         age 54, then STALE at age 61 (the window had expired; that request
+//         served the old render and kicked off the rebuild), then the very next
+//         request seven seconds later was a HIT at age 5 — the new render was
+//         already up, about two seconds after the stale one. On Vercel, one
+//         stale answer then fresh.
+//       - A COLD LOCAL `next start` against a loaded local stack, same day:
+//         STALE, then STALE again three seconds later, and only the third
+//         request carried the new number. The renderer is simply slower there.
+//
+//     So do not count to two, or to three. Reload until the page itself says the
+//     world is new — no boss felled, an empty ledger — which is what
+//     docs/LAUNCH-DAY.md step 20d asks for, and redeploy if it will not turn.
+//
+//     /world lags longest, because it sits behind TWO independent 60 s caches:
+//     the page's own ISR window and getMilestoneAggregates' `unstable_cache`
+//     below. A regeneration that lands while that data-cache entry is still warm
+//     renders the OLD world's Great Deeds and then parks THAT for another
+//     minute, so the ledger can trail the wipe by ~2 minutes even when the boss
+//     timeline has already turned over. Judge /world on its Great Deeds numbers,
+//     not on its boss row.
+//
+//     The routes are /world, /events, /gallery, /oath, /map and the eight
+//     /boss/<slug> pages. Dynamic routes (/, /players, /viking/[slug], /tv,
+//     /admin/ops, every /api/*) are not affected and need no warm-up.
 //
 // PER-REQUEST DEDUPE (2026-09-06). Every loader below is wrapped in React
 // `cache()`, so a page that reaches for the same data twice pays for it once.
@@ -176,12 +222,45 @@ export const getOnlinePlayerNames = cache(async (): Promise<string[]> => {
   return ((data as { character_name: string }[]) ?? []).map((r) => r.character_name);
 });
 
+/**
+ * The whole roster, longest-played first. The roster of record for the site:
+ * the Hall, the Vikings page, the gallery byline, every war-room and
+ * `getOnlinePlayers` below all read it, and React `cache()` means one render
+ * pays for it once.
+ *
+ * BOUNDED AT 500, AND LOUD ABOUT IT (2026-09-06). Its siblings were capped for
+ * the 2026-07-25 incident, when a webhook insert race forked `players` to 325
+ * duplicate rows in a week and every render carried all of them. This one was
+ * left unbounded, and the same commit widened it further by deriving
+ * `getOnlinePlayers` from it, so an incident would be paid for on more pages
+ * than before. 500 is twenty-five times the player cap and well above that
+ * incident, so it is a transfer bound and not a filter.
+ *
+ * The one thing a cap could cost here is a viking: the sort is by playtime, so
+ * above 500 rows a brand-new arrival with no minutes is the first to fall off
+ * the end, and `getOnlinePlayers` would then say the hall is emptier than it
+ * is. That must never happen quietly, so hitting the cap logs. If that line
+ * ever appears, `players` has forked and the roster needs deduping by
+ * character_name (db/2026-07-25_players_unique_name.sql) before anything on the
+ * site can be trusted.
+ */
+const ALL_PLAYERS_LIMIT = 500;
+
 export const getAllPlayers = cache(async (): Promise<Player[]> => {
   const { data } = await db()
     .from('players')
     .select(PLAYERS_PUBLIC_COLS)
-    .order('total_playtime_minutes', { ascending: false });
-  return (data as Player[]) ?? [];
+    .order('total_playtime_minutes', { ascending: false })
+    .limit(ALL_PLAYERS_LIMIT);
+  const rows = (data as Player[]) ?? [];
+  if (rows.length >= ALL_PLAYERS_LIMIT) {
+    console.error(
+      `[data] getAllPlayers hit its ${ALL_PLAYERS_LIMIT}-row cap. The players table has forked ` +
+        `(config/server.ts caps the hall at twenty); vikings past the cap are missing from the roster ` +
+        `AND from the online list. Dedupe players by character_name before trusting the site.`,
+    );
+  }
+  return rows;
 });
 
 export const getPlayersWithStats = cache(async (): Promise<PlayerWithStats[]> => {
@@ -511,6 +590,16 @@ export const getEventsSince = cache(async (days = 70, types?: string[]): Promise
   return (data as GameEvent[]) ?? [];
 });
 
+/**
+ * Sessions still open (no `left_at`).
+ *
+ * NO CALLERS TODAY (checked 2026-09-06: `grep -rn getActiveSessions` over
+ * *.ts/*.tsx outside node_modules returns only this definition). The perf pass
+ * wrapped it in cache() and bounded it along with its neighbours, which is
+ * harmless but makes the limit below look load-bearing when it is not. Kept
+ * because open-session state is a thing the ops cockpit keeps almost needing;
+ * delete it freely if it is still unused after launch.
+ */
 export const getActiveSessions = cache(async (): Promise<GameSession[]> => {
   const { data } = await db()
     .from('sessions')
