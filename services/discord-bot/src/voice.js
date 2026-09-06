@@ -6,9 +6,11 @@
 // chatterbox.
 //
 // Pacing model (Charlie's decisions, 2026-08-22):
-//   • AMBIENT (atmosphere + callback) — one line per ~2 HOURS of someone-online
-//     time, AND never within VOICE_MIN_GAP_MS (default 30 min) of the most
-//     recent voice line of ANY kind. Never to an empty hall.
+//   • AMBIENT (atmosphere + death callback + oath callback) — one line per ~2
+//     HOURS of someone-online time, AND never within VOICE_MIN_GAP_MS (default
+//     30 min) of the most recent voice line of ANY kind. Never to an empty
+//     hall. Roughly one ambient line in four reads a sworn oath back to the
+//     viking who swore it, whenever one of them is online to hear it.
 //   • WHISPERS ON QUIET NIGHTS — not extra volume: when the ambient slot fires
 //     to a nearly-empty hall (exactly 1 viking online, or 2–3 with no `events`
 //     row in the last 45 minutes), the ambient POOL is swapped for a closer,
@@ -30,7 +32,7 @@
 // Gated behind VOICE_ENGINE=1 (see index.js), like GALLERY_INGEST.
 
 import { serviceClient } from './supabase.js';
-import { causeNoun, nameMd, safeText } from './format.js';
+import { causeNoun, clipChars, defangLinks, nameMd, safeText } from './format.js';
 import { MENTION_STRICT } from './discord.js';
 
 const TICK_MS = 60_000;                 // the caller ticks us every 60s
@@ -43,6 +45,8 @@ const DAWN_EVERY_DAYS = 3;              // dawn line on every 3rd world day
 const DEATH_TIER_STEP = 100;            // after 100, a tier every +100 deaths
 const WHISPER_CREW_MAX = 3;             // 2..3 online = a quiet crew
 const WHISPER_QUIET_MS = 45 * 60_000;   // "nothing eventful" window for the crew whisper
+const OATH_QUOTE_MAX = 90;              // characters of a shouted oath Eilif repeats
+const OATH_AMBIENT_SHARE = 0.25;        // ~1 ambient line in 4 is an oath callback
 
 // ── Content bank (saga register — match format.js) ────────────────────────
 
@@ -56,6 +60,38 @@ export const DAWN = [
   'Day {day}. Eilif marks who rises first and says nothing about who does not.',
   'Another dawn on Eilif, day {day}. The mead survived the night.',
   'Day {day}. Eilif has seen worse mornings, though not lately.',
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  'Day {day}. Frost on the grass, and one set of tracks through it that Eilif does not know.',
+  'The fog sits in the low ground on day {day}, waiting to be invited up. Eilif has not invited it.',
+  'Day {day}. The sky is clean for once. Eilif takes a clean sky as a debt, not a gift.',
+  'Day {day}. The wind came around to the north before first light. Bring a cloak and bring a plan.',
+  'Smoke stands straight up over Eilif on day {day}. No wind, no weather, no excuses.',
+  'Sun on the snow, day {day}. A fine sight, and it will show your tracks to everything with a nose.',
+  'Cold and clear on day {day}. Eilif can see three days of weather coming and none of it is kind.',
+  'Day {day}. The frost broke overnight and the land smells of thaw and rot. Eilif calls both of them honest.',
+  'Low cloud on day {day} and the mountain has gone missing again. Eilif has never known it to stay gone.',
+  'Day {day}. A raven has sat on the gatepost since first light. Eilif did not ask what it is waiting for.',
+  'The howling stopped when the light came on day {day}. Eilif finds that worse than the howling.',
+  'The rain stopped at dawn on day {day}, as if something wanted a clear look at you.',
+  'Day {day}. Eilif smelled woodsmoke from the north before the sun. Not our smoke.',
+  'Deer at the edge of the meadow on day {day}, unbothered. That tells you where the wolves are not.',
+  'Day {day}. The sun is up, and every shadow it makes belongs to something.',
+  'Wet boots by the door on day {day}, and all of them in pairs. Eilif opens the morning content enough.',
+  'Day {day}. Eilif took the measure of the night: one broken cup, one snapped bowstring, no widows.',
+  'Dead greylings by the gate on day {day}. Eilif counted them and drew its own conclusions.',
+  'Salt crust on the longship rail, day {day}. She came home wet and she came home. Eilif counts both.',
+  'Day {day}. Somebody sang half an oath at the longfire and fell asleep. Eilif remembers the half.',
+  "First light on day {day}. Somebody's shield is still by the fire. Somebody is going out without it.",
+  'Frost reached inside the hall on day {day}. Eilif suggests more wood and fewer plans.',
+  'Day {day}. The mist is up to the knee and the gate is a rumor. Walk slowly and walk together.',
+  'Eilif marks day {day}: no new graves, no new gaps in the roster. The saga can wait a morning.',
+  'Day {day}. Nothing burned down while you slept. Eilif suspects that is the high point already.',
+  'Eilif has watched {day} dawns over this land. The land has not once looked grateful.',
+  'Eilif has held these stones {day} days and has yet to hear a promise it fully believes.',
+  'New light, old land, and the same hungry dark beneath it. Eilif welcomes you to day {day}.',
+  'The wind is down, the sea is quiet, and nothing tried the gate. Eilif marks it day {day}.',
+  'Eilif has a roof, a fire, and a warband that keeps coming back through the door. That is the whole of day {day}.',
+  'Day {day}. The light comes thinner than it did. Eilif has watched enough mornings to be sure of it.',
 ];
 
 // (b) Pure atmosphere — no data, just weather in the bones.
@@ -70,6 +106,67 @@ export const ATMOSPHERE = [
   'Out on the black water the serpents wait, patient as a grudge.',
   'Every oath sworn at this longfire goes into the stones. Stone is patient about that sort of thing.',
   'Quiet in the hall. That usually means a good story or a bad death is on its way.',
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  'Eilif settles at night. Old timber does that. Old halls do it for other reasons.',
+  'There is a draft in here that comes through no door anyone cut. Eilif has stopped hunting for it.',
+  'The floorboards remember where the heavy ones stand. Eilif reads them like a ledger.',
+  'Something has been nesting in the thatch all season. Eilif has decided it may stay.',
+  'Eilif is warm tonight. That took work from somebody, and the hall knows which somebody.',
+  'A hall is only a fire with walls around it. Keep the fire.',
+  'Nine halls came before this one. They are all quiet now. Eilif is the tenth.',
+  'There is a cold spot near the north wall. There has always been a cold spot near the north wall.',
+  'There is a sound the hall makes before a hard night. Eilif is not making it. Yet.',
+  'Eilif does not sleep. Eilif dims.',
+  'Eilif watches the door more than it watches the fire. Habit.',
+  'Every stone in this wall was carried here by somebody. Most of them are gone now. The wall is not.',
+  'The trees went quiet a moment ago. Eilif noticed. You should have too.',
+  'Something in the Black Forest stopped moving when you did.',
+  'Every greydwarf out there knows exactly where the light is. That is what light is for.',
+  'The forest does not hate the warband. It only has more patience than the warband has.',
+  'The far hills went dark all at once, as if something walked in front of them.',
+  'The tide is out and the shore smells of old iron. Eilif has never liked that smell.',
+  'The gulls went inland this morning. Sailors used to know what that meant.',
+  'The sea keeps everything it takes and shows you none of it back.',
+  'Iron never forgives a rushed quench. Eilif has seen the blades that prove it.',
+  'Bellows and sparks going up through the smoke hole. A good sound to grow old beside.',
+  'Munin remembers what you did last winter. Munin remembers all of it. That is his trouble.',
+  'A raven landed on the woodpile and stayed. Eilif is not superstitious. Eilif is careful.',
+  'The Valkyries have nothing to do tonight. Try to keep it that way.',
+  'Odin keeps a tally and never shows it. That is the whole cruelty of him.',
+  'The gods do not love the bold. They only watch the bold for longer.',
+  'The mead barrel is lighter than it was this morning. Nobody is a suspect and everybody is.',
+  'Eat before you go out. Eilif has buried plenty who meant to eat later.',
+  'Sit down. The realm will still be trying to kill you in ten minutes.',
+  'Somewhere in the Deep North the eighth of the Forsaken has not been introduced to anybody yet.',
+  'Smoke, salt pork, wet boots by the fire. Some evenings the realm just lets you have it.',
+  'The hall is loud tonight and Eilif would not trade it for a quiet one.',
+  'Long night ahead. The wood is stacked, the door is barred, and the dark can do its work outside.',
+  'There is bread rising by the coals and a serpent somewhere in the bay. Both are true at once.',
+  'The fog came off the water and has not moved since. Fog usually moves.',
+  'There are shapes in the mist that keep the same distance however fast you walk.',
+  'Something walked the treeline twice and came no closer. Eilif finds the second pass worse.',
+  'Something in the Mistlands sings a note too low to hear and everyone hears it.',
+  'Eilif has never once been surprised by a troll. Eilif has been surprised by vikings constantly.',
+  'Frost in the low grass. Winter is trying the latch.',
+  'Thunder somewhere behind the mountains. Not our storm. Not yet.',
+  'Clear sky, hard cold, every star showing. A beautiful night to die stupidly under.',
+  'Sun through the smoke hole and the dust turning in it. Eilif keeps a few hours like this one.',
+  'The wind found a new gap in the shutters and is bragging about it.',
+  'Eilif keeps a corner for the ones who did not come back. Not a large corner. Not a small one.',
+  'The ground here takes a body easily. Loose soil. That is all Eilif means by it.',
+  'Somewhere a stone is standing in the rain with your name on it and your good axe beneath.',
+  "The saga of this warband is mostly other people's bad ideas and Eilif is fond of it.",
+  'Somewhere a skeleton is standing in a burial chamber exactly where it stood a thousand years ago.',
+  'The gate is standing open. Eilif will assume that was deliberate.',
+  'Torches burn down faster when no one is watching them. Eilif has tested this.',
+  'The bees are working. Nobody ever thanks the bees.',
+  'Haldor is out there somewhere in the dark, counting coin and afraid of nothing.',
+  'Deathsquitos do not hum until they are close. Consider that a courtesy or do not.',
+  'Fulings shout at each other all night in the tall grass. They are not shouting at each other.',
+  'The lox in the plains have never once been afraid. Learn from them or learn from the ground.',
+  'Necks come up on the shore at night to watch the fires. They want nothing. That is worse.',
+  'Moths came to the light and something came for the moths.',
+  'A lantern is moving on the far ridge. Nobody in this hall is on the far ridge.',
 ];
 
 // (c) Callbacks — dated deaths from ~1/2/4 weeks ago, phrased darkly. {span}
@@ -82,6 +179,22 @@ export const CALLBACK_TEMPLATES = [
   '{Span} this hall lost {name} to {cause}. A saga is only the deaths we bother to tell twice.',
   'Raise a horn for {name}, who fell to {cause} {span}. The ravens ate well that night.',
   'It was {span} that {cause} put {name} in the ground. The gods keep a stool warm for the bold. The careless get a cold one.',
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  '{Span} Eilif wrote {name} into the ledger and {cause} beside it. The ink dried. Nothing else changed.',
+  '{Span} to the hour, {cause} had {name}. Eilif brings it up now because the hour is right.',
+  'Eilif counted {name} among the living {span}. Then {cause} took the count down by one.',
+  'Two things happened {span}. {name} ended, and {cause} did not. Eilif has trouble with the second half.',
+  '{Span} {name} was swearing oaths at this longfire, and {cause} answered. Eilif keeps both on one page.',
+  'Hugin remembers {name}. Munin remembers {cause}. Between them they make {span} feel like this morning.',
+  '{Span} this floor was scrubbed on account of {name} and {cause}. It came up clean. It always does.',
+  '{name} met {cause} {span} and lost. The saga gives it four words. Eilif remembers the longer version.',
+  'Eilif has stood through worse than {cause}. {name} did not get the chance. That was {span}.',
+  'The warband forgot {name} inside three days. It was {span}, by way of {cause}. Eilif did not forget.',
+  'Some nights the hall brings up {name} unasked. Tonight is one. It was {cause}, and it was {span}.',
+  '{Span} {cause} took {name}. The wind tonight smells the same. Eilif is not saying that means anything.',
+  'Witnesses still argue over how {cause} got {name}, and that was only {span}. Eilif does not argue.',
+  '{name} was lost to {cause} {span}. Eilif has never called that bad luck. Eilif calls it the land.',
+  'No one has said {name} aloud since the night {cause} won, {span}. Eilif says it now. Halls are for that.',
 ];
 
 // (d) Whispers on quiet nights — the ambient pool SWAP for a near-empty hall.
@@ -93,6 +206,35 @@ export const SOLO_WHISPERS = [
   'Nobody else came tonight, {firstName}. Something did. It is keeping its distance for now.',
   'The hall counts one heartbeat, {firstName}, and two sets of footsteps.',
   'Work while it is quiet, {firstName}. The dark only ever lends quiet out.',
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  'The benches are empty tonight, {firstName}. Eilif kept your seat warm and let the rest go cold.',
+  'Eilif hears one axe working in the dark, {firstName}. It is a small sound. It carries further than you would like.',
+  'Bar the door, {firstName}. Not because Eilif is worried. Because Eilif is thorough.',
+  'The hall is yours tonight, {firstName}. So is every creak in it.',
+  'You are the only warm thing for a long way, {firstName}. The cold has noticed.',
+  'Eilif marks you awake and alone, {firstName}, and marks the hour, in case anyone asks after.',
+  'Sleep is cheaper than a funeral, {firstName}. Eilif offers both and recommends the bed.',
+  'The pot is still warm, {firstName}. Eat before you go out. The dark will keep.',
+  'Eilif has stood empty for whole seasons, {firstName}. By that measure you are a crowd.',
+  'You could go to bed, {firstName}. You will not. Eilif has met your kind of tired before.',
+  'Nothing in this hall will hurt you, {firstName}. Eilif makes no promises about the yard.',
+  'A neck is croaking down at the water, {firstName}. That is the whole of the news. Eilif thought you should have some.',
+  'The wind found a gap in the wall tonight, {firstName}. Patch it in the morning. Let it sing until then.',
+  'Eilif has seen vikings do their finest work alone, {firstName}. Eilif has buried a few of those as well.',
+  'A torch burns on the far wall, {firstName}. You did not light that one. Eilif has been watching all evening.',
+  'Your boar is asleep, {firstName}. Your bees are asleep. Something out past the fence is not.',
+  'Alone is only dangerous when you forget that you are, {firstName}. You have not forgotten. Not yet.',
+  'Bring a torch and a friend, the old rule says, {firstName}. You brought a torch.',
+  'A raven sat on the ridgepole all evening, {firstName}, and left the moment you looked up.',
+  'This is how most sagas open, {firstName}. One viking, one fire, and something walking around outside.',
+  'You built this place in the daylight, {firstName}. Tonight you learn how well.',
+  'Something out there breathed, {firstName}. Or the wind did. Eilif is not going to go and look.',
+  'Take the long way home tonight, {firstName}, and the dark comes along for all of it.',
+  'Yours is the only name in the hall tonight, {firstName}. Eilif says it aloud so the walls learn it.',
+  'You went still for a moment there, {firstName}. So did something else.',
+  'Wolves are up in the hills tonight, {firstName}. They are not close. They are not far either.',
+  'Put your back to a wall, {firstName}. Eilif has plenty of them and charges nothing.',
+  'Your shadow moved before you did, {firstName}. That will be the torchlight. Eilif is fairly certain.',
 ];
 
 // QUIET CREW: 2–3 online and nothing eventful in the last 45 minutes. Some of
@@ -104,6 +246,33 @@ export const CREW_WHISPERS = [
   'A small crew and a long night. Eilif has known both to end well, though not often.',
   'Nothing has gone wrong yet, {firstName}. Eilif finds that suspicious.',
   'Torchlight only reaches so far. Past it, something has been very patient tonight.',
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  'Nobody has screamed in an hour. Eilif cannot tell if that is progress or a held breath.',
+  'Small work, small crew. Sagas rarely mention the roof, but the roof is why anyone lived to be mentioned.',
+  'A quiet night is when the hall gets built. The loud ones are when it gets tested.',
+  'Somebody is sorting a chest. Eilif finds that more heroic than most of what happens here.',
+  'Eilif keeps a page for tonight. So far it is empty. That is the best kind of page.',
+  'Hugin came in from the cold and said nothing. Munin is still out there, and Munin is the one who remembers.',
+  'A greydwarf came to the edge of the light, looked at the work, and went back into the dark.',
+  'Stew on the fire and nothing trying to eat you. Eilif calls that a fine hour.',
+  'The boars are asleep and the crops are slow. From the inside, this is what winning looks like.',
+  'Nobody has walked back for their gear tonight. Eilif notices the missing walk.',
+  'The hammers stop, and for a moment the hall listens back. Then it goes back to pretending.',
+  'Eilif has known bigger warbands who did less in a loud week than this handful does in silence.',
+  'The fog sat down at the edge of the field and has not moved. Neither has whatever brought it.',
+  'Quiet is not peace. Quiet is the realm holding its tongue, {firstName}.',
+  'Sharpen something while it is quiet, {firstName}. A dull edge is a slow way of choosing how you die.',
+  'A raven has sat on the ridgepole for an hour, {firstName}. It is not waiting for crumbs.',
+  'The trees have been very still, {firstName}. Trees are only still when something else is moving.',
+  'No one has a tale yet, {firstName}. Eilif will wait. Eilif is very good at waiting.',
+  'The mead is going slowly tonight, {firstName}. That is either discipline or dread.',
+  'The longship is tied and dry, {firstName}. Eilif has known it to be neither.',
+  'It is late enough that mistakes start getting interesting, {firstName}.',
+  'Whatever you are building, {firstName}, build it a door that shuts.',
+  'A short crew is a careful crew. Careful earns a second night, {firstName}.',
+  'Eilif counts the boots by the door and comes up short, {firstName}. The hall does not mind. Eilif does.',
+  'Every board you set tonight, {firstName}, is a board the dark has to get through later.',
+  'Eilif does not need many of you, {firstName}. Eilif needs the fire kept and the horns full.',
 ];
 
 // (e) Per-player death milestones — tiers at 20, 50, 100, then every +100.
@@ -114,6 +283,55 @@ export const DEATH_LINES = {
   100: 'One hundred deaths, {name}. Eilif stopped flinching somewhere around sixty.',
   next: '{count} deaths, {name}. Eilif has stopped being surprised. The ink holds out anyway.',
 };
+
+// (f) Oath echo — spoken in-game the moment a shouted `/oath` is captured.
+// {firstName} is the swearer, {oath} the shout itself: lower-cased, stripped of
+// markdown and control characters, clipped and already wrapped in quotes by
+// oathQuote() below. The Discord cross-post is unchanged.
+export const OATH_ECHO_LINES = [
+  'Eilif has your words now, {firstName}: {oath}. Eilif does not give words back.',
+  'The ravens lifted off the moment you said it, {firstName}. {oath} is already north.',
+  'So be it, {firstName}. {oath}, sworn out loud, with the whole hall listening.',
+  'Eilif adds a line to the saga, {firstName}: {oath}. Ink does not care whether you meant it.',
+  'Odin heard that, {firstName}. {oath}. He has better hearing than the rest of us.',
+  'That is an oath, {firstName}, not a plan. {oath}. Eilif will watch which it becomes.',
+  'Sworn and set, {firstName}. {oath} belongs to the warband now, not to you.',
+  'There. It is out of your mouth and into the hall, {firstName}: {oath}.',
+  'Eilif has heard vows and Eilif has heard boasts, {firstName}. Yours reads {oath}. Time sorts them.',
+  'Eilif seals it, {firstName}: {oath}. Undoing an oath here costs more than swearing one.',
+];
+
+// (g) Oath callbacks — an AMBIENT class alongside atmosphere and callbacks:
+// an oath a viking who is ONLINE RIGHT NOW swore, read back to them later.
+// {firstName} and {oath} as above; {days} is whole days since sworn_at, so the
+// three templates that use it are dropped when the row has no usable date.
+export const OATH_CALLBACKS = [
+  'Hugin carried it north and Munin carried it back. {firstName} swore {oath}.',
+  'The gods keep a ledger, {firstName}, and one line of it is yours: {oath}.',
+  'You said {oath}, {firstName}. The longfire heard you. Fire keeps nothing to itself.',
+  'Eilif has buried vikings with lighter oaths than yours, {firstName}. You swore {oath}.',
+  'The warband heard you swear {oath}, {firstName}. The warband is not known for letting things go.',
+  'Eilif marks the oath of {firstName}: {oath}. Marked is not the same as kept.',
+  'You swore {oath}, {firstName}. Eilif is patient. Eilif is also counting.',
+  'A vow does not rot, {firstName}. Yours still reads {oath}.',
+  'Odin is in no hurry, {firstName}. He is still waiting on {oath}.',
+  'The Valkyries remember it word for word, {firstName}. You swore {oath}.',
+  'Eilif has no opinion on {oath}, {firstName}. Eilif only remembers that you swore it.',
+  'Say it again if you like, {firstName}. Eilif already has it: {oath}.',
+  'You swore {oath}, {firstName}. Nobody made you say it.',
+  'It has been {days} days since {firstName} swore {oath}. Not one of them loosened it.',
+  'Eilif has held {oath} for {days} days, {firstName}. It weighs what it weighed that night.',
+  'Two things in these walls never sleep, {firstName}. One is your oath: {oath}.',
+  'Wind has taken the thatch twice since, {firstName}. It has not taken {oath}.',
+  'Even the greydwarfs at the treeline know it by now, {firstName}. You swore {oath}.',
+  'Some vows are load bearing, {firstName}. Eilif keeps yours in the wall: {oath}.',
+  'The mead wore off long ago, {firstName}. What you swore did not: {oath}.',
+  'The saga has your name once so far, {firstName}, beside {oath}. There is room for more.',
+  'Nine worlds came before this one, {firstName}. In this one you swore {oath}.',
+  'Eilif carved it where the smoke cannot reach, {firstName}: {oath}.',
+  'You swore {oath}, {firstName}. Eilif does not ask how it is going.',
+  "The oath is yours, {firstName}. The remembering is Eilif's work: {oath}.",
+];
 
 // ── tiny deterministic RNG (mulberry32) + string hash (mirrors format.js) ──
 function mulberry32(a) {
@@ -127,6 +345,61 @@ function mulberry32(a) {
 }
 
 const firstName = (s) => String(s || '').trim().split(/\s+/)[0] || 'viking';
+
+// Small, pure 31-multiplier string hash (mirrors format.js's own).
+function hashStr(s) {
+  let h = 0;
+  const t = String(s);
+  for (let i = 0; i < t.length; i++) h = (Math.imul(h, 31) + t.charCodeAt(i)) | 0;
+  return h >>> 0;
+}
+
+/**
+ * A shouted oath, ready to sit inside a spoken line: collapsed to one line,
+ * lower-cased, clipped to OATH_QUOTE_MAX with an ellipsis, and wrapped in
+ * quotes. Returns '' when nothing usable survives, so callers can fall back.
+ *
+ * The same treatment safeText gives the Discord embed, with one difference:
+ * markdown specials are REMOVED here, not escaped. This string is SPOKEN
+ * in-game by the Companion, where an escape backslash is read out as a
+ * backslash. Control characters go first (an oath is `oaths.oath_text`, which
+ * lib/webhook/oath.ts only trims), then the specials, then the whitespace
+ * collapse, and defangLinks last so a `https://…` shout cannot put a URL in
+ * front of the hall.
+ */
+export function oathQuote(raw, max = OATH_QUOTE_MAX) {
+  const stripped = String(raw ?? '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/[\\*_`~|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const clean = defangLinks(stripped).trim();
+  if (!clean) return '';
+  const body = clean.length > max ? `${clipChars(clean, max - 1)}\u2026` : clean;
+  return `"${body}"`;
+}
+
+// Not every sworn string deserves to be read back. A one-word shout, or the
+// crew's own "TEST OATH PLEASE IGNORE", is quoted by nobody. Kept deliberately
+// narrow: the hall quotes jokes with a straight face, it only refuses junk.
+const OATH_MIN_WORDS = 3;
+const OATH_UNSPEAKABLE = /\btest oath\b|\bplease ignore\b|\bignore (this|me)\b/i;
+export function speakableOath(raw) {
+  const quoted = oathQuote(raw, 10_000);
+  if (!quoted) return false;
+  const body = quoted.slice(1, -1);
+  if (OATH_UNSPEAKABLE.test(body)) return false;
+  return body.split(/\s+/).filter(Boolean).length >= OATH_MIN_WORDS;
+}
+
+// Second-person oath callbacks ("You swore ...") are meant for the swearer's
+// eyes; third-person ones are for the hall. Once the server plugin can aim a
+// line at one peer (VOICE_TARGETING=1, set after the rebuild that ships it),
+// the private ones carry meta.target and only that viking sees them. Until
+// then every line is spoken to everyone, exactly like the whispers.
+const SECOND_PERSON = /\b(you|your|yours|yourself)\b/i;
+const targetingEnabled = () => process.env.VOICE_TARGETING === '1';
 
 /** Highest death tier a total has crossed: 20, 50, 100, then every +100. 0 = none. */
 export function deathTier(deaths) {
@@ -238,7 +511,7 @@ export function createVoiceEngine({
 
   // Build the candidate lines for one category as {id, text}. Callback candidates
   // require a DB read, so they're only built when the roll actually lands there.
-  async function buildCategory(cat, status, rand) {
+  async function buildCategory(cat, status, rand, roster = []) {
     if (cat === 'atmosphere') {
       return ATMOSPHERE.map((t, i) => ({ id: `atmo:${i}`, text: t }));
     }
@@ -260,7 +533,66 @@ export function createVoiceEngine({
           .replace(/\{cause\}/g, () => ev.cause),
       }));
     }
+    if (cat === 'oath') {
+      const o = await findOathCallback(rand, roster);
+      if (!o) return [];
+      // Same function-replacer rule as the death callback: the name and the
+      // oath are both player-typed, and "$&" in a string replacement is a
+      // substitution pattern rather than text.
+      return OATH_CALLBACKS
+        .map((text, i) => ({ text, i }))
+        // {days} only reads right with a real span behind it, so an oath sworn
+        // today, or a row with no usable sworn_at, keeps the other templates.
+        .filter(({ text }) => o.days != null || !text.includes('{days}'))
+        .map(({ text, i }) => ({
+          id: `oathcb:${i}`,
+          source: 'oath_callback',
+          ...(SECOND_PERSON.test(text) && targetingEnabled() ? { target: o.name } : {}),
+          text: text
+            .replace(/\{firstName\}/g, () => firstName(o.name))
+            .replace(/\{oath\}/g, () => o.oath)
+            .replace(/\{days\}/g, () => String(o.days)),
+        }));
+    }
     return [];
+  }
+
+  // An oath sworn by a viking who is ONLINE RIGHT NOW, for the ambient slot.
+  // ONE read, and only when the roll lands on this class: the roster is already
+  // in hand from the whisper check, so an ambient tick costs at most one query
+  // more than it did before. Never a write: `announced_at` belongs to the echo.
+  //
+  // An 'unmatched' oath belongs to no viking yet (the name it was sworn under
+  // never resolved), so it can never be read back at anybody.
+  async function findOathCallback(rand, roster) {
+    if (!roster.length) return null;
+    const { data, error } = await db
+      .from('oaths')
+      .select('character_name, oath_text, sworn_at, match_status')
+      .order('sworn_at', { ascending: false })
+      .limit(100);
+    if (error) {
+      log.warn?.(`[voice] oath callback read failed: ${error.message}`);
+      return null;
+    }
+    // Case-insensitive, because `oaths.character_name` is typed by a player in
+    // a Discord message and the roster comes from the game.
+    const online = new Map(roster.map((n) => [n.toLowerCase(), n]));
+    const rows = [];
+    for (const r of data || []) {
+      const status = String(r.match_status || '').toLowerCase();
+      if (status !== 'exact' && status !== 'fuzzy') continue;
+      const key = String(r.character_name || '').trim().toLowerCase();
+      if (!key || !online.has(key)) continue;
+      const oath = oathQuote(r.oath_text);
+      if (!oath || !speakableOath(r.oath_text)) continue;
+      rows.push({ row: r, key, oath });
+    }
+    if (!rows.length) return null;
+    const { row, key, oath } = rows[Math.floor(rand() * rows.length)];
+    const sworn = row.sworn_at ? Date.parse(row.sworn_at) : NaN;
+    const days = Number.isFinite(sworn) ? Math.floor((Date.now() - sworn) / 86_400_000) : null;
+    return { name: online.get(key), oath, days: days != null && days >= 1 ? days : null };
   }
 
   // Find a death from ~1/2/4 weeks ago (spans tried in a seeded order).
@@ -335,11 +667,12 @@ export function createVoiceEngine({
   // nearly empty. Returns [] when the night doesn't qualify — then the normal
   // atmosphere/callback pools run, untouched. This is a POOL SWAP, never an
   // extra line: the 2h clock and VOICE_MIN_GAP_MS still decide *when*.
-  async function buildWhispers(status, rand = Math.random) {
+  async function buildWhispers(status, rand = Math.random, knownRoster = null) {
     // Presence must be unambiguous: whispers lean on WHO is in the hall, so an
     // empty/stale roster, or one that disagrees with server_status, says
-    // nothing clever and lets the normal pools run.
-    const roster = await onlineRoster();
+    // nothing clever and lets the normal pools run. `knownRoster` is the read
+    // pickAmbient already did for this slot, not a second one.
+    const roster = knownRoster ?? (await onlineRoster());
     const count = roster.length;
     if (count < 1 || count > WHISPER_CREW_MAX) return [];
     const reported = status.playerCount | 0;
@@ -379,18 +712,26 @@ export function createVoiceEngine({
     const v = st();
     const rand = mulberry32(((status.worldDay | 0) * 1000 + (v.ambientCount | 0)) >>> 0);
 
+    // One roster read serves the whole slot: the quiet-night check needs to know
+    // who is in the hall, and so does the oath callback (whose viking has to be
+    // online to hear it).
+    const roster = await onlineRoster();
+
     // A quiet night takes the slot before the normal pools are ever consulted.
-    const whispers = await buildWhispers(status, rand);
+    const whispers = await buildWhispers(status, rand, roster);
     if (whispers.length) return chooseFresh(whispers, v, rand);
 
     const roll = rand();
-    // ≈ atmosphere 65% / callback 35% (callback only if a dated death exists;
-    // atmosphere is always non-empty, so callback only runs its DB read when it
-    // wins the FIRST slot — keeping ticks cheap).
-    const order = roll < 0.35 ? ['callback', 'atmosphere'] : ['atmosphere', 'callback'];
+    // ≈ oath 25% / callback 30% / atmosphere 45%. Oath and callback each need a
+    // DB read (a sworn oath from someone online, a dated death) and each falls
+    // through to atmosphere, which is always non-empty — so an ambient tick
+    // still costs at most ONE read beyond the roster, as it did before.
+    const order = roll < OATH_AMBIENT_SHARE ? ['oath', 'atmosphere']
+      : roll < 0.55 ? ['callback', 'atmosphere']
+        : ['atmosphere', 'callback'];
 
     for (const cat of order) {
-      const cand = await buildCategory(cat, status, rand);
+      const cand = await buildCategory(cat, status, rand, roster);
       if (!cand.length) continue;
       return chooseFresh(cand, v, rand);
     }
@@ -403,6 +744,7 @@ export function createVoiceEngine({
     if (!pick) return false;
     const ok = await enqueue(pick.text, 'ambient', {
       template: pick.id,
+      ...(pick.target ? { target: pick.target } : {}),
       world_day: status.worldDay,
       ...(pick.source ? { source: pick.source } : {}),
     });
@@ -449,8 +791,31 @@ export function createVoiceEngine({
   // Channel: env OATH_CHANNEL ('server' during the rehearsal pilot, default
   // 'valheim' — revert/remove at launch alongside RECAP_CHANNEL/MILESTONE_CHANNEL).
   const OATH_CHANNEL = process.env.OATH_CHANNEL === 'server' ? 'server' : 'valheim';
+
+  // The line the hall SPEAKS when an oath is captured. Seeded by the oath row
+  // id, so a tick that runs twice over the same row says the same thing rather
+  // than inventing a second version of the moment.
+  function oathEchoLine(oath, name) {
+    const quote = oathQuote(oath?.oath_text);
+    // Nothing usable left (an all-markdown shout): keep the fixed line Eilif
+    // used before the pool existed, rather than speaking an empty pair of
+    // quotes back at the swearer.
+    if (!quote) {
+      return { text: `Eilif heard you, ${firstName(name)}. These walls will hold you to it.`, template: null };
+    }
+    const cand = OATH_ECHO_LINES.map((t, i) => ({
+      id: `oathecho:${i}`,
+      text: t
+        .replace(/\{firstName\}/g, () => firstName(name))
+        .replace(/\{oath\}/g, () => quote),
+    }));
+    const pick = chooseFresh(cand, st(), mulberry32(hashStr(`oath:${oath?.id ?? name}`)));
+    return { text: pick.text, template: pick.id };
+  }
+
   async function checkOathEchoes() {
     if (!writeDb) return 0;
+    const v = st();
     const { data, error } = await writeDb
       .from('oaths')
       .select('id, character_name, oath_text')
@@ -464,10 +829,18 @@ export function createVoiceEngine({
     let n = 0;
     for (const o of data || []) {
       const name = (o.character_name || '').trim() || 'A viking';
-      await enqueue(`Eilif heard you, ${firstName(name)}. These walls will hold you to it.`, 'event', {
+      const echo = oathEchoLine(o, name);
+      const spoken = await enqueue(echo.text, 'event', {
         source: 'oath',
         oath_id: o.id,
+        ...(echo.template ? { template: echo.template } : {}),
       });
+      // Only a line that actually reached the queue narrows the no-repeat
+      // window, and it narrows it before the next oath in this same batch is
+      // picked, so three oaths at once are three different sentences.
+      if (spoken && echo.template) {
+        v.recentTemplates = [...(v.recentTemplates || []), echo.template].slice(-RECENT_KEEP);
+      }
       try {
         await post(OATH_CHANNEL, {
           embeds: [
@@ -740,6 +1113,8 @@ export function createVoiceEngine({
     _state: st,
     _checkDawn: checkDawn,
     _buildWhispers: buildWhispers,
+    _findOathCallback: findOathCallback,
+    _oathEchoLine: oathEchoLine,
     _checkDeathMilestones: checkDeathMilestones,
     _ambientGapRemaining: ambientGapRemaining,
   };

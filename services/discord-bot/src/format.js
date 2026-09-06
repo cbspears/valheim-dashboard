@@ -318,50 +318,273 @@ function fillTemplate(tpl, vars) {
 // Bare environmental HitType words, as gs-ingest/GsValheimStatsClient report
 // them (e.g. "tree", "fall", "drowning") — same key set as episodes.ts's
 // ENV_DEATHS, own phrasing.
+//
+// Every spelling of one death SHARES ITS ARRAY BY REFERENCE (2026-09-06, when
+// the bank went from three lines a cause to eight): "drowning", "drowned",
+// "drown" and "water" are the same death reported by four different clients,
+// and copies of a list are a list that drifts.
+const FALL_DEATHS = [
+  '{name} took a fatal fall.',
+  "{name} forgot vikings can't fly.",
+  'Gravity finally caught up with {name}.',
+  'Eilif counted the drop. {name} did not.',
+  '{name} stepped off a height and let the rocks do the rest.',
+  '{name} took the quick way down the mountain.',
+  '{name} trusted a ledge that had no interest in them.',
+  'Nothing bit {name}. The land simply waited below.',
+  '{name} left the high ground all at once.',
+];
+
+const DROWNING_DEATHS = [
+  '{name} was dragged under by dark water.',
+  "{name} went down and didn't come back up.",
+  'The deep claimed {name}.',
+  '{name} learned that iron does not float.',
+  'Eilif has seen the water take better swimmers. It took {name} too.',
+  '{name} went under still looking for the shore.',
+  '{name} counted on one more breath. There was not one.',
+  'The sea had no quarrel with {name}. It drowned them all the same.',
+];
+
+const TREE_DEATHS = [
+  '{name} was flattened by a falling tree.',
+  'A tree had the last word with {name}.',
+  '{name} lost an argument with a tree.',
+  '{name} felled the tree. The tree returned the favor.',
+  '{name} was standing exactly where the trunk meant to be.',
+  '{name} heard the crack and ran the wrong way.',
+  'The trunk came down whole. {name} did not get up.',
+  '{name} looked up a breath too late.',
+];
+
+const FIRE_DEATHS = [
+  '{name} burned to a crisp.',
+  '{name} got too close to the flames.',
+  'Fire took {name} tonight.',
+  '{name} went up like dry kindling.',
+  'Eilif has watched fire take halls and vikings alike. Tonight, {name}.',
+  'Fire does not bargain. {name} tried anyway.',
+  '{name} caught alight, and the night was briefly brighter.',
+  '{name} ran while burning. It did not help.',
+];
+
+const SMOKE_DEATHS = [
+  '{name} choked on hearth-smoke.',
+  '{name} built the hearth well and the chimney poorly.',
+  'The hall filled with smoke. {name} never found the door.',
+  'Smoke gathered in the rafters and came down for {name}.',
+  '{name} died indoors, warm and short of breath.',
+  'No foe, no wound. Only smoke, and {name} beneath it.',
+  '{name} learned why the old halls keep a hole in the roof.',
+  'Eilif has seen smoke kill more quietly than any troll. Ask {name}.',
+];
+
+const FREEZING_DEATHS = [
+  '{name} froze solid in the cold.',
+  'The cold finally caught up with {name}.',
+  '{name} went up the mountain without a cloak.',
+  'Eilif marks the place where {name} stopped shivering.',
+  '{name} ran out of mead and warmth on the same night.',
+  '{name} was found stiff and blue, still facing the summit.',
+  'The wind took the heat from {name} one breath at a time.',
+  'The snow keeps {name} now, and keeps them well.',
+];
+
+const POISON_DEATHS = [
+  '{name} succumbed to poison.',
+  "Something {name} touched didn't agree with them.",
+  '{name} had the mead for this in a chest back home.',
+  'Something small and venomous outlived {name}.',
+  '{name} won the fight and lost the walk home.',
+  'The venom kept working after the wound closed. {name} did not.',
+  'No blade finished {name}. Poison had the patience for it.',
+];
+
+const STALAGMITE_DEATHS = [
+  '{name} was skewered from above.',
+  'The cave roof let go, and {name} was standing under it.',
+  '{name} stopped to look up. The stone came down.',
+  'A spike of rock found {name} with no hand to guide it.',
+  '{name} was run through by a ceiling.',
+  'The caves keep their teeth overhead. {name} learned it late.',
+  'Nothing living killed {name}. Only cold stone with a point on it.',
+];
+
+const IMPACT_DEATHS = [
+  '{name} was broken by the fall.',
+  '{name} stopped all at once.',
+  'Eilif has heard that sound before. {name} made it once.',
+  '{name} met something solid at speed and came off worse.',
+  '{name} arrived faster than a body is meant to.',
+  'Bones were not built for that. {name} found out.',
+  'The ground came up to meet {name} and did not slow for them.',
+];
+
+const CARTCOLLISION_DEATHS = [
+  '{name} was run down by their own cart. Embarrassing.',
+  '{name} loaded the cart heavy and stood downhill of it.',
+  'The cart got away from {name} and did not stop for them.',
+  '{name} was flattened by ore they dug up themselves.',
+  '{name} pulled that cart all day. It pushed back once.',
+  'The cart reached the bottom of the slope. {name} did not.',
+  '{name} died hauling copper. Eilif will keep that quiet.',
+];
+
+const STRUCTURAL_DEATHS = [
+  '{name} was crushed under falling timber.',
+  '{name} built it, stood in it, and watched it come down.',
+  'Eilif has seen many halls fall. This one fell on {name}.',
+  '{name} took out one beam too many.',
+  'The hall settled. {name} was under the part that moved.',
+  'Bad joinery did what no troll could. {name} lies beneath it.',
+  '{name} was buried by their own carpentry.',
+  'The floor above became the floor below, with {name} in between.',
+];
+
+const TURRET_DEATHS = [
+  '{name} was shot down by a ballista. Friendly fire, perhaps?',
+  "{name} walked in front of the warband's own defenses.",
+  'The ballista does not know friend from fuling. It knew {name} for a target.',
+  '{name} was pinned to the palisade by a bolt of their own making.',
+  'The war engine did its work. {name} was only standing there.',
+  "{name} tested the ballista's aim. The aim was good.",
+  '{name} forgot which way the ballista was pointed.',
+];
+
+// HitType.Boat is a hull hitting a viking, not a sinking. "Went down with
+// their ship" blamed the wrong thing entirely.
+const BOAT_DEATHS = [
+  '{name} was run down by a longship.',
+  '{name} was caught between hull and shore.',
+  '{name} was crushed by their own keel.',
+  'The longship came in fast. {name} was standing in the shallows.',
+  '{name} pushed the karve off the sand and went under it.',
+  '{name} met the prow instead of boarding it.',
+  'The ship came ashore. {name} was the shore.',
+  '{name} was rolled beneath a hull in a foot of water.',
+];
+
+const SELF_DEATHS = [
+  "{name} was undone by their own hand. We don't ask questions.",
+  'Whatever {name} was attempting, it worked.',
+  'Eilif watched {name} do it to themselves and said nothing.',
+  '{name} lit the very thing they were holding.',
+  'The blame for this one falls close to {name}.',
+];
+
+const CATAPULT_DEATHS = [
+  '{name} was smashed flat by a catapult stone.',
+  '{name} learned the true range of their own catapult.',
+  '{name} watched the stone go up. Then watched it come down.',
+  'Eilif marks {name}, buried under a rock the crew threw themselves.',
+  '{name} stood near the engine and nearer the target.',
+  'The catapult works. {name} is the proof.',
+  '{name} loaded it, aimed it, and stood beneath it.',
+];
+
+const CINDERFIRE_DEATHS = [
+  '{name} was caught in a rain of burning cinders.',
+];
+
+// Another viking landed the killing blow. Never dressed up as an unseen foe.
+const PLAYERHIT_DEATHS = [
+  '{name} was cut down by one of their own.',
+  'One of the clan put {name} in the ground. It happens.',
+  "A shieldmate's blade found {name}. Mead will be owed.",
+  'Eilif does not judge. Eilif only records that {name} fell to a friend.',
+  '{name} stepped into a swing meant for something else.',
+  'The warband lost {name} to the warband.',
+  '{name} was killed by a viking who is very sorry. Probably.',
+  'Someone in the crew has explaining to do. {name} has nothing to say.',
+];
+
+// The client had no HitType to report at all.
+const UNDEFINED_DEATHS = [
+  '{name} fell to something that left no name behind.',
+  'Eilif keeps every death in the ledger. Beside {name}, the cause is blank.',
+  '{name} died out there. That is the whole of it.',
+  '{name} fell. No wound, no witness, no word.',
+  'Something ended {name}. The saga does not say what.',
+  '{name} has a grave and no story to put on it.',
+];
+
+// Valheim's catch-all HitType for a killer the client couldn't name (an
+// off-screen projectile, a despawned attacker, a mod-spawned foe). Mirrors
+// lib/episodes.ts — without it the feed reads "killed by an Enemyhit".
+const ENEMYHIT_DEATHS = [
+  '{name} was struck down by an unseen foe.',
+  'Something in the dark took {name} and never showed its face.',
+  "{name} fell to an attacker nobody got a look at. The woods aren't saying.",
+  'Eilif saw the blow but not the hand behind it. {name} is gone.',
+  '{name} was struck once from somewhere and did not rise.',
+  'The realm killed {name} and kept the particulars to itself.',
+  '{name} fell to whatever is out there. It is still out there.',
+  'Whatever finished {name} left no track worth reading.',
+];
+
+const EDGEOFWORLD_DEATHS = [
+  '{name} sailed off the edge of the world.',
+  "{name} found out what's past the edge. Nothing good.",
+  '{name} kept sailing until there was nothing left to sail upon.',
+  'Eilif has seen the charts. They end where {name} ended.',
+  '{name} went looking for the end of the sea and found it.',
+  'The world runs out. {name} did not turn back in time.',
+  'Hugin warns of that water. {name} was not listening.',
+];
+
+const ASHLANDSOCEAN_DEATHS = [
+  '{name} was boiled alive in the Ashlands sea.',
+  '{name} went over the rail into water that cooks.',
+  'Eilif marks {name}, lost to a sea that steams.',
+  'There is no swimming out there. {name} tried.',
+  'The red water closed over {name} and hissed.',
+  '{name} left the deck, and the deck was the only safe thing aboard.',
+  'Steam and salt finished {name} in moments.',
+];
+
+const LAVA_DEATHS = [
+  '{name} was swallowed by molten rock.',
+  '{name} stepped where the ground was still cooking.',
+  'The Ashlands hold their heat close. {name} found some of it.',
+  'Eilif has no grave to mark for {name}. Nothing was left to bury.',
+  '{name} misjudged one stone in a field of fire.',
+  '{name} walked into the glow and did not walk out.',
+  'The ground opened hot beneath {name}.',
+];
+
 export const ENV_DEATH_POOLS = {
-  fall: ['{name} took a fatal fall.', "{name} forgot vikings can't fly.", 'Gravity finally caught up with {name}.'],
-  falling: ['{name} took a fatal fall.', "{name} forgot vikings can't fly.", 'Gravity finally caught up with {name}.'],
-  drowning: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
-  drowned: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
-  drown: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
-  water: ['{name} was dragged under by dark water.', "{name} went down and didn't come back up.", 'The deep claimed {name}.'],
-  tree: ['{name} was flattened by a falling tree.', 'A tree had the last word with {name}.', '{name} lost an argument with a tree.'],
-  fire: ['{name} burned to a crisp.', '{name} got too close to the flames.', 'Fire took {name} tonight.'],
-  burning: ['{name} burned to a crisp.', '{name} got too close to the flames.', 'Fire took {name} tonight.'],
-  smoke: ['{name} choked on hearth-smoke.'],
-  freezing: ['{name} froze solid in the cold.', 'The cold finally caught up with {name}.'],
-  cold: ['{name} froze solid in the cold.', 'The cold finally caught up with {name}.'],
-  poison: ['{name} succumbed to poison.', "Something {name} touched didn't agree with them."],
-  poisoned: ['{name} succumbed to poison.', "Something {name} touched didn't agree with them."],
-  stalagmite: ['{name} was skewered from above.'],
-  stalagtite: ['{name} was skewered from above.'],
-  impact: ['{name} was broken by the fall.'],
-  cartcollision: ['{name} was run down by their own cart. Embarrassing.'],
-  cart: ['{name} was run down by their own cart. Embarrassing.'],
-  structural: ['{name} was crushed under falling timber.'],
-  turret: ['{name} was shot down by a ballista. Friendly fire, perhaps?'],
-  // HitType.Boat is a hull hitting a viking, not a sinking. "Went down with
-  // their ship" blamed the wrong thing entirely.
-  boat: ['{name} was run down by a longship.', '{name} was caught between hull and shore.'],
-  self: ["{name} was undone by their own hand. We don't ask questions."],
-  catapult: ['{name} was smashed flat by a catapult stone.'],
-  cinderfire: ['{name} was caught in a rain of burning cinders.'],
-  // Another viking landed the killing blow. Never dressed up as an unseen foe.
-  playerhit: ['{name} was cut down by one of their own.', 'One of the clan put {name} in the ground. It happens.'],
-  // The client had no HitType to report at all.
-  undefined: ['{name} fell to something that left no name behind.'],
-  // Valheim's catch-all HitType for a killer the client couldn't name (an
-  // off-screen projectile, a despawned attacker, a mod-spawned foe). Mirrors
-  // lib/episodes.ts — without it the feed reads "killed by an Enemyhit".
-  enemyhit: [
-    '{name} was struck down by an unseen foe.',
-    'Something in the dark took {name} and never showed its face.',
-    "{name} fell to an attacker nobody got a look at. The woods aren't saying.",
-  ],
-  edgeofworld: ['{name} sailed off the edge of the world.', "{name} found out what's past the edge. Nothing good."],
-  ashlandsocean: ['{name} was boiled alive in the Ashlands sea.'],
-  ashlandsoceanfloor: ['{name} was boiled alive in the Ashlands sea.'],
-  lava: ['{name} was swallowed by molten rock.'],
+  fall: FALL_DEATHS,
+  falling: FALL_DEATHS,
+  drowning: DROWNING_DEATHS,
+  drowned: DROWNING_DEATHS,
+  drown: DROWNING_DEATHS,
+  water: DROWNING_DEATHS,
+  tree: TREE_DEATHS,
+  fire: FIRE_DEATHS,
+  burning: FIRE_DEATHS,
+  smoke: SMOKE_DEATHS,
+  freezing: FREEZING_DEATHS,
+  cold: FREEZING_DEATHS,
+  poison: POISON_DEATHS,
+  poisoned: POISON_DEATHS,
+  stalagmite: STALAGMITE_DEATHS,
+  stalagtite: STALAGMITE_DEATHS,
+  impact: IMPACT_DEATHS,
+  cartcollision: CARTCOLLISION_DEATHS,
+  cart: CARTCOLLISION_DEATHS,
+  structural: STRUCTURAL_DEATHS,
+  turret: TURRET_DEATHS,
+  boat: BOAT_DEATHS,
+  self: SELF_DEATHS,
+  catapult: CATAPULT_DEATHS,
+  cinderfire: CINDERFIRE_DEATHS,
+  playerhit: PLAYERHIT_DEATHS,
+  undefined: UNDEFINED_DEATHS,
+  enemyhit: ENEMYHIT_DEATHS,
+  edgeofworld: EDGEOFWORLD_DEATHS,
+  ashlandsocean: ASHLANDSOCEAN_DEATHS,
+  ashlandsoceanfloor: ASHLANDSOCEAN_DEATHS,
+  lava: LAVA_DEATHS,
 };
 
 // Named forsaken ones (mirrors episodes.ts's BOSSES set) read as a proper
@@ -373,6 +596,20 @@ export const BOSS_TEMPLATES = [
   '{causeCap} sent {name} to Valhalla.',
   '{name} did not rise again after facing {cause}.',
   'Only ash remains where {name} met {cause}.',
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  '{name} traded blows with {cause} and came out short.',
+  'The last thing {name} saw was {cause}, up close.',
+  '{name} charged {cause}. The charge is where it ended.',
+  '{name} stood against {cause} for a while. Not long enough.',
+  'There is a new gap in the warband where {name} stood before {cause}.',
+  '{name} went to answer {cause} and did not come back to say how it went.',
+  'The hall heard {name} fall, and {cause} did not stop for it.',
+  '{name} had a plan, and {cause} had a better one.',
+  '{name} went down to {cause}. The warband is one shield lighter.',
+  '{name} carried the fight to {cause}, and {cause} carried it back.',
+  'Eilif marks the hour. {name} fell to {cause}, and the hall will hear of it.',
+  'Eilif has watched this fight many times, and {cause} won again. {name} paid for it.',
+  'Whatever {name} shouted at {cause}, it was the last word they got.',
 ];
 
 // Plain creature names (e.g. "Neck", "Greydwarf", "Deathsquito").
@@ -382,6 +619,19 @@ export const CREATURE_TEMPLATES = [
   '{name} met their end at the claws of {article} {cause}.',
   '{articleCap} {cause} put {name} in the ground.',
   "{name} didn't see the {cause} coming.",
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  'The {cause} found {name} alone. That is usually enough.',
+  '{name} misjudged the reach of the {cause}.',
+  'The {cause} took {name} apart without hurrying.',
+  '{name} counted one {cause}. There were more.',
+  '{name} ran from the {cause}. Not far enough.',
+  'The {cause} closed the distance while {name} was still deciding.',
+  'Eilif has seen the {cause} do this before. {name} is only the latest.',
+  'The {cause} did not need a second try with {name}.',
+  'The {cause} finished {name} and went back to whatever it was doing.',
+  '{name} was carrying too much and moving too slow. The {cause} noticed.',
+  'Eilif adds {name} to the ledger, under the {cause}.',
+  '{name} turned their back on the {cause}. Once.',
 ];
 
 // A raw cause turned into a NOUN PHRASE, for the surfaces that drop it into the
@@ -441,6 +691,18 @@ export const NO_CAUSE_TEMPLATES = [
   'The realm claims another: {name}.',
   '{name} did not make it home tonight.',
   'Valhalla gains a new guest: {name}.',
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  '{name} died out there. The land is not saying how.',
+  'The warband is short one. {name} will not answer the horn tonight.',
+  '{name} went out full of plans and is a rumor now.',
+  '{name} has left a grave somewhere. Eilif knows only that it is there.',
+  'One more name for the stone: {name}.',
+  'The gods took {name} without explaining themselves.',
+  '{name} is with the Allfather now. The road there went unrecorded.',
+  '{name} stopped. That is all the hall knows.',
+  '{name} died the way most do. Quietly, and out of sight.',
+  'Eilif has no tale for this one. Only the fact of it, and the name: {name}.',
+  '{name} fell far from any fire.',
 ];
 
 /**
@@ -555,6 +817,17 @@ export const QUIET_RECAP_LINES = [
   'A quiet stretch. No deeds went into the book today.',
   'Empty hall and a cold hearth, though no new graves either.',
   'The saga has a blank page for today. It happens.',
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  'No deaths, no deeds, no news. Eilif has seen worse days.',
+  'Quiet. The greydwarfs had the woods to themselves.',
+  'Nothing happened worth carving. Eilif waited anyway.',
+  'Not one grave dug today. Take the gift.',
+  'No horns, no shouting, no blood on the grass. A rare arrangement.',
+  'Eilif listened all day and heard wind and little else.',
+  'The anvil stayed cold and the storehouse stayed full.',
+  'The wilds went unbothered today. They will not thank you for it.',
+  'The ravens found nothing worth carrying back to Odin.',
+  'No new stories. The old ones will hold another day.',
 ];
 
 /**

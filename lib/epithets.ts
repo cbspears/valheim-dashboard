@@ -644,7 +644,7 @@ export function epithetFor(
   );
 }
 
-const BIO_LINES: ((first: string, title: string) => string)[] = [
+export const BIO_LINES: ((first: string, title: string) => string)[] = [
   (first) =>
     `The sagas record little of ${first}. Only that the hearth was warmer when they were in the hall.`,
   (first, title) =>
@@ -655,6 +655,41 @@ const BIO_LINES: ((first: string, title: string) => string)[] = [
     `${first} left scarce a word behind, and needed none; the North knew them by their deeds.`,
   (first, title) =>
     `No saga names ${first} at length, but the fires burned longer on the nights ${title} sailed.`,
+  // Expanded 2026-09-06 for launch: the bank below is the new writing.
+  (first) =>
+    `Of ${first} the sagas keep a single line, and that line is mostly about someone else's boat.`,
+  (first) =>
+    `Eilif marks ${first} present and leaves the rest to the telling. The telling has been slow in coming.`,
+  (first) =>
+    `Two skalds began the tale of ${first}. Both stopped at the same part, and neither would say which part.`,
+  (first) =>
+    `The account of ${first} ends mid-sentence. In fairness, so do most accounts in this hall.`,
+  (first) =>
+    `Half the verses about ${first} were carved into a bench. The bench is firewood now, and it burned well.`,
+  (first) =>
+    `Someone wrote down "ask ${first} about the boar" and left it there. No one ever asked.`,
+  (first) =>
+    `The oldest thing the hall can say of ${first} is that they were already here when it started asking.`,
+  (first) =>
+    `Munin forgot the deeds of ${first} and Hugin was looking elsewhere. The ravens have offered no apology.`,
+  (first) =>
+    `The saga of ${first} is short and mostly weather. The hall reads it every winter anyway.`,
+  (first) =>
+    `${first} appears once in the ledger, in the margin, in a hand nobody recognizes.`,
+  (first) =>
+    `The chroniclers waited for ${first} to do something worth the ink, then went to bed. It happened that night.`,
+  (first) =>
+    `Little of ${first} survives beyond the smoke stains above the spot where they liked to stand.`,
+  (first) =>
+    `The record of ${first} is short. The list of vikings who still owe them a favor is not.`,
+  (first) =>
+    `Eilif has watched ${first} come and go a hundred times and wrote none of it down. Eilif is not a skald.`,
+  (first) =>
+    `Every account of ${first} disagrees with the others, except the part about the fire. That part never changes.`,
+  (first, title) =>
+    `A wet winter took the page that held ${first}. What is left of it reads ${title}, and then a blur.`,
+  (first, title) =>
+    `${first} is entered in the ledger as ${title}, which is either modesty or thrift.`,
 ];
 
 /**

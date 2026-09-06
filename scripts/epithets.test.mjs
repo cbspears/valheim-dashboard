@@ -1,6 +1,6 @@
 // Unit tests for the rank-aware + hysteresis epithet engine. Run:
 //   npx tsx scripts/epithets.test.mjs
-import { epithetFor, epithetsFor } from '../lib/epithets.ts';
+import { BIO_LINES, epithetFor, epithetsFor, generatedBioLine } from '../lib/epithets.ts';
 import assert from 'node:assert';
 
 // Build a PlayerWithStats with sane zero defaults; override what a test needs.
@@ -469,6 +469,53 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
   const after = epithetsFor(lifted);
   ok(after.get('Rune').source === 'resources' && after.get('Rune').title === 'the Provider',
     `over the floor, the vacated crown is inherited, got ${after.get('Rune').source}:${after.get('Rune').title}`);
+}
+
+// ── The fallback bio bank: the copy doctrine, and every variant renders ────
+// These sentences are the only prose on /viking/<slug> for a viking who never
+// wrote a bio, so they carry the doctrine like any other player-facing copy:
+// no em or en dash, no emoji, no unfilled placeholder. The bank went from 5
+// lines to 22 on 2026-09-06.
+//
+// KNOWN EXCEPTION, and the only one: two of the ORIGINAL five carry a
+// semicolon, which the doctrine bans. They are left byte-identical here on
+// purpose (this pass was a merge, not a rewrite) and are named so the exception
+// cannot spread: any NEW line with a semicolon fails.
+{
+  const LEGACY_SEMICOLONS = 2;
+
+  ok(BIO_LINES.length === 22, `the bio bank is 22 lines, got ${BIO_LINES.length}`);
+
+  const rendered = BIO_LINES.map((line) => line('Bren', 'the Provider'));
+  ok(new Set(rendered).size === rendered.length, 'no bio line is written twice');
+
+  for (const line of rendered) {
+    ok(!/[—–]/.test(line), `no em or en dash in a bio line, got: ${line}`);
+    ok(!/\p{Extended_Pictographic}/u.test(line), `no emoji in a bio line, got: ${line}`);
+    ok(!/[{}]/.test(line), `no unfilled placeholder in a bio line, got: ${line}`);
+    ok(!/undefined|NaN/.test(line), `no internals in a bio line, got: ${line}`);
+    ok(line.includes('Bren'), `every bio line names the viking, got: ${line}`);
+    ok(line.trim().endsWith('.'), `a bio line closes its sentence, got: ${line}`);
+    ok(line.length <= 220, `a bio line stays a sentence, got ${line.length}: ${line}`);
+  }
+
+  const semis = rendered.filter((line) => line.includes(';'));
+  ok(semis.length === LEGACY_SEMICOLONS,
+    `only the two legacy bio lines carry a semicolon, got ${semis.length}: ${JSON.stringify(semis)}`);
+  ok(rendered.slice(5).every((line) => !line.includes(';')),
+    'nothing written after the original five carries one');
+
+  // A line that reaches for the epithet must actually be handed one: every
+  // variant is called with (first, title), and generatedBioLine passes both.
+  const titled = BIO_LINES.filter((line) => line('Bren', 'the Provider') !== line('Bren', 'the Wanderer'));
+  ok(titled.length >= 2, `some bio lines weave in the epithet, got ${titled.length}`);
+
+  // The live entry point still works, and is still deterministic per name.
+  const player = (name) => mk(name);
+  const a = generatedBioLine(player('Bren'), { title: 'the Provider', source: 'resources' });
+  const b = generatedBioLine(player('Bren'), { title: 'the Provider', source: 'resources' });
+  ok(a === b, 'a viking always gets the same fallback bio');
+  ok(!/[{}]|undefined/.test(a), `and it renders clean, got: ${a}`);
 }
 
 console.log(`epithets.test: ${passed} assertions passed`);

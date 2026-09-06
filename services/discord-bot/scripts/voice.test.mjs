@@ -14,7 +14,9 @@ import {
   DEATH_LINES,
   SOLO_WHISPERS,
   CREW_WHISPERS,
-} from '../src/voice.js';
+  OATH_CALLBACKS,
+  OATH_ECHO_LINES,
+  oathQuote, speakableOath } from '../src/voice.js';
 import {
   POTY_TEMPLATES,
   ENV_DEATH_POOLS,
@@ -61,13 +63,14 @@ function harness({
   stats = [],
   status = { is_online: true, player_count: 2, world_day: 5 },
   oaths = [],
+  swornOaths = [],           // rows the ambient oath callback sees (match_status/sworn_at)
   deathEvents = [],
   recentEvents = [],        // rows the 45-min "was it a quiet night?" probe sees
   lastVoiceQueuedAt = null, // ISO string or null (= hall has never spoken)
   state = {},
   minGapMs,
 } = {}) {
-  const fixture = { players, stats, status, oaths, deathEvents, recentEvents, lastVoiceQueuedAt };
+  const fixture = { players, stats, status, oaths, swornOaths, deathEvents, recentEvents, lastVoiceQueuedAt };
   const queued = [];
   const handler = (table, ops, mode) => {
     const insert = ops.find((o) => o.op === 'insert');
@@ -79,7 +82,12 @@ function harness({
     if (table === 'server_status') return { data: fixture.status, error: null };
     if (table === 'players') return { data: fixture.players, error: null };
     if (table === 'player_stats') return { data: fixture.stats, error: null };
-    if (table === 'oaths') return { data: fixture.oaths, error: null };
+    if (table === 'oaths') {
+      // Two different reads hit `oaths`: the un-announced echo hunt, and the
+      // ambient callback (which asks for match_status + sworn_at).
+      const sel = String(ops.find((o) => o.op === 'select')?.args?.[0] ?? '');
+      return { data: sel.includes('match_status') ? fixture.swornOaths : fixture.oaths, error: null };
+    }
     if (table === 'events') {
       // Two different reads hit `events`: the callback hunt (selects the death
       // columns) and the quiet-night probe (selects just `id`).
@@ -424,19 +432,23 @@ const firstNames = (rows) => rows.map((r) => r.character_name.split(' ')[0]);
 
 // ── 10. Copy register guards ─────────────────────────────────────────────
 {
-  ok(DAWN.length >= 5 && DAWN.length <= 7, `dawn pool is 5-7 lines, got ${DAWN.length}`);
+  // EXACT counts, updated 2026-09-06 when the launch bank landed (the pools
+  // were 7 / 10 / 4 / 6 / 6 before it). They are pinned rather than bounded so
+  // a merge that loses lines fails here instead of going quiet in the hall:
+  // when the bank is deliberately grown, update the number in the same commit.
+  ok(DAWN.length === 38, `dawn pool is the launch bank of 38, got ${DAWN.length}`);
   ok(DAWN.filter((l) => l.includes('Eilif')).length >= Math.ceil(DAWN.length / 2),
     'most dawn lines name Eilif');
   ok(DAWN.every((l) => l.includes('{day}')), 'every dawn line carries the world day');
-  ok(ATMOSPHERE.length === 10, `atmosphere pool kept at 10, got ${ATMOSPHERE.length}`);
-  ok(CALLBACK_TEMPLATES.length === 4, `callback pool kept at 4, got ${CALLBACK_TEMPLATES.length}`);
-  ok(SOLO_WHISPERS.length >= 5 && SOLO_WHISPERS.length <= 6,
-    `solo whisper pool is 5-6 lines, got ${SOLO_WHISPERS.length}`);
+  ok(ATMOSPHERE.length === 70, `atmosphere pool is the launch bank of 70, got ${ATMOSPHERE.length}`);
+  ok(CALLBACK_TEMPLATES.length === 19, `callback pool is the launch bank of 19, got ${CALLBACK_TEMPLATES.length}`);
+  ok(SOLO_WHISPERS.length === 34, `solo whisper pool is the launch bank of 34, got ${SOLO_WHISPERS.length}`);
   ok(SOLO_WHISPERS.every((l) => l.includes('{firstName}')), 'every solo whisper names the lone viking');
-  ok(CREW_WHISPERS.length >= 5 && CREW_WHISPERS.length <= 6,
-    `crew whisper pool is 5-6 lines, got ${CREW_WHISPERS.length}`);
+  ok(CREW_WHISPERS.length === 32, `crew whisper pool is the launch bank of 32, got ${CREW_WHISPERS.length}`);
   ok(CREW_WHISPERS.some((l) => l.includes('{firstName}')) && CREW_WHISPERS.some((l) => !l.includes('{firstName}')),
     'the crew pool mixes named and unnamed lines');
+  ok(OATH_CALLBACKS.length === 25, `oath callback pool is the launch bank of 25, got ${OATH_CALLBACKS.length}`);
+  ok(OATH_ECHO_LINES.length === 10, `oath echo pool is the launch bank of 10, got ${OATH_ECHO_LINES.length}`);
   ok([20, 50, 100, 'next'].every((k) => typeof DEATH_LINES[k] === 'string'),
     'a distinct line exists for the 20 / 50 / 100 / every-100 tiers');
 
@@ -453,10 +465,99 @@ const firstNames = (rows) => rows.map((r) => r.character_name.split(' ')[0]);
   ];
   const all = [
     ...DAWN, ...ATMOSPHERE, ...CALLBACK_TEMPLATES, ...Object.values(DEATH_LINES),
-    ...SOLO_WHISPERS, ...CREW_WHISPERS,
+    ...SOLO_WHISPERS, ...CREW_WHISPERS, ...OATH_CALLBACKS, ...OATH_ECHO_LINES,
   ];
   ok(all.every((line) => !vanilla.some((re) => re.test(line))), 'no vanilla-sounding phrasings');
   ok(all.every((line) => line.trim().length > 0 && line.length <= 200), 'lines stay readable in 3 seconds');
+}
+
+// ── 10b. The copy doctrine, swept across every pool at once ───────────────
+// Charlie's doctrine, applied to the whole content bank in one place rather
+// than a rule at a time: no em dash, no en dash, no semicolon, no emoji, an
+// in-game line inside 150 characters once its placeholders are filled, and
+// ONLY the placeholders that pool's own fill code substitutes. A line carrying
+// a token nobody replaces reaches the hall with the braces still in it.
+//
+// Added 2026-09-06, when the banks grew roughly tenfold and reading them by eye
+// stopped being a check.
+{
+  // One representative fill per token. The oath is a real-length shout: the
+  // hard ceiling (a 90-character clip) is checked separately below, since a
+  // long oath is the one thing that can push a spoken line past 150.
+  const SAMPLE = {
+    '{day}': '128',
+    '{Span}': 'A fortnight ago',
+    '{span}': 'a fortnight ago',
+    '{name}': 'Bren Bjornsson',
+    '{firstName}': 'Bren',
+    '{cause}': 'a Greydwarf',
+    '{causeCap}': 'A Greydwarf',
+    '{article}': 'a',
+    '{articleCap}': 'A',
+    '{count}': '200',
+    '{days}': '12',
+    '{oath}': '"to hold the north gate and not run"',
+  };
+  const fill = (line) => line.replace(/\{[^}]*\}/g, (t) => SAMPLE[t] ?? t);
+
+  // inGame: spoken center-screen by the Companion (150). The rest land in
+  // Discord, where the doctrine allows 220.
+  const POOLS = [
+    { name: 'DAWN', lines: DAWN, tokens: ['{day}'], required: ['{day}'], inGame: true },
+    { name: 'ATMOSPHERE', lines: ATMOSPHERE, tokens: [], inGame: true },
+    { name: 'CALLBACK_TEMPLATES', lines: CALLBACK_TEMPLATES, tokens: ['{Span}', '{span}', '{name}', '{cause}'], inGame: true },
+    { name: 'SOLO_WHISPERS', lines: SOLO_WHISPERS, tokens: ['{firstName}'], required: ['{firstName}'], inGame: true },
+    { name: 'CREW_WHISPERS', lines: CREW_WHISPERS, tokens: ['{firstName}'], inGame: true },
+    { name: 'OATH_CALLBACKS', lines: OATH_CALLBACKS, tokens: ['{firstName}', '{oath}', '{days}'], required: ['{firstName}', '{oath}'], inGame: true },
+    { name: 'OATH_ECHO_LINES', lines: OATH_ECHO_LINES, tokens: ['{firstName}', '{oath}'], required: ['{firstName}', '{oath}'], inGame: true },
+    { name: 'DEATH_LINES', lines: Object.values(DEATH_LINES), tokens: ['{name}', '{count}'], required: ['{name}'], inGame: true },
+    { name: 'ENV_DEATH_POOLS', lines: [...new Set(Object.values(ENV_DEATH_POOLS).flat())], tokens: ['{name}'], required: ['{name}'], inGame: false },
+    { name: 'BOSS_TEMPLATES', lines: BOSS_TEMPLATES, tokens: ['{name}', '{cause}', '{causeCap}'], required: ['{name}'], inGame: false },
+    { name: 'CREATURE_TEMPLATES', lines: CREATURE_TEMPLATES, tokens: ['{name}', '{cause}', '{article}', '{articleCap}'], required: ['{name}', '{cause}'], inGame: false },
+    { name: 'NO_CAUSE_TEMPLATES', lines: NO_CAUSE_TEMPLATES, tokens: ['{name}'], required: ['{name}'], inGame: false },
+    { name: 'QUIET_RECAP_LINES', lines: QUIET_RECAP_LINES, tokens: [], inGame: false },
+  ];
+
+  for (const pool of POOLS) {
+    const cap = pool.inGame ? 150 : 220;
+    ok(pool.lines.length > 0, `${pool.name}: the pool is not empty`);
+    ok(new Set(pool.lines).size === pool.lines.length, `${pool.name}: no line is written twice`);
+    for (const line of pool.lines) {
+      ok(!line.includes('—'), `${pool.name}: em dash in "${line}"`);
+      ok(!line.includes('–'), `${pool.name}: en dash in "${line}"`);
+      ok(!line.includes(';'), `${pool.name}: semicolon in "${line}"`);
+      ok(!/\p{Extended_Pictographic}/u.test(line), `${pool.name}: emoji in "${line}"`);
+      for (const token of line.match(/\{[^}]*\}/g) || []) {
+        ok(pool.tokens.includes(token), `${pool.name}: "${token}" has no substitution, in "${line}"`);
+      }
+      for (const token of pool.required || []) {
+        ok(line.includes(token), `${pool.name}: "${line}" is missing ${token}`);
+      }
+      const rendered = fill(line);
+      ok(!/[{}]/.test(rendered), `${pool.name}: a token survived the fill, got: ${rendered}`);
+      ok(rendered.length <= cap, `${pool.name}: ${rendered.length} chars (cap ${cap}), got: ${rendered}`);
+    }
+  }
+
+  // At most ONE exclamation mark per hundred lines across the whole bank.
+  const everyLine = POOLS.flatMap((p) => p.lines);
+  const bangs = everyLine.filter((l) => l.includes('!'));
+  ok(bangs.length <= Math.ceil(everyLine.length / 100),
+    `at most one exclamation per hundred lines, found ${bangs.length} in ${everyLine.length}: ${JSON.stringify(bangs.slice(0, 3))}`);
+
+  // The oath ceiling: oathQuote clips a shout to 90 characters, and even at
+  // that length a spoken oath line has to stay inside the 220 the Companion
+  // will render. The 150 doctrine length holds for an oath of ordinary length,
+  // which is what the sample above renders.
+  const longest = oathQuote('x'.repeat(400));
+  ok(longest.length === 92, `a clipped oath is 90 characters inside its quotes, got ${longest.length}`);
+  for (const line of [...OATH_CALLBACKS, ...OATH_ECHO_LINES]) {
+    const worst = line
+      .replace(/\{firstName\}/g, 'Bjornsson')
+      .replace(/\{oath\}/g, longest)
+      .replace(/\{days\}/g, '365');
+    ok(worst.length <= 220, `an oath line survives its longest oath, got ${worst.length}: ${worst}`);
+  }
 }
 
 // ── 11. No em-dashes anywhere a player can see one ───────────────────────
@@ -503,7 +604,7 @@ const firstNames = (rows) => rows.map((r) => r.character_name.split(' ')[0]);
 
   const playerVisible = [
     ...DAWN, ...ATMOSPHERE, ...CALLBACK_TEMPLATES, ...Object.values(DEATH_LINES),
-    ...SOLO_WHISPERS, ...CREW_WHISPERS,
+    ...SOLO_WHISPERS, ...CREW_WHISPERS, ...OATH_CALLBACKS, ...OATH_ECHO_LINES,
     deathMilestoneLine(300, 'Steve Stevenson'),
     ...flatten(POTY_TEMPLATES),
     ...flatten(ENV_DEATH_POOLS),
@@ -575,6 +676,15 @@ const HIT_TYPES = [
 // What each cause must and must not say. The must-nots are the misattributions:
 // an unseen foe is not another viking, a cart is not a tree, a ballista bolt is
 // not a monster.
+//
+// 2026-09-06, when the death bank went from three lines a cause to eight: the
+// `must` half is now asked of the POOL, not of every line in it. Half the new
+// writing is deliberately oblique ("Nothing bit {name}. The land simply waited
+// below."), and the only way to keep a per-line `must` passing was to grow the
+// pattern into a whitelist of the lines themselves, which tests nothing. The
+// property that mattered is untouched and still per line: no line may blame
+// the WRONG thing (mustNot), and every HitType still has at least one line that
+// says plainly what killed them, so the reading is always available.
 const READS = {
   Undefined: [/no name|nameless/i, /viking|foe|creature/i],
   EnemyHit: [/unseen|never saw|never showed|nobody got a look|dark/i, /viking|cart|tree/i],
@@ -607,24 +717,44 @@ const READS = {
 
     // The enum word itself (case-sensitive) must never reach a player: "tree"
     // is English, "CinderFire" is a token.
+    //
+    // ONE exemption, added 2026-09-06 with the bigger bank: a HitType that is
+    // also an ordinary English word ("Smoke", "Tree") may OPEN a line, where
+    // English capitalizes it whatever it means. Anywhere else in the sentence
+    // it is still a leak, and a camel-cased HitType ("CinderFire", "EnemyHit")
+    // is banned outright, first word included.
     const token = new RegExp(`\\b${hit}\\b`);
+    const englishWord = /^[A-Z][a-z]+$/.test(hit);
+    const leaked = (s) => {
+      for (const m of String(s).matchAll(new RegExp(`\\b${hit}\\b`, 'g'))) {
+        if (englishWord && m.index === 0) continue;
+        return true;
+      }
+      return false;
+    };
 
-    // (a) the #server feed line
+    // (a) the #server feed line. Every line in the pool, not one random draw:
+    // pickOne made this assertion a coin toss.
     ok(ENV_DEATH_POOLS[low], `${hit}: missing from ENV_DEATH_POOLS in format.js`);
-    ok(!token.test(buildDeathMessage('**Testman**', hit)),
+    ok(!leaked(buildDeathMessage('**Testman**', hit)),
       `${hit}: the raw token must not surface in the feed line`);
-    for (const line of ENV_DEATH_POOLS[low]) {
-      const rendered = line.replace(/\{name\}/g, 'Testman');
-      ok(must.test(rendered), `${hit}: feed copy should say what killed them, got: ${rendered}`);
+    ok(!ENV_DEATH_POOLS[low].some((line) => leaked(line.replace(/\{name\}/g, '**Testman**'))),
+      `${hit}: the raw token must not surface in any line of the pool`);
+    const pool = ENV_DEATH_POOLS[low].map((line) => line.replace(/\{name\}/g, 'Testman'));
+    ok(pool.some((rendered) => must.test(rendered)),
+      `${hit}: no line in the pool says plainly what killed them`);
+    for (const rendered of pool) {
       ok(!mustNot.test(rendered), `${hit}: feed copy blames the wrong thing, got: ${rendered}`);
       ok(!/[—–]/.test(rendered), `${hit}: no dash in the feed copy, got: ${rendered}`);
       ok(!/killed by an? [A-Z]/.test(rendered),
         `${hit}: an environmental cause must not read as a creature, got: ${rendered}`);
+      ok(rendered.includes('Testman'), `${hit}: a death line names the fallen, got: ${rendered}`);
     }
 
     // (b) the mid-sentence noun phrase (POTY blurb, voice callback)
     const noun = causeNoun(hit);
     ok(noun && !token.test(noun), `${hit}: causeNoun must not hand back the raw token, got: ${noun}`);
+    ok(!leaked(noun), `${hit}: and not as a word inside the phrase either, got: ${noun}`);
     ok(!/^[A-Z]/.test(noun), `${hit}: a cause noun sits mid-sentence, so it stays lowercase, got: ${noun}`);
     ok(must.test(noun), `${hit}: causeNoun should say what killed them, got: ${noun}`);
     ok(!mustNot.test(noun), `${hit}: causeNoun blames the wrong thing, got: ${noun}`);
@@ -1025,6 +1155,239 @@ const READS = {
       ok(!/undefined|NaN/.test(v), `${key}: no internals in a blurb, got: ${v}`);
       ok(v.trim().endsWith('.'), `${key}: a blurb closes its sentence, got: ${v}`);
     }
+  }
+}
+
+// ── 24. The in-game oath echo speaks from the pool, and quotes the shout ───
+// Before 2026-09-06 every oath got the same fixed sentence. It now draws from
+// OATH_ECHO_LINES with the shout itself read back, lower-cased and clipped;
+// the Discord cross-post is untouched (its escaping is red-team territory).
+{
+  const rendered = (name, quote) => new Set(
+    OATH_ECHO_LINES.map((t) => t.replace(/\{firstName\}/g, name).replace(/\{oath\}/g, quote)),
+  );
+
+  const h = harness({
+    oaths: [{ id: 'o1', character_name: 'Bren Bjornsson', oath_text: 'I will hold the North gate.' }],
+    state: { voice: { deathTiersSeeded: true, deathTiers: {} } },
+  });
+  await h.voice.tick();
+  ok(h.queued.length === 1 && h.queued[0].meta.source === 'oath', 'the oath still echoes in-game');
+  const spoken = h.queued[0].text;
+  ok(rendered('Bren', '"i will hold the north gate."').has(spoken),
+    `the echo is a line from the pool, got: ${spoken}`);
+  ok(/^oathecho:\d+$/.test(h.queued[0].meta.template || ''),
+    `and records which one, got: ${h.queued[0].meta.template}`);
+  ok(spoken.includes('"i will hold the north gate."'), `the shout is quoted back, got: ${spoken}`);
+  ok(!/[{}]/.test(spoken), `every token is filled, got: ${spoken}`);
+  ok(h.posts.length === 1 && h.posts[0].p.embeds[0].description.includes('swore on the charter'),
+    'and the Discord embed is unchanged');
+
+  // Deterministic per oath row: a tick that runs twice says the same thing.
+  const again = harness({
+    oaths: [{ id: 'o1', character_name: 'Bren Bjornsson', oath_text: 'I will hold the North gate.' }],
+    state: { voice: { deathTiersSeeded: true, deathTiers: {} } },
+  });
+  await again.voice.tick();
+  ok(again.queued[0].text === spoken, 'the same oath row always gets the same line');
+
+  // Three oaths in one tick must not be three copies of one sentence.
+  const many = harness({
+    oaths: [
+      { id: 'a', character_name: 'Bren', oath_text: 'to finish the longship' },
+      { id: 'b', character_name: 'Astrid', oath_text: 'to kill Bonemass alone' },
+      { id: 'c', character_name: 'Sven', oath_text: 'to never sail sober' },
+    ],
+    state: { voice: { deathTiersSeeded: true, deathTiers: {} } },
+  });
+  await many.voice.tick();
+  ok(many.queued.length === 3, 'every un-announced oath echoes');
+  ok(new Set(many.queued.map((q) => q.meta.template)).size === 3,
+    'three oaths in one tick get three different lines');
+
+  // A shout that is nothing but markdown leaves no quote to speak, so the line
+  // Eilif used before the pool existed carries it instead of empty quotes.
+  const empty = harness({
+    oaths: [{ id: 'o2', character_name: 'Bren', oath_text: '**__||' }],
+    state: { voice: { deathTiersSeeded: true, deathTiers: {} } },
+  });
+  await empty.voice.tick();
+  ok(empty.queued[0].text === 'Eilif heard you, Bren. These walls will hold you to it.',
+    `an unspeakable oath falls back, got: ${empty.queued[0].text}`);
+  ok(empty.queued[0].meta.template === undefined, 'and claims no pool line');
+
+  // The quote itself: one line, lower-cased, no markdown, no live link.
+  ok(oathQuote('  HOLD   the\ngate  ') === '"hold the gate"', 'collapsed, trimmed and lower-cased');
+  ok(oathQuote('a **bold** vow') === '"a bold vow"', 'markdown is stripped, not escaped (this line is spoken)');
+  ok(!oathQuote('see https://evil.example/x').includes('://'), 'no live link survives into the hall');
+  ok(oathQuote('') === '' && oathQuote(null) === '', 'an empty oath is empty, for the caller to guard on');
+}
+
+// ── 25. Oath callbacks: an ambient class, and only for a viking who is here ─
+// Same 2h clock, same 30-minute gap, same chooseFresh de-duplication as any
+// other ambient line. The candidate exists only when a viking who is ONLINE
+// swore an oath the ledger actually matched to them.
+{
+  const online = (names) => names.map((n, i) => ({ id: `p${i}`, character_name: n, is_online: true }));
+  const crowd = ['Bren Bjornsson', 'Astrid', 'Sven', 'Lagertha', 'Ulf']; // >3, so no whispers
+  const oathRow = (over = {}) => ({
+    character_name: 'bren bjornsson',   // player-typed casing, deliberately not the roster's
+    oath_text: 'I will hold the North gate',
+    match_status: 'exact',
+    sworn_at: new Date(Date.now() - 12 * 86_400_000).toISOString(),
+    ...over,
+  });
+
+  const engine = (over = {}) => harness({
+    players: online(crowd),
+    status: { is_online: true, player_count: crowd.length, world_day: 9 },
+    state: { voice: { deathTiersSeeded: true, deathTiers: {} } },
+    ...over,
+  });
+
+  const sweep = async (h, days = 80) => {
+    const picks = [];
+    for (let day = 1; day <= days; day++) picks.push(await h.voice.pickAmbient({ worldDay: day, playerCount: crowd.length }));
+    return picks.filter(Boolean);
+  };
+
+  const h = engine({ swornOaths: [oathRow()] });
+  const picks = await sweep(h);
+  const oaths = picks.filter((p) => p.id.startsWith('oathcb:'));
+  ok(oaths.length > 0, 'an online viking with a sworn oath makes the callback reachable');
+  ok(oaths.every((p) => p.source === 'oath_callback'), 'the ambient line is tagged as an oath callback');
+  for (const p of oaths) {
+    ok(!/[{}]/.test(p.text), `every token is filled, got: ${p.text}`);
+    ok(p.text.includes('Bren'), `the swearer is named from the ROSTER spelling, got: ${p.text}`);
+    ok(p.text.includes('"i will hold the north gate"'), `the oath is quoted back, got: ${p.text}`);
+    ok(!/[—–]/.test(p.text), `no dash in a spoken oath callback, got: ${p.text}`);
+    ok(p.text.length <= 150, `a spoken line stays inside 150, got ${p.text.length}: ${p.text}`);
+  }
+  // ≈ one ambient line in four. Wide bounds: this pins the weighting, not the RNG.
+  const share = oaths.length / picks.length;
+  ok(share > 0.1 && share < 0.45, `about one ambient line in four is an oath callback, got ${(share * 100).toFixed(0)}%`);
+
+  // Nobody in the hall: no roster, no oath callback, and (the tick guard) no
+  // ambient line at all.
+  const emptyHall = engine({ players: [], swornOaths: [oathRow()], status: { is_online: true, player_count: 0, world_day: 9 } });
+  ok((await sweep(emptyHall, 40)).every((p) => !p.id.startsWith('oathcb:')),
+    'an empty hall never gets an oath callback');
+  ok((await emptyHall.voice._findOathCallback(Math.random, [])) === null,
+    'and the finder refuses an empty roster outright');
+  emptyHall.state.voice.onlineMinutes = 1000;
+  await emptyHall.voice.tick();
+  ok(emptyHall.queued.length === 0, 'never speaks to an empty hall, oath or otherwise');
+
+  // An oath the ledger never matched to a viking belongs to nobody.
+  const unmatched = engine({ swornOaths: [oathRow({ match_status: 'unmatched' })] });
+  ok((await sweep(unmatched, 40)).every((p) => !p.id.startsWith('oathcb:')),
+    'an unmatched oath is never read back at anybody');
+
+  // A fuzzy match is still that viking's oath.
+  const fuzzy = engine({ swornOaths: [oathRow({ match_status: 'fuzzy' })] });
+  ok((await sweep(fuzzy, 40)).some((p) => p.id.startsWith('oathcb:')), 'a fuzzy match counts');
+
+  // The swearer logged off: their oath waits for them.
+  const absent = engine({ swornOaths: [oathRow({ character_name: 'Hjalmar' })] });
+  ok((await sweep(absent, 40)).every((p) => !p.id.startsWith('oathcb:')),
+    'an oath from a viking who is not online is not spoken');
+
+  // No oaths at all: the slot falls through to the ordinary pools, as before.
+  const none = engine({ swornOaths: [] });
+  const fell = await sweep(none, 40);
+  ok(fell.length === 40 && fell.every((p) => /^(atmo|cb|oathcb):/.test(p.id)), 'the slot still fills');
+  ok(fell.every((p) => !p.id.startsWith('oathcb:')), 'with no oath callback in it');
+
+  // Junk is never read back: the crew's own test oath, or a one-word shout.
+  ok(!speakableOath('TEST OATH PLEASE IGNORE'), 'the test oath is unspeakable');
+  ok(!speakableOath('yes'), 'a one-word oath is unspeakable');
+  ok(speakableOath('I will hold the North gate'), 'a real oath is speakable');
+  const junk = engine({ swornOaths: [oathRow({ oath_text: 'TEST OATH PLEASE IGNORE' })] });
+  ok((await sweep(junk, 40)).every((p) => !p.id.startsWith('oathcb:')), 'a test oath is never quoted');
+
+  // Targeting: second-person lines carry meta.target only once VOICE_TARGETING=1
+  // (the plugin that can aim a line ships with the 1.0 rebuild); third-person
+  // lines never do, and with the flag off nothing is targeted.
+  const before = process.env.VOICE_TARGETING;
+  delete process.env.VOICE_TARGETING;
+  const untargeted = (await sweep(engine({ swornOaths: [oathRow()] }))).filter((p) => p.id.startsWith('oathcb:'));
+  ok(untargeted.length > 0 && untargeted.every((p) => !p.target), 'with the flag off no oath callback is targeted');
+  process.env.VOICE_TARGETING = '1';
+  const targeted = (await sweep(engine({ swornOaths: [oathRow()] }))).filter((p) => p.id.startsWith('oathcb:'));
+  const second = targeted.filter((p) => /\b(you|your|yours|yourself)\b/i.test(p.text));
+  const third = targeted.filter((p) => !/\b(you|your|yours|yourself)\b/i.test(p.text));
+  ok(second.length > 0 && second.every((p) => /^Bren\b/.test(p.target || '')), `second-person callbacks are aimed at the swearer (targeted=${targeted.length} second=${second.length} sample=${JSON.stringify(second.slice(0, 2).map((p) => ({ id: p.id, target: p.target, text: p.text.slice(0, 60) })))})`);
+  ok(third.length > 0 && third.every((p) => !p.target), 'third-person callbacks stay public');
+  const th = engine({ swornOaths: [oathRow()] });
+  th.state.voice.onlineMinutes = 1000;
+  for (let i = 0; i < 12 && !th.queued.some((q) => q.meta?.target); i++) { th.state.voice.onlineMinutes = 1000; th.state.voice.lastVoiceAt = 0; await th.voice.tick(); }
+  ok(th.queued.some((q) => /^Bren\b/.test(q.meta?.target || '')) || th.queued.every((q) => q.meta?.source !== 'oath_callback' || !/\b(you|your)\b/i.test(q.text)),
+    'a targeted pick is enqueued with meta.target');
+  if (before === undefined) delete process.env.VOICE_TARGETING; else process.env.VOICE_TARGETING = before;
+
+  // {days} needs a real span behind it: a row sworn today, or with no usable
+  // sworn_at, keeps the templates that do not count days.
+  const daysTemplates = OATH_CALLBACKS
+    .map((t, i) => (t.includes('{days}') ? `oathcb:${i}` : null))
+    .filter(Boolean);
+  ok(daysTemplates.length > 0, 'the pool has day-counting templates to withhold');
+  for (const over of [{ sworn_at: new Date().toISOString() }, { sworn_at: null }]) {
+    const young = engine({ swornOaths: [oathRow(over)] });
+    const ids = (await sweep(young, 60)).map((p) => p.id);
+    ok(ids.some((id) => id.startsWith('oathcb:')), 'a fresh oath is still read back');
+    ok(!ids.some((id) => daysTemplates.includes(id)),
+      `an oath with no whole days behind it never counts them (${JSON.stringify(over)})`);
+  }
+  const aged = engine({ swornOaths: [oathRow()] });
+  const agedIds = (await sweep(aged, 200)).map((p) => p.id);
+  ok(agedIds.some((id) => daysTemplates.includes(id)), 'a twelve-day-old oath does count them');
+
+  // The no-repeat guard is the shared one: a queued oath callback goes into
+  // recentTemplates like any other ambient line.
+  const queuedRun = engine({ swornOaths: [oathRow()] });
+  queuedRun.state.voice.onlineMinutes = 1000;
+  await queuedRun.voice.tick();
+  ok(queuedRun.queued.length === 1, 'the ambient slot fired');
+  const t = queuedRun.queued[0].meta.template;
+  ok(queuedRun.state.voice.recentTemplates.includes(t), `${t} went into the no-repeat window`);
+}
+
+// ── 26. One ambient tick, one extra read ───────────────────────────────────
+// The oath callback shares the roster read the whisper check already does, asks
+// the oaths table at most once, and never stacks on top of the death callback's
+// own read: whichever class wins the first slot falls straight through to
+// atmosphere, which needs no read at all. A voice tick runs every 60 seconds.
+{
+  const reads = [];
+  const db = fakeClient((table, ops) => {
+    if (!ops.some((o) => o.op === 'insert' || o.op === 'update')) reads.push(table);
+    if (table === 'players') {
+      return { data: Array.from({ length: 5 }, (_, i) => ({ id: `p${i}`, character_name: `V${i}`, is_online: true })), error: null };
+    }
+    if (table === 'oaths') {
+      return {
+        data: [{ character_name: 'V1', oath_text: 'to bar the gate', match_status: 'exact', sworn_at: new Date(Date.now() - 5 * 86_400_000).toISOString() }],
+        error: null,
+      };
+    }
+    return { data: [], error: null };
+  });
+  const voice = createVoiceEngine({
+    client: { user: { id: 'bot' }, on() {} },
+    db,
+    writeDb: db,
+    post: async () => {},
+    state: { voice: { deathTiersSeeded: true, deathTiers: {} } },
+    saveState: async () => {},
+    log: silentLog,
+  });
+  for (let day = 1; day <= 40; day++) {
+    reads.length = 0;
+    await voice.pickAmbient({ worldDay: day, playerCount: 5 });
+    ok(reads.filter((t) => t === 'players').length === 1, `day ${day}: one roster read, got ${reads.filter((t) => t === 'players').length}`);
+    ok(reads.filter((t) => t === 'oaths').length <= 1, `day ${day}: at most one oaths read, got ${reads.filter((t) => t === 'oaths').length}`);
+    ok(!(reads.includes('oaths') && reads.includes('events')),
+      `day ${day}: the oath callback never reads on top of the death callback, got ${JSON.stringify(reads)}`);
   }
 }
 
