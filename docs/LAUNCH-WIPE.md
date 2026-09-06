@@ -258,7 +258,9 @@ scripts/stress/rehearse-launch.sh
 
 **`SITE_DIR` is not decoration, and a rehearsal without it proves less than it
 looks like it does.** The 2026-09-05 perf pass put `/world`, `/events`,
-`/gallery`, `/oath`, `/map` and `/boss/[slug]` behind `revalidate = 60`. The
+`/events/storyteller`, `/gallery`, `/map` and `/boss/[slug]` behind
+`revalidate = 60` (`/oath` too, until the wall folded into `/players#oaths` on
+2026-09-06). The
 day-one section of this rehearsal runs in about **twenty seconds**, so all six of
 them answer every checkpoint with the same build-time HTML, and the run reports
 them clean without ever rendering a row of the evening. Caught on 2026-09-06 by
@@ -276,7 +278,7 @@ New tools, all local-only and all refusing any non-loopback URL:
 |---|---|
 | `scripts/stress/rehearse-launch.sh` | chains the whole rehearsal and diffs `cutover-env.sh` against the real files |
 | `scripts/stress/day-one.mjs` | the first evening in stages (`boot`, `first-join`, `day1`, `day2`, `day3`, `close`, `verify`) so the pages can be read between them. `verify` also takes `--bot-log <the dry-run announcer's log>` and compares what the relay POSTED against what the rows HOLD — added 2026-09-06, because every other invariant here is a database assertion, and that is how two whole rehearsals graded clean while twenty of the evening's forty-six event rows never reached `#server`. A check it cannot make reports **SKIP**, never PASS |
-| `scripts/stress/page-check.mjs` | reads the eight player-facing pages (Hall, Vikings, World, Map, Boss, Events, Gallery, Oath) as text, plus anything given to `--also` (the rehearsal passes `/viking/alvis` from the first join onward), and fails on `undefined`, `NaN`, `null`, `Invalid Date`, `Day 0`, plural disagreement at exactly one, names from the previous world, and the copy doctrine: an em or en dash, `Milestones` where the site says Great Deeds, and the old world's name. Gallery and Boss were added 2026-09-06; both are ISR pages `docs/LAUNCH-DAY.md` names in its post-wipe check, and neither was being read. Reports a cached ISR render as STALE rather than grading it |
+| `scripts/stress/page-check.mjs` | reads the seven player-facing pages (Hall, Vikings, World, Map, Boss, Events, Gallery) as text, plus anything given to `--also` (the rehearsal passes `/viking/alvis` from the first join onward), and fails on `undefined`, `NaN`, `null`, `Invalid Date`, `Day 0`, plural disagreement at exactly one, names from the previous world, and the copy doctrine: an em or en dash, `Milestones` where the site says Great Deeds, and the old world's name. Gallery and Boss were added 2026-09-06; both are ISR pages `docs/LAUNCH-DAY.md` names in its post-wipe check, and neither was being read. Reports a cached ISR render as STALE rather than grading it |
 
 `page-check.mjs`'s refusal is the newest of the three (2026-09-06) and it is not
 tidiness: with `--site-dir` it attaches the built site's `previewModeId` to every
@@ -405,7 +407,7 @@ Five findings, in the order they cost the most:
    1`. Launch night is the one night this is likely: the first boss, then people
    stop playing.
 3. **The Hall's `const worldDay = status?.world_day ?? 0` (in `app/page.tsx`,
-   rendered as `Day {worldDay} of the tenth world` and as a `World Day` stat
+   rendered as `Day {worldDay} of this world` and as a `World Day` stat
    tile) reads "Day 0 of the tenth world"** (and a `World Day 0` stat tile) for the whole window
    between the wipe and the Emitter's first post. The wipe zeroes `world_day`
    deliberately, and `docs/LAUNCH-DAY.md` step 20 puts the wipe after

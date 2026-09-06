@@ -298,7 +298,7 @@ export const GAME_SHOUTS: GameShout[] = [
     text: '/s /oath <RUNE> <your vow, one line>',
     copy: '/s /oath ',
     who: 'any member',
-    what: 'Swears your vow onto the Oath page and binds your Discord to the viking you are playing. This is the shout the rune from @Eilif I am is for.',
+    what: 'Swears your vow onto the oath wall and binds your Discord to the viking you are playing. This is the shout the rune from @Eilif I am is for.',
     example: '/s /oath K7M2QP I will not sail ahead of the longship',
     note: 'It must be a shout. Lead with /s or the line never leaves the campfire.',
     source: 'plugins/eilif-companion/src/OathCapture.cs OathPrefix; app/api/webhook/route.ts oath, isClaimCode',
@@ -633,7 +633,11 @@ export const SITE_PAGES: SitePage[] = [
     id: 'page-hall',
     text: '/',
     label: 'Hall',
-    what: 'Who is online now, the hearth’s pulse, the Great Deeds standing, the latest story and what is coming up.',
+    // Names the way in first. Since 2026-09-06 the Hall opens with the first
+    // run band and the boss progress card, and this row is the register a
+    // newcomer reads at the top of Resources: it has to say that the front
+    // page carries the route in, not only the standings.
+    what: 'The way in for a new viking, who is online now, boss progress, the Great Deeds standing, the latest story and what is coming up.',
     source: 'app/page.tsx',
   },
   {
@@ -641,8 +645,19 @@ export const SITE_PAGES: SitePage[] = [
     id: 'page-players',
     text: '/players',
     label: 'Vikings',
-    what: 'Every warrior who has set foot on these shores, the leaderboards, the attendance grid and how we die.',
+    what: 'Every warrior who has set foot on these shores, the oaths they have sworn, the leaderboards, the attendance grid and how we die.',
     source: 'app/players/page.tsx',
+  },
+  {
+    kind: 'page',
+    id: 'page-oath',
+    // A section of the Vikings page since 2026-09-06, not a page of its own.
+    // /oath still answers: next.config.ts sends it here, anchor and all, so a
+    // bookmark or an older Discord link still lands on the wall.
+    text: '/players#oaths',
+    label: 'Oaths sworn',
+    what: 'A section of the Vikings page, not a page of its own: the wall of every vow sworn in the hall, newest first, with how to swear yours and bind your Discord to your viking.',
+    source: 'app/players/page.tsx SignatureWall',
   },
   {
     kind: 'page',
@@ -688,21 +703,13 @@ export const SITE_PAGES: SitePage[] = [
   },
   {
     kind: 'page',
-    id: 'page-oath',
-    text: '/oath',
-    label: 'Oath',
-    what: 'How to swear and bind, and the wall of every vow sworn in the hall.',
-    source: 'app/oath/page.tsx',
-  },
-  {
-    kind: 'page',
     id: 'page-resources',
     text: '/resources',
     label: 'Resources',
     // One page since 2026-09-06, when Mods and Commands merged. /mods and
     // /commands still answer: next.config.ts redirects them here, to #mods and
     // #commands, so a bookmark or an older Discord link still lands.
-    what: 'The modpack and the register in one place: every mod, which of them you install, every command, and everything the hall says back.',
+    what: 'What every page of this site holds, the words we use, the modpack, and every command the hall answers to.',
     source: 'app/resources/page.tsx',
   },
   {
@@ -728,6 +735,93 @@ export const SITE_PAGES: SitePage[] = [
     label: 'A war room',
     what: 'One Forsaken: the fight, who stood in it, and the telling that stands. Reached from the World page.',
     source: 'app/boss/[slug]/page.tsx',
+  },
+];
+
+// ── The words this site uses ───────────────────────────────────────────────
+// Nine words a reader meets on this site with no definition anywhere, gathered
+// where a newcomer will read them: at the top of Resources, under the page
+// register. Every one of them is used in the copy today, which is the whole
+// test scripts/commands-page.test.mjs applies to this list.
+//
+// One plain line each, doctrine voice: the meaning says what the word means,
+// and the flavour stays in the section subtitle above it.
+
+export type GlossaryTerm = {
+  /** stable anchor id, unique across the glossary */
+  id: string;
+  /** the word exactly as a reader meets it on the site */
+  term: string;
+  /** one plain line, no second sentence of atmosphere */
+  meaning: string;
+  /** the file and symbols this meaning was derived from */
+  source: string;
+};
+
+export const GLOSSARY: GlossaryTerm[] = [
+  {
+    id: 'word-hall',
+    term: 'the hall',
+    meaning: 'Eilif itself: this server and its Discord, taken as one place.',
+    source: 'config/server.ts SERVER_NAME',
+  },
+  {
+    id: 'word-rune',
+    term: 'rune',
+    meaning:
+      'The six letter code Eilif whispers you once, to prove your Discord and your viking are the same person.',
+    source: 'services/discord-bot/src/identity.js mintClaim',
+  },
+  {
+    id: 'word-telling',
+    term: 'telling',
+    meaning: 'Your account of one boss falling, shown on that boss’s page.',
+    source: 'services/discord-bot/src/tellings.js handleRetell',
+  },
+  {
+    id: 'word-tale',
+    term: 'tale',
+    meaning: 'Your account of one night, shown on Story.',
+    source: 'services/discord-bot/src/tales.js handleWrite',
+  },
+  {
+    id: 'word-skald',
+    term: 'the Skald',
+    meaning:
+      'Eilif writing the first account of a fight itself, from what it recorded, until a viking tells it better.',
+    source: 'services/discord-bot/src/retelling.js recordSkaldTelling',
+  },
+  {
+    id: 'word-war-room',
+    term: 'war room',
+    // Deliberately NOT the wording of SITE_PAGES page-boss, which a reader
+    // passes about four hundred pixels above this row. Two identical lines on
+    // one screen read as a copy and paste, not as a definition.
+    meaning: 'The page one boss keeps of its own: how it fell, and what was written about it.',
+    source: 'app/boss/[slug]/page.tsx BossPage',
+  },
+  {
+    id: 'word-storyteller',
+    term: 'the Storyteller',
+    // "the viking currently holding that office" was the review's wording, and
+    // it worked in the review because the sentence before it named the office.
+    // Lifted into a nine row list it dangles: nothing on this page ever says
+    // what an office is. A definition may not lean on a word the site does not
+    // explain, which is the whole reason this block exists.
+    meaning: 'The viking whose turn it is to write for the hall, free to set down the tale of any night.',
+    source: 'services/discord-bot/src/tales.js mayWriteTale',
+  },
+  {
+    id: 'word-linked-viking',
+    term: 'linked viking',
+    meaning: 'A viking whose Discord has been bound to their name with a rune.',
+    source: 'services/discord-bot/src/identity.js currentLink',
+  },
+  {
+    id: 'word-board',
+    term: 'board',
+    meaning: 'An in game sign that shows a live leaderboard, written as a marker like [board:kills].',
+    source: 'plugins/eilif-boards/src/SignBoards.cs MarkerRe; lib/boards.ts statBoard',
   },
 ];
 

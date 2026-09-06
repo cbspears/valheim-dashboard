@@ -60,21 +60,20 @@ gets a launch night through the night.
 
 ## Dashboard pages
 - **Hall** (`/`) hero, server status, who is sailing, the Hearth pulse, boss progress
-- **Vikings** (`/players`) roster, leaderboards, attendance grid, How We Die, anglers
+- **Vikings** (`/players`) roster, the oath wall (`#oaths`), leaderboards, attendance grid, How We Die, anglers
 - **Viking** (`/viking/[slug]`) one player: feats, deaths, oath, the catch log
 - **World** (`/world`) boss timeline, Great Deeds ledger, scheduled gatherings
 - **Boss** (`/boss/[slug]`) war room and full record for one boss
 - **Saga** (`/events`) filterable event feed plus Episodes
 - **Map** (`/map`) fog-masked atlas, in-game-day timelapse, pins, place albums
 - **Gallery** (`/gallery`) screenshots ingested from Discord
-- **Oath** (`/oath`) the oath wall
-- **Mods** (`/mods`) installed mods (edit `config/mods.ts`)
+- **Resources** (`/resources`, sections #mods and #commands) the modpack, the pages guide, the glossary and every command (mods: edit `config/mods.ts`; commands: `config/commands.ts`)
 - **Get Started** (`/get-started`) pack code, Mac config bundle, connect details
 - **Ops** (`/admin/ops`) read-only cockpit, password gated, noindexed
 
 ## Configure (edit & redeploy)
 - `config/server.ts` — server name, tagline, max players, address
-- `config/mods.ts` — the mod list shown on the Mods page
+- `config/mods.ts` — the mod list shown on the Resources page
 
 ## Run locally
 > ⚠️ **Node 20+ required** (Next 16). Pinned via `.nvmrc`.

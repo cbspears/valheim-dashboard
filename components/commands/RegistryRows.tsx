@@ -35,11 +35,35 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/**
+ * Whether a page of the register has an address a reader can be sent to.
+ *
+ * Only the fixed routes do; the dynamic ones (`/viking/<name>`, `/boss/<name>`)
+ * are reached from inside another page. Exported because the page guide reads
+ * it too, and a second copy of this rule would let the rows and the guide
+ * disagree about what can be clicked.
+ */
+export function isLinkablePage(entry: SitePage): boolean {
+  return entry.text.includes('<') === false;
+}
+
+/**
+ * Whether a page of the register is a door: its own route, reachable by typing
+ * it.
+ *
+ * Narrower than `isLinkablePage`, and the difference is the oath wall. Since
+ * 2026-09-06 it is `/players#oaths`, a section of the Vikings page: a reader
+ * can be sent straight to it, so the row links, but it is not a page and the
+ * guide's subtitle must not count it as one. An anchor is a room inside a door,
+ * the same as the two dynamic templates.
+ */
+export function isDoorPage(entry: SitePage): boolean {
+  return isLinkablePage(entry) && entry.text.includes('#') === false;
+}
+
 /** One page of this site: its path, and one line on what it holds. */
 export function PageRow({ entry }: { entry: SitePage }) {
-  // Only the fixed routes are linkable; the dynamic ones are reached from
-  // inside another page and have no single address to send anyone to.
-  const linkable = !entry.text.includes('<');
+  const linkable = isLinkablePage(entry);
 
   return (
     <li className="border-t border-rune/60 py-4 first:border-t-0 first:pt-0 last:pb-0">

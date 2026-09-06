@@ -30,6 +30,16 @@
 //      marks (CLAUDE.md) — in the register AND in the page's own prose.
 //   5. Every `source` names a file that exists AND symbols that are really in
 //      it, and the nav and the page list agree with each other.
+//   6. The glossary defines words the site really uses. Every term is looked
+//      for in the register's own copy and in the source of every page,
+//      component and bot module, with comments stripped and as a whole word
+//      rather than a substring, so `border-rune` is not evidence for "rune"
+//      and `leaderboard` is not evidence for "board". A word that is quietly
+//      renamed out from under a definition fails here, and so does a
+//      definition that leans on a word this site never explains.
+//   7. The page still reads newest player first (UX review 2026-09-06,
+//      proposal 3): what each page is for, then the words, then the modpack,
+//      then the register, whose groups are disclosures.
 //
 // Picked up automatically by `npm test` (find scripts lib -name '*.test.mjs').
 // Run alone: npx tsx scripts/commands-page.test.mjs
@@ -41,6 +51,7 @@ import {
   COMMAND_SECTIONS,
   DISCORD_COMMANDS,
   GAME_SHOUTS,
+  GLOSSARY,
   NOTIFICATIONS,
   SITE_PAGES,
 } from '../config/commands.ts';
@@ -734,12 +745,16 @@ const indexSrc = read(`${BOT}/index.js`);
     'app/resources/page.tsx',
     ...readdirSync(repo('components/commands')).map((f) => `components/commands/${f}`),
     ...readdirSync(repo('components/mods')).map((f) => `components/mods/${f}`),
+    ...readdirSync(repo('components/resources')).map((f) => `components/resources/${f}`),
   ];
   let pageStrings = 0;
   for (const f of pageFiles) {
     const src = stripComments(read(f));
-    // JSX text nodes, plus the prose props a SectionHeader takes.
-    const nodes = [...src.matchAll(/>([^<>{}]*[A-Za-z][^<>{}]*)</g)].map((m) => m[1]);
+    // JSX text nodes, plus the prose props a SectionHeader takes. The `>` may
+    // not be the tail of an arrow function or a comparison: `=> !x.includes('<')`
+    // is code, and reading it as a text node failed this scan on an exclamation
+    // mark no reader will ever see.
+    const nodes = [...src.matchAll(/(?<![=!<>-])>([^<>{}]*[A-Za-z][^<>{}]*)</g)].map((m) => m[1]);
     const props = [...src.matchAll(/(?:title|subtitle|label|description|aria-label)=["']([^"']+)["']/g)]
       .map((m) => m[1]);
     const literals = [...src.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"/g)]
@@ -808,10 +823,49 @@ const indexSrc = read(`${BOT}/index.js`);
       `the nav links ${href} and the register describes it`,
     );
   }
+
+  // SEVEN TABS AND THE CALL TO ACTION (2026-09-06). The count is held here
+  // because the NavBar's own comment records two horizontal-overflow
+  // regressions from adding tabs, and the second of them was invisible outside
+  // a 15px band (768px through 782px). An eighth tab is allowed, but not
+  // without re-measuring that band and rewriting the comment.
+  eq(hrefs.length, 8, 'the nav is seven tabs and the call to action');
+  // The ORDER is the decision, not just the count: left to right is what the
+  // site says matters, and the call to action is last because that is where a
+  // reader's eye ends the row. Reshuffling these is allowed; doing it by
+  // accident, in a diff about something else, is what this line stops.
+  eq(
+    hrefs.join(' '),
+    '/ /players /world /map /events /gallery /resources /get-started',
+    'in F-pattern priority: Hall, Vikings, World, Map, Story, Gallery, Resources, then Get Started',
+  );
+
+  // And the drawer inverts that order. On a phone the nav is the only route to
+  // Get Started, so it leads, with a divider between it and the seven.
+  const drawer = nav.slice(nav.indexOf('id={DRAWER_ID}'));
+  ok(drawer.includes('DRAWER_CTA'), 'the drawer renders the call to action');
+  ok(
+    drawer.indexOf('DRAWER_CTA') < drawer.indexOf('DRAWER_TABS.map'),
+    'and leads with it, above the seven tabs',
+  );
+  ok(
+    /<hr[^>]*\/>\s*\{DRAWER_TABS\.map/.test(drawer),
+    'with a divider between the button and the tabs',
+  );
+
   for (const p of SITE_PAGES) {
     if (p.text.includes('<')) continue; // dynamic route, no single address
-    const route = p.text === '/' ? 'app/page.tsx' : `app${p.text}/page.tsx`;
+    // A register entry may address a SECTION of a page (/players#oaths), which
+    // is a real address only if the anchor is really in that page's source.
+    const [path, anchor] = p.text.split('#');
+    const route = path === '/' ? 'app/page.tsx' : `app${path}/page.tsx`;
     ok(existsSync(repo(route)), `${p.text} is a real page (${route})`);
+    if (anchor) {
+      ok(
+        read(route).includes(`id="${anchor}"`),
+        `and ${path} carries the #${anchor} section the register addresses`,
+      );
+    }
   }
 
   // Mods and Commands merged into /resources on 2026-09-06. Both addresses were
@@ -829,6 +883,54 @@ const indexSrc = read(`${BOT}/index.js`);
       `${gone} redirects to /resources${anchor}, permanently`,
     );
   }
+
+  // The Oath tab went the same way later that day: the wall is now the "Oaths
+  // sworn" section under the roster on /players. /oath was in the nav for
+  // months and is linked from the Hall and from Get Started, so it may not
+  // 404 either, and the redirect must keep the anchor or a reader lands at the
+  // top of a long page instead of on the wall.
+  ok(!existsSync(repo('app/oath/page.tsx')), '/oath is no longer a page of its own');
+  ok(
+    /source: '\/oath', destination: '\/players#oaths', permanent: true/.test(config),
+    '/oath redirects to /players#oaths, permanently',
+  );
+  ok(!hrefs.includes('/oath'), 'and the nav no longer carries an Oath tab');
+  ok(
+    read('app/players/page.tsx').includes('SignatureWall'),
+    'and /players renders the signature wall itself',
+  );
+
+  // AND NOTHING INSIDE THE SITE MAY LINK THROUGH ONE OF THOSE 308s.
+  //
+  // A hash rides in the Location header, so an address TYPED into the bar, or
+  // an old bookmark, lands on the anchor. A click inside the site does not: the
+  // router fetches the route, follows the redirect, and the URL it resolves to
+  // has no fragment on it. Measured 2026-09-06 against a production build:
+  // /oath typed put #oaths 80px from the top; the same destination reached by
+  // clicking a <Link href="/oath"> put it 942px below the fold, at the top of
+  // the longest page on the site.
+  const linkedPages = [];
+  const walkForLinks = (dir) => {
+    for (const item of readdirSync(repo(dir), { withFileTypes: true })) {
+      if (item.name === 'node_modules') continue;
+      const next = `${dir}/${item.name}`;
+      if (item.isDirectory()) walkForLinks(next);
+      else if (/\.tsx$/.test(item.name)) linkedPages.push(next);
+    }
+  };
+  walkForLinks('app');
+  walkForLinks('components');
+  const THROUGH_A_REDIRECT = /href=(?:"|'|\{')\/(?:oath|mods|commands)(?:"|'|'\})/;
+  // The list is empty and stays empty. Get Started's "your vow stands on the
+  // oath wall" link was the last one through a 308; it was corrected to
+  // /players#oaths on 2026-09-06 when the UX set was integrated, so this rule
+  // has no exceptions and must never grow one.
+  const throughRedirect = linkedPages.filter((f) => THROUGH_A_REDIRECT.test(read(f)));
+  eq(
+    throughRedirect.join(', '),
+    '',
+    'no page links through a 308 (address /players#oaths, /resources#mods directly)',
+  );
 
   // The page itself must render from the register rather than a second copy of
   // it, or this whole test grades a file nobody reads.
@@ -879,6 +981,275 @@ const indexSrc = read(`${BOT}/index.js`);
     ok(
       !/after the mention/i.test(prose),
       `${f} does not tell every reader that what they copy follows a mention`,
+    );
+  }
+}
+
+// ── 6. the glossary defines words the site really uses ─────────────────────
+{
+  // The nine the UX review named. Order is the page's reading order, and the
+  // list is exact in both directions: a word dropped fails, and a tenth word
+  // added without a decision fails too.
+  const NAMED_BY_THE_REVIEW = [
+    'the hall',
+    'rune',
+    'telling',
+    'tale',
+    'the Skald',
+    'war room',
+    'the Storyteller',
+    'linked viking',
+    'board',
+  ];
+
+  eq(GLOSSARY.length, NAMED_BY_THE_REVIEW.length, 'the glossary is the nine words the review named');
+  eq(
+    GLOSSARY.map((g) => g.term).join(' | '),
+    NAMED_BY_THE_REVIEW.join(' | '),
+    'and carries them in the reading order the page uses',
+  );
+
+  const registryIds = new Set(COMMAND_REGISTRY.map((e) => e.id));
+  const seen = new Set();
+  for (const g of GLOSSARY) {
+    ok(g.id.length > 3, `${g.term} has an id`);
+    ok(seen.has(g.id) === false, `${g.id} is used once in the glossary`);
+    seen.add(g.id);
+    ok(registryIds.has(g.id) === false, `${g.id} does not collide with a register entry`);
+
+    // One plain line. A definition that needs a second sentence of atmosphere
+    // is a definition that belongs in a subtitle.
+    ok(g.meaning.length > 20, `${g.term} carries a real meaning`);
+    ok(g.meaning.length <= 160, `${g.term} is defined in one line (${g.meaning.length} chars)`);
+    ok(g.meaning.includes('\n') === false, `${g.term} is one line of copy`);
+    ok(g.meaning.trim().endsWith('.'), `${g.term} is a finished sentence`);
+
+    for (const copy of [g.term, g.meaning]) {
+      ok(copy.includes('—') === false, `no em dash in ${JSON.stringify(copy.slice(0, 60))}`);
+      ok(copy.includes('–') === false, `no en dash in ${JSON.stringify(copy.slice(0, 60))}`);
+      ok(copy.includes('!') === false, `no exclamation mark in ${JSON.stringify(copy.slice(0, 60))}`);
+    }
+
+    // Same citation rule the register lives by: the file exists and every
+    // symbol named after it is really in it.
+    for (const ref of g.source.split(';')) {
+      const tokens = ref.trim().split(/[\s,]+/).filter(Boolean);
+      const file = tokens[0];
+      ok(existsSync(repo(file)), `${g.id} cites ${file}, which exists`);
+      const text = read(file).toLowerCase();
+      for (const sym of tokens.slice(1)) {
+        if (/^[A-Za-z][A-Za-z0-9_-]{2,}$/.test(sym) === false) continue;
+        ok(text.includes(sym.toLowerCase()), `${g.id} cites "${sym}" in ${file}, really there`);
+      }
+    }
+  }
+
+  // A DEFINITION MAY NOT LEAN ON A WORD THE SITE NEVER EXPLAINS. "the
+  // Storyteller" was once defined as "the viking holding that office", and
+  // `office` appears in exactly one other place in this file: a comment. An
+  // undefined referent inside a definition is the one failure this whole block
+  // exists to prevent, so the words that have bitten are named here.
+  const NEVER_EXPLAINED = ['office', 'prefab', 'slug', 'ZDO', 'webhook'];
+  for (const g of GLOSSARY) {
+    for (const word of NEVER_EXPLAINED) {
+      const re = new RegExp(`(?<![\\w-])${word}(?![\\w-])`, 'i');
+      ok(re.test(g.meaning) === false, `${g.term} is defined without leaning on "${word}"`);
+    }
+  }
+
+  // AND IT MAY NOT BE A COPY OF A ROW THE READER ALREADY PASSED. The page guide
+  // sits directly above the glossary, so "war room" repeating page-boss's line
+  // verbatim read as a paste rather than a definition. Six consecutive words
+  // shared with a SITE_PAGES row is the tripwire.
+  const shingles = (s) => {
+    const words = s.toLowerCase().replace(/[^a-z0-9’' ]/g, ' ').split(/\s+/).filter(Boolean);
+    return new Set(words.slice(0, Math.max(0, words.length - 5)).map((_, i) => words.slice(i, i + 6).join(' ')));
+  };
+  const pageCopy = SITE_PAGES.flatMap((p) => [...shingles(p.what)]);
+  for (const g of GLOSSARY) {
+    const mine = shingles(g.meaning);
+    const echo = pageCopy.find((s) => mine.has(s));
+    ok(echo === undefined, `${g.term} is not a copy of a page register row (${echo ?? 'clean'})`);
+  }
+
+  // EVERY TERM IS A WORD THE SITE REALLY USES. The corpus is the register's own
+  // copy plus the source of every page, component and bot module. The glossary
+  // itself is NOT in it: config/commands.ts is left out on purpose, so a word
+  // can never satisfy this check by being defined.
+  const MACHINERY = new Set(['source', 'id', 'kind', 'flag', 'channel', 'channelVar', 'channelIdVar']);
+  const registerCopy = [
+    ...COMMAND_REGISTRY.flatMap((o) =>
+      Object.entries(o)
+        .filter(([k]) => MACHINERY.has(k) === false)
+        .flatMap(([, v]) => (Array.isArray(v) ? v : [v]))
+        .filter((v) => typeof v === 'string'),
+    ),
+    ...COMMAND_SECTIONS.flatMap((x) => [x.title, x.subtitle]),
+  ];
+
+  const sourceFiles = [];
+  const walk = (dir) => {
+    for (const item of readdirSync(repo(dir), { withFileTypes: true })) {
+      if (item.name === 'node_modules') continue;
+      const next = `${dir}/${item.name}`;
+      if (item.isDirectory()) walk(next);
+      else if (/\.(tsx|ts|js)$/.test(item.name)) sourceFiles.push(next);
+    }
+  };
+  walk('app');
+  walk('components');
+  walk('services/discord-bot/src');
+  ok(sourceFiles.length > 80, `the corpus is the real site (${sourceFiles.length} files)`);
+
+  // Comments come out first: a word that survives only in a note someone wrote
+  // to themselves is not a word the site uses. Then the term is matched as a
+  // WHOLE WORD, never as a substring of an identifier, because a substring
+  // match let `border-rune` stand in for "rune", `leaderboard` for "board" and
+  // `tales` for "tale", which made this assertion far weaker than it read. A
+  // trailing plural still counts; a hyphen on either side does not.
+  const stripComments = (s) =>
+    s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+  const corpus = [...registerCopy, ...sourceFiles.map((f) => stripComments(read(f)))].join('\n');
+  const asWord = (term) =>
+    new RegExp(`(?<![\\w-])${term.replace(/^the /i, '').replace(/ /g, '\\s+')}(?:s|es)?(?![\\w-])`, 'i');
+  for (const g of GLOSSARY) {
+    ok(asWord(g.term).test(corpus), `"${g.term}" is a word this site really uses`);
+  }
+  // The check discriminates: a word nobody writes is not found.
+  ok(asWord('frostmarrow').test(corpus) === false, 'and a word nobody writes is not found');
+
+  // And the page renders the list rather than a second copy of it.
+  const glossaryPage = read('components/resources/Glossary.tsx');
+  ok(/from '@\/config\/commands'/.test(glossaryPage), 'the glossary half reads the register file');
+  ok(/GLOSSARY/.test(glossaryPage), 'and walks the glossary');
+  const guide = read('components/resources/PageGuide.tsx');
+  ok(/SITE_PAGES/.test(guide), 'and the page guide is built from SITE_PAGES');
+}
+
+// ── 7. the page reads newest player first ──────────────────────────────────
+{
+  const page = read('app/resources/page.tsx');
+
+  // The order the UX review argued for, and the reason this page was restacked:
+  // orientation, then the words, then what you install, then the register.
+  const ORDER = ['<PageGuide', '<Glossary', '<ModsSection', '<RegisterSections'];
+  let cursor = -1;
+  for (const marker of ORDER) {
+    const at = page.indexOf(marker);
+    ok(at > cursor, `${marker} comes after everything before it on the page`);
+    cursor = at;
+  }
+
+  // "The pages" is drawn once, at the top, and the register half skips it.
+  ok(
+    COMMAND_SECTIONS.some((x) => x.id === 'the-pages'),
+    'the register still carries the pages group',
+  );
+  ok(page.includes('the-pages'), 'and the page anchors the top section on its id');
+  const register = read('components/commands/RegisterSections.tsx');
+  ok(/the-pages/.test(register), 'and the register half names the group it skips');
+  ok(
+    /REGISTER_GROUPS/.test(register) && /REGISTER_GROUPS/.test(page),
+    'and both halves agree on which groups are left',
+  );
+
+  // Each remaining group is a disclosure, the first open and the rest shut.
+  ok(/<details/.test(register), 'each register group is a disclosure');
+  ok(/open=\{open\}/.test(register), 'whose open state is a plain attribute, not client state');
+  ok(/i === 0/.test(register), 'and only the first group ships open');
+
+  // MARKUP, NOT THE NOTES ABOUT IT. Every file in this track carries a comment
+  // naming the class it is telling you to keep (or never to use again), so a
+  // check that reads raw source passes on prose and stops biting. Strip first.
+  const codeOf = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+  // The wayfinder. A rail on a wide screen, chips on a phone, and never a
+  // horizontal scroller at either width.
+  const rail = codeOf(read('components/resources/JumpList.tsx'));
+  ok(/lg:sticky/.test(rail), 'the jump list sticks on a wide screen');
+  ok(/lg:top-20/.test(rail), 'under the 64px site header');
+  ok(/flex-wrap/.test(rail), 'and wraps to a row of chips on a phone');
+  ok(/overflow-x/.test(rail) === false, 'and never scrolls sideways');
+  // 44px touch target, set as a floor. Inferring it from padding is what got
+  // this wrong: text-xs is a 16px line, so py-2.5 alone measures 38px.
+  ok(/min-h-11/.test(rail), 'and every chip is at least 44px tall for a thumb');
+
+  // A chip into a shut group lands on a summary, so the landing has to be
+  // visible. `.card-surface` (app/globals.css) is UNLAYERED and sets the
+  // border shorthand, and an unlayered declaration beats every @layer whatever
+  // its specificity, so a target:border-* on a card-surface element is dead
+  // CSS. The highlight must use a property card-surface does not set.
+  // Read the markup, not the note explaining it: this file's own comment names
+  // the variant it is telling you never to use.
+  const registerCode = codeOf(register);
+  ok(/target:/.test(registerCode), 'the register marks the group a jump landed on');
+  ok(
+    /target:border-/.test(registerCode) === false,
+    'and not with a border, which the unlayered .card-surface would eat',
+  );
+  ok(/card-surface/.test(read('app/globals.css')), 'the .card-surface this reasoning is about exists');
+
+  // The badge on a shut group counts what is really in it. "In the game" holds
+  // shouted commands AND board markers, and calling all of them commands
+  // contradicted the sub-block four lines below it.
+  ok(
+    /<Badge[\s\S]{0,160}countLabel\(/.test(registerCode),
+    'the group badge is drawn by countLabel, which counts by kind',
+  );
+  ok(
+    /how === 'sign'/.test(registerCode),
+    'and the sign markers are the partition it counts separately',
+  );
+
+  // The page guide and the glossary are one reference block, which means one
+  // column geometry. Two different widths stepped their second columns by
+  // about 30px.
+  const rows = read('components/commands/RegistryRows.tsx');
+  const guide = read('components/resources/PageGuide.tsx');
+  const glossaryWidth = read('components/resources/Glossary.tsx').match(/sm:w-\[(\d+)%\]/)?.[1];
+  const pageWidth = rows.match(/sm:w-\[(\d+)%\]/)?.[1];
+  eq(glossaryWidth, pageWidth, 'the glossary and the page guide share one column width');
+
+  // And the guide's own subtitle counts doors with an exported predicate, so it
+  // can never promise a page a reader cannot open, and never call a section of
+  // another page a door. The oath wall is the live case: /players#oaths links
+  // from its row and is counted as a room.
+  ok(/export function isLinkablePage/.test(rows), 'RegistryRows exports the linkable rule');
+  ok(/export function isDoorPage/.test(rows), 'and the narrower door rule beside it');
+  ok(
+    /SITE_PAGES\.filter\(isDoorPage\)/.test(codeOf(guide)),
+    'and the page guide counts doors with it, not with SITE_PAGES.length',
+  );
+  // RegistryRows is a .tsx module with JSX in it, so the rule is graded from
+  // its source rather than imported: a door has no '#' in its address.
+  ok(
+    /isDoorPage\(entry: SitePage\): boolean \{[\s\S]{0,200}includes\('#'\) === false/.test(rows),
+    'and a door is a route with no anchor in it',
+  );
+  const anchored = SITE_PAGES.filter((e) => e.text.includes('#'));
+  ok(anchored.length > 0, 'the register carries at least one anchored section');
+  for (const entry of anchored) {
+    ok(
+      /a section of/i.test(entry.what),
+      `${entry.text} says in its own line that it is a section of another page`,
+    );
+    ok(entry.text.includes('<') === false, `but ${entry.text} still links from its row`);
+  }
+  ok(/lg:grid-cols-\[260px/.test(page), 'the page is a 260px rail and a content column at lg');
+  ok(/lg:items-start/.test(page), 'with the rail free to be shorter than the content');
+
+  // Every jump target exists on the page.
+  const targets = [...page.matchAll(/href: `?'?#([a-z-]+)/g)].map((m) => m[1]);
+  ok(targets.includes('mods') && targets.includes('commands'), 'the two redirect anchors are in the jump list');
+  for (const id of ['words', 'mods', 'commands']) {
+    ok(page.includes(`id="${id}"`), `#${id} is a real anchor on the page`);
+  }
+  for (const group of COMMAND_SECTIONS) {
+    if (group.id === 'the-pages') continue;
+    ok(
+      register.includes('id={section.id}'),
+      `the register puts ${group.id} on the disclosure itself, so a jump lands on its summary`,
     );
   }
 }

@@ -16,9 +16,22 @@ import {
   Crown,
   CalendarDays,
   FishSymbol,
+  PenLine,
+  ScrollText,
+  ExternalLink,
 } from 'lucide-react';
-import { Card, SectionHeader, Badge, EmptyState, OnlineDot, VikingLink } from '@/components/ui';
+import {
+  Card,
+  CardBody,
+  SectionHeader,
+  Badge,
+  EmptyState,
+  OnlineDot,
+  VikingLink,
+} from '@/components/ui';
 import { PageHeader } from '@/components/art/PageHeader';
+import { SignatureWall } from '@/components/oath/SignatureWall';
+import { SERVER_NAME, DISCORD_URL } from '@/config/server';
 import {
   LeaderboardCard,
   type LeaderboardEntry,
@@ -31,6 +44,7 @@ import {
   getAllPlayers,
   getPlayersWithStats,
   getPotyArchive,
+  getOaths,
   getSessionsSince,
   getEventsSince,
   getServerStatus,
@@ -53,6 +67,9 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Vikings',
+  // The oath wall folded in here on 2026-09-06 and /oath is a 308 to
+  // /players#oaths, so this description has to answer for both.
+  description: `Every viking who has sailed ${SERVER_NAME}, the oaths they have sworn, and the leaderboards they stand on.`,
 };
 
 /** Build a top-N board: skip non-positive values, sort desc, format each value. */
@@ -166,16 +183,26 @@ interface Board {
 }
 
 export default async function PlayersPage() {
-  const [online_, roster_, withStats_, potyArchive, sessions, deaths, status] =
+  const [online_, roster_, withStats_, potyArchive, oaths, sessions, deaths, status] =
     await Promise.all([
       getOnlinePlayers(),
       getAllPlayers(),
       getPlayersWithStats(),
       getPotyArchive(),
+      getOaths(),
       getSessionsSince(70),
       getEventsSince(70, ['death']),
       getServerStatus(),
     ]);
+
+  // The wall reads newest first; getOaths() returns oldest first.
+  const oathCount = oaths.length;
+  const signatures = [...oaths].reverse();
+
+  // Empty until the permanent invite is set (config/server.ts). The one
+  // instruction in the oath section that sends a reader somewhere else sends
+  // them to Discord, so it carries the exit the moment there is one to carry.
+  const discord = DISCORD_URL || null;
 
   // Server up, but the stats feed has gone quiet: every board below is still
   // the last real number, just no longer moving. Flagged in the header.
@@ -489,6 +516,111 @@ export default async function PlayersPage() {
           </Card>
         </section>
       </div>
+
+      {/*
+        ── Oaths sworn ───────────────────────────────────────────
+        Was its own tab and its own page until 2026-09-06. It is the roster's
+        other half (who these people said they would be), so it sits directly
+        under the roster, and /oath is a 308 to this anchor. `scroll-mt-20`
+        clears the 64px sticky header a reader arriving on that redirect would
+        otherwise land behind.
+
+        The wall gave up its ISR in the move: /oath carried `revalidate = 60`
+        from the 2026-09-05 perf pass and this page is force-dynamic, because
+        "Who is on now" is worthless cached. So a link to the wall now costs a
+        full render of this page. That is the price of the fold and it is
+        deliberate; docs/STRESS-TEST.md and docs/LAUNCH-WIPE.md were corrected
+        to stop listing /oath among the cached pages.
+
+        On a wide screen the wall takes two thirds and the rite rides in a
+        one-third rail beside it, `items-start` so neither column stretches to
+        the other's height. Below lg they stack, wall first: the empty state
+        carries its own next step, so a first-timer is never left without one.
+      */}
+      <section id="oaths" className="scroll-mt-20">
+        <SectionHeader
+          title="Oaths sworn"
+          subtitle={
+            oathCount === 0
+              ? // Not a second "no oaths yet": the wall's own empty state says
+                // that, 90px below, and it is the one that carries the next
+                // step. This line says what the section is instead.
+                'What each viking swore to be, in their own words.'
+              : 'Every vow as it was spoken, newest first.'
+          }
+          icon={<PenLine size={20} />}
+          action={
+            oathCount > 0 ? (
+              <Badge tone="neutral">
+                {oathCount} {oathCount === 1 ? 'oath' : 'oaths'}
+              </Badge>
+            ) : undefined
+          }
+        />
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
+          <Card className="lg:col-span-2">
+            <CardBody>
+              <SignatureWall oaths={signatures} />
+            </CardBody>
+          </Card>
+
+          {/* How to swear, three lines and a link. The full rite used to be
+              printed both here and on Get Started, and the two copies had
+              already drifted apart. Get Started is the model register and owns
+              the procedure; this holds the wall. */}
+          {/* Sticky from lg up: on a long wall the rite would otherwise scroll
+              away and leave the whole right third empty. */}
+          <Card className="border-l-2 border-l-gold lg:sticky lg:top-20">
+            <CardBody className="space-y-3">
+              <div className="flex items-center gap-2">
+                <ScrollText size={18} className="text-gold" />
+                <h3 className="font-display text-base tracking-wide text-ash">
+                  How to swear, and how to link your Discord
+                </h3>
+              </div>
+              <p className="text-sm leading-relaxed text-ash-dim">
+                Swearing an oath also binds your Discord to your viking, so your deeds, photos and
+                title gather under one name.
+              </p>
+              <p className="text-sm leading-relaxed text-ash-dim">
+                Ask {SERVER_NAME}{' '}
+                {discord ? (
+                  <a
+                    href={discord}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light prose-link"
+                  >
+                    in Discord
+                    <ExternalLink size={12} />
+                  </a>
+                ) : (
+                  'in Discord'
+                )}
+                , shout the rune it sends back, and your vow is carved here.
+              </p>
+              <p className="text-sm leading-relaxed text-ash-dim">
+                Full walkthrough on{' '}
+                <Link
+                  href="/get-started"
+                  className="gold-ring rounded font-medium text-gold-light prose-link"
+                >
+                  Get Started
+                </Link>
+                .
+              </p>
+              <p className="text-xs leading-relaxed text-muted">
+                Re-swear anytime in game with{' '}
+                <span className="rounded bg-gold/15 px-1.5 py-0.5 font-mono text-xs font-semibold text-gold-light">
+                  /s /oath your new vow
+                </span>
+                . Your latest oath replaces the last.
+              </p>
+            </CardBody>
+          </Card>
+        </div>
+      </section>
 
       {/* ── Attendance Constellation ───────────────────────────── */}
       <section>

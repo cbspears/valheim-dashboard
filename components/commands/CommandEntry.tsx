@@ -8,6 +8,10 @@ import type { DiscordCommand, GameShout } from '@/config/commands';
  * Laid out as a stack on a phone and a two-column split from sm up, so nothing
  * is ever wider than the viewport. Every command string is font-mono and
  * allowed to break mid-token: a long boss name must wrap, never scroll the page.
+ *
+ * The split is `sm:` rather than a wider breakpoint on purpose: on /resources
+ * these rows sit inside the content column beside a 260px rail, so the column
+ * is narrower than the page and the two halves still have to fit in it.
  */
 export function CommandEntry({ entry }: { entry: DiscordCommand | GameShout }) {
   const copyValue = entry.copy ?? entry.text;
@@ -45,10 +49,16 @@ export function CommandEntry({ entry }: { entry: DiscordCommand | GameShout }) {
         <div className="min-w-0 flex-1 space-y-2">
           <p className="text-sm leading-relaxed text-ash-dim">{entry.what}</p>
 
-          <p className="text-xs text-muted">
-            <span className="text-ash-dim">Like this: </span>
-            <span className="font-mono break-words text-ash">{entry.example}</span>
-          </p>
+          {/* The example gets its own bordered row with an eyebrow instead of
+              running on inside the description's paragraph, where a reader
+              scanning for "what do I actually type" had to read a sentence
+              first to find it. */}
+          <div className="rounded-md border border-rune/70 bg-surface-raised/50 px-3 py-2">
+            <p className="text-xs tracking-wide text-gold uppercase">Example</p>
+            <p className="mt-1 font-mono text-xs leading-relaxed break-words text-ash">
+              {entry.example}
+            </p>
+          </div>
 
           {entry.note && <p className="text-xs leading-relaxed text-muted">{entry.note}</p>}
         </div>

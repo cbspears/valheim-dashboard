@@ -390,8 +390,10 @@ Stop and fix it before going further.
 
 #### Six of these pages are ISR, and a page you fetch is not a page that rendered
 
-Since the 2026-09-05 perf pass, `/world`, `/events`, `/gallery`, `/oath`, `/map`
-and `/boss/[slug]` carry `export const revalidate = 60`. `next start` answers
+Since the 2026-09-05 perf pass, `/world`, `/events`, `/events/storyteller`,
+`/gallery`, `/map` and `/boss/[slug]` carry `export const revalidate = 60`
+(`/oath` carried it too until the oath wall folded into `/players#oaths` on
+2026-09-06; `/players` is force-dynamic, so the wall is never served stale). `next start` answers
 them out of the prerendered cache, and even the request that crosses the 60 s
 window is served the **stale** copy while the regeneration runs behind it. Any
 harness that reads a page once and grades what came back is therefore grading the

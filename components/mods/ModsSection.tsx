@@ -20,11 +20,15 @@ import { MODPACK_PROFILE_CODE, MODPACK_VERSION_LABEL } from '@/config/server';
 import { CopyChip } from '@/components/get-started/CopyChip';
 
 /**
- * The mod half of /resources: the pack code, the badge legend, and every mod
- * the server runs, grouped by what it is for.
+ * The modpack half of /resources: the pack code, the badge legend, and every
+ * mod the server runs, grouped by what it is for.
  *
  * Lifted out of app/mods/page.tsx on 2026-09-06 when Mods and Commands became
  * one page. Nothing here reads the database; it renders `config/mods.ts`.
+ *
+ * THE HEADING IS "The modpack", not "Mods". The tab above it is already called
+ * Resources and the thing a player installs is a pack, not a category. The
+ * anchor stays #mods, because /mods redirects to it.
  *
  * THE BADGES SAY THE INSTRUCTION, not the architecture. They used to read
  * "Client" and "Server-only", which is the developer's word for the one thing
@@ -127,7 +131,7 @@ export function ModsSection() {
   return (
     <div>
       <SectionHeader
-        title="Mods"
+        title="The modpack"
         subtitle={
           MODPACK_PROFILE_CODE
             ? 'Everything the hall runs, and the one code that installs your half of it.'
@@ -219,7 +223,11 @@ export function ModsSection() {
                   <p className="mt-1 text-xs text-muted">{blurb}</p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {/* Two up, not three. On /resources these cards live in the content
+                    column beside a 260px rail, so a third column would leave
+                    each card narrower than it was on the old full width page
+                    and wrap half the mod names. */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {mods.map((mod) => (
                     <ModCard key={mod.name} mod={mod} />
                   ))}

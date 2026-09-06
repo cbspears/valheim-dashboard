@@ -10,7 +10,7 @@ import { NextGatheringPill } from '@/components/events/NextGatheringPill';
 import type { NextGathering } from '@/lib/next-gathering';
 
 /**
- * Eight tabs and the call to action.
+ * Seven tabs and the call to action, in F-pattern priority.
  *
  * Mods and Commands became one Resources tab on 2026-09-06; /mods and
  * /commands still answer, as 308s to /resources#mods and /resources#commands
@@ -18,8 +18,16 @@ import type { NextGathering } from '@/lib/next-gathering';
  * became Story in the same pass, which is a label change only: the route is
  * still /events.
  *
+ * The Oath tab went the same way later that day. The wall is now the "Oaths
+ * sworn" section under the roster on /players, and /oath is a 308 to
+ * /players#oaths. Ten flat tabs had no grouping and nothing told a newcomer
+ * which one mattered; seven leaves the record of the world on the left and
+ * the one thing a stranger should press on the right.
+ *
  * Every href here must also be a page in `SITE_PAGES` (config/commands.ts) —
- * scripts/commands-page.test.mjs fails when the nav and the register disagree.
+ * scripts/commands-page.test.mjs fails when the nav and the register disagree,
+ * and it holds this list at seven plus the call to action, because an eighth
+ * tab means re-measuring the 768px band the comment below records.
  */
 const LINKS = [
   { href: '/', label: 'Hall' },
@@ -28,18 +36,20 @@ const LINKS = [
   { href: '/map', label: 'Map' },
   { href: '/events', label: 'Story' },
   { href: '/gallery', label: 'Gallery' },
-  { href: '/oath', label: 'Oath' },
   { href: '/resources', label: 'Resources' },
   { href: '/get-started', label: 'Get Started', cta: true },
 ];
 
 /**
- * The drawer leads with Get Started, keeping its bordered treatment.
- * On a phone the nav is the only route to it, and it was the last of ten rows,
- * under nine labels a newcomer cannot yet decode. The desktop order is left
- * alone, where rightmost gold is where the eye ends up anyway.
+ * The drawer inverts the desktop order: Get Started as a full-width gold
+ * button first, a divider, then the seven tabs. On a phone the nav is the only
+ * route to it, and it used to be the last of ten rows, under nine labels a
+ * newcomer cannot yet decode. The divider is what makes the button read as the
+ * one action rather than the first of eight equal rows. The desktop order is
+ * left alone, where rightmost gold is where the eye ends up anyway.
  */
-const DRAWER_LINKS = [...LINKS.filter((l) => l.cta), ...LINKS.filter((l) => !l.cta)];
+const DRAWER_CTA = LINKS.find((l) => l.cta);
+const DRAWER_TABS = LINKS.filter((l) => !l.cta);
 
 /** The drawer's id, so the toggle's aria-controls can name it. */
 const DRAWER_ID = 'mobile-nav';
@@ -110,21 +120,24 @@ export function NavBar({ nextGathering }: { nextGathering?: NextGathering | null
           is unchanged.
 
           Merging Mods and Commands into Resources (2026-09-06) took the row
-          back to nine items and handed 49px of it back. Re-measured against a
-          real build the same day (Chromium 147.0.7727.15 via Playwright
-          1.59.1), which is the number to trust:
+          back to nine items, and folding the Oath tab into /players later the
+          same day took it to eight (seven tabs and the CTA). Re-measured
+          against a real build after that fold, which is the number to trust:
 
-            768, 783 and 800px : tab row 496px, wordmark + row 571px of the
-                                 720px box a 768px viewport gives, so 149px
+            768, 783 and 800px : tab row 454px, wordmark + row 529px of the
+                                 720px box a 768px viewport gives, so 191px
                                  of headroom
-            1024px             : tab row 705px, wordmark + row 780px of 976px
+            1024px             : tab row 642px, wordmark + row 717px of 976px
+            1440px             : tab row 642px in a bar capped at 1152px
+                                 (max-w-6xl), so the row stops growing at lg
 
-          documentElement.scrollWidth === clientWidth on all 117 page/width
-          pairs: /, /resources, /get-started, /oath, /world, /players,
-          /events, /gallery and /map at 360, 390, 414, 768, 775, 782, 783,
-          800, 900, 1024, 1152, 1280 and 1440px.
+          documentElement.scrollWidth === clientWidth on all 104 page/width
+          pairs: /, /players, /world, /map, /events, /gallery, /resources and
+          /get-started at 360, 390, 414, 768, 775, 782, 783, 800, 900, 1024,
+          1152, 1280 and 1440px.
 
-          Re-measure before loosening any of this or adding a tenth tab, and
+          Re-measure before loosening any of this or adding an eighth tab (the
+          tripwire holds the count at seven plus the CTA for that reason), and
           note that a 820px-only check does not catch the regression: the band
           ran from 768px to 782px and cleared at 783px.
         */}
@@ -193,20 +206,31 @@ export function NavBar({ nextGathering }: { nextGathering?: NextGathering | null
             <NextGatheringPill gathering={nextGathering} className="max-w-full" />
           </div>
         )}
-        {DRAWER_LINKS.map((l) => (
+        {DRAWER_CTA && (
+          <Link
+            href={DRAWER_CTA.href}
+            onClick={() => setOpen(false)}
+            aria-current={isActive(DRAWER_CTA.href) ? 'page' : undefined}
+            // px-3 py-3 on a 20px line is a 44px row, and `block` makes it the
+            // full width of the drawer rather than a label with a box round it.
+            className="gold-ring mt-1 block rounded-md border border-gold-dim bg-gold/15 px-3 py-3 text-center text-sm font-semibold text-gold-light"
+          >
+            {DRAWER_CTA.label}
+          </Link>
+        )}
+
+        {/* The one rule of this drawer: the button above, the record below. */}
+        <hr className="my-2 border-t border-rune" />
+
+        {DRAWER_TABS.map((l) => (
           <Link
             key={l.href}
             href={l.href}
             onClick={() => setOpen(false)}
             aria-current={isActive(l.href) ? 'page' : undefined}
             className={clsx(
-              // px-3 py-3 on a 20px line is a 44px row.
               'gold-ring mt-1 block rounded-md px-3 py-3 text-sm font-medium',
-              l.cta
-                ? 'border border-gold-dim bg-gold/10 font-semibold text-gold-light'
-                : isActive(l.href)
-                  ? 'bg-gold/10 text-gold-light'
-                  : 'text-ash-dim hover:text-ash'
+              isActive(l.href) ? 'bg-gold/10 text-gold-light' : 'text-ash-dim hover:text-ash'
             )}
           >
             {l.label}

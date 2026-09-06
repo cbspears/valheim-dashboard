@@ -12,7 +12,7 @@
 #              three state files relocated to a scratch copy, then verify every
 #              table, bucket, reset and state file it claimed, then the
 #              announcer back up against the wiped database
-#   3. DAY ONE — the first evening stage by stage, with the eight player-facing
+#   3. DAY ONE — the first evening stage by stage, with the seven player-facing
 #              pages read BETWEEN every stage rather than only at the end
 #   4. verify — the day-one invariants, and the dry-run bot's recap
 #
@@ -31,8 +31,8 @@
 #   SUPABASE_SERVICE_ROLE_KEY   that stack's service key
 # Optional, but SITE_DIR only in the sense that the run tells you it is missing:
 #   SITE_DIR   the built copy $BASE_URL is serving (the directory holding .next).
-#              Since the 2026-09-05 perf pass, /world, /events, /gallery, /oath,
-#              /map and /boss/[slug] are ISR pages with a 60 s window, and the whole
+#              Since the 2026-09-05 perf pass, /world, /events, /events/storyteller,
+#              /gallery, /map and /boss/[slug] are ISR pages with a 60 s window, and the whole
 #              day-one section below runs in about twenty seconds — so without this
 #              every one of them answers with the same build-time HTML at all six
 #              checkpoints and page-check grades a render that never saw the evening.

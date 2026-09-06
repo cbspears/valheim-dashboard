@@ -13,7 +13,8 @@ import { headerArt, type HeaderSlot } from '@/config/art';
  * or this slot's image hasn't landed), it renders `children` verbatim — no
  * band, no wrapper, no visual change whatsoever.
  *
- * `prominent` = taller band (used on the Oath page).
+ * `prominent` = taller band. Nothing passes it since the oath wall folded
+ * into /players on 2026-09-06; it is kept as an option, not a live setting.
  */
 export function PageHeader({
   slot,

@@ -30,8 +30,9 @@
 //
 // ── ISR, AND WHY --site-dir IS NOT OPTIONAL (found in the round-3 rehearsal) ──
 //
-// The 2026-09-05 perf pass put /world, /events, /gallery, /oath, /map and
-// /boss/[slug] behind `export const revalidate = 60`. A prerendered ISR page is
+// The 2026-09-05 perf pass put /world, /events, /events/storyteller, /gallery,
+// /map and /boss/[slug] behind `export const revalidate = 60` (/oath carried it
+// too until the wall folded into /players#oaths on 2026-09-06). A prerendered ISR page is
 // served from the build-time render until a request arrives MORE than 60 s after
 // the last one, and even that request is served the STALE copy while the
 // regeneration happens behind it. The whole day-one rehearsal runs in about
@@ -105,9 +106,8 @@ const PAGES = [
   { path: '/boss/eikthyr', name: 'Boss' },
   { path: '/events', name: 'Events' },
   { path: '/gallery', name: 'Gallery' },
-  { path: '/oath', name: 'Oath' },
   // --also <path>,<path> appends here. The name is derived from the path so a
-  // dump file and a result line can be told apart from the fixed eight.
+  // dump file and a result line can be told apart from the fixed seven.
   ...ALSO.map((p) => ({ path: p, name: p.replace(/^\//, '').replace(/[^A-Za-z0-9]+/g, '-') || 'root' })),
 ];
 
@@ -174,7 +174,7 @@ const ARTEFACTS = [
   // the em dashes on /viking/<slug> were found. visibleText() already decodes
   // &mdash;/&#8212; into a literal dash for exactly this check.
   //
-  // The eight fixed pages are clean of all four (verified against the 2026-09-06
+  // The seven fixed pages are clean of all four (verified against the 2026-09-06
   // dumps). /viking/<slug> is not, and that is the point: three of the five
   // BIO_LINES variants in lib/epithets.ts carry an em dash, and every uncaught
   // fish renders one as a placeholder where a 0 belongs.

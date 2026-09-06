@@ -1,15 +1,17 @@
 import type { Metadata } from 'next';
-import { clsx } from 'clsx';
 import { Wrench } from 'lucide-react';
 import { SectionHeader } from '@/components/ui';
 import { PageHeader } from '@/components/art/PageHeader';
 import { ModsSection } from '@/components/mods/ModsSection';
-import { RegisterSections } from '@/components/commands/RegisterSections';
+import { PageGuide } from '@/components/resources/PageGuide';
+import { Glossary } from '@/components/resources/Glossary';
+import { JumpList, type JumpLink } from '@/components/resources/JumpList';
+import { RegisterSections, REGISTER_GROUPS } from '@/components/commands/RegisterSections';
 import { COMMAND_SECTIONS } from '@/config/commands';
 import { SERVER_NAME } from '@/config/server';
 
-// FULLY STATIC, and deliberately carrying no `revalidate`. Both halves of this
-// page are TypeScript config compiled into the build (`config/mods.ts` and
+// FULLY STATIC, and deliberately carrying no `revalidate`. Every section of
+// this page is TypeScript config compiled into the build (`config/mods.ts` and
 // `config/commands.ts`), not a query: there is no database read here and no
 // clock after which its content could differ, so an ISR window would only buy a
 // re-render of the same bytes. A copy fix ships with the next deploy, the way
@@ -19,32 +21,52 @@ import { SERVER_NAME } from '@/config/server';
 // pointing at #mods and #commands below, so every bookmark and every older
 // Discord link still lands on the right half.
 //
-// STILL POINTING AT THE OLD ADDRESSES (2026-09-06): app/get-started/page.tsx
-// links /mods three times and /commands once, and calls them "the Mods page"
-// and "the Commands page". The links work, through the 308, but the nav offers
-// neither tab any more, so the labels promise something a reader cannot find.
-// That file belongs to the Get Started track; re-point it at /resources#mods
-// and /resources#commands and rename the labels.
+// THE ORDER IS NEWEST PLAYER FIRST (UX review 2026-09-06, proposal 3). The page
+// used to be two long reference documents stapled together, with the one thing
+// a first-timer wanted, a one-line description of every page of the site, at
+// the very bottom of the longest page on the site. It now reads:
+//
+//   1. What each page is for   orientation, from SITE_PAGES
+//   2. Words used here         the nine words the copy never stops to explain
+//   3. The modpack             what you install, and the pack code
+//   4. Commands                the register, one disclosure per group
+//
+// Everything that links in here now names the real address: app/get-started
+// points at /resources#mods four times and /resources#commands once, and
+// components/home/FirstRunBand.tsx at /resources#mods. Nothing under app or
+// components links at the two retired routes any more (section 5 of
+// scripts/commands-page.test.mjs fails the build if anything starts), so the
+// 308s in next.config.ts exist for bookmarks and older Discord links only.
 export const metadata: Metadata = {
   title: 'Resources',
-  description: `The modpack and the register for ${SERVER_NAME}: every mod, which of them you install, every command you can use in Discord and in game, and everything the hall says back.`,
+  description: `What every page of ${SERVER_NAME} holds, the words we use, the modpack and which of it you install, and every command you can use in Discord and in game.`,
 };
 
 /**
- * The jump chips: both halves of the page, then the four groups inside the
- * register.
+ * The jump list, in the order the page runs.
  *
- * Commands is in the row for the same reason Mods is. It is an h2, it is the
- * other half of the page, and it is where `/commands` lands after its 308, so
- * a reader who arrived that way needs a chip that names where they are. The
- * two halves are marked `half` and carry the brighter border, which is what
- * keeps the row readable as two tops and their children rather than six
- * equals.
+ * Both halves that own a redirect are top level entries carrying the anchors
+ * the 308s point at: `/mods` lands on #mods and `/commands` on #commands, so a
+ * reader who arrived that way sees where they are. The register's own groups
+ * hang under Commands, because each of them is a disclosure inside it.
+ *
+ * Built from COMMAND_SECTIONS rather than a second list of headings, the same
+ * way the register itself is, so a group added to the config appears here
+ * without anyone remembering to add it.
  */
-const JUMP_LINKS = [
-  { href: '#mods', label: 'Mods', half: true },
-  { href: '#commands', label: 'Commands', half: true },
-  ...COMMAND_SECTIONS.map((s) => ({ href: `#${s.id}`, label: s.title, half: false })),
+// Read out of the register rather than typed twice, so the anchor and the
+// group it names can never drift apart.
+const PAGES_ANCHOR = COMMAND_SECTIONS.find((s) => s.id === 'the-pages')?.id ?? 'the-pages';
+
+const JUMP_LINKS: JumpLink[] = [
+  { href: `#${PAGES_ANCHOR}`, label: 'What each page is for' },
+  { href: '#words', label: 'Words used here' },
+  { href: '#mods', label: 'The modpack' },
+  {
+    href: '#commands',
+    label: 'Commands',
+    children: REGISTER_GROUPS.map((s) => ({ href: `#${s.id}`, label: s.title })),
+  },
 ];
 
 export default function ResourcesPage() {
@@ -54,39 +76,36 @@ export default function ResourcesPage() {
         <SectionHeader
           as="h1"
           title="Resources"
-          subtitle="What to install, what to type, and what the hall will say back to you."
+          subtitle="What each page holds, what to install, what to type, and what the hall will say back to you."
           icon={<Wrench size={22} />}
         />
       </PageHeader>
 
-      {/* Jump links. A phone gets a wrapped row of chips rather than a rail, so
-          the header never has to scroll sideways. py-2 on a 20px line keeps
-          every chip a comfortable target on a touch screen. */}
-      <nav aria-label="Sections of this page" className="mb-9 flex flex-wrap gap-2">
-        {JUMP_LINKS.map((l) => (
-          <a
-            key={l.href}
-            href={l.href}
-            className={clsx(
-              'gold-ring rounded-md border bg-surface-raised px-3 py-2 text-xs transition-colors hover:border-gold-dim hover:text-ash',
-              l.half
-                ? 'border-gold-dim/60 font-semibold text-ash'
-                : 'border-rune font-medium text-ash-dim'
-            )}
-          >
-            {l.label}
-          </a>
-        ))}
-      </nav>
+      {/* PC first. On a wide screen the wayfinder is a 260px rail that stays
+          put while ten thousand pixels of reference scroll past it; `items-start`
+          is what stops it stretching to the content column's height and killing
+          the sticky. Below lg the grid collapses and the rail becomes the
+          wrapped row of chips this page has always had, above the content. */}
+      <div className="lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:items-start lg:gap-10">
+        <JumpList links={JUMP_LINKS} />
 
-      <div className="space-y-14">
-        <section id="mods" className="scroll-mt-20">
-          <ModsSection />
-        </section>
+        <div className="min-w-0 space-y-14">
+          <section id={PAGES_ANCHOR} className="scroll-mt-20">
+            <PageGuide />
+          </section>
 
-        <section id="commands" className="scroll-mt-20">
-          <RegisterSections />
-        </section>
+          <section id="words" className="scroll-mt-20">
+            <Glossary />
+          </section>
+
+          <section id="mods" className="scroll-mt-20">
+            <ModsSection />
+          </section>
+
+          <section id="commands" className="scroll-mt-20">
+            <RegisterSections />
+          </section>
+        </div>
       </div>
     </div>
   );

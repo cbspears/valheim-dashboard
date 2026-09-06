@@ -89,7 +89,10 @@ export function Hearth({
         {state === 'lively' && (
           <>
             <hr className="rune-divider" />
-            <ul className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
+            {/* The Hall renders this card at full width now, so a hall of
+                twenty reads as four short columns on a desktop instead of two
+                columns ten names deep. Phone stays one column. */}
+            <ul className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-4">
               {online.map((p) => (
                 <li key={p.id} className="flex items-center gap-2.5 text-sm">
                   <OnlineDot online />

@@ -3,7 +3,8 @@ import Image from 'next/image';
 import {
   Users,
   Sun,
-  Swords,
+  Hourglass,
+  MapPin,
   Skull,
   Crown,
   ScrollText,
@@ -23,6 +24,7 @@ import {
   BossLink,
 } from '@/components/ui';
 import { AutoRefresh } from '@/components/home/AutoRefresh';
+import { FirstRunBand } from '@/components/home/FirstRunBand';
 import { HomeHero } from '@/components/art/HomeHero';
 import { Hearth } from '@/components/home/Hearth';
 import { GreatDeedsCard } from '@/components/milestones/GreatDeedsCard';
@@ -37,9 +39,10 @@ import {
   getOaths,
   getMilestones,
   getMilestoneAggregates,
+  getPins,
   statsFreshness,
 } from '@/lib/data';
-import { summarizeMilestones } from '@/lib/milestones';
+import { summarizeMilestones, formatMetricValue, metricInfo } from '@/lib/milestones';
 import { summarizeBosses } from '@/lib/bosses';
 import { describeEvent } from '@/lib/events';
 import { timeAgo, formatEventWhen } from '@/lib/format';
@@ -49,18 +52,37 @@ import { LaunchNotice } from '@/components/LaunchNotice';
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const [status, online, allPlayers, bosses, events, upcoming, oaths, milestones, milestoneAgg] =
-    await Promise.all([
-      getServerStatus(),
-      getOnlinePlayers(),
-      getAllPlayers(),
-      getBosses(),
-      getRecentEvents(8),
-      getUpcomingEvents(3),
-      getOaths(),
-      getMilestones(),
-      getMilestoneAggregates(),
-    ]);
+  const [
+    status,
+    online,
+    allPlayers,
+    bosses,
+    events,
+    upcoming,
+    oaths,
+    milestones,
+    milestoneAgg,
+    pins,
+  ] = await Promise.all([
+    getServerStatus(),
+    getOnlinePlayers(),
+    getAllPlayers(),
+    getBosses(),
+    // Five, not eight (UX plan, proposal 2). Eight rows of a feed whose most
+    // common event is one viking arriving and leaving spent a whole card
+    // repeating one name. The joins themselves stay: on launch night they are
+    // the only story there is, and filtering them would put "The story has not
+    // begun" on the Hall while people are actually walking in.
+    getRecentEvents(5),
+    getUpcomingEvents(3),
+    getOaths(),
+    getMilestones(),
+    getMilestoneAggregates(),
+    // Only the count is shown, but there is no count-only reader in lib/data and
+    // this one is narrow (six columns, no gs_stats blob) and React-cached, so
+    // /map and the Hall share a single read inside one request.
+    getPins(),
+  ]);
 
   const milestoneSummary = summarizeMilestones(milestones, milestoneAgg);
 
@@ -118,7 +140,12 @@ export default async function HomePage() {
           </Badge>
           <span className="flex items-center gap-1.5 text-ash-dim">
             <Sun size={14} className="text-gold" />
-            {worldDay > 0 ? `Day ${worldDay} of the tenth world` : 'A new world, not yet a day old'}
+            {/* "of this world", not "of the tenth world": the tenth world is a
+                phrase this group carries and nothing on the site explains it,
+                so it was the first unexplained words a stranger met. It stays
+                in the flavour lines (the footer, the felled-saga line) and out
+                of the hero's first fact. */}
+            {worldDay > 0 ? `Day ${worldDay} of this world` : 'A new world, not yet a day old'}
           </span>
           <span className="flex items-center gap-1.5 text-ash-dim">
             <Users size={14} className="text-gold" />
@@ -216,162 +243,55 @@ export default async function HomePage() {
       {/* ───────────────────────── HERO BANNER ───────────────────────── */}
       <HomeHero fallback={heroFallback} footer={heroFooter} />
 
+      {/* ──────────────────── FIRST RUN BAND ─────────────────── */}
+      {/* The Hall had no link to /get-started anywhere in its body; on a phone
+          the only route in was the tenth item in the nav drawer. */}
+      <FirstRunBand />
+
       {/* ───────────────────── STAT STRIP ────────────────────── */}
+      {/* FACTS THE HERO DOES NOT ALREADY CARRY, and only those. Online now,
+          world day and bosses felled all live in the hero strip two hundred
+          pixels above this row, so the strip used to spend the page's most
+          valuable band restating itself three times over. */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatTile label="Online Now" value={playerCount} icon={<Users size={16} />} hint="in the world right now" />
-        <StatTile label="World Day" value={worldDay > 0 ? worldDay : 'New'} icon={<Sun size={16} />} hint={worldDay > 0 ? 'in-game days since landfall' : 'the first sunrise is still to come'} />
         <StatTile
-          label="Total Vikings"
+          label="Total vikings"
           value={allPlayers.length}
-          icon={<Swords size={16} />}
+          icon={<Users size={16} />}
           hint="have set foot here"
         />
+        {/* Labels come from lib/milestones METRIC_INFO, the one register for
+            metric names, so the Hall cannot drift from the /world ledger and
+            the /players boards. Values are formatted by the same module ("1,204
+            h", "24"). */}
         <StatTile
-          label="Bosses Felled"
-          value={felledCount}
+          label={metricInfo('playtime_total_hours').label}
+          value={formatMetricValue('playtime_total_hours', milestoneAgg.playtime_total_hours ?? 0)}
+          icon={<Hourglass size={16} />}
+          hint="every viking's time, combined"
+        />
+        <StatTile
+          label={metricInfo('deaths_total').label}
+          value={formatMetricValue('deaths_total', milestoneAgg.deaths_total ?? 0)}
           icon={<Skull size={16} />}
-          hint={`of ${totalBosses} forsaken ones`}
+          hint="every fall, all vikings"
+        />
+        {/* "Pins", not "Places named": section 4 of the UX plan makes pin the
+            one word for this thing and retires "place", the plan's own sketch
+            labels this tile Pins, and it is the word a player types (/pin). */}
+        <StatTile
+          label="Pins"
+          value={pins.length}
+          icon={<MapPin size={16} />}
+          hint="named on the atlas with /pin"
         />
       </div>
 
-      {/* ──────────────────── LIVE FROM THE HALL ─────────────── */}
-      <section>
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-          {/* The Hearth — server pulse + who's online */}
-          <Hearth status={status} online={online} statsStale={statsStale} />
-
-          {/* Great Deeds — the collective-milestone counterpart to the Hearth */}
-          <GreatDeedsCard summary={milestoneSummary} />
-        </div>
-
-        {/* Recent story — full width beneath the pulse cards */}
-        <div className="mt-5">
-          <Card>
-            <CardHeader
-              title="Recent story"
-              icon={<ScrollText size={16} />}
-              action={
-                <Link
-                  href="/events"
-                  className="gold-ring rounded text-xs font-medium text-gold-light hover:text-gold-light/80"
-                >
-                  The full story →
-                </Link>
-              }
-            />
-            <CardBody className="p-0">
-              {events.length === 0 ? (
-                /* On launch night this card IS the Hall, so it carries the way
-                   in rather than only saying it is empty. "Story" here, not
-                   "saga": the card above it, the tab and the page it opens all
-                   say Story. */
-                <EmptyState
-                  icon={<ScrollText size={28} />}
-                  title="The story has not begun"
-                  message="Deeds, deaths and conquests will be etched here as they happen. Be the first: install the mods and join."
-                  action={
-                    <Link
-                      href="/get-started"
-                      className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
-                    >
-                      Get Started
-                    </Link>
-                  }
-                />
-              ) : (
-                <ul className="divide-y divide-rune">
-                  {events.map((e) => {
-                    const { icon: Icon, accent, description } = describeEvent(e);
-                    // Boss kills carry the beast's name in metadata — link the
-                    // whole line to its war-room (mirrors EventFeed on /events).
-                    const bossName =
-                      e.type === 'boss' && typeof e.metadata?.boss === 'string'
-                        ? e.metadata.boss
-                        : null;
-                    return (
-                      <li key={e.id} className="flex items-start gap-3 px-5 py-3">
-                        <span className={`mt-0.5 shrink-0 ${accent}`}>
-                          <Icon size={16} />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          {bossName ? (
-                            <BossLink
-                              name={bossName}
-                              className="gold-ring block text-sm leading-snug text-ash-dim transition-colors hover:text-gold-light"
-                            >
-                              {description}
-                            </BossLink>
-                          ) : (
-                            <p className="text-sm leading-snug text-ash-dim">{description}</p>
-                          )}
-                          <p className="mt-0.5 text-xs text-muted">{timeAgo(e.created_at)}</p>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </CardBody>
-          </Card>
-        </div>
-      </section>
-
-      {/* ─────────────────────── THE OATH TEASER ─────────────── */}
-      <Link href="/oath" className="gold-ring block rounded-[var(--radius-card)]">
-        <Card className="border-l-2 border-l-gold transition-colors hover:border-gold-dim/60 hover:bg-surface-raised/40">
-          <CardBody className="flex items-center gap-4">
-            <span className="hidden shrink-0 text-gold sm:block">
-              <Feather size={22} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2">
-                <h3 className="font-display text-base tracking-wide text-ash">The Oath</h3>
-                <span className="text-sm text-muted">
-                  · {oathCount} sworn
-                </span>
-              </div>
-              {latestOath ? (
-                <p className="mt-0.5 truncate text-sm text-ash-dim">
-                  {/* Not a VikingLink: this whole teaser is already an <a> to
-                      /oath, and nested anchors are invalid HTML. */}
-                  <span className="font-display text-gold-light">{latestOathName}</span>
-                  <span className="italic">: &ldquo;{latestOath.oath_text}&rdquo;</span>
-                </p>
-              ) : (
-                <p className="mt-0.5 text-sm text-ash-dim">
-                  Be the first to swear your oath to Odin.
-                </p>
-              )}
-            </div>
-            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-gold-light">
-              {/* Spelled exactly as the page it opens: /oath's h1 and browser
-                  title are both "The Oath Wall". One object, one spelling. */}
-              The Oath Wall
-              <ArrowRight size={14} />
-            </span>
-          </CardBody>
-        </Card>
-      </Link>
-
-      {/* ─────────────────────── COMING UP ──────────────────── */}
-      <Card>
-        <CardHeader
-          title="Coming Up"
-          icon={<CalendarClock size={16} />}
-          action={
-            <Link
-              href="/world"
-              className="gold-ring rounded text-xs font-medium text-gold-light hover:text-gold-light/80"
-            >
-              Full schedule →
-            </Link>
-          }
-        />
-        <CardBody className="p-0">
-          <UpcomingEvents events={upcoming} />
-        </CardBody>
-      </Card>
-
+      {/* READING ORDER, deliberately (UX plan, proposal 2): the band above is
+          for the stranger, then facts the hero does not carry, then what the
+          warband is doing about the world (the objective), who is on, what it
+          has earned and what is next, and only then the record. Boss progress
+          used to be the LAST card on the page, under everything else. */}
       {/* ─────────────────────── BOSS PROGRESS ───────────────── */}
       {/* The count + progress bar now live in the hero; what remains here is
           what the hero cannot say: which beast is next, and which are down. */}
@@ -465,6 +385,146 @@ export default async function HomePage() {
           </div>
         </CardBody>
       </Card>
+
+      {/* ──────────────────── WHO IS ON NOW ──────────────────── */}
+      {/* Full width: the hall's pulse is the first live thing a returning
+          viking looks for, and at 1440px the roster reads four names across
+          instead of two. */}
+      <Hearth status={status} online={online} statsStale={statsStale} />
+
+      {/* ───────────── GREAT DEEDS AND COMING UP ─────────────── */}
+      {/* Side by side on a wide screen: what the warband has earned, and what
+          it has agreed to turn up for. */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <GreatDeedsCard summary={milestoneSummary} />
+
+        <Card>
+          <CardHeader
+            title="Coming Up"
+            icon={<CalendarClock size={16} />}
+            action={
+              <Link
+                href="/world"
+                className="gold-ring rounded text-xs font-medium text-gold-light hover:text-gold-light/80"
+              >
+                Full schedule →
+              </Link>
+            }
+          />
+          <CardBody className="p-0">
+            <UpcomingEvents events={upcoming} />
+          </CardBody>
+        </Card>
+      </div>
+
+      {/* ─────────────────────── RECENT STORY ────────────────── */}
+      <Card>
+        <CardHeader
+          title="Recent story"
+          icon={<ScrollText size={16} />}
+          action={
+            <Link
+              href="/events"
+              className="gold-ring rounded text-xs font-medium text-gold-light hover:text-gold-light/80"
+            >
+              The full story →
+            </Link>
+          }
+        />
+        <CardBody className="p-0">
+          {events.length === 0 ? (
+            /* On launch night this card IS the Hall, so it carries the way
+               in rather than only saying it is empty. "Story" here, not
+               "saga": the card above it, the tab and the page it opens all
+               say Story. */
+            <EmptyState
+              icon={<ScrollText size={28} />}
+              title="The story has not begun"
+              message="Deeds, deaths and conquests will be etched here as they happen. Be the first: install the mods and join."
+              action={
+                <Link
+                  href="/get-started"
+                  className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                >
+                  Get Started
+                </Link>
+              }
+            />
+          ) : (
+            <ul className="divide-y divide-rune">
+              {events.map((e) => {
+                const { icon: Icon, accent, description } = describeEvent(e);
+                // Boss kills carry the beast's name in metadata — link the
+                // whole line to its war-room (mirrors EventFeed on /events).
+                const bossName =
+                  e.type === 'boss' && typeof e.metadata?.boss === 'string'
+                    ? e.metadata.boss
+                    : null;
+                return (
+                  <li key={e.id} className="flex items-start gap-3 px-5 py-3">
+                    <span className={`mt-0.5 shrink-0 ${accent}`}>
+                      <Icon size={16} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {bossName ? (
+                        <BossLink
+                          name={bossName}
+                          className="gold-ring block text-sm leading-snug text-ash-dim transition-colors hover:text-gold-light"
+                        >
+                          {description}
+                        </BossLink>
+                      ) : (
+                        <p className="text-sm leading-snug text-ash-dim">{description}</p>
+                      )}
+                      <p className="mt-0.5 text-xs text-muted">{timeAgo(e.created_at)}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardBody>
+      </Card>
+
+      {/* ─────────────────────── THE OATH TEASER ─────────────── */}
+      {/* /oath folded into /players#oaths (it is a 308 in next.config.ts), so
+          this points at where the wall actually lives rather than paying for
+          the redirect hop on every click. */}
+      <Link href="/players#oaths" className="gold-ring block rounded-[var(--radius-card)]">
+        <Card className="border-l-2 border-l-gold transition-colors hover:border-gold-dim/60 hover:bg-surface-raised/40">
+          <CardBody className="flex items-center gap-4">
+            <span className="hidden shrink-0 text-gold sm:block">
+              <Feather size={22} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                <h3 className="font-display text-base tracking-wide text-ash">The Oath</h3>
+                <span className="text-sm text-muted">
+                  · {oathCount} sworn
+                </span>
+              </div>
+              {latestOath ? (
+                <p className="mt-0.5 truncate text-sm text-ash-dim">
+                  {/* Not a VikingLink: this whole teaser is already an <a> to
+                      the oath wall, and nested anchors are invalid HTML. */}
+                  <span className="font-display text-gold-light">{latestOathName}</span>
+                  <span className="italic">: &ldquo;{latestOath.oath_text}&rdquo;</span>
+                </p>
+              ) : (
+                <p className="mt-0.5 text-sm text-ash-dim">
+                  Be the first to swear your oath to Odin.
+                </p>
+              )}
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-gold-light">
+              {/* Spelled exactly as the section it opens, which is headed
+                  "Oaths sworn" on /players. One object, one spelling. */}
+              Oaths sworn
+              <ArrowRight size={14} />
+            </span>
+          </CardBody>
+        </Card>
+      </Link>
     </div>
   );
 }
