@@ -69,8 +69,25 @@ export default async function RootLayout({
   return (
     <html lang="en" className={`${cinzel.variable} ${inter.variable} h-full`}>
       <body className="flex min-h-full flex-col">
+        {/*
+          Twelve tab stops stand between the top of a page and its content, on
+          every navigation. This is the way past them: invisible until it takes
+          focus, then the first thing on the screen. It must stay the first
+          child of <body>, and <main> must keep its id and its tabIndex, or a
+          keyboard user lands nowhere.
+        */}
+        <a
+          href="#main"
+          className="gold-ring absolute left-4 top-3 z-[100] -translate-y-[200%] rounded-md border border-gold bg-pitch px-4 py-3 text-sm font-semibold text-gold-light transition-transform focus:translate-y-0"
+        >
+          Skip to content
+        </a>
         <NavBar nextGathering={nextGathering} />
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
+        <main
+          id="main"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 focus:outline-none sm:px-6 sm:py-10"
+        >
           {children}
         </main>
         <Footer />

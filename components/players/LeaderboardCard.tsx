@@ -68,7 +68,7 @@ export function LeaderboardCard({
                 <span
                   className={clsx(
                     'w-5 shrink-0 text-center font-display text-sm tabular-nums',
-                    first ? 'text-gold-light' : 'text-gold-dim'
+                    first ? 'text-gold-light' : 'text-gold'
                   )}
                 >
                   {rank}

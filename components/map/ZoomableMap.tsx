@@ -185,7 +185,7 @@ export function ZoomableMap({
               </div>
               <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-rune bg-pitch/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm group-hover:block">
                 <div className="font-display text-xs font-semibold tracking-wide text-gold-light">{m.name}</div>
-                <div className="mt-0.5 text-[11.5px] leading-relaxed text-ash-dim">
+                <div className="mt-0.5 text-xs leading-relaxed text-ash-dim">
                   {kindLabel(m.kind)}
                   {m.by ? (
                     <>
@@ -193,13 +193,13 @@ export function ZoomableMap({
                       · pinned by{' '}
                       <VikingLink
                         name={m.by}
-                        className="pointer-events-auto gold-ring rounded-sm text-ash transition-colors hover:text-gold-light"
+                        className="pointer-events-auto prose-link gold-ring rounded-sm text-ash transition-colors hover:text-gold-light"
                       />
                     </>
                   ) : null}
                 </div>
                 {count > 0 && (
-                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gold-dim">
+                  <div className="mt-0.5 flex items-center gap-1 text-xs text-gold">
                     <Camera size={11} /> {count} {count === 1 ? 'photo' : 'photos'} · click to view
                   </div>
                 )}
@@ -269,7 +269,7 @@ export function ZoomableMap({
                     · pinned by{' '}
                     <VikingLink
                       name={selected.by}
-                      className="gold-ring rounded-sm text-ash transition-colors hover:text-gold-light"
+                      className="prose-link gold-ring rounded-sm text-ash transition-colors hover:text-gold-light"
                     />
                   </>
                 ) : null}
@@ -301,10 +301,10 @@ export function ZoomableMap({
                         className="aspect-video w-full rounded-md border border-rune object-cover"
                       />
                       <figcaption className="mt-1 flex items-baseline justify-between gap-2 px-0.5">
-                        <span className="truncate text-[11px] text-ash-dim">
+                        <span className="truncate text-xs text-ash-dim">
                           {photo.caption ?? selected.name}
                         </span>
-                        <span className="shrink-0 text-[10px] text-muted">
+                        <span className="shrink-0 text-xs text-muted">
                           {photo.posted_by ?? 'a viking'} · {timeAgo(photo.posted_at)}
                         </span>
                       </figcaption>
@@ -317,7 +317,7 @@ export function ZoomableMap({
                 </p>
               )}
               <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-muted">
-                <Camera size={13} className="mt-0.5 shrink-0 text-gold-dim" />
+                <Camera size={13} className="mt-0.5 shrink-0 text-gold" />
                 <span>
                   Post a screenshot in Discord, tag the bot, and name the place in your caption.
                   It lands in the Gallery and here.

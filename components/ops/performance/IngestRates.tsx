@@ -101,7 +101,7 @@ export function IngestRates({
                   <Td>
                     <span className={silent ? 'text-raid' : undefined}>{PRODUCER_LABELS[p]}</span>
                     {silent && (
-                      <span className="ml-2 text-[11px] text-raid">wrote nothing in the last 24 h</span>
+                      <span className="ml-2 text-xs text-raid">wrote nothing in the last 24 h</span>
                     )}
                   </Td>
                   <Td right mono className={totals24h[p] === 0 ? 'text-muted' : undefined}>
@@ -110,7 +110,7 @@ export function IngestRates({
                   <Td right mono className={totals7d[p] === 0 ? 'text-muted' : undefined}>
                     {formatCount(totals7d[p])}
                   </Td>
-                  <Td right mono className="text-[11px] text-muted">
+                  <Td right mono className="text-xs text-muted">
                     {formatRatePerHour(totals24h[p], WINDOW_24H_MS)}
                   </Td>
                   <Td className="w-40">
@@ -127,7 +127,7 @@ export function IngestRates({
                         hideAxis
                       />
                     ) : (
-                      <span className="text-[11px] text-muted">nothing in this window</span>
+                      <span className="text-xs text-muted">nothing in this window</span>
                     )}
                   </Td>
                 </Tr>

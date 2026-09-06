@@ -66,7 +66,7 @@ export function HeartbeatGauges({ rows, historyPresent, hourLabels }: HeartbeatG
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-ash">{r.label}</p>
-                    {r.subtitle && <p className="text-[11px] text-muted">{r.subtitle}</p>}
+                    {r.subtitle && <p className="text-xs text-muted">{r.subtitle}</p>}
                   </div>
                   <Pill tone={band.tone}>{band.text}</Pill>
                 </div>
@@ -85,7 +85,7 @@ export function HeartbeatGauges({ rows, historyPresent, hourLabels }: HeartbeatG
                   }
                 />
 
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                   <span>
                     Last success{' '}
                     <span className="font-mono text-ash-dim">{formatAgeSec(p.ageSec)}</span>
@@ -102,11 +102,11 @@ export function HeartbeatGauges({ rows, historyPresent, hourLabels }: HeartbeatG
                   )}
                 </div>
 
-                {r.error && <p className="text-[11px] text-death">Last error: {r.error}</p>}
+                {r.error && <p className="text-xs text-death">Last error: {r.error}</p>}
 
                 {historyPresent ? (
                   r.history.every((v) => v === null) ? (
-                    <p className="text-[11px] text-muted">No samples for this component in the last 24 h.</p>
+                    <p className="text-xs text-muted">No samples for this component in the last 24 h.</p>
                   ) : (
                     <div>
                       <Sparkline
@@ -115,7 +115,7 @@ export function HeartbeatGauges({ rows, historyPresent, hourLabels }: HeartbeatG
                         className="text-frost"
                         height={28}
                       />
-                      <div className="mt-0.5 flex justify-between text-[10px] text-muted">
+                      <div className="mt-0.5 flex justify-between text-xs text-muted">
                         <span>{hourLabels[0]}</span>
                         <span>p90 age per hour, last 24 h</span>
                         <span>{hourLabels[hourLabels.length - 1]}</span>

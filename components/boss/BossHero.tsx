@@ -4,9 +4,31 @@ import { Badge } from '@/components/ui';
 import { shortDate } from '@/lib/format';
 import type { Boss } from '@/lib/types';
 
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
 /** War-room hero header — lit gold when felled, dim and unlit while the altar still waits. */
-export function BossHero({ boss }: { boss: Boss }) {
+export function BossHero({
+  boss,
+  index,
+  total,
+}: {
+  boss: Boss;
+  /** 0-based position in the boss order, for the "Forsaken VII of VIII" eyebrow. */
+  index?: number;
+  total?: number;
+}) {
   const killed = boss.is_killed;
+
+  // The eyebrow used to read THE ALTAR AWAITS, which the card below it and the
+  // status chip beside it both said again. It now carries the one fact this
+  // page never stated: where this boss sits in the chain. The biome is
+  // deliberately NOT repeated here — the badge two lines below is already the
+  // biome chip, and the card body names it a third time, which is the same
+  // say-it-three-times fault this eyebrow was rewritten to fix.
+  const place =
+    index != null && total != null && index >= 0 && index < total
+      ? `Forsaken ${ROMAN[index] ?? index + 1} of ${ROMAN[total - 1] ?? total}`
+      : null;
 
   return (
     <div
@@ -17,8 +39,8 @@ export function BossHero({ boss }: { boss: Boss }) {
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted">
-            {killed ? 'The War-Room' : 'The Altar Awaits'}
+          <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
+            {place ?? (killed ? 'War room' : 'The altar awaits')}
           </p>
           <h1
             className={clsx(

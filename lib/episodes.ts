@@ -457,8 +457,8 @@ const OPENERS = {
 };
 
 const BOSS_DESC = [
-  '{boss} fell this day, and a new region opened to the clan.',
-  'The forsaken {boss} was cut down at last.',
+  '{boss} fell this day, and a new region opened to the warband.',
+  '{boss} was felled at last.',
   '{boss} met its end. Skål to the war party that took its head.',
 ];
 
@@ -528,13 +528,13 @@ const ONE_DEATH_DESC = [
 
 const DISCOVERY_DESC = [
   'New country was charted this day.',
-  'The clan pushed into lands no map yet held.',
+  'The warband pushed into lands no map yet held.',
 ];
 
 const RAID_DESC = [
   'The hall weathered a raid and held.',
   'A raid tested the walls, and the walls won.',
-  'The clan stood against a siege before the dawn.',
+  'The warband stood against a siege before the dawn.',
 ];
 
 const PLACES_ONE_DESC = [
@@ -549,11 +549,11 @@ const PLACES_MANY_DESC = [
 
 const OATHS_ONE_DESC = [
   '{name} swore a fresh oath before the hall.',
-  'An oath was spoken: {name} bound their word to the clan.',
+  'An oath was spoken: {name} bound their word to the warband.',
 ];
 
 const OATHS_MANY_DESC = [
-  '{names} swore new oaths before the clan.',
+  '{names} swore new oaths before the warband.',
   '{n} oaths were spoken before the hall this day.',
 ];
 
@@ -637,7 +637,7 @@ function describeEpisode(e: EpisodeCore, seed: number): string {
 
   // Primary headline clause — highest-priority happening of the day. `kind` is
   // kept so the color clause below never tells the same event a second time
-  // ("The clan stood against a siege. A raid tested the walls, and the walls
+  // ("The warband stood against a siege. A raid tested the walls, and the walls
   // won." was two sentences about one raid).
   let primary: string | null = null;
   let kind = 'quiet';

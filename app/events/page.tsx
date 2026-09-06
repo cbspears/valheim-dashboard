@@ -16,7 +16,7 @@ import {
 import { buildEpisodes } from '@/lib/episodes';
 import { daysAgoCtKey } from '@/lib/tales';
 
-// SIXTY SECONDS OF ISR (2026-09-06). The Saga is a record of what already
+// SIXTY SECONDS OF ISR (2026-09-06). Story is a record of what already
 // happened — 200 events, 70 days of sessions, the oaths, the pins and the
 // tales, six reads and the two largest payloads on the site. A new deed or
 // death joining the feed a minute late costs the reader nothing; #server
@@ -35,8 +35,13 @@ export const revalidate = 60;
 
 const WINDOW_DAYS = 70;
 
+// ONE NAME FOR THIS ROUTE. It has answered to Saga, The Saga, The Episodes, The
+// Full Chronicle, Recent Saga and "all tales" at the same time, which is six
+// names for one page. It is Story: the tab, the title, the h1 and the Hall card
+// all say Story, its two halves are Nights and Everything that happened, and
+// "saga" survives only as a mood word in a subtitle.
 export const metadata: Metadata = {
-  title: 'The Saga',
+  title: 'Story',
 };
 
 export default async function EventsPage() {
@@ -59,19 +64,25 @@ export default async function EventsPage() {
       <section className="flex flex-col gap-6">
         <PageHeader slot="events">
           <SectionHeader
-            title="The Episodes"
+            as="h1"
+            title="Story"
             subtitle="Each night the vikings gather becomes a chapter of the season."
             icon={<BookOpenText size={22} />}
           />
         </PageHeader>
         <StorytellerToggle active="all" />
+        <SectionHeader
+          title="Nights"
+          subtitle="One card per night anyone played."
+          icon={<BookOpenText size={20} />}
+        />
         <EpisodeList episodes={episodes} />
       </section>
 
       <section className="flex flex-col gap-6">
         <SectionHeader
-          title="The Full Chronicle"
-          subtitle="The complete event log: every deed, death, and triumph as it was recorded."
+          title="Everything that happened"
+          subtitle="The raw log: every join, death, boss and deed, newest first."
           icon={<ScrollText size={22} />}
         />
         <EventFeed events={events} />

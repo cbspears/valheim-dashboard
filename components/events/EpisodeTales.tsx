@@ -20,7 +20,7 @@ export function EpisodeTales({ tales }: { tales: EpisodeTale[] }) {
 
   return (
     <div className="mt-4 border-t border-rune/60 pt-3.5">
-      <h4 className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-gold-dim">
+      <h4 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.18em] text-gold">
         <Feather size={12} />
         As the Storyteller tells it
       </h4>
@@ -43,7 +43,7 @@ export function EpisodeTales({ tales }: { tales: EpisodeTale[] }) {
               </p>
             ))}
             <figcaption className="mt-2 text-xs uppercase tracking-wider text-muted">
-              Told by <span className="text-gold-dim">{t.by}</span>
+              Told by <span className="text-gold">{t.by}</span>
             </figcaption>
           </figure>
         ))}

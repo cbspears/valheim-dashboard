@@ -8,7 +8,7 @@ import {
   Crown,
   ScrollText,
   ArrowRight,
-  Signal,
+  Compass,
   CalendarClock,
   Feather,
 } from 'lucide-react';
@@ -43,7 +43,7 @@ import { summarizeMilestones } from '@/lib/milestones';
 import { summarizeBosses } from '@/lib/bosses';
 import { describeEvent } from '@/lib/events';
 import { timeAgo, formatEventWhen } from '@/lib/format';
-import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/config/server';
+import { SERVER_NAME, SERVER_TAGLINE, MAX_PLAYERS } from '@/config/server';
 import { LaunchNotice } from '@/components/LaunchNotice';
 
 export const dynamic = 'force-dynamic';
@@ -98,26 +98,47 @@ export default async function HomePage() {
   const heroFooter = (
     <div className="border-t border-rune bg-pitch/50 backdrop-blur-sm">
       <div className="space-y-2 px-5 py-3 sm:px-7">
-        {/* Quick info — server pulse, world day, who is sailing, address */}
+        {/* What this place is, in the DOM rather than painted into the hero art
+            (the desktop title card carries the tagline, the phone crop does not,
+            and no screen reader or crawler ever gets either). */}
+        {/* The cap is spelled out here and counted twenty-five lines below
+            ("{playerCount} / {MAX_PLAYERS} sailing"), so it is read from the
+            same config value rather than typed twice. Move MAX_PLAYERS and the
+            sentence follows instead of contradicting the row under it. */}
+        <p className="text-sm leading-relaxed text-ash">
+          {SERVER_NAME} is a {MAX_PLAYERS === 20 ? 'twenty' : MAX_PLAYERS}-person modded Valheim
+          server. One shared world, one canon, played cozy.
+        </p>
+
+        {/* Quick info — server pulse, world day, who is sailing, how to join */}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
           <Badge tone={isOnline ? 'online' : 'offline'}>
             <OnlineDot online={isOnline} />
             {isOnline ? 'Server Online' : 'Server Offline'}
           </Badge>
           <span className="flex items-center gap-1.5 text-ash-dim">
-            <Sun size={14} className="text-gold-dim" />
+            <Sun size={14} className="text-gold" />
             {worldDay > 0 ? `Day ${worldDay} of the tenth world` : 'A new world, not yet a day old'}
           </span>
           <span className="flex items-center gap-1.5 text-ash-dim">
-            <Users size={14} className="text-gold-dim" />
+            <Users size={14} className="text-gold" />
             {playerCount} / {MAX_PLAYERS} sailing
           </span>
-          {SERVER_ADDRESS && (
-            <span className="inline-flex items-center gap-2 rounded-full border border-rune bg-pitch/70 px-3 py-1">
-              <Signal size={13} className="text-online-glow" />
-              <span className="font-mono text-xs text-ash">{SERVER_ADDRESS}</span>
-            </span>
-          )}
+          {/* The address used to sit here bare. It is the one thing a stranger
+              must not use yet (the server is modded and refuses an unmodded
+              join), so the chip points at the page that hands it over in
+              order. The address itself lives on Get Started. */}
+          {/* 44px tall on a phone, where this is the newcomer's whole route in
+              from the Hall; the chip was 111x26 and cleared SC 2.5.8's 24px
+              floor by 2px. Back to chip height from `sm` up, where it sits in a
+              row of badges and a pointer is doing the aiming. */}
+          <Link
+            href="/get-started"
+            className="gold-ring inline-flex min-h-11 items-center gap-2 rounded-full border border-gold-dim/60 bg-gold/10 px-4 py-2 text-xs font-medium text-gold-light transition-colors hover:bg-gold/20 sm:min-h-0 sm:px-3 sm:py-1.5"
+          >
+            <Compass size={13} />
+            How to join
+          </Link>
         </div>
 
         {/* Up next — only when a gathering is actually scheduled */}
@@ -223,27 +244,39 @@ export default async function HomePage() {
           <GreatDeedsCard summary={milestoneSummary} />
         </div>
 
-        {/* Recent Saga — full width beneath the pulse cards */}
+        {/* Recent story — full width beneath the pulse cards */}
         <div className="mt-5">
           <Card>
             <CardHeader
-              title="Recent Saga"
+              title="Recent story"
               icon={<ScrollText size={16} />}
               action={
                 <Link
                   href="/events"
                   className="gold-ring rounded text-xs font-medium text-gold-light hover:text-gold-light/80"
                 >
-                  All tales →
+                  The full story →
                 </Link>
               }
             />
             <CardBody className="p-0">
               {events.length === 0 ? (
+                /* On launch night this card IS the Hall, so it carries the way
+                   in rather than only saying it is empty. "Story" here, not
+                   "saga": the card above it, the tab and the page it opens all
+                   say Story. */
                 <EmptyState
                   icon={<ScrollText size={28} />}
-                  title="The saga has not begun"
-                  message="Deeds, deaths, and conquests will be etched here as they happen."
+                  title="The story has not begun"
+                  message="Deeds, deaths and conquests will be etched here as they happen. Be the first: install the mods and join."
+                  action={
+                    <Link
+                      href="/get-started"
+                      className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                    >
+                      Get Started
+                    </Link>
+                  }
                 />
               ) : (
                 <ul className="divide-y divide-rune">
@@ -310,8 +343,11 @@ export default async function HomePage() {
                 </p>
               )}
             </div>
-            <span className="shrink-0 text-gold-light">
-              <ArrowRight size={16} />
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-gold-light">
+              {/* Spelled exactly as the page it opens: /oath's h1 and browser
+                  title are both "The Oath Wall". One object, one spelling. */}
+              The Oath Wall
+              <ArrowRight size={14} />
             </span>
           </CardBody>
         </Card>
@@ -336,19 +372,19 @@ export default async function HomePage() {
         </CardBody>
       </Card>
 
-      {/* ─────────────────────── THE FORSAKEN ────────────────── */}
+      {/* ─────────────────────── BOSS PROGRESS ───────────────── */}
       {/* The count + progress bar now live in the hero; what remains here is
           what the hero cannot say: which beast is next, and which are down. */}
       <Card>
         <CardHeader
-          title="The Forsaken"
+          title="Boss progress"
           icon={<Skull size={16} />}
           action={
             <Link
               href="/world"
               className="gold-ring inline-flex items-center gap-1 rounded text-xs font-medium text-gold-light hover:text-gold-light/80"
             >
-              View the full saga <ArrowRight size={13} />
+              The boss timeline <ArrowRight size={13} />
             </Link>
           }
         />
@@ -365,7 +401,7 @@ export default async function HomePage() {
                   Hunt{' '}
                   <BossLink
                     name={nextBoss.name}
-                    className="gold-ring rounded-sm font-display text-gold-light transition-colors hover:text-gold"
+                    className="prose-link gold-ring rounded-sm font-display text-gold-light transition-colors hover:text-gold"
                   />
                   <span className="text-muted"> in the {nextBoss.biome}</span>
                 </p>
@@ -377,7 +413,10 @@ export default async function HomePage() {
                 <Crown size={18} />
               </span>
               <div>
-                <p className="text-xs uppercase tracking-wider text-muted">The saga is complete</p>
+                {/* The pair to "Current objective" above, and plainly said:
+                    "Saga" is retired as a label everywhere the reader can see
+                    it. The flavour is the line underneath. */}
+                <p className="text-xs uppercase tracking-wider text-muted">Every boss felled</p>
                 <p className="mt-0.5 text-ash">
                   Every forsaken one has fallen. The tenth world belongs to the bold.
                 </p>

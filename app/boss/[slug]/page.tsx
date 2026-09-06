@@ -10,6 +10,9 @@ import {
   Clock,
   Droplet,
   Flame,
+  Moon,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Card, CardHeader, CardBody, EmptyState, StatTile, VikingLink } from '@/components/ui';
 import { BossHero } from '@/components/boss/BossHero';
@@ -27,8 +30,9 @@ import {
   getPins,
 } from '@/lib/data';
 import { findAltarPin } from '@/components/boss/altar';
-import { slugify, vikingPath, matchVikingName, resolvePhotoViking } from '@/lib/slug';
+import { slugify, bossPath, vikingPath, matchVikingName, resolvePhotoViking } from '@/lib/slug';
 import { currentHolder, currentOffice } from '@/components/viking/office';
+import type { Boss } from '@/lib/types';
 
 // SIXTY SECONDS OF ISR (2026-09-06). A Forsaken's page changes on exactly two
 // events: the kill that flips it, and a photo or a boss night being added. Both
@@ -68,6 +72,34 @@ async function resolveBoss(slug: string) {
   return bosses.find((b) => slugify(b.name) === slug) ?? null;
 }
 
+/**
+ * The boss AND its neighbours in the chain. A war room used to be an island:
+ * no breadcrumb, no way back to the timeline, and nothing saying where in the
+ * eight this one sits, while /viking/[slug] has had breadcrumbs all along.
+ */
+async function resolveBossInChain(slug: string) {
+  const bosses = await getBosses();
+  const index = bosses.findIndex((b) => slugify(b.name) === slug);
+  if (index < 0) return null;
+  const previous = index > 0 ? bosses[index - 1] : null;
+  return {
+    boss: bosses[index],
+    index,
+    total: bosses.length,
+    previous,
+    next: index < bosses.length - 1 ? bosses[index + 1] : null,
+    // What is actually standing in the way, which is NOT the same thing as the
+    // previous link. On /boss/the-elder the previous boss is Eikthyr, who is
+    // already felled, so "after Eikthyr falls" would tell a launch-night reader
+    // that a dead boss still has to die — and contradict /world, which sends
+    // them here from "Current objective: The Elder".
+    blocker: previous && !previous.is_killed ? previous : null,
+    // Every boss before this one is down, so this one is the next fight. Only
+    // claimed when it is true of the whole chain, not just the neighbour.
+    isNext: bosses.slice(0, index).every((b) => b.is_killed),
+  };
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -80,8 +112,9 @@ export async function generateMetadata({
 
 export default async function BossPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const boss = await resolveBoss(slug);
-  if (!boss) notFound();
+  const chain = await resolveBossInChain(slug);
+  if (!chain) notFound();
+  const { boss, index, total, previous, next, blocker, isNext } = chain;
 
   if (boss.is_killed) {
     const [photos, roster, tellings, offices, pins] = await Promise.all([
@@ -111,17 +144,19 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
 
     return (
       <div className="flex flex-col gap-8">
+        <BossBreadcrumb />
+
         {ART_ENABLED ? (
           <div className="flex flex-col gap-5 sm:flex-row sm:items-stretch">
             <div className="mx-auto w-32 shrink-0 sm:mx-0 sm:w-44">
               <BossPortrait name={boss.name} status="defeated" />
             </div>
             <div className="min-w-0 flex-1">
-              <BossHero boss={boss} />
+              <BossHero boss={boss} index={index} total={total} />
             </div>
           </div>
         ) : (
-          <BossHero boss={boss} />
+          <BossHero boss={boss} index={index} total={total} />
         )}
 
         {/* The Circle — the TRUE war party (those who actually fought). Prefer the
@@ -199,7 +234,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
                   Posted by{' '}
                   <VikingLink
                     name={depictionPoster}
-                    className="gold-ring rounded-sm transition-colors hover:text-gold-light"
+                    className="prose-link gold-ring rounded-sm transition-colors hover:text-gold-light"
                   >
                     {depiction.posted_by}
                   </VikingLink>
@@ -210,7 +245,15 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
             <EmptyState
               icon={<Camera size={28} />}
               title="No screenshots yet"
-              message="No depiction yet. Post one in Discord and name the beast."
+              message="No depiction yet. Post one in Discord, tag Eilif and name the beast in the caption."
+              action={
+                <Link
+                  href="/gallery"
+                  className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                >
+                  The gallery
+                </Link>
+              }
             />
           )}
         </Card>
@@ -295,6 +338,8 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
             The altar is marked on the atlas. View the map
           </Link>
         )}
+
+        <BossFooterNav previous={previous} next={next} />
       </div>
     );
   }
@@ -306,25 +351,50 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
 
   return (
     <div className="flex flex-col gap-8">
+      <BossBreadcrumb />
+
       {ART_ENABLED ? (
         <div className="flex flex-col gap-5 sm:flex-row sm:items-stretch">
           <div className="mx-auto w-32 shrink-0 sm:mx-0 sm:w-44">
             <BossPortrait name={boss.name} status="locked" />
           </div>
           <div className="min-w-0 flex-1">
-            <BossHero boss={boss} />
+            <BossHero boss={boss} index={index} total={total} />
           </div>
         </div>
       ) : (
-        <BossHero boss={boss} />
+        <BossHero boss={boss} index={index} total={total} />
       )}
 
+      {/* ONE CARD, NOT THREE. An unfought war room used to say the same fact
+          three times over: the eyebrow, the status chip, a card reading "The
+          altar awaits." and a second card holding nothing but the Seers' line.
+          The Seers appear nowhere else on this site, so they are gone; what is
+          left is the thing a reader actually wants, which is where this one
+          sits in the chain. */}
       <Card className="bg-surface/60">
+        <CardHeader title="What we know" icon={<Moon size={16} />} />
         <CardBody>
-          <p className="font-display text-lg text-ash-dim">The altar awaits.</p>
-          <p className="mt-1 text-sm text-muted">
-            No clan has yet stood before {boss.name} in the {boss.biome}. Its cairn is unbuilt,
-            its tale unwritten.
+          <p className="text-sm leading-relaxed text-ash-dim">
+            Nobody has fought {boss.name} yet. It waits in the {boss.biome}
+            {blocker ? (
+              <>
+                , after{' '}
+                <Link
+                  href={bossPath(blocker.name)}
+                  className="gold-ring rounded-sm text-gold-light prose-link transition-colors"
+                >
+                  {blocker.name}
+                </Link>{' '}
+                falls
+              </>
+            ) : isNext ? (
+              <>, and it is next</>
+            ) : null}
+            .
+          </p>
+          <p className="mt-2 text-sm text-muted">
+            Its cairn is unbuilt, its tale unwritten.
           </p>
         </CardBody>
       </Card>
@@ -338,13 +408,50 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
         </Card>
       )}
 
-      <Card className="bg-surface/60">
-        <CardBody>
-          <p className="text-sm text-muted">
-            The Seers&apos; ledger opens when the horn sounds.
-          </p>
-        </CardBody>
-      </Card>
+      <BossFooterNav previous={previous} next={next} />
+    </div>
+  );
+}
+
+/** The way back up, matching the pattern /viking/[slug] has had all along. */
+function BossBreadcrumb() {
+  return (
+    <Link
+      href="/world"
+      className="gold-ring inline-flex w-fit items-center gap-1 text-xs text-muted transition-colors hover:text-ash-dim"
+    >
+      <ChevronLeft size={14} />
+      World progression
+    </Link>
+  );
+}
+
+/** The way onward: the timeline, and the two Forsaken either side of this one. */
+function BossFooterNav({ previous, next }: { previous: Boss | null; next: Boss | null }) {
+  const link = 'gold-ring inline-flex items-center gap-1.5 font-display text-sm text-muted transition-colors hover:text-gold-light';
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 border-t border-rune/60 pt-6">
+      {previous ? (
+        <Link href={bossPath(previous.name)} className={link}>
+          <ChevronLeft size={15} />
+          {previous.name}
+        </Link>
+      ) : (
+        <span />
+      )}
+
+      <Link href="/world" className={link}>
+        Back to the boss timeline
+      </Link>
+
+      {next ? (
+        <Link href={bossPath(next.name)} className={link}>
+          {next.name}
+          <ChevronRight size={15} />
+        </Link>
+      ) : (
+        <span />
+      )}
     </div>
   );
 }

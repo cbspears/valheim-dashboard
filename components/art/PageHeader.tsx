@@ -41,9 +41,17 @@ export function PageHeader({
           : 'min-h-[160px] sm:min-h-[220px] lg:min-h-[260px]',
       )}
     >
+      {/*
+        The band is decoration behind the page title, so it is announced as
+        nothing. With the manifest's descriptive alt in place, the first words a
+        screen-reader user heard on Get Started were "A longship bound for a new
+        frontier at first light", before the page had said what it was. The
+        description stays in config/art.ts, where the gallery and the Hall hero
+        (art that IS the content) still use it.
+      */}
       <Image
         src={ref.src}
-        alt={ref.alt}
+        alt=""
         fill
         sizes="(max-width: 1152px) 100vw, 1152px"
         className="object-cover"

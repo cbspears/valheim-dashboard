@@ -42,8 +42,16 @@ export function EpisodeList({ episodes }: { episodes: Episode[] }) {
       <Card>
         <EmptyState
           icon={<ScrollText size={28} />}
-          title="The season has not yet begun…"
-          message="When the vikings gather, their nights will be chronicled here as episodes."
+          title="The season has not yet begun"
+          message="Nothing recorded yet. Every night anyone plays becomes a card here."
+          action={
+            <Link
+              href="/get-started"
+              className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+            >
+              Get Started
+            </Link>
+          }
         />
       </Card>
     );
@@ -62,7 +70,7 @@ export function EpisodeList({ episodes }: { episodes: Episode[] }) {
 
       {remaining > 0 && (
         <p className="px-1 pt-1 text-center text-sm text-muted">
-          …and {remaining} earlier {remaining === 1 ? 'episode' : 'episodes'}, back to the founding.
+          …and {remaining} earlier {remaining === 1 ? 'night' : 'nights'}, back to the founding.
         </p>
       )}
     </div>
@@ -74,9 +82,9 @@ function EpisodeCard({ ep }: { ep: Episode }) {
 
   return (
     <Card className="p-5">
-      {/* header line: Episode N · Sat, Jun 28 · Days 88-91 */}
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] font-medium uppercase tracking-[0.18em] text-gold-dim">
-        <span>Episode {ep.number}</span>
+      {/* header line: Night N · Sat, Jun 28 · Days 88-91 */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs font-medium uppercase tracking-[0.18em] text-gold">
+        <span>Night {ep.number}</span>
         <span className="text-rune-bright">·</span>
         <span className="text-muted normal-case tracking-normal">{episodeDate(ep.startedAt)}</span>
         {days && (
@@ -87,14 +95,14 @@ function EpisodeCard({ ep }: { ep: Episode }) {
         )}
       </div>
 
-      {/* title — a sword glyph links to the war-room when this night felled a forsaken */}
+      {/* title — a sword glyph links to the war room when this night felled a boss */}
       <h3 className="mt-1.5 flex items-center gap-2 font-display text-xl text-gold-light">
         {ep.title}
         {ep.bossKills.length > 0 && (
           <Link
             href={bossPath(ep.bossKills[0])}
-            title={`Visit ${ep.bossKills[0]}'s war-room`}
-            className="gold-ring inline-flex text-gold-dim transition-colors hover:text-gold-light"
+            title={`Visit ${ep.bossKills[0]}'s war room`}
+            className="gold-ring inline-flex text-gold transition-colors hover:text-gold-light"
           >
             <Swords size={16} />
           </Link>
@@ -109,28 +117,30 @@ function EpisodeCard({ ep }: { ep: Episode }) {
       {/* what the Storyteller wrote about this night, when anyone did */}
       <EpisodeTales tales={ep.tales} />
 
-      {/* participant chips */}
+      {/* Participant chips. The whole chip is the link, not the 22 px of text
+          inside it: a 51x15 target with 22 px between centres fails SC 2.5.8
+          even on its spacing exception. */}
       {ep.participants.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-2">
           {ep.participants.map((p) => (
-            <span
+            <VikingLink
               key={p.name}
-              className="rounded-full border border-rune bg-surface-raised px-2.5 py-0.5 text-xs text-ash-dim"
-            >
-              <VikingLink
-                name={p.name}
-                className="gold-ring rounded-full transition-colors hover:text-gold-light"
-              />
-            </span>
+              name={p.name}
+              className="gold-ring inline-flex items-center rounded-full border border-rune bg-surface-raised px-3 py-1.5 text-xs text-ash-dim transition-colors hover:border-gold-dim hover:text-gold-light"
+            />
           ))}
         </div>
       )}
 
-      {/* compact stat row: viking-hours · deaths · discoveries */}
+      {/* compact stat row: hours played · deaths · discoveries.
+          "viking-hours" was a coinage nobody has met: it reads as a unit of
+          time rather than as "everyone's hours added up", which is what it is. */}
       <div className="mt-3.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted">
         <span className="inline-flex items-center gap-1.5">
-          <Clock size={13} className="text-gold-dim" />
-          <span className="tabular-nums text-ash-dim">{trimHours(ep.totalVikingHours)}</span> viking-hours
+          <Clock size={13} className="text-gold" />
+          <span className="tabular-nums text-ash-dim">{trimHours(ep.totalVikingHours)}</span> hours
+          played by <span className="tabular-nums text-ash-dim">{ep.participants.length}</span>{' '}
+          {ep.participants.length === 1 ? 'viking' : 'vikings'}
         </span>
         {ep.deaths.length > 0 && (
           <span className="inline-flex items-center gap-1.5">
@@ -148,18 +158,20 @@ function EpisodeCard({ ep }: { ep: Episode }) {
         )}
       </div>
 
-      {/* one-line death notes */}
+      {/* One-line death notes. The WHOLE line is the link, not the name alone:
+          a bare name measured 50x15 px with 20 px between target centres, which
+          fails SC 2.5.8 including its spacing exception. */}
       {ep.deaths.length > 0 && (
-        <ul className="mt-3 space-y-1 border-t border-rune/60 pt-3">
+        <ul className="mt-3 border-t border-rune/60 pt-2">
           {ep.deaths.map((d, i) => (
             <li key={`${d.name}-${i}`} className="text-xs text-ash-dim">
               <VikingLink
                 name={d.name}
-                className="gold-ring rounded-sm text-ash transition-colors hover:text-gold-light"
+                className="gold-ring block rounded-sm py-1.5 leading-6 transition-colors hover:text-gold-light"
               >
-                {d.name.split(/\s+/)[0]}
+                <span className="text-ash">{d.name.split(/\s+/)[0]}</span>
+                <span className="text-muted">, {phraseDeath(d.cause)}</span>
               </VikingLink>
-              <span className="text-muted">, {phraseDeath(d.cause)}</span>
             </li>
           ))}
         </ul>

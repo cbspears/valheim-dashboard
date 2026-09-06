@@ -55,15 +55,15 @@ export function describeEvent(e: GameEvent): EventPresentation {
       };
     }
     case 'boss': {
-      const boss = str(meta, 'boss') ?? 'a forsaken one';
+      const boss = str(meta, 'boss') ?? 'A boss';
       const players = str(meta, 'players');
       return {
         icon: Crown,
         accent: 'text-gold-light',
         label: 'Boss Kill',
         description: players
-          ? `${boss} was defeated by ${players}`
-          : `${boss} was defeated`,
+          ? `${boss} was felled by ${players}`
+          : `${boss} was felled`,
       };
     }
     case 'raid': {

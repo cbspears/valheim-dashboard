@@ -468,8 +468,8 @@ Next.js 16 App Router, React 19, Tailwind v4, TypeScript. Public pages:
 | `/map` | fog-masked atlas, per-in-game-day timelapse, player pins, place albums |
 | `/gallery` | photos ingested from Discord |
 | `/oath` | the oath wall |
-| `/mods` | the mod list from `config/mods.ts` |
-| `/commands` | the player register: every Discord verb, every `/s` shout, every notice the hall sends and every page, rendered from `config/commands.ts`, where each entry names the code it was derived from and `scripts/commands-page.test.mjs` fails the build if a verb, a shout prefix, a permission gate, a feature flag or a `*_CHANNEL` route drifts away from it (which includes step 20b: lifting the pilot overrides re-points four notices at `#valheim` and this test says so) |
+| `/resources` | two halves under one heading. `#mods` is the mod list from `config/mods.ts`; `#commands` is the player register: every Discord verb, every `/s` shout, every board sign marker, every notice the hall sends and every page, rendered from `config/commands.ts`, where each entry names the code it was derived from and `scripts/commands-page.test.mjs` fails the build if a verb, a shout prefix, a marker, a permission gate, a feature flag or a `*_CHANNEL` route drifts away from it (which includes step 20b: lifting the pilot overrides re-points four notices at `#valheim` and this test says so) |
+| `/mods`, `/commands` | gone as pages since 2026-09-06; both are 308s in `next.config.ts` to `/resources#mods` and `/resources#commands` |
 | `/get-started` | pack code, Mac config bundle, connect details |
 | `/tv` | experimental TV mode, unlinked and noindexed (delete `app/tv` and `components/tv` to remove) |
 | `/admin/ops`, `/admin/ops/architecture` | the ops cockpit, cookie-gated |

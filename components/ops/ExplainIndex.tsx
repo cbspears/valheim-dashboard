@@ -113,7 +113,7 @@ export function ExplainIndex() {
                             ›
                           </span>
                           {entry.title}
-                          <span className="ml-2 font-mono text-[10px] text-muted">{entry.id}</span>
+                          <span className="ml-2 font-mono text-xs text-muted">{entry.id}</span>
                         </summary>
                         <dl className="space-y-2 px-2 pt-1 pb-3 pl-6 text-xs leading-relaxed">
                           <Field term="What it measures" text={entry.what} />
@@ -126,7 +126,7 @@ export function ExplainIndex() {
                                 href={entry.link.href}
                                 target={entry.link.href.startsWith('http') ? '_blank' : undefined}
                                 rel={entry.link.href.startsWith('http') ? 'noreferrer' : undefined}
-                                className="text-gold-dim transition hover:text-gold"
+                                className="text-gold transition hover:text-gold"
                               >
                                 {entry.link.label}
                               </a>
@@ -152,10 +152,10 @@ function Field({ term, text, tone }: { term: string; text: string; tone?: 'good'
       <dt
         className={
           tone === 'good'
-            ? 'text-[10px] font-semibold tracking-wider text-online-glow uppercase'
+            ? 'text-xs font-semibold tracking-wider text-online-glow uppercase'
             : tone === 'bad'
-              ? 'text-[10px] font-semibold tracking-wider text-raid uppercase'
-              : 'text-[10px] font-semibold tracking-wider text-muted uppercase'
+              ? 'text-xs font-semibold tracking-wider text-raid uppercase'
+              : 'text-xs font-semibold tracking-wider text-muted uppercase'
         }
       >
         {term}

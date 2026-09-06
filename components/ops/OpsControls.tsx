@@ -41,7 +41,15 @@ export function OpsControls({ renderedAtIso }: { renderedAtIso: string }) {
         disabled={pending}
         className="inline-flex items-center gap-1.5 rounded-md border border-rune bg-surface-raised px-3 py-1.5 text-xs font-medium text-ash-dim transition hover:border-gold-dim hover:text-ash disabled:opacity-50"
       >
-        <RefreshCw size={14} className={pending ? 'animate-spin' : ''} />
+        {/* The spin is the only motion on this site that carries state rather
+            than decoration, so it is exempt from the reduced-motion stop in
+            globals.css. The disabled button and its faded label say the same
+            thing a second way. */}
+        <RefreshCw
+          size={14}
+          className={pending ? 'animate-spin' : ''}
+          data-motion={pending ? 'essential' : undefined}
+        />
         Refresh
       </button>
       <button

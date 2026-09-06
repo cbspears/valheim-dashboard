@@ -80,8 +80,8 @@ export function Stat({
         {entry && <Explain entry={entry} size="sm" />}
       </div>
       <div className={clsx('mt-0.5 font-mono text-xl leading-tight', toneCls)}>{value}</div>
-      <div className="text-[11px] text-muted">{window}</div>
-      {hint && <div className="mt-0.5 text-[11px] text-ash-dim">{hint}</div>}
+      <div className="text-xs text-muted">{window}</div>
+      {hint && <div className="mt-0.5 text-xs text-ash-dim">{hint}</div>}
     </div>
   );
 }
@@ -104,7 +104,7 @@ export function StatRow({ children, cols = 4 }: { children: ReactNode; cols?: 2 
 /** A short explanatory line under a panel: how the number was arrived at. */
 export function Note({ children, tone = 'muted' }: { children: ReactNode; tone?: 'muted' | 'warn' }) {
   return (
-    <p className={clsx('mt-2 text-[11px] leading-relaxed', tone === 'warn' ? 'text-raid' : 'text-muted')}>
+    <p className={clsx('mt-2 text-xs leading-relaxed', tone === 'warn' ? 'text-raid' : 'text-muted')}>
       {children}
     </p>
   );
@@ -181,7 +181,7 @@ export function Pill({
   return (
     <span
       className={clsx(
-        'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-wide',
+        'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-semibold tracking-wide',
         cls,
       )}
     >

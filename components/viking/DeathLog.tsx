@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Skull } from 'lucide-react';
 import { Card, EmptyState } from '@/components/ui';
 import { phraseDeath } from '@/lib/episodes';
@@ -51,6 +52,14 @@ export function DeathLog({ deaths, first }: { deaths: GameEvent[]; first: string
           icon={<Skull size={26} />}
           title="Yet unbowed"
           message={`No death has been recorded for ${first}. Valhalla waits, but not today.`}
+          action={
+            <Link
+              href="/players"
+              className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+            >
+              How the warband dies
+            </Link>
+          }
         />
       ) : (
         <ul className="divide-y divide-rune/50">
@@ -61,7 +70,7 @@ export function DeathLog({ deaths, first }: { deaths: GameEvent[]; first: string
               <li key={e.id ?? i} className="flex items-baseline gap-3 px-5 py-2.5">
                 <span className="flex-1 text-sm text-ash-dim">{cap(phraseAny(cause))}</span>
                 {day != null && (
-                  <span className="shrink-0 font-display text-xs text-gold-dim">Day {day}</span>
+                  <span className="shrink-0 font-display text-xs text-gold">Day {day}</span>
                 )}
                 <span className="shrink-0 text-xs tabular-nums text-muted">{dateLabel(e.created_at)}</span>
               </li>

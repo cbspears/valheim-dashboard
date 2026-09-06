@@ -131,7 +131,7 @@ export function LagPanel({
                     label="Pipeline delay p90 per hour, last 24 h, in seconds"
                     className="text-gold"
                   />
-                  <div className="mt-1 flex justify-between text-[10px] text-muted">
+                  <div className="mt-1 flex justify-between text-xs text-muted">
                     <span>{hourLabels[0]}</span>
                     <span>{hourLabels[Math.floor((hourLabels.length - 1) / 2)]}</span>
                     <span>{hourLabels[hourLabels.length - 1]}</span>
@@ -169,7 +169,7 @@ export function LagPanel({
                     className="text-frost"
                     height={72}
                   />
-                  <ul className="mt-2 space-y-0.5 text-[11px] text-muted">
+                  <ul className="mt-2 space-y-0.5 text-xs text-muted">
                     {histogram
                       .filter((b) => b.count > 0)
                       .map((b) => (
@@ -249,8 +249,8 @@ export function LagPanel({
                   <Td right mono className="text-ash">{formatDurationSec(w.lagSec)}</Td>
                   <Td>{w.type ?? 'unknown'}</Td>
                   <Td>{w.characterName ?? 'the hall'}</Td>
-                  <Td mono className="text-[11px] text-muted">{w.createdAt.replace('T', ' ').slice(0, 19)}Z</Td>
-                  <Td mono className="text-[11px] text-muted">{w.insertedAt.replace('T', ' ').slice(0, 19)}Z</Td>
+                  <Td mono className="text-xs text-muted">{w.createdAt.replace('T', ' ').slice(0, 19)}Z</Td>
+                  <Td mono className="text-xs text-muted">{w.insertedAt.replace('T', ' ').slice(0, 19)}Z</Td>
                 </Tr>
               ))}
             </ScrollTable>

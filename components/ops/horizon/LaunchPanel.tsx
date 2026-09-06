@@ -81,7 +81,7 @@ export function LaunchPanel({
               {confirmed}
               <span className="text-base text-muted"> of {all.length}</span>
             </p>
-            <p className="mt-0.5 text-[11px] text-muted">
+            <p className="mt-0.5 text-xs text-muted">
               Only step 20 is checkable from the database.
             </p>
           </div>

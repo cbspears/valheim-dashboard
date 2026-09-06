@@ -61,21 +61,21 @@ export function RouteHeartbeats({ rows, throttleSec }: RouteHeartbeatsProps) {
               <Tr key={r.component}>
                 <Td>
                   <div className="text-ash">{r.label}</div>
-                  <div className="text-[11px] text-muted">{r.purpose}</div>
+                  <div className="text-xs text-muted">{r.purpose}</div>
                 </Td>
-                <Td mono className="text-[11px] text-ash-dim">{r.route}</Td>
+                <Td mono className="text-xs text-ash-dim">{r.route}</Td>
                 <Td>
                   <Pill tone={unknown ? 'info' : stale ? 'bad' : 'good'}>
                     {unknown ? 'Never polled' : stale ? 'Stale' : 'Polling'}
                   </Pill>
-                  {r.error && <div className="mt-1 text-[11px] text-death">{r.error}</div>}
+                  {r.error && <div className="mt-1 text-xs text-death">{r.error}</div>}
                 </Td>
                 <Td right mono>{formatAgeSec(r.ageSec)}</Td>
                 <Td>
                   {r.metrics.length === 0 ? (
-                    <span className="text-[11px] text-muted">a timestamp only</span>
+                    <span className="text-xs text-muted">a timestamp only</span>
                   ) : (
-                    <ul className="space-y-0.5 text-[11px] text-ash-dim">
+                    <ul className="space-y-0.5 text-xs text-ash-dim">
                       {r.metrics.map((m) => (
                         <li key={m.key}>
                           <span className="text-muted">{m.key}</span>{' '}

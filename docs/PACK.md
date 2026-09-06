@@ -4,7 +4,7 @@ Two artifacts have to agree with each other and with the server, every time:
 
 | Artifact | Where it lives | Who uses it |
 |---|---|---|
-| r2modman pack code | `MODPACK_PROFILE_CODE` in `config/server.ts`, shown on `/get-started` and `/mods` | Windows and Linux players, one click |
+| r2modman pack code | `MODPACK_PROFILE_CODE` in `config/server.ts`, shown on `/get-started` and `/resources#mods` | Windows and Linux players, one click |
 | Mac config bundle | `public/downloads/eilif-configs-pack-v<N>.zip`, linked by `CONFIG_BUNDLE_URL` in `app/get-started/page.tsx` | Macheim players, who install the mods by hand because Macheim cannot read a pack code |
 
 Both are now generated from one source: `scripts/pack-templates/`. `scripts/mint-pack.mjs`
@@ -46,7 +46,7 @@ Three files in this repo hold a version list for those seven, and they have to b
 together: `MODS` in `scripts/mint-pack.mjs` (the renderer of record), `PACK_V12_PINS` in
 `scripts/launch-preflight.mjs` (which checks the same Thunderstore endpoints from the
 preflight side), and the player-facing list in `config/mods.ts`. If they disagree,
-preflight can green-light a pin the minter refuses, or `/mods` can claim a version nobody
+preflight can green-light a pin the minter refuses, or `/resources#mods` can claim a version nobody
 is running. Folding preflight's list into an `import { MODS }` is the obvious fix and is
 not done yet.
 

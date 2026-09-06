@@ -99,7 +99,7 @@ export default async function TvPage({
           {SERVER_NAME.toUpperCase()}
         </h1>
         <div className="flex items-center gap-2.5 text-xl text-ash-dim md:text-2xl">
-          <Sun size={22} className="text-gold-dim" />
+          <Sun size={22} className="text-gold" />
           Day {worldDay}
         </div>
       </header>
@@ -117,7 +117,7 @@ export default async function TvPage({
             />
           ) : (
             <div className="flex aspect-square h-full max-h-full w-full flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-rune bg-pitch/60 p-10 text-center">
-              <MapIcon size={44} className="text-gold-dim" />
+              <MapIcon size={44} className="text-gold" />
               <p className="max-w-md text-lg text-ash-dim">
                 The map charts itself once the warband sails. The known world lands here the moment
                 the {SERVER_NAME} server is live.
@@ -131,7 +131,7 @@ export default async function TvPage({
           {/* 1 + 2 — In the hall (roster) with the pulse state */}
           <div className="shrink-0 rounded-2xl border border-rune bg-surface/70 p-6">
             <div className="mb-4 flex items-center gap-3">
-              <Flame size={22} className={hall === 'lively' ? 'text-gold-light' : 'text-gold-dim'} />
+              <Flame size={22} className={hall === 'lively' ? 'text-gold-light' : 'text-gold'} />
               <h2 className="font-display text-2xl tracking-wide text-ash">In the hall</h2>
             </div>
             <p className="font-display text-xl text-ash">{hallCopy.title}</p>
@@ -149,7 +149,7 @@ export default async function TvPage({
             )}
 
             <div className="mt-4 flex items-center gap-2 border-t border-rune pt-4 text-base text-muted">
-              <Users size={16} className="text-gold-dim" />
+              <Users size={16} className="text-gold" />
               {playerCount} {playerCount === 1 ? 'viking' : 'vikings'} sailing · Day {worldDay}
             </div>
           </div>
@@ -211,7 +211,7 @@ export default async function TvPage({
           {nextUp && (
             <div className="shrink-0 rounded-2xl border border-rune bg-surface/70 px-6 py-4">
               <div className="flex items-center gap-2 text-sm uppercase tracking-wider text-muted">
-                <CalendarClock size={15} className="text-gold-dim" />
+                <CalendarClock size={15} className="text-gold" />
                 Coming up
               </div>
               <p className="mt-1 truncate font-display text-xl text-ash">{nextUp.name}</p>

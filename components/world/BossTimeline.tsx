@@ -21,8 +21,16 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
       <Card>
         <EmptyState
           icon={<Swords size={28} />}
-          title="No bosses felled yet"
-          message="The timeline lights up when the first forsaken falls."
+          title="No bosses tracked yet"
+          message="The timeline lights up when the first of the Forsaken falls."
+          action={
+            <Link
+              href="/get-started"
+              className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+            >
+              Get Started
+            </Link>
+          }
         />
       </Card>
     );
@@ -42,13 +50,13 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
         <CardBody className="flex flex-col gap-5 sm:gap-6">
           <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
             <div>
-              <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted">
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
                 Realm Progression
               </p>
               <p className="mt-1 font-display text-2xl text-ash sm:text-3xl">
                 <span className="text-gold-light">{killedCount}</span>
                 <span className="text-muted"> / {total} </span>
-                forsaken defeated
+                Forsaken felled
               </p>
             </div>
             <Badge tone={allDone ? 'gold' : 'frost'}>
@@ -81,7 +89,7 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
 
           <p className="text-sm text-muted">
             {allDone ? (
-              'Every forsaken has fallen. The tenth world bows to the clan.'
+              'Every one of the Forsaken has fallen. The tenth world bows to the warband.'
             ) : nextBoss ? (
               <>
                 Current objective:{' '}
@@ -89,7 +97,7 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                 <span className="text-muted"> · {nextBoss.biome}</span>
               </>
             ) : (
-              'No forsaken charted on the map yet.'
+              'No bosses charted on the map yet.'
             )}
           </p>
         </CardBody>
@@ -165,7 +173,7 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                   </div>
                 )}
 
-                <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted">
                   Forsaken {ROMAN[i] ?? i + 1}
                 </p>
 
@@ -184,7 +192,7 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                     </Link>
                   </h3>
                   <Badge tone={status === 'locked' ? 'offline' : 'frost'}>{boss.biome}</Badge>
-                  {status === 'killed' && <Badge tone="gold">Defeated</Badge>}
+                  {status === 'killed' && <Badge tone="gold">Felled</Badge>}
                   {status === 'next' && <Badge tone="gold">Next objective</Badge>}
                   {status === 'locked' && <Badge tone="offline">Locked</Badge>}
                 </div>
@@ -199,7 +207,7 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         <span className="text-xs text-muted">War party:</span>
                         {boss.players_present.map((p) => (
-                          <Badge key={p} tone="neutral" className="text-[11px]">
+                          <Badge key={p} tone="neutral" className="text-xs">
                             <VikingLink
                               name={p}
                               className="gold-ring rounded-sm transition-colors hover:text-gold-light"
@@ -211,17 +219,22 @@ export function BossTimeline({ bosses }: { bosses: Boss[] }) {
                   </>
                 )}
 
+                {/* Valheim does not gate biomes behind bosses. Saying it does
+                    sends a newcomer into the Black Forest thinking the game is
+                    broken, so both lines below name the house rule as a house
+                    rule, and the locked card names the boss actually in the
+                    way instead of leaving the reader to count backwards. */}
                 {status === 'next' && (
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-gold-light/90">
                     <Target size={13} />
-                    Hunt this forsaken to unseal the next region.
+                    Next up. House rule: nobody moves into the next biome until this one falls.
                   </div>
                 )}
 
                 {status === 'locked' && (
                   <div className="mt-2 flex items-center gap-1.5 text-xs text-muted">
                     <Lock size={12} />
-                    Locked. Fell the previous forsaken to advance.
+                    {i > 0 ? `Locked until ${bosses[i - 1].name} falls.` : 'Locked.'}
                   </div>
                 )}
 

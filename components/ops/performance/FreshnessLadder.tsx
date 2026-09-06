@@ -51,10 +51,10 @@ export function FreshnessLadder({ rungs }: { rungs: FreshnessRung[] }) {
                 <Td right mono className={r.ageSec === null ? 'text-muted' : undefined}>
                   {formatAgeSec(r.ageSec)}
                 </Td>
-                <Td right mono className="text-[11px] text-muted">
+                <Td right mono className="text-xs text-muted">
                   {formatDurationSec(r.staleAfterSec)}
                 </Td>
-                <Td mono className="text-[11px] text-muted">{r.source}</Td>
+                <Td mono className="text-xs text-muted">{r.source}</Td>
               </Tr>
             );
           })}

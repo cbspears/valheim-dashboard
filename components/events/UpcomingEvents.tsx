@@ -75,7 +75,7 @@ export function UpcomingEvents({
                   href={ev.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="gold-ring inline-flex items-center gap-1 rounded text-gold-light hover:underline"
+                  className="prose-link gold-ring inline-flex items-center gap-1 rounded text-gold-light"
                 >
                   View in Discord
                   <ExternalLink size={11} />

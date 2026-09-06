@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Crown } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Card, EmptyState, VikingLink } from '@/components/ui';
@@ -25,7 +26,15 @@ export function PotyArchive({ entries }: { entries: PotyHistoryEntry[] }) {
         <EmptyState
           icon={<Crown size={28} />}
           title="No champions crowned yet"
-          message="Once the nightly saga recaps begin, each day's Player of the Day will be enshrined here."
+          message="Play a night and the first crown is handed out in the recap. Every Player of the Day is enshrined here."
+          action={
+            <Link
+              href="/get-started"
+              className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+            >
+              Get Started
+            </Link>
+          }
         />
       </Card>
     );
@@ -49,8 +58,11 @@ export function PotyArchive({ entries }: { entries: PotyHistoryEntry[] }) {
           <span className="text-gold">
             <Crown size={16} />
           </span>
+          {/* One name for one thing. "The Crowning Log" was a coinage a reader
+              met nowhere else; the register, the recap and the viking pages all
+              say Player of the Day. */}
           <h3 className="font-display text-sm uppercase tracking-wide text-ash">
-            The Crowning Log
+            Player of the Day, newest first
           </h3>
         </div>
         <ol className="flex-1">
@@ -62,7 +74,7 @@ export function PotyArchive({ entries }: { entries: PotyHistoryEntry[] }) {
                 i > 0 && 'border-t border-rune/60'
               )}
             >
-              <span className="w-12 shrink-0 font-display text-xs tabular-nums text-gold-dim">
+              <span className="w-12 shrink-0 font-display text-xs tabular-nums text-gold">
                 {crownDate(e.awarded_at)}
               </span>
               <span className="flex-1 truncate font-display text-sm text-ash">

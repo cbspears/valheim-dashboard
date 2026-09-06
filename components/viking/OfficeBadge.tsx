@@ -12,7 +12,7 @@ export function OfficeBadge({ label }: { label: string | null }) {
   if (!label) return null;
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-gold-dim/40 bg-pitch/70 px-2.5 py-0.5 align-middle text-xs font-medium text-gold-dim"
+      className="inline-flex items-center gap-1.5 rounded-full border border-gold-dim/40 bg-pitch/70 px-2.5 py-0.5 align-middle text-xs font-medium text-gold"
       title="An office of the hall"
     >
       <ScrollText size={12} />

@@ -185,9 +185,13 @@ const offersVerb = (verb) =>
   }
   ok(
     /Talker\.Type\.Shout/.test(oathCs),
-    'and the capture is still gated on a SHOUT, which is why every in-game entry leads with /s',
+    'and the capture is still gated on a SHOUT, which is why every chat entry leads with /s',
   );
+  // Two acts in one section, and `how` is what tells them apart. A shout that
+  // does not lead with /s never reaches the hall; a board marker is not chat at
+  // all, and telling a viking to shout one would send them nowhere.
   for (const e of GAME_SHOUTS) {
+    if (e.how === 'sign') continue;
     ok(e.text.startsWith('/s '), `"${e.text}" is written as a shout`);
   }
 
@@ -239,6 +243,100 @@ const offersVerb = (verb) =>
     GAME_SHOUTS.some((e) => e.id.startsWith('pin-') && /MOVED|moves?\b/i.test(e.note ?? '')),
     'and the register tells a viking that re-shouting a name moves the pin',
   );
+}
+
+// ── 2b. the board markers the sign plugin really paints ───────────────────
+//
+// The Living Boards are the one thing on this page that is written rather than
+// typed, and the whole vocabulary lives in the plugin: BoardKeys says which
+// boards exist and which of them have a leader, and SignBoards.MarkerRe says
+// what shape a marker has to be. None of that is remembered here.
+{
+  const feedCs = read('plugins/eilif-boards/src/BoardsFeed.cs');
+  const constOf = Object.fromEntries(
+    [...feedCs.matchAll(/internal const string (\w+)\s*=\s*"([a-z]+)"/g)].map((m) => [m[1], m[2]]),
+  );
+  const arrayOf = (name) => {
+    const block = new RegExp(
+      `internal static readonly string\\[\\] ${name}\\s*=\\s*\\{([^}]*)\\}`,
+    ).exec(feedCs);
+    ok(block, `BoardsFeed.cs still declares BoardKeys.${name} as a literal this test can read`);
+    return block[1]
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((sym) => {
+        ok(constOf[sym], `BoardKeys.${name} names ${sym}, which is a board key`);
+        return constOf[sym];
+      });
+  };
+
+  const allKeys = arrayOf('All');
+  const statKeys = arrayOf('Stats');
+  const leader = constOf.Leader;
+  ok(allKeys.length >= 8, `the feed carries every board (${allKeys.join(', ')})`);
+  ok(leader, 'BoardKeys still names the leader variant');
+
+  const signs = GAME_SHOUTS.filter((e) => e.how === 'sign');
+  ok(signs.length >= 1, `the register offers the board signs (${signs.length} entries)`);
+  const offered = new Set(
+    signs.flatMap((e) => [e.text, ...(e.also ?? [])]).map((s) => s.toLowerCase()),
+  );
+
+  // Every board a player can claim is on the page...
+  for (const k of allKeys) {
+    ok(offered.has(`[board:${k}]`), `the plugin paints [board:${k}] and the register offers it`);
+  }
+  for (const k of statKeys) {
+    ok(
+      offered.has(`[board:${k}:${leader}]`),
+      `[board:${k}] has a leader plaque and the register offers it`,
+    );
+  }
+  // ...and nothing is on the page that the plugin would leave as a player's own
+  // sign, which is the failure that teaches the crew a marker that does nothing.
+  for (const m of offered) {
+    const parsed = /^\[board:([a-z]+)(?::([a-z]+))?\]$/.exec(m);
+    ok(parsed, `${m} is written the way the marker regex reads it`);
+    ok(allKeys.includes(parsed[1]), `${m} names a board the feed carries`);
+    if (parsed[2]) {
+      ok(parsed[2] === leader, `${m} asks for the one variant there is`);
+      ok(statKeys.includes(parsed[1]), `${m} asks for it on a board that has a leader`);
+    }
+  }
+
+  // The two claims the copy makes about the shape of a marker.
+  const signCs = read('plugins/eilif-boards/src/SignBoards.cs');
+  const markerRe = /MarkerRe\s*=\s*new Regex\(@"([^"]+)",\s*RegexOptions\.IgnoreCase/.exec(signCs);
+  ok(markerRe, 'SignBoards.cs still declares the marker regex as a literal this test can read');
+  ok(
+    markerRe[1].startsWith('^') && markerRe[1].endsWith('$'),
+    'a marker must be the whole text of the sign, which is what the register tells a viking',
+  );
+
+  // And the cadence, which is two different numbers and the page says both.
+  const pluginCs = read('plugins/eilif-boards/src/EilifBoardsPlugin.cs');
+  const scan = /Config\.Bind\("Discovery", "ScanSeconds", (\d+)/.exec(pluginCs);
+  const poll = /Config\.Bind\("Feed", "PollSeconds", (\d+)/.exec(pluginCs);
+  ok(scan && Number(scan[1]) === 300, 'a new marker is found within about five minutes');
+  ok(poll && Number(poll[1]) === 60, 'and a claimed board redraws about once a minute');
+  const cadence = signs.map((e) => `${e.note ?? ''} ${e.what}`).join(' ');
+  ok(/five minutes/.test(cadence), 'and the register says the first of those');
+  ok(/once a minute/.test(cadence), 'and the second');
+
+  // Nothing here is shouted, and every one of these entries has to say so: the
+  // section they sit in is otherwise all /s.
+  for (const e of signs) {
+    ok(/never shouted/i.test(e.note ?? ''), `${e.id} tells a viking it is written, not shouted`);
+    ok(!e.text.startsWith('/s '), `${e.id} is not written as a shout`);
+  }
+  const inGame = COMMAND_SECTIONS.find((s) => s.id === 'in-the-game');
+  ok(inGame, 'the in-game section is still on the page');
+  ok(
+    !/every line below has to be shouted/i.test(inGame.subtitle),
+    'and its subtitle no longer claims that everything in it is shouted',
+  );
+  ok(/sign/i.test(inGame.subtitle), 'and it names the signs as the exception');
 }
 
 // ── 3. nothing behind a flag that ships off ────────────────────────────────
@@ -633,8 +731,9 @@ const indexSrc = read(`${BOT}/index.js`);
     src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
   const pageFiles = [
-    'app/commands/page.tsx',
+    'app/resources/page.tsx',
     ...readdirSync(repo('components/commands')).map((f) => `components/commands/${f}`),
+    ...readdirSync(repo('components/mods')).map((f) => `components/mods/${f}`),
   ];
   let pageStrings = 0;
   for (const f of pageFiles) {
@@ -701,8 +800,8 @@ const indexSrc = read(`${BOT}/index.js`);
   // The nav and the page list must not drift apart.
   const nav = read('components/NavBar.tsx');
   const hrefs = [...nav.matchAll(/href:\s*'([^']+)'/g)].map((m) => m[1]);
-  ok(hrefs.includes('/commands'), 'the nav carries the Commands tab');
-  ok(/label: 'Commands'/.test(nav), 'labelled Commands');
+  ok(hrefs.includes('/resources'), 'the nav carries the Resources tab');
+  ok(/label: 'Resources'/.test(nav), 'labelled Resources');
   for (const href of hrefs) {
     ok(
       SITE_PAGES.some((p) => p.text === href),
@@ -715,12 +814,73 @@ const indexSrc = read(`${BOT}/index.js`);
     ok(existsSync(repo(route)), `${p.text} is a real page (${route})`);
   }
 
+  // Mods and Commands merged into /resources on 2026-09-06. Both addresses were
+  // on the site for months and are in the pack notes and in Discord, so neither
+  // may 404: they are redirects now, and nothing may quietly re-create them as
+  // pages either, because a redirect is checked BEFORE the filesystem and the
+  // page would never be reached.
+  const config = read('next.config.ts');
+  for (const [gone, anchor] of [['/mods', '#mods'], ['/commands', '#commands']]) {
+    ok(!existsSync(repo(`app${gone}/page.tsx`)), `${gone} is no longer a page of its own`);
+    ok(
+      new RegExp(`source: '${gone}', destination: '/resources${anchor}', permanent: true`).test(
+        config,
+      ),
+      `${gone} redirects to /resources${anchor}, permanently`,
+    );
+  }
+
   // The page itself must render from the register rather than a second copy of
   // it, or this whole test grades a file nobody reads.
-  const page = read('app/commands/page.tsx');
-  ok(/from '@\/config\/commands'/.test(page), 'the page reads the register');
-  ok(/COMMAND_SECTIONS/.test(page), 'and walks its sections');
+  const page = read('app/resources/page.tsx');
+  const register = read('components/commands/RegisterSections.tsx');
+  ok(/from '@\/config\/commands'/.test(register), 'the register half reads the register');
+  ok(/COMMAND_SECTIONS/.test(register), 'and walks its sections');
+  ok(/COMMAND_SECTIONS/.test(page), 'and the page builds its jump links from the same sections');
   ok(/export const metadata/.test(page), 'and sets its own title and description');
+  for (const half of ['#mods', '#commands']) {
+    ok(page.includes(`id="${half.slice(1)}"`), `and it carries the ${half} anchor its redirect uses`);
+    // A reader who arrives from one of the two 308s lands mid-page. The jump
+    // row is the only thing that names where they are, so both halves are in
+    // it, not just the one that happens to be first.
+    ok(
+      new RegExp(`href: '${half}'`).test(page),
+      `and the jump row carries a chip for ${half}`,
+    );
+  }
+
+  // ITEM 40, ONE PER PAGE. The mention-and-popup instruction is true of the
+  // Discord group and of nothing else on this page: the shouts go into game
+  // chat and the board markers are written on a sign. It is said once, in the
+  // In Discord subtitle, and the page's own prose must not say it again in a
+  // card that sits above all four groups.
+  const discordSection = COMMAND_SECTIONS.find((x) => x.id === 'in-discord');
+  ok(/popup/i.test(discordSection.subtitle), 'the In Discord subtitle explains the mention');
+  ok(
+    /after the mention/i.test(discordSection.subtitle),
+    'and says there what a chip in that group copies',
+  );
+  for (const other of COMMAND_SECTIONS.filter((x) => x.id !== 'in-discord')) {
+    ok(
+      !/popup/i.test(other.subtitle),
+      `"${other.title}" does not repeat the popup instruction`,
+    );
+  }
+  const stripJsComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  for (const f of [
+    'app/resources/page.tsx',
+    'components/commands/RegisterSections.tsx',
+    'components/commands/CommandEntry.tsx',
+    'components/commands/RegistryRows.tsx',
+  ]) {
+    const prose = stripJsComments(read(f));
+    ok(!/popup/i.test(prose), `${f} leaves the popup instruction to the register`);
+    ok(
+      !/after the mention/i.test(prose),
+      `${f} does not tell every reader that what they copy follows a mention`,
+    );
+  }
 }
 
 for (const s of skips) console.log(`commands-page.test: SKIPPED ${s}`);

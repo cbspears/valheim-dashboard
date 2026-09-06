@@ -211,12 +211,12 @@ export function MapTimelapse() {
               {/* hover card */}
               <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-md border border-rune bg-pitch/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm group-hover:block">
                 <div className="font-display text-xs font-semibold tracking-wide text-gold-light">{l.name}</div>
-                <div className="mt-0.5 text-[11.5px] leading-relaxed text-ash-dim">
+                <div className="mt-0.5 text-xs leading-relaxed text-ash-dim">
                   {KIND_LABEL[l.kind]} · {pinVerb(l.kind)}{' '}
                   <span className="text-ash">{l.by}</span> · Day {l.day}
                 </div>
                 {DEMO_PLACE_PHOTOS[l.name] && (
-                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gold-dim">
+                  <div className="mt-0.5 flex items-center gap-1 text-xs text-gold">
                     <Camera size={11} /> {DEMO_PLACE_PHOTOS[l.name].length}{' '}
                     {DEMO_PLACE_PHOTOS[l.name].length === 1 ? 'photo' : 'photos'} — click to view
                   </div>
@@ -284,7 +284,7 @@ export function MapTimelapse() {
               ['trader', 'Trader'],
             ] as const
           ).map(([kind, label]) => (
-            <span key={kind} className="flex items-center gap-1.5 text-[11.5px] font-medium tracking-wide text-ash-dim">
+            <span key={kind} className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-ash-dim">
               <MarkerGlyph kind={kind} />
               {label}
             </span>
@@ -384,10 +384,10 @@ export function MapTimelapse() {
                         className="aspect-video w-full rounded-md border border-rune object-cover"
                       />
                       <figcaption className="mt-1 flex items-baseline justify-between gap-2 px-0.5">
-                        <span className="truncate text-[11px] text-ash-dim">
+                        <span className="truncate text-xs text-ash-dim">
                           {photo.caption ?? selected.name}
                         </span>
-                        <span className="shrink-0 text-[10px] text-muted">
+                        <span className="shrink-0 text-xs text-muted">
                           {photo.by} · Day {photo.day}
                         </span>
                       </figcaption>
@@ -400,7 +400,7 @@ export function MapTimelapse() {
                 </p>
               )}
               <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-muted">
-                <Camera size={13} className="mt-0.5 shrink-0 text-gold-dim" />
+                <Camera size={13} className="mt-0.5 shrink-0 text-gold" />
                 <span>
                   Post a screenshot in Discord, tag the bot, and name the place in your caption —
                   it lands in the Gallery and here.

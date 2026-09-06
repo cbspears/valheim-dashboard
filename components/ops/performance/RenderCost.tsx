@@ -77,7 +77,7 @@ export function RenderCost({
               valueText={`${Math.round(cost.fetchMs)} ms of ${cost.budgetMs} ms (${formatPercent(fraction)})`}
             />
             {cachedGroups.length > 0 && (
-              <ul className="space-y-0.5 text-[11px] text-muted">
+              <ul className="space-y-0.5 text-xs text-muted">
                 {cachedGroups.map((g) => (
                   <li key={g.label}>
                     {g.label}: measured{' '}

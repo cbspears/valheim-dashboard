@@ -18,7 +18,7 @@ function PlaceTag({ name }: { name: string }) {
     <Link
       href="/map"
       onClick={(e) => e.stopPropagation()}
-      className="gold-ring inline-flex max-w-full items-center gap-1 rounded-full border border-gold-dim/50 bg-gold/10 px-2 py-0.5 text-[11px] font-medium text-gold-light transition-colors hover:border-gold hover:bg-gold/20"
+      className="gold-ring inline-flex max-w-full items-center gap-1 rounded-full border border-gold-dim/50 bg-gold/10 px-2 py-0.5 text-xs font-medium text-gold-light transition-colors hover:border-gold hover:bg-gold/20"
       title={`See ${name} on the map`}
     >
       <MapPin size={11} className="shrink-0" />
@@ -94,7 +94,7 @@ export function PhotoGrid({ photos }: { photos: CreditedPhoto[] }) {
               {p.pin?.name && <PlaceTag name={p.pin.name} />}
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-ash">
-                  <User size={12} className="shrink-0 text-gold-dim" />
+                  <User size={12} className="shrink-0 text-gold" />
                   <VikingLink
                     name={p.matchedViking}
                     className="gold-ring truncate rounded-sm transition-colors hover:text-gold-light"

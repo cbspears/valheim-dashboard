@@ -28,7 +28,7 @@ export function GreatDeedsCard({ summary }: { summary: MilestoneSummary }) {
             href="/world"
             className="gold-ring inline-flex items-center gap-1 rounded text-xs font-medium text-gold-light hover:text-gold-light/80"
           >
-            The ledger <ArrowRight size={13} />
+            The full ledger <ArrowRight size={13} />
           </Link>
         }
       />

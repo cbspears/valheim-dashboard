@@ -57,12 +57,12 @@ export function Hearth({
   return (
     <Card glow={state === 'lively'}>
       <CardHeader
-        title="The Hearth"
+        title="Who is on now"
         icon={<Flame size={16} />}
         action={
           typeof worldDay === 'number' && worldDay > 0 && state !== 'sleeping' ? (
             <span className="flex items-center gap-1.5 text-xs text-muted">
-              <Sun size={12} className="text-gold-dim" />
+              <Sun size={12} className="text-gold" />
               Day {worldDay}
             </span>
           ) : undefined

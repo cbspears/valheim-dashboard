@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Compass, Users, Globe2 } from 'lucide-react';
+import { Compass, Home } from 'lucide-react';
 import { Card, CardBody, SectionHeader, EmptyState } from '@/components/ui';
 import { PageHeader } from '@/components/art/PageHeader';
 import { SERVER_NAME } from '@/config/server';
@@ -19,6 +19,7 @@ export default function NotFound() {
     <div className="flex flex-col gap-8">
       <PageHeader slot="events">
         <SectionHeader
+          as="h1"
           title="Page not found"
           subtitle="The skald knows no such tale. Try one of the paths below."
           icon={<Compass size={22} />}
@@ -33,20 +34,23 @@ export default function NotFound() {
             message={`The link may be old, or a name may be misspelled. Everything in ${SERVER_NAME} is one of these two doors away.`}
           />
 
+          {/* The two doors are the two a lost reader most likely wants: the
+              way in, and the front page. They used to be the Vikings and the
+              World, neither of which helps someone who has not joined yet. */}
           <div className="flex flex-wrap items-center justify-center gap-3 pb-6">
             <Link
-              href="/players"
+              href="/get-started"
               className="gold-ring inline-flex items-center gap-2 rounded-md bg-gold px-5 py-3 font-display text-base tracking-wide text-night transition-colors hover:bg-gold-light"
             >
-              <Users size={17} />
-              The Vikings
+              <Compass size={17} />
+              Get Started
             </Link>
             <Link
-              href="/world"
+              href="/"
               className="gold-ring inline-flex items-center gap-2 rounded-md border border-gold-dim/60 bg-gold/10 px-4 py-2.5 text-sm font-medium text-gold-light transition-colors hover:bg-gold/20"
             >
-              <Globe2 size={15} />
-              The World
+              <Home size={15} />
+              The Hall
             </Link>
           </div>
         </CardBody>

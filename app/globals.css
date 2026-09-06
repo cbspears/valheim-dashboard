@@ -25,7 +25,14 @@
   /* Text — warm parchment on the cool ground (hearth-light contrast) */
   --color-ash: #e7dccb;
   --color-ash-dim: #aea796;
-  --color-muted: #6b7585;
+  /*
+    The quiet grey, used in roughly 360 places. It was #6b7585, which measures
+    4.17:1 on night, 3.92:1 on surface and 3.47:1 on surface-raised — under the
+    4.5:1 AA floor on all three. #7f8898 is the same hue at 5.44 / 5.12 / 4.52
+    and passes everywhere. Measured with the relative-luminance formula from
+    WCAG 2.2 SC 1.4.3; do not darken it again without re-measuring.
+  */
+  --color-muted: #7f8898;
 
   /* Status / event colors */
   --color-online: #5aa86a;
@@ -166,13 +173,71 @@ body {
   outline-offset: 2px;
 }
 
-/* Pulsing online dot */
+/*
+  Tailwind's `transition-colors` includes outline-color, so on a nav tab the
+  focus ring faded in over 150ms instead of appearing the instant the key was
+  pressed. Naming the properties here (everything transition-colors carries,
+  minus outline-color) makes the ring instant and leaves the rest of the
+  hover fades alone. Unlayered, so it wins over the utility.
+*/
+.gold-ring {
+  transition-property: color, background-color, border-color,
+    text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter,
+    backdrop-filter;
+}
+
+/*
+  Inline links inside a run of text. Colour alone separated them from body copy
+  at 1.76:1 on the story feed, well under the 3:1 that lets colour carry the
+  distinction on its own, so they now carry an underline at rest and brighten
+  it on hover. For links inside sentences only — nav tabs, chips and card
+  actions are separated by box and position and must not take this.
+*/
+.prose-link {
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-gold-dim) 60%, transparent);
+  text-underline-offset: 2px;
+}
+.prose-link:hover {
+  text-decoration-color: var(--color-gold);
+}
+
+/* Pulsing online dot. The static ring is the whole look when motion is not
+   welcome; the animation only exists inside the no-preference query. */
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 0 0 rgba(111, 220, 134, 0.5); }
   50% { box-shadow: 0 0 0 5px rgba(111, 220, 134, 0); }
 }
 .online-pulse {
-  animation: pulse-glow 2.2s infinite;
+  box-shadow: 0 0 0 2px rgba(111, 220, 134, 0.28);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .online-pulse {
+    box-shadow: none;
+    animation: pulse-glow 2.2s infinite;
+  }
+}
+
+/*
+  The Tailwind motion utilities carry their own keyframes and none of them read
+  the reduced-motion preference. Stop them all at the door.
+
+  One exception, and it is the reason for the attribute: motion that IS the
+  message. Every use of these utilities on the public site is a decorative
+  pulsing dot, but the ops cockpit spins its refresh icon to say a request is
+  in flight, and freezing that would be removing information rather than
+  removing decoration. Mark such a case `data-motion="essential"` and it keeps
+  moving; nothing else does. WCAG 2.2 SC 2.2.2 exempts motion that is essential
+  for exactly this reason.
+*/
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse:not([data-motion='essential']),
+  .animate-ping:not([data-motion='essential']),
+  .animate-spin:not([data-motion='essential']),
+  .animate-bounce:not([data-motion='essential']) {
+    animation: none !important;
+  }
 }
 
 /* ------------------------------------------------------------------ */

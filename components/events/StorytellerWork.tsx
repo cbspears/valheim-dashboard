@@ -25,7 +25,15 @@ export function StorytellerWork({ entries }: { entries: StorytellerEntry[] }) {
         <EmptyState
           icon={<Feather size={28} />}
           title="No tale has been written yet."
-          message="The Storyteller's quill is dry."
+          message="The Storyteller's quill is dry. Every night the warband sets down in its own words lands here."
+          action={
+            <Link
+              href="/events"
+              className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+            >
+              What happened on those nights
+            </Link>
+          }
         />
       </Card>
     );
@@ -59,7 +67,7 @@ function Prose({ text }: { text: string }) {
 function Byline({ by }: { by: string }) {
   return (
     <figcaption className="mt-3 text-xs uppercase tracking-wider text-muted">
-      Told by <span className="text-gold-dim">{by}</span>
+      Told by <span className="text-gold">{by}</span>
     </figcaption>
   );
 }
@@ -67,7 +75,7 @@ function Byline({ by }: { by: string }) {
 function TaleCard({ e }: { e: Extract<StorytellerEntry, { kind: 'tale' }> }) {
   return (
     <Card className="p-5">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] font-medium uppercase tracking-[0.18em] text-gold-dim">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs font-medium uppercase tracking-[0.18em] text-gold">
         <span className="inline-flex items-center gap-1.5">
           <Feather size={12} />
           A tale of the hall
@@ -88,7 +96,7 @@ function TaleCard({ e }: { e: Extract<StorytellerEntry, { kind: 'tale' }> }) {
 function TellingCard({ e }: { e: Extract<StorytellerEntry, { kind: 'telling' }> }) {
   return (
     <Card className="p-5">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] font-medium uppercase tracking-[0.18em] text-gold-dim">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs font-medium uppercase tracking-[0.18em] text-gold">
         <span className="inline-flex items-center gap-1.5">
           <Swords size={12} />
           A telling of a fall

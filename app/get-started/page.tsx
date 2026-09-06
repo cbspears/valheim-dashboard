@@ -18,6 +18,7 @@ import {
   MessageCircle,
   ExternalLink,
   Ship,
+  ShieldCheck,
   TriangleAlert,
   ScrollText,
 } from 'lucide-react';
@@ -37,7 +38,7 @@ import {
 
 export const metadata: Metadata = {
   title: 'Get Started',
-  description: `New to ${SERVER_NAME}? Log on and install the mods in five steps, then the rituals that put you on the map.`,
+  description: `New to ${SERVER_NAME}? Install the mods, then join. About 15 minutes, no experience needed. Then two things to do once you are in.`,
 };
 
 // Direct installer links so nobody has to navigate a GitHub releases page.
@@ -111,11 +112,14 @@ function Platform({
   return (
     <Card className="flex h-full flex-col">
       <CardBody className="flex flex-1 flex-col gap-3">
+        {/* h3, not h4: these cards sit directly under the "Notes for your
+            platform" h2, so an h4 skipped a level in the document outline. The
+            size is set by the class, not the tag. */}
         <div className="flex items-center justify-between gap-2">
-          <h4 className="flex items-center gap-2 font-display text-base text-ash">
+          <h3 className="flex items-center gap-2 font-display text-base text-ash">
             <span className="text-gold-light">{icon}</span>
             {name}
-          </h4>
+          </h3>
           <Badge tone={tone}>{difficulty}</Badge>
         </div>
         <div className="space-y-2 text-sm leading-relaxed text-ash-dim">{children}</div>
@@ -142,7 +146,7 @@ function Ext({ href, children }: { href: string; children: ReactNode }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light hover:underline"
+      className="prose-link gold-ring inline-flex items-center gap-1 rounded font-medium text-gold-light"
     >
       {children}
       <ExternalLink size={12} />
@@ -160,7 +164,7 @@ function PackCode() {
   }
   return (
     <span className="inline-flex flex-wrap items-center gap-2 align-middle">
-      <CopyChip value={MODPACK_PROFILE_CODE} />
+      <CopyChip value={MODPACK_PROFILE_CODE} describe="the modpack code" />
       <span className="text-xs text-muted">{MODPACK_VERSION_LABEL}</span>
     </span>
   );
@@ -186,13 +190,35 @@ export default function GetStartedPage() {
       {/* Only rendered when config/server.ts LAUNCH_NOTICE is set. */}
       <LaunchNotice />
 
-      <PageHeader slot="get-started">
-        <SectionHeader
-          title="Get Started"
-          subtitle={`New to ${SERVER_NAME}? Log on and install the mods in five steps. About 15 minutes, no experience needed. Then the two things to do once you're in.`}
-          icon={<Compass size={22} />}
-        />
-      </PageHeader>
+      {/* The band is deliberately shorter here than anywhere else: this is a
+          task page, and the full-height art pushed the first real instruction
+          below the fold. The wrapper overrides PageHeader's own min-heights
+          without changing the shared component.
+
+          Phones keep PageHeader's own 160px. The band is a fixed box: its
+          content is `absolute inset-0 ... justify-end` inside `overflow-hidden`,
+          so anything taller than the box is clipped off the TOP, and at 320px a
+          140px band left only 9px of headroom above the heading: one more
+          wrapped subtitle line, or a reader's enlarged font, and the word
+          "Get Started" would be sliced. 140px is what item 12 asks for and
+          what it measured (1440x900), so it applies from `sm` up.
+
+          The selector keys on `div.relative` deliberately. PageHeader positions
+          its scrim and its heading with `absolute inset-0`, so `relative` on its
+          root is load-bearing and cannot be dropped without breaking the
+          component itself; and when the art manifest is empty PageHeader returns
+          its children bare, where SectionHeader's root (`div.mb-5`, not
+          relative) must NOT pick up a min-height. */}
+      <div className="[&>div.relative]:min-h-[160px] sm:[&>div.relative]:min-h-[140px]">
+        <PageHeader slot="get-started">
+          <SectionHeader
+            as="h1"
+            title="Get Started"
+            subtitle={`New to ${SERVER_NAME}? Install the mods, then join. About 15 minutes, no experience needed. Then two things to do once you are in.`}
+            icon={<Compass size={22} />}
+          />
+        </PageHeader>
+      </div>
 
       {/* ══════════════ SECTION A — SERVER INFO ══════════════ */}
       <section>
@@ -205,7 +231,7 @@ export default function GetStartedPage() {
               <p className="text-xs uppercase tracking-wider text-muted">Server address</p>
               {SERVER_ADDRESS ? (
                 <div className="mt-1.5">
-                  <CopyChip value={SERVER_ADDRESS} />
+                  <CopyChip value={SERVER_ADDRESS} describe="the server address" />
                 </div>
               ) : (
                 <p className="mt-1 text-sm text-ash">shared in Discord</p>
@@ -214,16 +240,17 @@ export default function GetStartedPage() {
             <div>
               <p className="text-xs uppercase tracking-wider text-muted">Password</p>
               <div className="mt-1.5">
-                <CopyChip value={SERVER_PASSWORD} />
+                <CopyChip value={SERVER_PASSWORD} describe="the server password" />
               </div>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wider text-muted">How to connect</p>
+              <p className="text-xs uppercase tracking-wider text-muted">Who can join</p>
               <p className="mt-1 text-sm text-ash">
                 Steam only (Windows, Mac, Linux).{' '}
                 <span className="text-ash-dim">
                   Xbox, PlayStation, Switch and Game Pass can&apos;t join: the mods need Steam and
-                  crossplay is off.
+                  crossplay is off. If you only have a console, say so{' '}
+                  {discord ? <Ext href={discord}>in Discord</Ext> : 'in Discord'}.
                 </span>
               </p>
             </div>
@@ -233,24 +260,33 @@ export default function GetStartedPage() {
 
       {/* ══════════════ SECTION B — QUICK START ══════════════ */}
       <section>
-        <SectionTitle icon={<Compass size={20} />}>
-          Quick start: install the mods &amp; log on{' '}
-          <span className="font-body text-xs font-normal tracking-normal text-muted">
-            (prefer to install mods by hand? see the{' '}
-            <Link href="/mods" className="text-gold-light hover:underline">
-              Mods page
-            </Link>
-            )
-          </span>
-        </SectionTitle>
+        <SectionTitle icon={<Compass size={20} />}>Install the mods and join</SectionTitle>
+        <p className="-mt-2 mb-4 text-sm text-muted">About 15 minutes.</p>
 
         <Card>
           <CardBody>
+            {/* The Mac fork, at the point of decision. It used to be one dim
+                clause under the Windows download button, 2,450 px above the
+                Mac section it referred to. */}
+            <div className="mb-6 flex items-start gap-3 rounded-md border border-gold-dim/60 bg-gold/5 px-4 py-3">
+              <Laptop size={16} className="mt-0.5 shrink-0 text-gold" />
+              <p className="text-sm leading-relaxed text-ash-dim">
+                On a Mac? r2modman does not run on macOS.{' '}
+                <a
+                  href="#mac-setup"
+                  className="prose-link gold-ring rounded font-medium text-gold-light"
+                >
+                  Jump to the Mac setup
+                </a>
+                .
+              </p>
+            </div>
+
             <ol className="space-y-6">
               <Step n={1} title="Install the mod manager" icon={<Package size={16} />}>
                 <p>
                   r2modman is the free app that installs and manages all the mods for you, on
-                  Windows and Linux. There&apos;s no Mac version.
+                  Windows and Linux.
                 </p>
                 <div className="flex flex-wrap items-center gap-3 py-1.5">
                   <a
@@ -270,12 +306,14 @@ export default function GetStartedPage() {
                 </div>
                 <p className="text-xs text-muted">
                   The download starts right away. Run the installer, click through it, and open
-                  r2modman. It keeps itself updated from then on. On a Mac, use the Apple Silicon
-                  setup below instead.{' '}
+                  r2modman. It keeps itself updated from then on.{' '}
                   <Ext href={R2MODMAN_ALL_URL}>All downloads</Ext>
                 </p>
                 <p className="text-xs text-muted">
                   It sets up BepInEx (the mod loader) for you, so you never touch that by hand.
+                </p>
+                <p className="text-xs text-muted">
+                  You are done when r2modman opens and shows its list of games.
                 </p>
               </Step>
 
@@ -285,6 +323,12 @@ export default function GetStartedPage() {
                   and click <span className="text-ash">Select game</span>. If it asks which store,
                   pick <span className="text-ash">Steam</span>. That lands you on the profile
                   screen. Stay there, the next step happens on it.
+                </p>
+                {/* The plan's wording was "the Eilif profile list"; the profile
+                    named Eilif does not exist until step 3, so this names what
+                    is actually on screen at the end of step 2. */}
+                <p className="text-xs text-muted">
+                  You are done when r2modman shows the Valheim profile list.
                 </p>
               </Step>
 
@@ -300,6 +344,10 @@ export default function GetStartedPage() {
                     <div className="py-0.5">
                       <PackCode />
                     </div>
+                    <p className="text-xs text-muted">
+                      This is the current code. Use it now. When the pack changes, this code changes
+                      here too and we announce it in Discord.
+                    </p>
                     <p>
                       It lists the mods it is about to install. Click{' '}
                       <span className="text-ash">Import</span>. When it asks for a profile name,
@@ -309,15 +357,28 @@ export default function GetStartedPage() {
                       you&apos;re done here.
                     </p>
                     <p className="text-xs text-muted">
+                      You are done when the profile {SERVER_NAME} shows{' '}
+                      <span className="text-ash-dim">Installed</span> with the mod list.
+                    </p>
+                    <p className="text-xs text-muted">
                       Updating to a newer pack code later? Use{' '}
                       <span className="text-ash">How to update your mods</span> further down this
                       page. It is a different button, and it keeps you on one profile.
+                    </p>
+                    {/* The escape hatch that used to live inside the section
+                        heading, where it competed with the heading itself. */}
+                    <p className="text-xs text-muted">
+                      Prefer to install mods by hand? The{' '}
+                      <Link href="/resources#mods" className="prose-link text-gold-light">
+                        Resources page
+                      </Link>{' '}
+                      lists every one at the version the server runs.
                     </p>
                   </>
                 ) : (
                   <p>
                     In r2modman, search for and install each mod listed in{' '}
-                    <Link href="/mods" className="text-gold-light hover:underline">
+                    <Link href="/resources#mods" className="prose-link text-gold-light">
                       the mod list
                     </Link>
                     . The manager keeps the versions matched. A shared one-click code is coming
@@ -332,6 +393,10 @@ export default function GetStartedPage() {
                   <strong className="text-ash-dim">not</strong>
                   {' '}Steam&apos;s normal Play button. Let Valheim load, then pick your character.
                 </p>
+                <p className="text-xs text-muted">
+                  You are done when the Valheim main menu shows the BepInEx console text in the
+                  corner. If the menu looks completely normal, you launched vanilla.
+                </p>
               </Step>
 
               <Step n={5} title={`Join ${SERVER_NAME}`} icon={<LogIn size={16} />}>
@@ -341,7 +406,7 @@ export default function GetStartedPage() {
                 </p>
                 <div className="py-0.5">
                   {SERVER_ADDRESS ? (
-                    <CopyChip value={SERVER_ADDRESS} />
+                    <CopyChip value={SERVER_ADDRESS} describe="the server address" />
                   ) : (
                     <span className="text-ash">the address shared in Discord</span>
                   )}
@@ -351,9 +416,15 @@ export default function GetStartedPage() {
                   <span className="text-ash">Connect</span>, and enter the password:
                 </p>
                 <div className="py-0.5">
-                  <CopyChip value={SERVER_PASSWORD} />
+                  <CopyChip value={SERVER_PASSWORD} describe="the server password" />
                 </div>
-                <p>Welcome to {SERVER_NAME}. 🛡️</p>
+                <p className="text-xs text-muted">
+                  You are done when the world loads and you can see other names in the player list.
+                </p>
+                <p className="flex items-center gap-2 font-display text-base tracking-wide text-gold-light">
+                  <ShieldCheck size={17} className="shrink-0 text-gold" />
+                  Welcome to {SERVER_NAME}.
+                </p>
               </Step>
             </ol>
           </CardBody>
@@ -361,7 +432,8 @@ export default function GetStartedPage() {
       </section>
 
       {/* ══════════════ SECTION B2 — MAC (APPLE SILICON) ══════════════ */}
-      <section>
+      {/* id: the Mac callout above step 1 jumps here. */}
+      <section id="mac-setup" className="scroll-mt-20">
         <SectionTitle icon={<Laptop size={20} />}>On a Mac? Apple Silicon setup</SectionTitle>
 
         <Card className="border-l-2 border-l-gold-dim">
@@ -373,15 +445,23 @@ export default function GetStartedPage() {
             </p>
 
             <div className="flex flex-wrap items-center gap-3 py-3">
+              {/* Ghost treatment, matching the Linux button. Only one filled
+                  gold button exists on this page at a time, and it is the one
+                  most players need. */}
               <a
                 href={MACHEIM_APPLE_SILICON_URL}
-                className="gold-ring inline-flex items-center gap-2.5 rounded-md bg-gold px-5 py-3 font-display text-base tracking-wide text-night transition-colors hover:bg-gold-light"
+                className="gold-ring inline-flex items-center gap-1.5 rounded-md border border-gold-dim/60 bg-gold/10 px-3.5 py-2 text-sm font-medium text-gold-light transition-colors hover:bg-gold/20"
               >
-                <Download size={18} />
+                <Download size={14} />
                 Download Macheim (Apple Silicon)
               </a>
               <Ext href={MACHEIM_ALL_URL}>All downloads (incl. Intel Mac)</Ext>
             </div>
+
+            <p className="text-xs text-muted">
+              On an Intel Mac, take the Intel build from All downloads and follow the same steps.
+              Rosetta is not part of it: an Intel Mac already runs the game the mods were built for.
+            </p>
 
             <ol className="mt-1 space-y-2.5 text-sm leading-relaxed text-ash-dim">
               <li>
@@ -394,7 +474,14 @@ export default function GetStartedPage() {
                 blocked because Macheim isn&apos;t signed. Open{' '}
                 <span className="text-ash">Terminal</span>, run this, then open Macheim:
                 <span className="mt-1.5 block">
-                  <CopyChip value="xattr -cr /Applications/Macheim.app" />
+                  <CopyChip
+                    value="xattr -cr /Applications/Macheim.app"
+                    describe="the command that unlocks Macheim"
+                  />
+                </span>
+                <span className="mt-1 block text-xs text-muted">
+                  This clears the quarantine flag macOS puts on anything you download. It changes
+                  nothing else, and you only run it once.
                 </span>
                 <span className="mt-1 block text-xs text-muted">
                   Still blocked? System Settings → Privacy &amp; Security → Open Anyway.
@@ -434,8 +521,8 @@ export default function GetStartedPage() {
                 <span className="mt-1 block text-xs text-muted">
                   The server checks your ValheimPlus and AzuCraftyBoxes against its own, so a newer
                   copy is turned away at the door. The{' '}
-                  <Link href="/mods" className="text-gold-light hover:underline">
-                    Mods page
+                  <Link href="/resources#mods" className="prose-link text-gold-light">
+                    Resources page
                   </Link>{' '}
                   always carries the current list.
                 </span>
@@ -444,7 +531,7 @@ export default function GetStartedPage() {
                   <a
                     href={CONFIG_BUNDLE_URL}
                     download
-                    className="gold-ring rounded font-medium text-gold-light hover:underline"
+                    className="prose-link gold-ring rounded font-medium text-gold-light"
                   >
                     {SERVER_NAME} config bundle
                   </a>{' '}
@@ -475,6 +562,20 @@ export default function GetStartedPage() {
                 expect it to strain on raids and big bases.
               </p>
             </div>
+
+            {/* The Mac path used to end on those two caveats, with nothing to
+                say it was finished and no route to the rites. */}
+            <p className="mt-4 border-t border-rune pt-4 font-display text-base tracking-wide text-gold-light">
+              <ShieldCheck size={17} className="mr-2 inline-block align-[-3px] text-gold" />
+              Welcome to {SERVER_NAME}. Now do the{' '}
+              <a
+                href="#once-you-are-in"
+                className="gold-ring rounded text-gold-light prose-link"
+              >
+                two things below
+              </a>
+              .
+            </p>
           </CardBody>
         </Card>
       </section>
@@ -482,12 +583,13 @@ export default function GetStartedPage() {
       {/* ══════════════ VISUAL BREAK ══════════════ */}
       <div className="flex items-center gap-4" aria-hidden="true">
         <span className="h-px flex-1 bg-gradient-to-r from-transparent to-gold-dim/50" />
-        <Anchor size={18} className="text-gold-dim" />
+        <Anchor size={18} className="text-gold" />
         <span className="h-px flex-1 bg-gradient-to-l from-transparent to-gold-dim/50" />
       </div>
 
       {/* ══════════════ PART TWO — NOW THAT YOU'RE ASHORE ══════════════ */}
-      <section>
+      {/* id: the Mac path's closing line jumps here. */}
+      <section id="once-you-are-in" className="scroll-mt-20">
         <SectionTitle icon={<ScrollText size={20} />}>
           Once you&apos;re in, do these two things
         </SectionTitle>
@@ -533,10 +635,18 @@ export default function GetStartedPage() {
                   <li>
                     <span className="font-mono text-xs text-gold-light">3.</span> In game, open chat
                     and <strong className="text-ash-dim">shout</strong> it, rune first:
+                    {/* The shape to type, then the part a chip can actually
+                        give you. The chip used to be labelled with the whole
+                        shape and copy only the first two words, so what landed
+                        in the clipboard was not what the button said. */}
+                    <span className="mt-1.5 block font-mono text-xs text-ash">
+                      /s /oath RUNE your vow, one line
+                    </span>
                     <span className="mt-1.5 block">
-                      <CopyChip value="/s /oath " label="/s /oath RUNE your vow, one line" />
+                      <CopyChip value="/s /oath " describe="the start of the oath shout" />
                     </span>
                     <span className="mt-1 block text-xs text-muted">
+                      The chip copies the first two words. Type your rune and your vow after them.
                       It must be a shout, so lead with{' '}
                       <span className="font-mono text-xs">/s</span>. Plain chat never leaves the
                       campfire.
@@ -546,9 +656,8 @@ export default function GetStartedPage() {
                 <p className="text-xs text-muted">
                   Re-swear anytime with{' '}
                   <span className="font-mono text-xs text-ash-dim">/s /oath your new vow</span>{' '}in
-                  game. Your latest oath replaces the last. Read the charter and see who&apos;s
-                  sworn on the{' '}
-                  <Link href="/oath" className="text-gold-light hover:underline">
+                  game. Your latest oath replaces the last. See who&apos;s sworn on the{' '}
+                  <Link href="/oath" className="prose-link text-gold-light">
                     Oath page
                   </Link>
                   .
@@ -558,8 +667,8 @@ export default function GetStartedPage() {
               <Step n={2} title="Turn on your location" icon={<MapPin size={16} />}>
                 <p>
                   Open the map (<span className="font-mono text-xs text-ash">M</span>) and enable{' '}
-                  <span className="text-ash">Share position</span> (bottom-left) so the warband can
-                  find you in the world.
+                  <span className="text-ash">Share position</span> (bottom-left) so other vikings
+                  can see you on the map.
                 </p>
               </Step>
             </ol>
@@ -567,8 +676,8 @@ export default function GetStartedPage() {
             <p className="mt-6 border-t border-rune pt-4 text-xs text-muted">
               That is the whole rite. Everything else {SERVER_NAME} answers to, in Discord and in
               game, and every notice it sends back, is listed on the{' '}
-              <Link href="/commands" className="text-gold-light hover:underline">
-                Commands page
+              <Link href="/resources#commands" className="prose-link text-gold-light">
+                Resources page
               </Link>
               .
             </p>
@@ -651,7 +760,7 @@ export default function GetStartedPage() {
             <p>
               Valheim runs natively. Download the r2modman AppImage and make it executable
               (right-click → Properties → Permissions → Allow executing, or{' '}
-              <span className="font-mono text-[11px]">chmod +x</span>), then run it and import the
+              <span className="font-mono text-xs">chmod +x</span>), then run it and import the
               code exactly as above.
             </p>
             <p>

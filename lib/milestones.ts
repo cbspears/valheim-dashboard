@@ -265,24 +265,38 @@ export interface MetricInfo {
   description: string;
 }
 
-export const METRIC_INFO: Record<string, MetricInfo> = {
+export const METRIC_INFO = {
   sail_total: { label: 'Distance sailed', description: "every viking's sailing combined" },
   walk_run_total: { label: 'Distance on foot', description: 'walking and running, all vikings' },
   deaths_total: { label: 'Deaths', description: 'every viking who has fallen' },
   kills_total: { label: 'Foes slain', description: 'every kill, all vikings' },
   boss_kills_total: { label: 'Bosses slain', description: 'the Forsaken felled, one by one' },
   damage_total: { label: 'Damage dealt', description: 'every point of damage dealt, all vikings' },
-  resources_total: { label: 'Resources gathered', description: 'everything harvested by the crew' },
-  crafts_total: { label: 'Items crafted', description: "everything shaped by the crew's own hands" },
+  resources_total: { label: 'Resources gathered', description: 'everything the warband has harvested' },
+  crafts_total: { label: 'Items crafted', description: 'everything the warband has shaped by hand' },
   builds_total: { label: 'Pieces built', description: 'every piece placed, all vikings' },
-  playtime_total_hours: { label: 'Hours lived in the world', description: 'combined time played' },
-  explored_avg_pct: { label: 'Map explored', description: "clan average across every viking's map" },
+  // The label says the number plainly; "lived in the world" is flavour, and the
+  // doctrine puts flavour in the line underneath, not in the label.
+  playtime_total_hours: {
+    label: 'Hours played',
+    description: 'combined time every viking has lived in this world',
+  },
+  explored_avg_pct: { label: 'Map explored', description: "warband average across every viking's map" },
   fish_total: { label: 'Fish caught', description: 'every catch landed, all vikings' },
-};
+} satisfies Record<string, MetricInfo>;
+
+/**
+ * The keys of the register. `satisfies` above keeps the literal key union alive
+ * so a page that hand-writes a metric key (the /players boards, the /viking stat
+ * tiles) can be typed against it. Without that the fallback below quietly ships
+ * a raw database column name to players as a board title, which is exactly the
+ * drift the one-register change was made to end.
+ */
+export type MetricKey = keyof typeof METRIC_INFO;
 
 /** Plain label + description for a metric key; falls back to the raw key if unmapped. */
 export function metricInfo(metric: string): MetricInfo {
-  return METRIC_INFO[metric] ?? { label: metric, description: '' };
+  return (METRIC_INFO as Record<string, MetricInfo>)[metric] ?? { label: metric, description: '' };
 }
 
 // ── per-metric "chains" (tiered deeds grouped under one tracker) ───────────

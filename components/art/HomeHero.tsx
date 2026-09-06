@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import Image from 'next/image';
 import { art, isTitleBakedIn, HEADER_ART } from '@/config/art';
+import { SERVER_NAME } from '@/config/server';
 
 /**
  * Full-width home hero.
@@ -30,8 +31,16 @@ export function HomeHero({
   const hero = art(HEADER_ART.hero); // 02 — 21:9, title baked in
   const heroSmall = art(HEADER_ART.heroSmall); // 07 — 16:9, clean text space
 
-  // No art at all → current hero, untouched.
-  if (!hero && !heroSmall) return <>{fallback}</>;
+  // No art at all → current hero, untouched (plus the page's own heading, which
+  // the banner image cannot supply).
+  if (!hero && !heroSmall) {
+    return (
+      <>
+        <HallTitle />
+        {fallback}
+      </>
+    );
+  }
 
   // Prefer the baked-in 21:9 title card for large screens; fall back to the
   // small asset if only it is present.
@@ -42,6 +51,8 @@ export function HomeHero({
 
   return (
     <div className="overflow-hidden rounded-[var(--radius-card)] border border-gold-dim/40 shadow-[0_0_50px_-14px_rgba(200,149,42,0.45)]">
+      <HallTitle />
+
       {/* Small screens: 16:9 crop, tuned to keep the subject framed. */}
       <div className="relative aspect-video w-full sm:hidden">
         <Image
@@ -78,16 +89,32 @@ export function HomeHero({
 }
 
 /**
+ * The Hall's page heading. The name is painted into the hero art at both
+ * breakpoints, so on screen it is already there; this is the same word as real
+ * text, so a screen reader, a crawler and the document outline all get a page
+ * title instead of a picture. It renders on every path and at every width, and
+ * it is the only `h1` on the Hall.
+ */
+function HallTitle() {
+  return <h1 className="sr-only">{SERVER_NAME}</h1>;
+}
+
+/**
  * Fallback title overlay — only used when a hero asset does NOT have the title
- * baked in (i.e. asset 07). Mirrors the existing engraved type treatment.
+ * baked in (i.e. asset 07). Mirrors the existing engraved type treatment. The
+ * word is decorative here: `HallTitle` above carries the heading itself, so
+ * this must not be a heading too.
  */
 function HeroTitleOverlay() {
   return (
     <div
       className="absolute inset-0 flex flex-col items-center justify-center text-center"
+      aria-hidden
       style={{ background: 'linear-gradient(rgba(6,8,12,0.15), rgba(6,8,12,0.65))' }}
     >
-      <h1 className="heading-engraved px-4 text-4xl text-ash sm:text-5xl lg:text-6xl">Eilif</h1>
+      <span className="heading-engraved px-4 text-4xl text-ash sm:text-5xl lg:text-6xl">
+        {SERVER_NAME}
+      </span>
     </div>
   );
 }

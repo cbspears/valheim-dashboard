@@ -1,5 +1,5 @@
-// The server's mod list. Edit this file to update the Mods page — the dashboard
-// reads it directly (no database needed). Push to redeploy.
+// The server's mod list. Edit this file to update the mod half of /resources —
+// the dashboard reads it directly (no database needed). Push to redeploy.
 //
 // Source of truth: verified against the live server boot log 2026-08-27 (see Obsidian note
 // `05-Server/Mods/Selected-Mods.md`), server-side versions re-checked against the

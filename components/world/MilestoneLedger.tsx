@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Trophy } from 'lucide-react';
 import { Card, CardBody, EmptyState } from '@/components/ui';
 import { shortDate } from '@/lib/format';
@@ -55,6 +56,14 @@ export function EarnedDeeds({ summary }: { summary: MilestoneSummary }) {
                 ? NOTHING_TRACKED_MESSAGE
                 : "The first deed is still ahead, and every viking's tally counts toward it."
             }
+            action={
+              <Link
+                href="/get-started"
+                className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+              >
+                Get Started
+              </Link>
+            }
           />
         ) : (
           <ul className="divide-y divide-rune">
@@ -62,10 +71,19 @@ export function EarnedDeeds({ summary }: { summary: MilestoneSummary }) {
               <li key={m.id} className="px-5 py-3.5">
                 <div className="flex items-baseline justify-between gap-3">
                   <div>
-                    <p className="text-[11px] uppercase tracking-wider text-muted">
+                    <p className="text-xs uppercase tracking-wider text-muted">
                       {metricInfo(m.metric).label}
                     </p>
                     <span className="font-display text-base text-gold-light">{m.title}</span>
+                    {/* Whose number this is. The column beside this one has
+                        carried the clause since item 22; without it here the
+                        two ledgers sit side by side on /world, one saying whose
+                        tally it counts and one not. */}
+                    {metricInfo(m.metric).description && (
+                      <p className="mt-0.5 text-xs text-muted">
+                        {metricInfo(m.metric).description}
+                      </p>
+                    )}
                   </div>
                   <span className="shrink-0 text-xs text-muted">{shortDate(m.achieved_at)}</span>
                 </div>
@@ -112,11 +130,20 @@ export function HorizonDeeds({ summary }: { summary: MilestoneSummary }) {
           <ul className="divide-y divide-rune">
             {chains.map((chain) => (
               <li key={chain.metric} className="px-5 py-3.5">
-                <div className="mb-1.5 flex items-baseline justify-between gap-3">
-                  <span className="font-display text-sm text-ash">{chain.label}</span>
-                  <span className="shrink-0 text-xs text-muted">
-                    {formatMetricValue(chain.metric, chain.value)}
-                  </span>
+                <div className="mb-1.5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-display text-sm text-ash">{chain.label}</span>
+                    <span className="shrink-0 text-xs text-muted">
+                      {formatMetricValue(chain.metric, chain.value)}
+                    </span>
+                  </div>
+                  {/* Whose number this is, and what it counts. METRIC_INFO has
+                      carried the clause all along and nothing rendered it, so a
+                      reader could not tell one viking's tally from the whole
+                      warband's added together. */}
+                  {chain.description && (
+                    <p className="mt-0.5 text-xs text-muted">{chain.description}</p>
+                  )}
                 </div>
                 <div
                   className="h-2.5 w-full overflow-hidden rounded-full border border-rune bg-pitch"
@@ -138,7 +165,7 @@ export function HorizonDeeds({ summary }: { summary: MilestoneSummary }) {
                   <span className="not-italic text-gold-light">{chain.next.pct}%</span>
                 </p>
                 {chain.laterTiers.length > 0 && (
-                  <p className="mt-1 text-[11px] text-muted">
+                  <p className="mt-1 text-xs text-muted">
                     then: {chain.laterTiers.map((m) => m.title).join(' · ')}
                   </p>
                 )}

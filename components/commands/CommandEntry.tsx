@@ -38,7 +38,7 @@ export function CommandEntry({ entry }: { entry: DiscordCommand | GameShout }) {
             </p>
           ) : null}
 
-          <p className="mt-2 text-xs tracking-wide text-gold-dim uppercase">{entry.who}</p>
+          <p className="mt-2 text-xs tracking-wide text-gold uppercase">{entry.who}</p>
         </div>
 
         {/* What it does */}

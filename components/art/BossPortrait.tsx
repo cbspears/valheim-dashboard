@@ -62,9 +62,20 @@ export function BossPortrait({
         </div>
       ) : (
         <>
+          {/*
+            Decoration, announced as nothing. Every place this card is used
+            sits the portrait directly beside the boss name as real text (the
+            /world timeline row and the war-room hero), so the manifest's
+            descriptive alt made a screen reader say "Eikthyr, the antlered
+            stag of the Meadows" and then "Eikthyr" again, and on /boss/[slug]
+            it said it BEFORE the page title. The description stays in
+            config/art.ts for the gallery and the Hall hero, where the art is
+            the content. If this card is ever used with no name beside it,
+            give it a real alt at that call site.
+          */}
           <Image
             src={ref.src}
-            alt={ref.alt}
+            alt=""
             fill
             loading="lazy"
             sizes="(max-width: 640px) 40vw, 200px"

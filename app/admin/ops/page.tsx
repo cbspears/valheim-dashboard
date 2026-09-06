@@ -234,7 +234,7 @@ export default async function OpsPage() {
                       </p>
                       <p className="mt-0.5 text-sm text-ash-dim">{f.detail}</p>
                       <p className="mt-1.5 flex gap-1.5 text-sm text-muted">
-                        <ListChecks size={15} className="mt-0.5 shrink-0 text-gold-dim" />
+                        <ListChecks size={15} className="mt-0.5 shrink-0 text-gold" />
                         <span>{f.whatToDo}</span>
                       </p>
                     </div>
@@ -606,7 +606,7 @@ function IdentityMismatches({
         {/* Escaped + one statement per character in lib/ops/release-sql (tested
             there): the name is unvalidated player input and this block is meant
             to be pasted into Supabase under the service role. */}
-        <pre className="mt-1.5 overflow-x-auto rounded border border-rune bg-surface-raised px-2.5 py-1.5 font-mono text-[11px] text-ash-dim">
+        <pre className="mt-1.5 overflow-x-auto rounded border border-rune bg-surface-raised px-2.5 py-1.5 font-mono text-xs text-ash-dim">
           {releaseBindingSql(rows.map((r) => r.characterName))}
         </pre>
       </CardBody>
@@ -645,7 +645,7 @@ function HealthRow({ r }: { r: ComponentReport }) {
         {r.flags.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {r.flags.map((f) => (
-              <span key={f.label} className="rounded border border-rune bg-surface-raised px-1.5 py-0.5 font-mono text-[10px] text-ash-dim">
+              <span key={f.label} className="rounded border border-rune bg-surface-raised px-1.5 py-0.5 font-mono text-xs text-ash-dim">
                 {f.label}={f.value}
               </span>
             ))}

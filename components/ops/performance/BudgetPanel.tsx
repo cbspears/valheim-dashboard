@@ -107,7 +107,7 @@ export function BudgetPanel({
                   </>
                 )}
               </p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                 <span>
                   Rows: <span className="font-mono text-ash-dim">{formatBytes(estimate.tableBytes)}</span>
                 </span>
@@ -121,7 +121,7 @@ export function BudgetPanel({
                   </span>
                 </span>
               </div>
-              <p className="text-[11px] text-muted">
+              <p className="text-xs text-muted">
                 Row counts taken {countsAgeSec < 1 ? 'just now' : `${formatDurationSec(countsAgeSec)} ago`},
                 re-counted at most once a minute.
               </p>
@@ -156,7 +156,7 @@ export function BudgetPanel({
                   )} (${formatPercent(storageFraction, 1)})`}
                 />
               )}
-              <p className="text-[11px] text-muted">
+              <p className="text-xs text-muted">
                 Weighed {storageAgeSec < 1 ? 'just now' : `${formatDurationSec(storageAgeSec)} ago`}, and
                 re-weighed at most every five minutes: the map snapshot rewrites these objects on that
                 cadence, so measuring more often cannot produce a different number.
@@ -172,13 +172,13 @@ export function BudgetPanel({
                       <span className="font-mono text-ash">
                         {s.bytes === null ? 'unknown' : formatBytes(s.bytes)}
                         {s.objects !== null && (
-                          <span className="ml-1.5 text-[11px] text-muted">
+                          <span className="ml-1.5 text-xs text-muted">
                             {formatCount(s.objects)} objects
                           </span>
                         )}
                       </span>
                     </div>
-                    <p className="text-[11px] leading-relaxed text-muted">{s.method}</p>
+                    <p className="text-xs leading-relaxed text-muted">{s.method}</p>
                   </li>
                 ))}
               </ul>
@@ -232,7 +232,7 @@ export function BudgetPanel({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {growthSeries.map((g) => (
                 <div key={g.table}>
-                  <p className="mb-1 text-[11px] text-muted">
+                  <p className="mb-1 text-xs text-muted">
                     {g.table}{' '}
                     <span className="text-ash-dim">
                       {formatCount(g.perDay.reduce((a, b) => a + b, 0))} rows, last 7 d
@@ -284,13 +284,13 @@ export function BudgetPanel({
                   <Td>
                     {t.table}
                     {t.assumedRowSize && (
-                      <span className="ml-2 text-[11px] text-raid">no per-row constant, default used</span>
+                      <span className="ml-2 text-xs text-raid">no per-row constant, default used</span>
                     )}
                   </Td>
                   <Td right mono className={t.rows === null ? 'text-death' : t.rows === 0 ? 'text-muted' : undefined}>
                     {t.rows === null ? 'unreadable' : formatCount(t.rows)}
                   </Td>
-                  <Td right mono className="text-[11px] text-muted">{t.bytesPerRow} B</Td>
+                  <Td right mono className="text-xs text-muted">{t.bytesPerRow} B</Td>
                   <Td right mono>{t.bytes === null ? 'unknown' : formatBytes(t.bytes)}</Td>
                 </Tr>
               ))}

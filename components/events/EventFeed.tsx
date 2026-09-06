@@ -65,7 +65,7 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
   // Days are Central, not the machine's: this component renders on the server
   // (UTC on Vercel) and again in the browser (whatever the reader's clock says),
   // and an evening session runs past midnight UTC. Grouping in CT keeps the
-  // Chronicle agreeing with the Episodes and keeps both renders identical.
+  // raw log agreeing with the Nights above it and keeps both renders identical.
   const groups = useMemo<DayGroup[]>(() => {
     const today = centralDayIndex(new Date());
     const map = new Map<string, GameEvent[]>();
@@ -107,7 +107,7 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
               <span>{f.label}</span>
               <span
                 className={clsx(
-                  'rounded-full px-1.5 py-0.5 text-[11px] tabular-nums',
+                  'rounded-full px-1.5 py-0.5 text-xs tabular-nums',
                   isActive ? 'bg-gold/15 text-gold-light' : 'bg-night/60 text-muted'
                 )}
               >
@@ -121,10 +121,27 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
       {/* ── The feed ─────────────────────────────────────────── */}
       <Card className="overflow-hidden">
         {filtered.length === 0 ? (
+          /* Two different empty states wearing one message. On launch night the
+             whole log is empty and the reader needs a door; every other time it
+             is one filter that matched nothing and the door is another filter. */
           <EmptyState
             icon={<ScrollText size={28} />}
             title="Nothing here yet"
-            message="No events of this type have been recorded yet. Try another filter."
+            message={
+              events.length === 0
+                ? 'Nothing recorded yet. Joins, deaths, boss kills and deeds land here the moment they happen.'
+                : 'No events of this type have been recorded yet. Try another filter.'
+            }
+            action={
+              events.length === 0 ? (
+                <Link
+                  href="/get-started"
+                  className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                >
+                  Get Started
+                </Link>
+              ) : undefined
+            }
           />
         ) : (
           <div className="max-h-[72vh] overflow-y-auto">
@@ -133,11 +150,11 @@ export function EventFeed({ events }: { events: GameEvent[] }) {
                 {/* sticky day divider */}
                 <div className="sticky top-0 z-10 bg-surface/95 px-5 pb-2 pt-4 backdrop-blur-sm">
                   <div className="flex items-center gap-3">
-                    <span className="font-display text-[11px] uppercase tracking-[0.2em] text-gold-dim">
+                    <span className="font-display text-xs uppercase tracking-[0.2em] text-gold">
                       {group.label}
                     </span>
                     <hr className="rune-divider flex-1" />
-                    <span className="text-[11px] tabular-nums text-muted">
+                    <span className="text-xs tabular-nums text-muted">
                       {group.events.length}
                     </span>
                   </div>

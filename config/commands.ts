@@ -78,8 +78,17 @@ type TypedCommand = Base & {
 /** Something a player types in Discord. `copy` is what goes AFTER the mention. */
 export type DiscordCommand = TypedCommand & { kind: 'discord' };
 
-/** Something a player shouts in game. Every one of these leads with /s. */
-export type GameShout = TypedCommand & { kind: 'in-game' };
+/**
+ * Something a player does inside the game.
+ *
+ * `how` says which of the two ways it is done, because they are not the same
+ * act and the page must not tell a viking to shout a thing that is written:
+ *   'shout' (the default) leads with /s, because proximity chat never reaches
+ *     the dedicated server and the Companion's hooks only fire on a shout.
+ *   'sign'  is the whole text of a plain wooden sign, which the Boards plugin
+ *     reads off the world itself. Nothing is typed into chat at all.
+ */
+export type GameShout = TypedCommand & { kind: 'in-game'; how?: 'shout' | 'sign' };
 
 /** Something the hall says to the player, unprompted. */
 export type Notification = Base & {
@@ -165,7 +174,7 @@ export const DISCORD_COMMANDS: DiscordCommand[] = [
     who: 'a linked viking',
     what: 'Files your account of that boss falling and makes it the one the war room shows, in place of the Skald’s. Nothing is overwritten: every telling is kept, and yours becomes the one that stands.',
     example: '@Eilif retell Bonemass: we lost the raft twice before the swamp let us through',
-    note: 'Bind your Discord first, because Eilif files the telling against your viking. Up to 2000 characters, and one telling every five minutes. The boss may be named or slugged, in any case: Bonemass, bonemass, the-elder and The Elder all resolve. A newline may stand in for the space after the colon, so you can write a paragraph.',
+    note: 'Bind your Discord first, because Eilif files the telling against your viking. Up to 2000 characters, and one telling every five minutes. The boss can be written any way: Bonemass, bonemass, The Elder and the-elder all work. A newline may stand in for the space after the colon, so you can write a paragraph.',
     source: 'services/discord-bot/src/tellings.js parseTellings, handleRetell, resolveSenderPlayer',
     flag: 'TELLINGS',
   },
@@ -199,7 +208,7 @@ export const DISCORD_COMMANDS: DiscordCommand[] = [
     copy: 'tale ',
     also: ['@Eilif tale for yesterday <Title>: <your tale>', '@Eilif tale for Sep 12 <Title>: <your tale>'],
     who: 'the Storyteller, or an admin of the hall',
-    what: 'Writes a tale of the hall about a night that was not a boss: a game night, an RP evening, whatever happened. It appears on the Saga inside that night’s episode, and on the Storyteller’s own page.',
+    what: 'Writes a tale of the hall about a night that was not a boss: a game night, an RP evening, whatever happened. It appears on Story inside that night’s episode, and again under Written by the warband.',
     example: '@Eilif tale for last night The Longship Race: two boats, one barrel, and Bren in the water',
     note: 'With no day named it is about today. Name one with `for yesterday`, `for last night`, `for 2026-09-12` or `for Sep 12`; a night in the future is refused, and a bare month and day are read in the current year, so write the whole date when you mean an earlier one. Up to 4000 characters and an 80-character title, one tale every two minutes. A line break may stand in for any of the spaces, so you can write paragraphs.',
     source: 'services/discord-bot/src/tales.js parseTales, handleWrite, mayWriteTale',
@@ -220,7 +229,7 @@ export const DISCORD_COMMANDS: DiscordCommand[] = [
     text: '@Eilif untale <n>',
     copy: 'untale ',
     who: 'the viking who wrote it, the Storyteller, or an admin',
-    what: 'Takes tale number n off the Saga. The numbers come from the list above.',
+    what: 'Takes tale number n off Story. The numbers come from the list above.',
     example: '@Eilif untale 2',
     source: 'services/discord-bot/src/tales.js parseTales, handleUntale, mayEditTale',
   },
@@ -268,9 +277,19 @@ export const DISCORD_COMMANDS: DiscordCommand[] = [
 ];
 
 // ── In the game ────────────────────────────────────────────────────────────
-// Every one of these must be SHOUTED. Proximity chat never reaches the
-// dedicated server, so a plain line is never seen by the hall; the plugin's
-// hooks only fire on Talker.Type.Shout.
+// TWO DIFFERENT ACTS, and `how` on each entry says which one it is.
+//
+//   how: 'shout' (the default) must be SHOUTED. Proximity chat never reaches
+//   the dedicated server, so a plain line is never seen by the hall; the
+//   plugin's hooks only fire on Talker.Type.Shout.
+//
+//   how: 'sign' is not chat at all. The marker is the WHOLE text of a plain
+//   wooden sign, and EilifBoards reads it off the world (SignBoards.cs
+//   MarkerRe is anchored, so a sign that merely mentions a marker inside a
+//   sentence is left alone). Shouting one of these does nothing whatsoever.
+//
+// The section subtitle below has to keep saying both, and the tripwire holds
+// every entry to its own `how`.
 
 export const GAME_SHOUTS: GameShout[] = [
   {
@@ -337,6 +356,73 @@ export const GAME_SHOUTS: GameShout[] = [
     example: '/s the greydwarves found the portal again',
     note: 'Anything starting with a slash is treated as a command, so a shout of /foo reaches Discord as nothing at all.',
     source: 'plugins/eilif-companion/src/OathCapture.cs OathCapture, Prefix; services/log-poller/src/index.js chatChannelId',
+  },
+
+  // ── the board signs ──────────────────────────────────────────────────────
+  // Written, not shouted. Everything below is derived from the marker regex in
+  // SignBoards.cs, the key list in BoardsFeed.cs and the strings lib/boards.ts
+  // renders, and the tripwire reads all three.
+  {
+    kind: 'in-game',
+    how: 'sign',
+    id: 'board-stat',
+    text: '[board:kills]',
+    also: [
+      '[board:deaths]',
+      '[board:builds]',
+      '[board:resources]',
+      '[board:explored]',
+      '[board:distance]',
+    ],
+    who: 'any member',
+    what: 'Turns an ordinary sign into a live leaderboard. Build a sign, write the marker as the whole of its text, and the top five for that stat appear on it with the leader accented. Write anything else on the sign and it is yours again.',
+    example: '[board:resources]',
+    note: 'This one is written on a sign, never shouted. It has to be the plain wooden sign you can write on, and the marker has to be the sign’s whole text: a sign that only mentions a marker inside a sentence stays yours. Case and stray spaces do not matter. A newly marked sign is found within about five minutes, and every board redraws about once a minute after that.',
+    source:
+      'plugins/eilif-boards/src/SignBoards.cs MarkerRe, ParseMarker; plugins/eilif-boards/src/BoardsFeed.cs BoardKeys, Canonical; plugins/eilif-boards/src/EilifBoardsPlugin.cs ScanSeconds, PollSeconds; lib/boards.ts statBoard, TOP_N',
+  },
+  {
+    kind: 'in-game',
+    how: 'sign',
+    id: 'board-leader',
+    text: '[board:kills:leader]',
+    also: [
+      '[board:deaths:leader]',
+      '[board:builds:leader]',
+      '[board:resources:leader]',
+      '[board:explored:leader]',
+      '[board:distance:leader]',
+    ],
+    who: 'any member',
+    what: 'The same six stats as a one line plaque: the heading, whoever leads it, and their number, with no runners up. Write the other marker on the same sign to turn a plaque back into a full board.',
+    example: '[board:distance:leader]',
+    note: 'Written on a sign, never shouted. Only those six take the leader ending. There is no leader of Living Titles and no leader of Great Deeds, so a sign written that way is not a marker at all and stays yours.',
+    source:
+      'plugins/eilif-boards/src/BoardsFeed.cs BoardKeys, Claim, Leader, Stats; lib/boards.ts buildLeaders, leaderPlaque',
+  },
+  {
+    kind: 'in-game',
+    how: 'sign',
+    id: 'board-titles',
+    text: '[board:titles]',
+    who: 'any member',
+    what: 'Every titled viking on one plank, in alphabetical order, each with the title they carry. It is a roll rather than a race, so nobody on it is accented.',
+    example: '[board:titles]',
+    note: 'Written on a sign, never shouted. A viking who has not earned a title yet is left off until they do.',
+    source:
+      'plugins/eilif-boards/src/BoardsFeed.cs BoardKeys, Titles; lib/boards.ts titlesBoard, MAX_TITLE_CHARS',
+  },
+  {
+    kind: 'in-game',
+    how: 'sign',
+    id: 'board-deeds',
+    text: '[board:deeds]',
+    who: 'any member',
+    what: 'Where the warband stands on Great Deeds: how many of them are earned out of all there are, and the name of the newest one.',
+    example: '[board:deeds]',
+    note: 'Written on a sign, never shouted. This one counts for all of you at once, so there is nobody to name on it.',
+    source:
+      'plugins/eilif-boards/src/BoardsFeed.cs BoardKeys, Deeds; lib/boards.ts deedsBoard, DeedsSummary',
   },
 ];
 
@@ -415,7 +501,7 @@ export const NOTIFICATIONS: Notification[] = [
     id: 'recap',
     text: 'The daily recap',
     where: 'Discord, in #server',
-    trigger: 'The day closes: hours kept, vikings fallen, and the Viking of the Day',
+    trigger: 'The day closes: hours kept, vikings fallen, and the Player of the Day',
     cadence: 'Once a night at 23:00 America/Chicago',
     channel: 'server',
     channelVar: 'RECAP_CHANNEL',
@@ -500,7 +586,7 @@ export const NOTIFICATIONS: Notification[] = [
   {
     kind: 'notification',
     id: 'voice-poty',
-    text: 'The Viking of the Day crown',
+    text: 'The Player of the Day crown',
     where: 'Spoken in game',
     trigger: 'The evening recap crowns someone',
     cadence: 'Once a night, with the recap',
@@ -547,7 +633,7 @@ export const SITE_PAGES: SitePage[] = [
     id: 'page-hall',
     text: '/',
     label: 'Hall',
-    what: 'Who is online now, the hearth’s pulse, the Great Deeds standing, the latest saga and what is coming up.',
+    what: 'Who is online now, the hearth’s pulse, the Great Deeds standing, the latest story and what is coming up.',
     source: 'app/page.tsx',
   },
   {
@@ -563,7 +649,9 @@ export const SITE_PAGES: SitePage[] = [
     id: 'page-world',
     text: '/world',
     label: 'World',
-    what: 'Boss gated progression: each Forsaken felled opens the next leg, with the ledger of Great Deeds earned and on the horizon.',
+    // Says the same thing the page itself now says. Valheim does not gate a
+    // biome behind a boss, so the register must not claim it does either.
+    what: 'Which Forsaken have fallen and which one is next, with the ledger of Great Deeds earned and still ahead. Clearing them in order is our rule, not the game’s.',
     source: 'app/world/page.tsx',
   },
   {
@@ -578,7 +666,7 @@ export const SITE_PAGES: SitePage[] = [
     kind: 'page',
     id: 'page-events',
     text: '/events',
-    label: 'Saga',
+    label: 'Story',
     what: 'Each night the vikings gather becomes a chapter, with the running feed of everything the hall recorded.',
     source: 'app/events/page.tsx',
   },
@@ -586,17 +674,9 @@ export const SITE_PAGES: SitePage[] = [
     kind: 'page',
     id: 'page-storyteller',
     text: '/events/storyteller',
-    label: 'The Storyteller’s work',
-    what: 'The same Saga, filtered to what vikings wrote themselves: every tale of a night, and every telling of a boss falling.',
+    label: 'Written by the warband',
+    what: 'The same story, filtered to what vikings wrote themselves: every tale of a night, and every telling of a boss falling.',
     source: 'app/events/storyteller/page.tsx',
-  },
-  {
-    kind: 'page',
-    id: 'page-mods',
-    text: '/mods',
-    label: 'Mods',
-    what: 'Every mod running on the server, which ones you must install to join, and the one click pack code.',
-    source: 'app/mods/page.tsx',
   },
   {
     kind: 'page',
@@ -616,18 +696,21 @@ export const SITE_PAGES: SitePage[] = [
   },
   {
     kind: 'page',
-    id: 'page-commands',
-    text: '/commands',
-    label: 'Commands',
-    what: 'This register: every command, every shout, and everything the hall says back.',
-    source: 'app/commands/page.tsx',
+    id: 'page-resources',
+    text: '/resources',
+    label: 'Resources',
+    // One page since 2026-09-06, when Mods and Commands merged. /mods and
+    // /commands still answer: next.config.ts redirects them here, to #mods and
+    // #commands, so a bookmark or an older Discord link still lands.
+    what: 'The modpack and the register in one place: every mod, which of them you install, every command, and everything the hall says back.',
+    source: 'app/resources/page.tsx',
   },
   {
     kind: 'page',
     id: 'page-get-started',
     text: '/get-started',
     label: 'Get Started',
-    what: 'Log on and install the mods in five steps, then the two rites to perform once you are in.',
+    what: 'Install the mods, then join, and the two rites to perform once you are in.',
     source: 'app/get-started/page.tsx',
   },
   {
@@ -661,15 +744,18 @@ export const COMMAND_SECTIONS: CommandSection[] = [
   {
     id: 'in-discord',
     title: 'In Discord',
+    // The one place on the page that explains the mention. The card above the
+    // groups used to say it a second time, and said it about every entry on
+    // the page, which is wrong for the shouts and wronger for the board signs.
     subtitle:
-      'Tag Eilif and it listens. Type the @ and pick Eilif out of the popup, because the bare letters are only letters.',
+      'Tag Eilif and it listens. Type the @ and pick Eilif out of the popup, because the bare letters are only letters. What a chip here copies is the part that goes after the mention.',
     entries: DISCORD_COMMANDS,
   },
   {
     id: 'in-the-game',
     title: 'In the game',
     subtitle:
-      'Chat that stays at the campfire never reaches the hall. Every line below has to be shouted, so lead with /s.',
+      'Chat that stays at the campfire never reaches the hall, so every command here is shouted with /s. The board markers are the exception: those are written on a sign.',
     entries: GAME_SHOUTS,
   },
   {

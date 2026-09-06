@@ -13,7 +13,10 @@ import type { Notification, SitePage } from '@/config/commands';
 export function NotificationRow({ entry }: { entry: Notification }) {
   return (
     <li className="border-t border-rune/60 py-4 first:border-t-0 first:pt-0 last:pb-0">
-      <h3 className="font-display text-sm tracking-wide text-ash">{entry.text}</h3>
+      {/* h4: the group this sits in ("What the hall says") is an h3 on
+          /resources, the same way a mod card's name is an h4 under its
+          category. Nothing about the type changes. */}
+      <h4 className="font-display text-sm tracking-wide text-ash">{entry.text}</h4>
       <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-3">
         <Field label="Where">{entry.where}</Field>
         <Field label="What sets it off">{entry.trigger}</Field>
@@ -26,7 +29,7 @@ export function NotificationRow({ entry }: { entry: Notification }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[11px] tracking-wide text-gold-dim uppercase">{label}</dt>
+      <dt className="text-xs tracking-wide text-gold uppercase">{label}</dt>
       <dd className="mt-0.5 text-sm leading-relaxed break-words text-ash-dim">{children}</dd>
     </div>
   );
@@ -45,7 +48,7 @@ export function PageRow({ entry }: { entry: SitePage }) {
           {linkable ? (
             <Link
               href={entry.text}
-              className="font-mono text-xs break-words text-gold-light hover:underline"
+              className="prose-link font-mono text-xs break-words text-gold-light"
             >
               {entry.text}
             </Link>

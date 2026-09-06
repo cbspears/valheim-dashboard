@@ -52,7 +52,7 @@ export function InsightCard({ insight }: { insight: Insight }) {
         <div className="flex items-start justify-between gap-2">
           <span
             className={clsx(
-              'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+              'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-semibold uppercase tracking-wider',
               s.chip,
             )}
           >
@@ -67,7 +67,7 @@ export function InsightCard({ insight }: { insight: Insight }) {
         {insight.link && (
           <Link
             href={insight.link.href}
-            className="mt-auto inline-flex items-center gap-1 pt-1 text-xs font-medium text-gold-dim transition hover:text-gold"
+            className="mt-auto inline-flex items-center gap-1 pt-1 text-xs font-medium text-gold transition hover:text-gold"
           >
             {insight.link.label}
             <ArrowRight size={12} aria-hidden="true" />

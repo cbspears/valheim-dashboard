@@ -133,7 +133,7 @@ export function FeatsOfArms({
           <ul className="flex-1 divide-y divide-rune/50">
             {records.map((r) => (
               <li key={r.label} className="flex items-center gap-3 px-5 py-2.5">
-                <span className="text-gold-dim">{r.icon}</span>
+                <span className="text-gold">{r.icon}</span>
                 <span className="flex-1 text-sm text-ash-dim">{r.label}</span>
                 <span className="shrink-0 font-display text-sm tabular-nums text-ash">{r.value}</span>
               </li>

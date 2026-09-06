@@ -234,7 +234,7 @@ export function Explain({ entry, size = 'sm', align = 'start', className }: Expl
               href={entry.link.href}
               target={entry.link.href.startsWith('http') ? '_blank' : undefined}
               rel={entry.link.href.startsWith('http') ? 'noreferrer' : undefined}
-              className="mt-3 inline-block text-xs font-medium text-gold-dim transition hover:text-gold focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-dim"
+              className="mt-3 inline-block text-xs font-medium text-gold transition hover:text-gold focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-dim"
             >
               {entry.link.label}
             </a>
@@ -258,7 +258,7 @@ function Field({
     <div>
       <dt
         className={clsx(
-          'text-[10px] font-semibold uppercase tracking-wider',
+          'text-xs font-semibold uppercase tracking-wider',
           tone === 'good' && 'text-online-glow',
           tone === 'bad' && 'text-raid',
           !tone && 'text-muted',

@@ -76,7 +76,7 @@ export function BossTellings({
                 {p}
               </p>
             ))}
-            <figcaption className="mt-3 text-xs uppercase tracking-wider text-gold-dim">
+            <figcaption className="mt-3 text-xs uppercase tracking-wider text-gold">
               {shown ? byline(shown) : 'The Skald'}
             </figcaption>
           </figure>
@@ -96,7 +96,7 @@ export function BossTellings({
 
         {apocryphal && (
           <div className="mt-5 border-t border-rune pt-4">
-            <h4 className="font-display text-xs uppercase tracking-wider text-gold-dim">
+            <h4 className="font-display text-xs uppercase tracking-wider text-gold">
               The apocryphal version
             </h4>
             <p className="mt-1 text-xs text-muted">
@@ -112,7 +112,7 @@ export function BossTellings({
                   {p}
                 </p>
               ))}
-              <figcaption className="mt-2 text-xs uppercase tracking-wider text-gold-dim">
+              <figcaption className="mt-2 text-xs uppercase tracking-wider text-gold">
                 {byline(apocryphal)} &middot; {shortDate(apocryphal.created_at)}
               </figcaption>
             </figure>
@@ -135,7 +135,7 @@ export function BossTellings({
                       {p}
                     </p>
                   ))}
-                  <figcaption className="mt-2 text-xs uppercase tracking-wider text-gold-dim">
+                  <figcaption className="mt-2 text-xs uppercase tracking-wider text-gold">
                     {byline(t)} &middot; {shortDate(t.created_at)}
                   </figcaption>
                 </figure>
@@ -146,7 +146,7 @@ export function BossTellings({
 
         {storyteller && (
           <p className="mt-5 border-t border-rune pt-3 text-xs uppercase tracking-wider text-muted">
-            Storyteller: <span className="text-gold-dim">{storyteller}</span>
+            Storyteller: <span className="text-gold">{storyteller}</span>
           </p>
         )}
       </CardBody>

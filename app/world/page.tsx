@@ -6,7 +6,7 @@ import { BossTimeline } from '@/components/world/BossTimeline';
 import { EarnedDeeds, HorizonDeeds } from '@/components/world/MilestoneLedger';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import { getBosses, getUpcomingEvents, getMilestones, getMilestoneAggregates } from '@/lib/data';
-import { summarizeMilestones, groupUpcomingChains } from '@/lib/milestones';
+import { summarizeMilestones } from '@/lib/milestones';
 
 // SIXTY SECONDS OF ISR, NOT PER-REQUEST (2026-09-06). Nothing on this page is
 // live: it is the Forsaken timeline, the Great Deeds ledger and the calendar.
@@ -29,18 +29,21 @@ export default async function WorldPage() {
 
   const milestoneSummary = summarizeMilestones(milestones, milestoneAgg);
   const earnedCount = milestoneSummary.achieved.length;
-  const chainCount = groupUpcomingChains(milestoneSummary.upcoming).length;
   const aheadCount = milestoneSummary.upcoming.length;
 
   // Counts ride in the subtitle rather than in a heading badge: the columns are
   // narrow, and a badge competing with the title for that row wraps the heading.
+  //
+  // "Deeds still to earn", not "N trackers": a tracker is this codebase's word
+  // for a grouped metric, and a reader sees a progress bar. One word per
+  // concept, and the one a reader already has.
   const earnedSubtitle =
     'What the warband has done together, tallied across every viking.' +
     (earnedCount > 0 ? ` ${earnedCount} earned so far.` : '');
   const horizonSubtitle =
     'The deeds still ahead, and how near the warband stands to each.' +
-    (chainCount > 0
-      ? ` ${chainCount} ${chainCount === 1 ? 'tracker' : 'trackers'}, ${aheadCount} ${aheadCount === 1 ? 'deed' : 'deeds'}.`
+    (aheadCount > 0
+      ? ` ${aheadCount} ${aheadCount === 1 ? 'deed' : 'deeds'} still to earn.`
       : '');
 
   return (
@@ -48,8 +51,9 @@ export default async function WorldPage() {
       <div>
         <PageHeader slot="world">
           <SectionHeader
+            as="h1"
             title="World Progress"
-            subtitle="Boss-gated progression: each forsaken felled opens the next leg of the journey. No one sails ahead of the longship."
+            subtitle="Our rule: we clear the bosses in order and nobody moves ahead of the group. No one sails ahead of the longship."
             icon={<MapIcon size={22} />}
           />
         </PageHeader>

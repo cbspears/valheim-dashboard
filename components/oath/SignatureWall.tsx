@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { PenLine } from 'lucide-react';
+import { EmptyState } from '@/components/ui';
 import { vikingPath } from '@/lib/slug';
 import type { Oath } from '@/lib/types';
 import { shortDate } from '@/lib/format';
@@ -43,10 +45,24 @@ function Signature({ oath }: { oath: Oath }) {
 
 export function SignatureWall({ oaths }: { oaths: Oath[] }) {
   if (oaths.length === 0) {
+    // After the wipe this IS the page, so it gets the house empty state rather
+    // than a grey line: a title, something to do, and somewhere to do it. It
+    // also no longer opens with the same three words as the page subtitle
+    // 300px above it ("No marks yet"), which is one thought said twice.
     return (
-      <p className="py-8 text-center text-sm text-muted">
-        No marks yet. Be the first to swear the oath.
-      </p>
+      <EmptyState
+        icon={<PenLine size={28} />}
+        title="No oaths sworn yet"
+        message="Be the first: shout your oath in game and it is carved here under your name."
+        action={
+          <Link
+            href="/get-started#once-you-are-in"
+            className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+          >
+            How to swear your oath
+          </Link>
+        }
+      />
     );
   }
 

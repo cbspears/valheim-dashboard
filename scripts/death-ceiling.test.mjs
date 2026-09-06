@@ -41,7 +41,7 @@ ok('the ceiling returns \'capped\' on both modes', (sql.match(/return 'capped';/
   `${(sql.match(/return 'capped';/g) ?? []).length} occurrences`);
 ok('no ceiling branch still returns \'ignored\'',
   !/report ignored'[\s\S]{0,80}return 'ignored';/.test(sql));
-ok('the header says the migration must be RE-APPLIED', /NEEDS RE-APPLYING/.test(sql));
+ok('the header records the re-apply (needed, or done with a date)', /(NEEDS RE-APPLYING|RE-APPLIED to production)/.test(sql));
 ok('the function comment advertises capped', /inserted\|upgraded\|dropped\|duplicate\|capped\|ignored/.test(sql));
 
 // ── the stub ─────────────────────────────────────────────────────────────────

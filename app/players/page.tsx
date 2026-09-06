@@ -47,6 +47,7 @@ import {
 } from '@/lib/format';
 import { vikingPath } from '@/lib/slug';
 import { epithetsFor } from '@/lib/epithets';
+import { metricInfo, type MetricKey } from '@/lib/milestones';
 
 export const dynamic = 'force-dynamic';
 
@@ -142,7 +143,18 @@ function anglerEntries(players: PlayerWithStats[], n = 5): LeaderboardEntry[] {
 
 interface Board {
   key: string;
-  title: string;
+  /**
+   * The metric key in `lib/milestones.ts` METRIC_INFO that names this number.
+   * One number, one name: the board title, the /world count label and the
+   * viking stat tile all read the same string from there rather than three
+   * hand-typed sets that drift (Structures Built / Pieces built / Built).
+   * `titleOverride` is for the one board named after the people rather than
+   * the number (Anglers), which is deliberate.
+   * Typed as the register's own key union, so a typo is a build error rather
+   * than a raw column name rendered to players as a board title.
+   */
+  metric: MetricKey;
+  titleOverride?: string;
   icon: ReactNode;
   accent: string;
   empty: string;
@@ -176,8 +188,8 @@ export default async function PlayersPage() {
   }));
 
   // The `players.total_playtime_minutes` column isn't kept fresh by the real
-  // pipeline yet — derive it live from session rows so Hours Logged / Total
-  // Time reflect real playtime instead of reading back as 0.
+  // pipeline yet — derive it live from session rows so the Hours played board
+  // and the roster column reflect real playtime instead of reading back as 0.
   const onlineNames = new Set(online_.map((p) => p.character_name));
   const playtimeByName = playtimeMinutesByCharacter(sessions, onlineNames);
   const online = online_.map((p) => ({
@@ -218,7 +230,7 @@ export default async function PlayersPage() {
   const boards: Board[] = [
     {
       key: 'deaths',
-      title: 'Most Deaths',
+      metric: 'deaths_total',
       icon: <Skull size={16} />,
       accent: 'text-death',
       empty: 'No warrior has fallen yet. The halls of Valhalla wait.',
@@ -226,7 +238,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'kills',
-      title: 'Most Kills',
+      metric: 'kills_total',
       icon: <Swords size={16} />,
       accent: 'text-gold',
       empty: 'No blood has been spilled across the realms.',
@@ -234,7 +246,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'damage',
-      title: 'Damage Dealt',
+      metric: 'damage_total',
       icon: <Flame size={16} />,
       accent: 'text-gold',
       empty: 'No wounds dealt. Every blade still rests in its sheath.',
@@ -242,7 +254,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'hours',
-      title: 'Hours Logged',
+      metric: 'playtime_total_hours',
       icon: <Clock size={16} />,
       accent: 'text-gold',
       empty: 'No voyages recorded. The longships remain moored.',
@@ -250,7 +262,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'resources',
-      title: 'Resources Gathered',
+      metric: 'resources_total',
       icon: <Pickaxe size={16} />,
       accent: 'text-gold',
       empty: 'No ore mined, no wood felled. The wilds stand untouched.',
@@ -258,7 +270,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'crafted',
-      title: 'Items Crafted',
+      metric: 'crafts_total',
       icon: <Hammer size={16} />,
       accent: 'text-gold',
       empty: 'The forges are cold. Nothing has been wrought.',
@@ -266,7 +278,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'distance',
-      title: 'Distance Traveled',
+      metric: 'walk_run_total',
       icon: <Footprints size={16} />,
       accent: 'text-gold',
       emptyTitle: 'No trails blazed yet',
@@ -281,7 +293,7 @@ export default async function PlayersPage() {
     },
     {
       key: 'built',
-      title: 'Structures Built',
+      metric: 'builds_total',
       icon: <Castle size={16} />,
       accent: 'text-gold',
       empty: 'Not a single nail driven. The longhouses are yet to rise.',
@@ -289,17 +301,20 @@ export default async function PlayersPage() {
     },
     {
       key: 'explored',
-      title: 'Map Explored',
+      metric: 'explored_avg_pct',
       icon: <MapIcon size={16} />,
       accent: 'text-gold',
-      subtitle: 'Fills in as players run the companion map-share mod (in the modpack).',
+      subtitle: 'Fills in as vikings run the companion map-share mod (in the modpack).',
       emptyTitle: 'No frontier charted',
       empty: 'The fog hangs thick over every shore. No mapmaker has yet turned in their ledger.',
       entries: topBy(withStats, (p) => p.stats?.map_explored_pct ?? 0, formatPercent),
     },
     {
       key: 'anglers',
-      title: 'Anglers',
+      metric: 'fish_total',
+      // The one board named for the people, not the number: the ranking is a
+      // skill level, not a count of fish.
+      titleOverride: 'Anglers',
       icon: <FishSymbol size={16} />,
       accent: 'text-gold',
       subtitle: 'Fishing skill, with ties broken by total catches.',
@@ -314,6 +329,7 @@ export default async function PlayersPage() {
       {/* ── Header ─────────────────────────────────────────────── */}
       <PageHeader slot="players">
         <SectionHeader
+          as="h1"
           title="The Vikings"
           subtitle="Every warrior who has set foot on these shores: the warband that carves its saga into the world."
           icon={<Users size={22} />}
@@ -326,20 +342,21 @@ export default async function PlayersPage() {
         />
       </PageHeader>
 
-      {/* Sailing Now + The Warband sit side by side on desktop (stacked below lg),
-          so the online cards drop to one per row inside the half-width column. */}
+      {/* Who is on now + the roster sit side by side on desktop (stacked below
+          lg), so the online cards drop to one per row inside the half-width
+          column. */}
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-start lg:gap-8">
-        {/* ── Sailing Now ────────────────────────────────────────── */}
+        {/* ── Who is on now ──────────────────────────────────────── */}
         <section>
           <SectionHeader
-            title="Sailing Now"
-            subtitle="Who's online right now."
+            title="Who is on now"
+            subtitle="Every viking sailing this world right this minute."
             icon={<Sailboat size={20} />}
             action={
               online.length > 0 ? (
                 <Badge tone="online">
                   <OnlineDot online />
-                  {online.length} at sea
+                  {online.length} online
                 </Badge>
               ) : undefined
             }
@@ -350,7 +367,15 @@ export default async function PlayersPage() {
               <EmptyState
                 icon={<Sailboat size={28} />}
                 title="The seas are calm"
-                message="No Vikings are sailing right now. The longhouse fires burn low, awaiting their return."
+                message="Nobody is on right now. The longhouse fires burn low, awaiting their return."
+                action={
+                  <Link
+                    href="/get-started"
+                    className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                  >
+                    The server address and password are on Get Started
+                  </Link>
+                }
               />
             </Card>
           ) : (
@@ -369,17 +394,17 @@ export default async function PlayersPage() {
                       {formatPlaytime(p.total_playtime_minutes)} logged
                     </p>
                   </div>
-                  <Badge tone="online">Sailing</Badge>
+                  <Badge tone="online">Online</Badge>
                 </Card>
               ))}
             </div>
           )}
         </section>
 
-        {/* ── The Warband (roster) ──────────────────────────────── */}
+        {/* ── All vikings (roster) ──────────────────────────────── */}
         <section>
           <SectionHeader
-            title="Players"
+            title="All vikings"
             subtitle="Everyone who has played, ranked by hours in the world."
             icon={<Users size={20} />}
           />
@@ -388,8 +413,16 @@ export default async function PlayersPage() {
             {roster.length === 0 ? (
               <EmptyState
                 icon={<Users size={28} />}
-                title="No Vikings have landed"
-                message="The shores are empty. As warriors join the server, they will be enshrined here."
+                title="No vikings yet"
+                message="The shores are empty. Be the first: install the mods and join."
+                action={
+                  <Link
+                    href="/get-started"
+                    className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                  >
+                    Get Started
+                  </Link>
+                }
               />
             ) : (
               <div className="overflow-x-auto">
@@ -403,8 +436,11 @@ export default async function PlayersPage() {
                       <th className="hidden px-2 py-3 font-medium sm:table-cell">
                         Last Seen
                       </th>
+                      {/* Same number as the leaderboard 200 lines below, so it
+                          reads from the same register. "Total Time" was the
+                          third name this one figure carried on this page. */}
                       <th className="px-4 py-3 text-right font-medium sm:px-5">
-                        Total Time
+                        {metricInfo('playtime_total_hours').label}
                       </th>
                     </tr>
                   </thead>
@@ -425,12 +461,12 @@ export default async function PlayersPage() {
                             {p.character_name}
                           </Link>
                           {p.is_online && (
-                            <span className="ml-2 align-middle text-[11px] uppercase tracking-wide text-online-glow">
+                            <span className="ml-2 align-middle text-xs uppercase tracking-wide text-online-glow">
                               online
                             </span>
                           )}
                           {epithetByName.get(p.character_name) && (
-                            <span className="mt-0.5 block font-display text-xs text-gold-dim">
+                            <span className="mt-0.5 block font-display text-xs text-gold">
                               {epithetByName.get(p.character_name)}
                             </span>
                           )}
@@ -468,7 +504,7 @@ export default async function PlayersPage() {
       <section>
         <SectionHeader
           title="Leaderboards"
-          subtitle="The deeds, and the misdeeds, that will be sung of in the mead halls."
+          subtitle="Every number below is one viking's own, on this world, all time. The deeds, and the misdeeds, that will be sung of in the mead halls."
           icon={<Swords size={20} />}
         />
 
@@ -476,7 +512,7 @@ export default async function PlayersPage() {
           {boards.map((board) => (
             <LeaderboardCard
               key={board.key}
-              title={board.title}
+              title={board.titleOverride ?? metricInfo(board.metric).label}
               icon={board.icon}
               accent={board.accent}
               entries={board.entries}
@@ -492,7 +528,7 @@ export default async function PlayersPage() {
       <section>
         <SectionHeader
           title="How We Die"
-          subtitle="Every warrior meets Valhalla eventually. These are the roads that take them there."
+          subtitle="The last ten weeks. Every warrior meets Valhalla eventually, and these are the roads that take them there."
           icon={<Skull size={20} />}
         />
         <div className="grid grid-cols-1 lg:grid-cols-2">

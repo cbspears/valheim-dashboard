@@ -50,7 +50,7 @@ export function BossRevisions({ rows }: { rows: BossRevRow[] }) {
                 <Td>
                   <span className={r.isKilled ? 'text-ash' : 'text-muted'}>{r.name}</span>
                   {r.isKilled && r.killedAt && (
-                    <span className="ml-2 text-[11px] text-muted">
+                    <span className="ml-2 text-xs text-muted">
                       felled {r.killedAt.slice(0, 10)}
                     </span>
                   )}
@@ -64,7 +64,7 @@ export function BossRevisions({ rows }: { rows: BossRevRow[] }) {
                 <Td right mono className={r.fighters === null ? 'text-muted' : undefined}>
                   {r.fighters === null ? 'none' : formatCount(r.fighters)}
                 </Td>
-                <Td className="text-[11px] text-muted">{r.topDamageFrom ?? 'not recorded'}</Td>
+                <Td className="text-xs text-muted">{r.topDamageFrom ?? 'not recorded'}</Td>
               </Tr>
             );
           })}

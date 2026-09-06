@@ -221,8 +221,8 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
       ) : (
         <div className="flex flex-col gap-4 p-5">
           <p className="text-sm text-ash-dim">
-            <span className="font-display text-gold-light">{total}</span> deaths recorded across the
-            realms. {observation}
+            <span className="font-display text-gold-light">{total}</span> deaths recorded over the
+            last ten weeks. {observation}
           </p>
 
           <ul className="flex flex-col gap-2">
@@ -282,7 +282,7 @@ export function HowWeDie({ deaths }: { deaths: GameEvent[] }) {
             <p className="border-t border-rune/60 pt-3 text-xs text-muted">
               <VikingLink
                 name={deadliest.name}
-                className="gold-ring rounded-sm font-display text-ash-dim transition-colors hover:text-gold-light"
+                className="prose-link gold-ring rounded-sm font-display text-ash-dim transition-colors hover:text-gold-light"
               />{' '}
               has died {deadliest.count} times, more than any other viking. Valhalla knows the
               way.

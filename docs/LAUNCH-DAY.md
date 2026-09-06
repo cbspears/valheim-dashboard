@@ -1130,15 +1130,15 @@ Then the site config:
   same N as step 11** (it already reads **20**, which matches the `--cap 20` posture; it is
   only an edit if the cap changed).
 - `config/mods.ts` — every version that moved, **and delete the rows for mods this pack no
-  longer ships**, or `/mods` advertises a mod nobody has.
+  longer ships**, or `/resources#mods` advertises a mod nobody has.
 
   **The version is not the only thing that moves. Three descriptions become wrong at the
   v12 mint, and deleting the ValheimPlus row takes the page's only mention of the raised
   player cap and infinite fuel with it.** Those two comforts move to Eilif Companion
   `[ServerFallback]` and EilifPaths `[VPlusFallback]`, and neither of those descriptions
-  mentions them today. `/mods` is what a player reads to find out what they are running, so
-  paste these three in with the versions. They are written in the register the page already
-  uses, and they carry no dashes:
+  mentions them today. `/resources#mods` is what a player reads to find out what they are
+  running, so paste these three in with the versions. They are written in the register the
+  page already uses, and they carry no dashes:
 
   1. **Eilif Paths**, version `1.5.0`:
 
@@ -1194,7 +1194,7 @@ Then the site config:
      tells a viking still on **v11** that they are current — on the one night an old pack
      gets them kicked by the `enforceMod` version check. **Eilif Paths becomes 1.5.0 in v12;
      GsValheimStatsClient stays 0.2.12.** Either update the number or, better, drop both
-     numbers and point at `/mods`, which is config-driven and updates itself.
+     numbers and point at `/resources#mods`, which is config-driven and updates itself.
 
   The `CUTOVER ANCHOR` comment in the file lists only the first two, and so do
   `docs/PACK.md` step 3b and `mint-pack.mjs`'s printed checklist. Three procedural sources,
@@ -1209,7 +1209,8 @@ Then, Charlie's call to trigger:
 vercel deploy --prod --yes --scope charlie-9292s-projects
 ```
 
-**Look for:** `/mods` shows the new pack label and the surviving mod list.
+**Look for:** `/resources` shows the new pack label and the surviving mod list under Mods
+(`/mods` still answers, as a 308 to that anchor).
 
 **If it fails:** the deploy blocks with `TEAM_ACCESS_REQUIRED` when the git commit author
 is not `charlie@blockspace.media`. A Vercel env edit does nothing until a deploy, and
@@ -1297,7 +1298,9 @@ Three things `cutover-env.sh` **cannot** do, which it prints:
 3. The pack mint — done at step 18.
 
 **A fourth, which it does not print: `update config/commands.ts channels after cutover.`**
-The `/commands` page is in the NavBar, so it is player-facing on launch night, and it says
+The register is the second half of the `/resources` page (the Mods and Commands tabs merged
+on 2026-09-06; `/commands` still answers, as a 308 to `/resources#commands`). Resources is in
+the NavBar, so the register is player-facing on launch night, and it says
 **`#server` for five notifications that this step moves to `#valheim`** — boss kill, recap,
 Great Deeds, titles and the oath echo. It is **not** derived from the running config:
 `config/commands.ts` carries the literal strings `where: 'Discord, in #server'` and

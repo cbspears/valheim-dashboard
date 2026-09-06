@@ -37,6 +37,7 @@ import {
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
 import { epithetsFor, generatedBioLine } from '@/lib/epithets';
+import { metricInfo, type MetricKey } from '@/lib/milestones';
 import { OfficeBadge } from '@/components/viking/OfficeBadge';
 import { officeLabelFor } from '@/components/viking/office';
 import {
@@ -103,7 +104,15 @@ export async function generateMetadata({
 }
 
 interface Tile {
-  label: string;
+  /**
+   * The metric key in `lib/milestones.ts` METRIC_INFO that names this number.
+   * One number, one name: these tiles, the /players boards and the /world
+   * counts all read their label from there, so "Built" here and "Structures
+   * Built" on /players cannot drift apart again. Typed as the register's own
+   * key union, so a typo is a build error rather than a raw column name
+   * rendered to players as a tile label.
+   */
+  metric: MetricKey;
   value: string;
   icon: ReactNode;
   show: boolean;
@@ -183,55 +192,55 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
 
   const tiles: Tile[] = [
     {
-      label: 'Hours',
+      metric: 'playtime_total_hours',
       value: formatPlaytime(viking.total_playtime_minutes),
       icon: <Clock size={15} />,
       show: (viking.total_playtime_minutes ?? 0) > 0,
     },
     {
-      label: 'Kills',
+      metric: 'kills_total',
       value: formatNumber(stats?.kills),
       icon: <Swords size={15} />,
       show: (stats?.kills ?? 0) > 0,
     },
     {
-      label: 'Damage',
+      metric: 'damage_total',
       value: formatNumber(stats?.damage_dealt),
       icon: <Flame size={15} />,
       show: (stats?.damage_dealt ?? 0) > 0,
     },
     {
-      label: 'Deaths',
+      metric: 'deaths_total',
       value: formatNumber(stats?.deaths),
       icon: <Skull size={15} />,
       show: (stats?.deaths ?? 0) > 0,
     },
     {
-      label: 'Resources',
+      metric: 'resources_total',
       value: formatNumber(stats?.resources_harvested),
       icon: <Pickaxe size={15} />,
       show: (stats?.resources_harvested ?? 0) > 0,
     },
     {
-      label: 'Crafted',
+      metric: 'crafts_total',
       value: formatNumber(stats?.items_crafted),
       icon: <Hammer size={15} />,
       show: (stats?.items_crafted ?? 0) > 0,
     },
     {
-      label: 'Distance',
+      metric: 'walk_run_total',
       value: formatDistance(stats?.distance_traveled),
       icon: <Footprints size={15} />,
       show: (stats?.distance_traveled ?? 0) > 0,
     },
     {
-      label: 'Built',
+      metric: 'builds_total',
       value: formatNumber(stats?.structures_built),
       icon: <Castle size={15} />,
       show: (stats?.structures_built ?? 0) > 0,
     },
     {
-      label: 'Explored',
+      metric: 'explored_avg_pct',
       value: formatPercent(stats?.map_explored_pct),
       icon: <MapIcon size={15} />,
       show: (stats?.map_explored_pct ?? 0) > 0,
@@ -248,7 +257,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           className="gold-ring mb-5 inline-flex items-center gap-1 text-xs text-muted transition-colors hover:text-ash-dim"
         >
           <ChevronLeft size={14} />
-          Players
+          Vikings
         </Link>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -256,7 +265,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           {viking.role && <Badge tone="gold">{viking.role}</Badge>}
           {isLinked && discordUsername && (
             <span
-              className="inline-flex items-center gap-1 rounded-full border border-gold-dim/40 bg-pitch/70 px-2.5 py-0.5 text-xs font-medium text-gold-dim"
+              className="inline-flex items-center gap-1 rounded-full border border-gold-dim/40 bg-pitch/70 px-2.5 py-0.5 text-xs font-medium text-gold"
               title={`Linked to Discord as ${discordUsername}`}
             >
               <AtSign size={12} />
@@ -279,7 +288,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
 
         {!isLinked && (
           <div className="mt-5 flex max-w-2xl items-start gap-3 rounded-[var(--radius-card)] border border-gold-dim/30 bg-surface-raised/60 px-4 py-3">
-            <span className="mt-0.5 shrink-0 text-gold-dim">
+            <span className="mt-0.5 shrink-0 text-gold">
               <AtSign size={16} />
             </span>
             <p className="text-sm leading-relaxed text-ash-dim">
@@ -293,11 +302,17 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
         )}
       </header>
 
-      {/* ── Stat tiles ─────────────────────────────────────────── */}
+      {/* Stat tiles. Three columns, not four: nine tiles in a four-column grid
+          leave an orphan above three empty cells, which reads as missing data. */}
       {shownTiles.length > 0 && (
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {shownTiles.map((t) => (
-            <StatTile key={t.label} label={t.label} value={t.value} icon={t.icon} />
+            <StatTile
+              key={t.metric}
+              label={metricInfo(t.metric).label}
+              value={t.value}
+              icon={t.icon}
+            />
           ))}
         </section>
       )}
@@ -327,13 +342,27 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
       {/* ── Crowns + Death-roll ────────────────────────────────── */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div>
-          <SectionHeader title="Crowns Worn" subtitle="Player of the Day awards." icon={<Crown size={20} />} />
+          {/* Named for the thing itself, not for a coinage: the register, the
+              recap and the /players archive all say Player of the Day. */}
+          <SectionHeader
+            title="Player of the Day"
+            subtitle={`Every night ${first} wore the crown.`}
+            icon={<Crown size={20} />}
+          />
           {myCrowns.length === 0 ? (
             <Card>
               <EmptyState
                 icon={<Crown size={26} />}
                 title="Uncrowned, for now"
                 message={`${first} has yet to be named Player of the Day. The saga is young.`}
+                action={
+                  <Link
+                    href="/players"
+                    className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                  >
+                    See who has worn the crown
+                  </Link>
+                }
               />
             </Card>
           ) : (
@@ -382,6 +411,14 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
               icon={<Camera size={26} />}
               title="No screenshots yet"
               message={`Once ${first} is linked (see the note above), every screenshot they've shared will gather here.`}
+              action={
+                <Link
+                  href="/gallery"
+                  className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                >
+                  The gallery
+                </Link>
+              }
             />
           </Card>
         ) : myPhotos.length === 0 ? (
@@ -389,7 +426,15 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
             <EmptyState
               icon={<Camera size={26} />}
               title="No screenshots yet"
-              message={`${first} has shared no images to the hall. Not yet.`}
+              message={`${first} has shared no images to the hall. Not yet. Post one in Discord, tag Eilif, and it lands here.`}
+              action={
+                <Link
+                  href="/gallery"
+                  className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+                >
+                  The gallery
+                </Link>
+              }
             />
           </Card>
         ) : (
@@ -404,7 +449,7 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
           className="gold-ring inline-flex items-center gap-1.5 font-display text-sm text-muted transition-colors hover:text-gold-light"
         >
           <ChevronLeft size={15} />
-          Back to the Vikings
+          Vikings
         </Link>
       </div>
     </div>

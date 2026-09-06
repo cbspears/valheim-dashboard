@@ -85,7 +85,7 @@ export function Bars({ bars, label, max, height = 64, className, hideAxis = fals
         })}
       </div>
       {!hideAxis && (
-        <div className="mt-1 flex w-full gap-px text-[10px] text-muted">
+        <div className="mt-1 flex w-full gap-px text-xs text-muted">
           {bars.map((b, i) => (
             <span key={`ax-${b.label}-${i}`} className="flex-1 text-center">
               {axisIdx.has(i) ? b.label : ' '}

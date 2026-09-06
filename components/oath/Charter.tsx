@@ -12,7 +12,7 @@ export function Charter() {
 
       <div className="relative px-6 py-10 sm:px-12 sm:py-14">
         <div className="text-center">
-          <p className="text-xs uppercase tracking-[0.35em] text-gold-dim">Session Zero</p>
+          <p className="text-xs uppercase tracking-[0.35em] text-gold">Session Zero</p>
           <h1 className="heading-engraved mt-3 text-3xl text-gold-light sm:text-4xl">{title}</h1>
         </div>
 

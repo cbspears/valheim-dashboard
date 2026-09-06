@@ -32,7 +32,15 @@ export function NamedPlaces({ places, first }: { places: NamedPlace[]; first: st
         <EmptyState
           icon={<MapPin size={26} />}
           title="No places named yet"
-          message={`${first} hasn't named any places yet. Shout /pin <name> in-game to plant a marker.`}
+          message={`${first} hasn't named any places yet. Shout /s /pin <name> in game to plant a marker.`}
+          action={
+            <Link
+              href="/map"
+              className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+            >
+              The atlas
+            </Link>
+          }
         />
       ) : (
         <ul className="divide-y divide-rune/50">
@@ -45,14 +53,14 @@ export function NamedPlaces({ places, first }: { places: NamedPlace[]; first: st
               >
                 <span
                   aria-hidden
-                  className="w-4 shrink-0 translate-y-0.5 text-center font-display text-gold-dim"
+                  className="w-4 shrink-0 translate-y-0.5 text-center font-display text-gold"
                 >
                   {KIND_GLYPH[p.kind] ?? '◆'}
                 </span>
                 <span className="flex-1 font-display text-sm text-ash">{p.name}</span>
                 <Badge tone="neutral">{KIND_LABEL[p.kind] ?? p.kind}</Badge>
                 {p.day != null && (
-                  <span className="shrink-0 font-display text-xs text-gold-dim">Day {p.day}</span>
+                  <span className="shrink-0 font-display text-xs text-gold">Day {p.day}</span>
                 )}
               </Link>
             </li>

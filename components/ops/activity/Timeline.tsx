@@ -111,7 +111,7 @@ export function Timeline({
                       </span>
                       <span
                         className={clsx(
-                          'shrink-0 text-[10px] uppercase tracking-wide',
+                          'shrink-0 text-xs uppercase tracking-wide',
                           KIND_TONE[r.kind],
                         )}
                       >
@@ -129,14 +129,14 @@ export function Timeline({
                     )}
                     <div className="mt-0.5 sm:pl-[3.6rem]">
                       <details className="group">
-                        <summary className="cursor-pointer list-none text-[11px] text-muted transition hover:text-ash-dim">
+                        <summary className="cursor-pointer list-none text-xs text-muted transition hover:text-ash-dim">
                           <span className="group-open:hidden">raw row</span>
                           <span className="hidden group-open:inline">hide raw row</span>
                           <span className="ml-2 text-rune-bright">
                             {PRODUCER_LABELS[r.producer]}
                           </span>
                         </summary>
-                        <pre className="mt-1 overflow-x-auto rounded border border-rune bg-pitch px-2.5 py-2 text-[11px] leading-relaxed text-ash-dim">
+                        <pre className="mt-1 overflow-x-auto rounded border border-rune bg-pitch px-2.5 py-2 text-xs leading-relaxed text-ash-dim">
 {JSON.stringify(
   { at: r.at, kind: r.kind, who: r.who, producer: r.producer, raw: r.raw ?? null },
   null,

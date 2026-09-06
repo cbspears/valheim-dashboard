@@ -187,8 +187,12 @@ export function AttendanceCalendar({
       {/* View selector — hidden when the grid is pinned to one viking */}
       {!lockedTo && (
         <div className="mb-5 flex flex-wrap gap-2">
+          {/* "Everyone", not "All vikings": the roster section 30 lines up
+              this page is now headed "All vikings" and means the list of
+              people, while this chip means everyone's hours added together.
+              One word per concept, so the two cannot be read as the same. */}
           <Chip active={!single} onClick={() => setSelected(null)}>
-            All vikings
+            Everyone
           </Chip>
           {vikings.map((v) => (
             <Chip key={v} active={selected === v} onClick={() => setSelected(v)}>
@@ -201,12 +205,15 @@ export function AttendanceCalendar({
       {/* Grid */}
       <div className="overflow-x-auto">
         <div className="inline-flex flex-col gap-2">
-          {/* month row */}
-          <div className="flex pl-9">
+          {/* month row. 12 px is the floor for text on this site, and these
+              labels are the only key to reading the grid, so the columns are
+              sized off the 16 px cell plus its 3 px gap rather than the other
+              way round. */}
+          <div className="flex pl-10">
             {monthLabels.map((m, i) => (
               <div
                 key={i}
-                className="w-[18px] shrink-0 font-display text-[10px] uppercase tracking-wide text-muted"
+                className="w-[19px] shrink-0 font-display text-xs uppercase tracking-wide text-muted"
               >
                 {m}
               </div>
@@ -215,11 +222,11 @@ export function AttendanceCalendar({
 
           <div className="flex gap-[3px]">
             {/* weekday labels */}
-            <div className="mr-1 flex w-8 shrink-0 flex-col gap-[3px]">
+            <div className="mr-1 flex w-9 shrink-0 flex-col gap-[3px]">
               {weekdayRows.map((w, i) => (
                 <div
                   key={i}
-                  className="flex h-[15px] items-center justify-end pr-1 text-[9px] leading-none text-muted"
+                  className="flex h-4 items-center justify-end pr-1 text-xs leading-none text-muted"
                 >
                   {w}
                 </div>
@@ -230,7 +237,7 @@ export function AttendanceCalendar({
               <div key={ci} className="flex flex-col gap-[3px]">
                 {col.map((cell) => {
                   if (cell.inFuture) {
-                    return <div key={cell.key} className="h-[15px] w-[15px]" />;
+                    return <div key={cell.key} className="h-4 w-4" />;
                   }
                   const level = levelFor(cell.hours);
                   const isToday = cell.key === todayKey;
@@ -238,7 +245,7 @@ export function AttendanceCalendar({
                     <div key={cell.key} className="group relative">
                       <div
                         className={clsx(
-                          'h-[15px] w-[15px] rounded-[3px] transition-colors',
+                          'h-4 w-4 rounded-[3px] transition-colors',
                           level === 0 && 'border border-rune/70',
                           isToday && 'ring-1 ring-gold-light/70'
                         )}
@@ -249,12 +256,12 @@ export function AttendanceCalendar({
                         <div className="font-display text-xs text-gold-light">
                           {LABEL_FMT.format(cell.date)}
                         </div>
-                        <div className="text-[11px] text-ash-dim">
+                        <div className="text-xs text-ash-dim">
                           {cell.hours <= 0
                             ? 'No one at the hearth'
                             : single
                               ? `${cell.hours.toFixed(1)} hours`
-                              : `${cell.hours.toFixed(1)} viking-hours · ${cell.vikings} viking${cell.vikings === 1 ? '' : 's'}`}
+                              : `${cell.hours.toFixed(1)} hours played by ${cell.vikings} viking${cell.vikings === 1 ? '' : 's'}`}
                         </div>
                       </div>
                     </div>
@@ -296,14 +303,14 @@ export function AttendanceCalendar({
               Most faithful:{' '}
               <VikingLink
                 name={champion.name}
-                className="gold-ring rounded-sm font-display text-ash-dim transition-colors hover:text-gold-light"
+                className="prose-link gold-ring rounded-sm font-display text-ash-dim transition-colors hover:text-gold-light"
               />{' '}
               ({champion.len} in a row)
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 text-[10px] text-muted">
+        <div className="flex items-center gap-1.5 text-xs text-muted">
           <span>less</span>
           <div className="h-[13px] w-[13px] rounded-[3px] border border-rune/70" />
           {[1, 2, 3, 4].map((l) => (

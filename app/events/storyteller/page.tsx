@@ -23,9 +23,12 @@ import { storytellerWork } from '@/lib/tales';
 export const revalidate = 60;
 
 export const metadata: Metadata = {
-  title: "The Storyteller's Work",
+  // The sibling half of Story, named for what it holds rather than for the
+  // office that fills it: a jarl's tale and a viking's telling are both on this
+  // page, and neither was written by the Storyteller.
+  title: 'Written by the warband',
   description:
-    'Every night the Storyteller has set down, and every fall the vikings have told in their own words.',
+    'Every night the warband has set down, and every fall the vikings have told in their own words.',
 };
 
 export default async function StorytellerPage() {
@@ -45,7 +48,8 @@ export default async function StorytellerPage() {
       <section className="flex flex-col gap-6">
         <PageHeader slot="events">
           <SectionHeader
-            title="The Storyteller's Work"
+            as="h1"
+            title="Written by the warband"
             subtitle="Every night set down in a viking's own words, and every fall they have told."
             icon={<Feather size={22} />}
           />
