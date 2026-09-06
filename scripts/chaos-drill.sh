@@ -56,9 +56,9 @@ dispatch() {  # $1 = label, expects the workflow response JSON to contain "actio
     tries=$((tries+1)); [ $tries -gt 12 ] && { say "$label: no run appeared"; return 1; }; sleep 5
   done
   gh run watch "$id" --exit-status >/dev/null 2>&1; local rc=$?
-  local body; body=$(gh run view "$id" --log 2>/dev/null | grep -o '{"ok".*}' | tail -1)
+  local body; body=$(gh run view "$id" --log 2>/dev/null | grep -o '{.*}' | tail -1)
   local action notified
-  action=$(printf '%s' "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('decision',{}).get('action', d.get('action','?')))" 2>/dev/null || echo '?')
+  action=$(printf '%s' "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('alert') or {}).get('action') or (d.get('decision') or {}).get('action') or d.get('action') or '?')" 2>/dev/null || echo '?')
   notified=$(printf '%s' "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('notified',{}); print('posted' if n.get('ok') else ('not-posted:'+str(n.get('error','')) if n.get('attempted') else 'no-post'))" 2>/dev/null || echo '?')
   say "$label: run $id exit=$rc action=$action discord=$notified"
   printf '%s\n' "$body" >> "$LOG"
