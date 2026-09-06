@@ -73,7 +73,7 @@ elif [ -s "$OUT/$WORLD.fwl" ]; then
 else
   echo "  ⚠️  neither worlds_local/$WORLD.fwl nor worlds_local/$WORLD/ was found — wrong world name?"
 fi
-grep -i "$WORLD" "$OUT/sftp-ls.txt" | grep -v "^sftp>" | head -8 || true
+grep -i -- "$WORLD" "$OUT/sftp-ls.txt" | grep -v "^sftp>" | head -8 || true
 
 echo "== ⓪ Valheim version (console.log — proof no Steam update ran) =="
 grep -a -m1 "Valheim version:" "$OUT/console.log" || echo "  (no 'Valheim version:' line in this console.log)"

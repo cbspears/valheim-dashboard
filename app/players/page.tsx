@@ -136,7 +136,7 @@ function anglerEntries(players: PlayerWithStats[], n = 5): LeaderboardEntry[] {
     .map((e) => ({
       id: e.id,
       name: e.name,
-      value: `L${e.level} · ${formatNumber(e.catches)} catches`,
+      value: `L${e.level} · ${formatNumber(e.catches)} ${e.catches === 1 ? 'catch' : 'catches'}`,
     }));
 }
 

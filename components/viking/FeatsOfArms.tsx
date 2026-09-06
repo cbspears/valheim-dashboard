@@ -7,7 +7,7 @@ import type { PlayerStats, Boss } from '@/lib/types';
 
 /** Seconds -> "1h 4m" / "12m 30s" / "45s". */
 function dur(sec: number): string {
-  if (!sec || sec <= 0) return '—';
+  if (!sec || sec <= 0) return 'none yet';
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
@@ -18,7 +18,7 @@ function dur(sec: number): string {
 
 /** Prettify a Valheim prefab/skill token into a readable name. */
 function pretty(raw: string | null | undefined): string {
-  if (!raw) return '—';
+  if (!raw) return 'none yet';
   return raw
     .replace(/^\$(?:enemy|item|character)_/i, '')
     .replace(/[_-]+/g, ' ')
@@ -59,7 +59,7 @@ export function FeatsOfArms({
   const records: Rec[] = [
     {
       label: 'Favored Weapon',
-      value: gs.records.topWeapon ? pretty(gs.records.topWeapon) : '—',
+      value: gs.records.topWeapon ? pretty(gs.records.topWeapon) : 'none yet',
       icon: <Sword size={14} />,
       show: !!gs.records.topWeapon,
     },
@@ -89,7 +89,7 @@ export function FeatsOfArms({
     },
     {
       label: 'Fishing',
-      value: `L${fishingLevel} · ${formatNumber(totalCatches)} catches`,
+      value: `L${fishingLevel} · ${formatNumber(totalCatches)} ${totalCatches === 1 ? 'catch' : 'catches'}`,
       icon: <FishSymbol size={14} />,
       show: fishingLevel > 0 || totalCatches > 0,
     },
@@ -212,7 +212,7 @@ export function FeatsOfArms({
               >
                 <span className="flex-1 truncate text-sm text-ash">{f.name}</span>
                 <span className="shrink-0 text-sm tabular-nums text-ash-dim">
-                  {f.count > 0 ? formatNumber(f.count) : '—'}
+                  {f.count > 0 ? formatNumber(f.count) : '0'}
                 </span>
               </li>
             ))}

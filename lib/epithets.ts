@@ -646,15 +646,15 @@ export function epithetFor(
 
 const BIO_LINES: ((first: string, title: string) => string)[] = [
   (first) =>
-    `The sagas record little of ${first} — only that the hearth was warmer when they were in the hall.`,
+    `The sagas record little of ${first}. Only that the hearth was warmer when they were in the hall.`,
   (first, title) =>
     `Some called ${first} ${title}; the skalds wrote no more than that, and needed no more.`,
   (first) =>
-    `Of ${first} few verses survive — yet every longhouse remembers the work of their hands.`,
+    `Of ${first} few verses survive, yet every longhouse remembers the work of their hands.`,
   (first) =>
     `${first} left scarce a word behind, and needed none; the North knew them by their deeds.`,
   (first, title) =>
-    `No saga names ${first} at length — but the fires burned longer on the nights ${title} sailed.`,
+    `No saga names ${first} at length, but the fires burned longer on the nights ${title} sailed.`,
 ];
 
 /**

@@ -1,9 +1,7 @@
 -- APPLIED to production 2026-09-05 20:05 CT (Fable session): three additive indexes on sessions, verified present in pg_indexes.
 -- 2026-09-06 · Hot-path indexes for `sessions`.
 --
--- ⚠️ UNAPPLIED. Nothing in this repo runs migrations; Charlie applies db/*.sql
--- by hand (AGENTS.md → "Database / migrations"). This file has NOT been run
--- against the production project.
+-- Status: APPLIED (see line 1). Idempotent; safe to re-run.
 --
 -- WHY: db/2026-09-04_events_indexes.sql covered `events` and the four unindexed
 -- foreign keys, and noted in passing that `sessions` was showing 13,340
