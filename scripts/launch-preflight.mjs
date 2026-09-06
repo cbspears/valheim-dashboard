@@ -776,7 +776,7 @@ function checkGtx() {
     PHASE === 'post-start' ? true : 'warn',
   );
 
-  // docs/LAUNCH-WIPE.md step 5 lists `BepInEx/plugins/WebMap/map_data/<old world>/` as a
+  // docs/LAUNCH-DAY.md step 12 lists `BepInEx/plugins/WebMap/map_data/<old world>/` as a
   // mandatory delete, and nothing regenerates a retired world's directory — WebMap only
   // writes the running world's. Same treatment as the worlds_local leftovers.
   const mdForeign = mdDirs.filter((d) => d !== WORLD);

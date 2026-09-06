@@ -183,11 +183,16 @@ Related: `--ingest-url` exists but should almost never be used. The dashboard an
 hostnames and the shipped mod configs hard-code `valheim-dashboard.vercel.app`; repointing it
 strands every player still on an older pack, because their cfg keeps posting to the old one.
 
-## Re-minting: the launch-day sequence
+## Re-minting: the sequence
+
+**On 2026-09-09 do not run the launch from this section.** The launch morning is
+`docs/LAUNCH-DAY.md`, one numbered sequence with owners and rollbacks; the mint is its
+steps 16 to 19 and it slots the pieces below into a different order (in particular the
+server Stop/Start happens *before* the mint, not after it — see step 8's note). What
+follows is the recipe for an ordinary re-mint, and the reference for what each flag does.
 
 Assume the four plugins have been rebuilt for Valheim 1.0 and the two Eilif client plugins
-are uploaded to Thunderstore. The full morning around this, including who does which half,
-is `docs/LAUNCH-WIPE.md` under "The launch-morning sequence".
+are uploaded to Thunderstore.
 
 If ValheimPlus is gone, add `--paths 1.5.0 --no-vplus --fallback on` to **every** command in
 this section, including step 6's bundle rebuild. All three, every time: `--fallback` without
@@ -226,8 +231,9 @@ with the flags already in it, which is why copying it beats retyping it.
    ```
 
    Then in r2modman: Settings, Import/Export, Import profile, paste the code. It should land
-   with all seven mods and the cfgs already filled in. Worth doing once before launch night;
-   it is the only link in the chain the script cannot check for itself.
+   with **every mod the pack ships** and the cfgs already filled in. Do not check it against a
+   count: v11 shipped seven, and a `--no-vplus` pack ships six. Worth doing once before launch
+   night; it is the only link in the chain the script cannot check for itself.
 
 3. **Real mint.**
 
@@ -294,6 +300,14 @@ with the flags already in it, which is why copying it beats retyping it.
 8. **Stop then Start the server** from the GTX panel, so it comes up on the same plugin
    builds the pack now hands out. A restart is not the same thing as Stop then Start for
    config changes.
+
+   > **Not on 2026-09-09.** The launch-day stopped window comes *first* — the Steam
+   > Update, the DLL swap, V+ removal, the `[ServerFallback]` cfg, the world upload and
+   > the Start are all done before the pack is minted, precisely so the mint can be built
+   > from what actually loaded. `docs/LAUNCH-DAY.md` steps 7 to 14. Doing an extra
+   > Stop/Start here would kick the crew off after the GO post for no reason.
+   > `mint-pack.mjs --publish` prints this same line in its checklist; it is written for
+   > an ordinary re-mint day too.
 
 9. **Tell the crew**, in Discord, in this order: the new code, the version label, and
    "r2modman: Settings, Import/Export, Update profile from code" for people who already

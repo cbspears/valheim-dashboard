@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Launch-day environment cutover for the world named in $1 (default Eilif). DRY RUN unless --apply.
-# Flips every world-dependent setting on THIS PC and prints the two remote steps it cannot do.
+# Flips every world-dependent setting on THIS PC and prints the THREE remote steps it cannot do
+# (Vercel GS_EXPECTED_WORLD + deploy, the Emitter cfg World= on the box, the pack mint).
+# The full launch morning around this is docs/LAUNCH-DAY.md; this is its step 20b.
 #   bash scripts/cutover-env.sh Eilif            # show the diff
 #   bash scripts/cutover-env.sh Eilif --apply    # write .env files, fix the unit, daemon-reload (no restarts)
 #   bash scripts/cutover-env.sh --apply          # same, for the default world
@@ -102,7 +104,13 @@ echo "  2. GTX (server STOPPED): BepInEx/config/net.cproudlock.gsvalheimstats.cf
 # refused by a box that no longer runs it (enforceMod checks both directions).
 # Following the old line under time pressure minted a pack every client rejects,
 # so this now prints the runbook's own flag set and sends the operator there.
-echo "  3. Pack: docs/LAUNCH-WIPE.md steps 14 and 15 (throwaway test mint, then dry-run, mint, publish)."
+#
+# The bundle line below is deliberately NOT a paste-able command either:
+# build-config-bundle.mjs REQUIRES --pack-number and --pack-date (it prints usage and
+# exits 2 without them) and wants the same pins the mint used. The command to run is the
+# one `mint-pack.mjs --publish` prints in its own checklist, which forwards every changed
+# pin plus --no-vplus/--fallback. See docs/LAUNCH-DAY.md step 19.
+echo "  3. Pack: docs/LAUNCH-DAY.md steps 16 and 18 (throwaway test mint, then dry-run, mint, publish)."
 echo "        M=\"--world $W --paths 1.5.0 --companion-client <ver> --no-vplus --fallback on --cap <N>\""
 echo "        Then MODPACK_PROFILE_CODE + MODPACK_VERSION_LABEL in config/server.ts,"
 echo "        node scripts/build-config-bundle.mjs --world $W, deploy."

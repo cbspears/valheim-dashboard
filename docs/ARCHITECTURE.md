@@ -15,7 +15,8 @@ Companion docs, all current:
 |---|---|
 | `AGENTS.md` | build/test/deploy commands, verification expectations |
 | `CLAUDE.md` | session orientation, the launch-week state block |
-| `docs/LAUNCH-WIPE.md` | the launch-morning sequence and the wipe procedure |
+| **`docs/LAUNCH-DAY.md`** | **the launch sequence of record for 2026-09-09 — 22 numbered steps, owners, commands, expected output, failure branches, rollbacks** |
+| `docs/LAUNCH-WIPE.md` | the wipe procedure itself, the rehearsal, and what it does and does not touch |
 | `docs/PACK.md` | minting the modpack and the Mac config bundle |
 | `docs/OPS-COCKPIT.md` | `/admin/ops`, component health, redaction, watchdog runbook |
 | `docs/STRESS-TEST.md` | the local twenty-viking load test and its local Supabase stack |
@@ -686,8 +687,20 @@ means all four custom plugins are recompiled in the morning window and ValheimPl
 assumed absent.
 
 **Do not run the launch from this file.** The procedure of record is
-**`docs/LAUNCH-WIPE.md`**, which carries the launch-morning sequence, the twelve-step
-cutover, the ordering rules that were learned the hard way (stop the Discord bot first,
-start the map snapshotter last), and the owner of each step. `docs/PACK.md` carries the
-re-mint. `CLAUDE.md` carries the current state block and the links to the launch audit
-and the printable runbook.
+**`docs/LAUNCH-DAY.md`** (added 2026-09-05): one numbered, time-boxed, 22-step sequence
+from "1.0 is out on Steam" to "players are in", with the owner, the exact command, the
+line to look for, the "if it fails" branch and the rollback on every step, and the
+go/no-go at 15:00 CT. It carries the ordering rules that were learned the hard way (stop
+the Discord bot first, start the map snapshotter last) and marks every Charlie-only step.
+
+It also carries a **step 0**, which is not on the 9th: the launch world does not exist
+yet, and none of the six sources the file reconciled said who creates it or when. Charlie
+generates `Eilif` in his own client and hands over the `.fwl`+`.db` pair by 2026-09-08.
+Step 12 uploads it into a stopped window that opens after the irreversible Steam Update,
+so a missing pair is a no-go before step 7, not a hold at step 12.
+
+`docs/LAUNCH-WIPE.md` keeps the wipe's own procedure and the rehearsal that shaped it.
+`docs/PACK.md` carries the re-mint mechanics and the flag reference. `CLAUDE.md` carries
+the current state block and the links to the launch audit and the printable runbook.
+Earlier notes calling this a "twelve-step cutover" were counting the HTML runbook's
+numbering; `LAUNCH-DAY.md` has 22 steps and is the only numbering to quote.

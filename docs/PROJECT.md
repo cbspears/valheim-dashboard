@@ -27,7 +27,8 @@
 >   password-gated ops cockpit.
 > - **The launch date held:** 2026-09-09, world `Eilif`, on Valheim 1.0.
 >
-> For the current runbooks see `docs/LAUNCH-WIPE.md`, `docs/PACK.md`,
+> For the launch sequence of record see **`docs/LAUNCH-DAY.md`**; for the runbooks
+> around it, `docs/LAUNCH-WIPE.md` (the wipe itself), `docs/PACK.md`,
 > `docs/OPS-COCKPIT.md` and `docs/STRESS-TEST.md`.
 
 ---
@@ -71,7 +72,7 @@ ServerCharacters .fch ─────SFTP─> stats parser ──┼──> /api
 - **Dashboard** (`app/`) — Next.js 16 · React 19 · Tailwind v4 · TS · Supabase. 5 pages (Hall/Vikings/World/Saga/Mods). Banner hero + derived blue-slate background + gold-"E" favicon + OG image. → Vercel.
 - **Supabase** — `players, sessions, events, player_stats, bosses, roadmap, server_status, discord_events, gallery_photos` (+ a public `gallery` Storage bucket). Public-read RLS; writes go through `/api/webhook` (service-role + `x-webhook-secret`). `occurredAt` + `sync` + `events_sync` supported.
 - **Discord bot** (`services/discord-bot/`) — discord.js v14, systemd `eilif-discord-bot` (live, auto-boot). Relays joins/leaves/deaths/raids → `#server`; first boss kills `@everyone` → `#valheim`; **8 AM & 10 PM Central recaps** (deaths leaderboard + Player-of-the-Day) → `#valheim`. Recaps gated by `RECAPS_START`. Scripts: `mark-boss.js`, `announce.js`, `preview.js`.
-- **Log poller** (`services/log-poller/`) — Node + ssh2-sftp-client, systemd `valheim-log-poller` (built, not yet running). Tails `BepInEx/LogOutput.log` over SFTP → derives presence/sessions/deaths/raids → `/api/webhook`. Parser unit-tested.
+- **Log poller** (`services/log-poller/`) — Node + ssh2-sftp-client, systemd **`eilif-log-poller.service`** (live; the repo's reference unit file is still named `valheim-log-poller.service`, and there is no live unit by that name). Tails `BepInEx/LogOutput.log` over SFTP → derives presence/sessions/deaths/raids → `/api/webhook`. Parser unit-tested.
 - **Stats parser** (`services/stats-parser/`) — Node + ssh2-sftp-client. `ServerCharacters` stores each player's full vanilla `.fch` profile server-side → SFTP-pull → parse the `ZPackage` stat array + map-exploration fog → POST `{type:'stats'}` to `/api/webhook` → `player_stats`. Built + validated against 30 real profiles (v37/39/43). The `PlayerStatType` ordinal map is extracted from the live `assembly_valheim.dll` (`scripts/extract-stat-enum.mjs`); the parser reads the stat count dynamically and self-synchronizes past version-variable flag bytes, so a game patch degrades gracefully rather than corrupting data. Runs post-launch under systemd (`eilif-stats-parser`).
 
 **Runtime:** Node 20 via nvm (`~/.config/nvm`; system node is 18). Pinned via `.nvmrc`.

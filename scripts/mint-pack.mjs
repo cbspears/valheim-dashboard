@@ -1071,7 +1071,9 @@ async function main(argv) {
     console.log(`    4. node scripts/build-config-bundle.mjs ${bundleArgs(args, pins)} \\`);
     console.log('         --pack-number <N> --pack-date "<Mon D, YYYY>"');
     console.log('    5. app/get-started/page.tsx: point CONFIG_BUNDLE_URL at the new bundle file');
-    console.log('    6. deploy, then Stop/Start the server, then tell the crew to re-import');
+    console.log('    6. deploy; if the server is RUNNING, Stop/Start it so the new cfg loads');
+    console.log('       (launch morning: skip that, the box is already stopped; docs/LAUNCH-DAY.md);');
+    console.log('       then tell the crew to re-import');
     if (args.omit.includes('vplus')) printNoVplusReminder(args.cap);
   } else {
     console.log(`  TEST code: ${key}`);

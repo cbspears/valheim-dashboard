@@ -15,7 +15,7 @@
 #        (a) PANEL TIER   — the latest `Setting world modifier: DeathPenalty->` line in console.log.
 #            Tiers map to keys via Unity scene data (decompile-verified): `veryeasy` grants ONLY
 #            `skillreductionrate 15`. KEEP-GEAR (`deathkeepequip`) is granted by the CASUAL tier.
-#        (b) PLUGIN ENFORCEMENT — Eilif Companion 0.3.0's `[EILIF_KEY] enforced world key:
+#        (b) PLUGIN ENFORCEMENT — Eilif Companion 0.3.x's `[EILIF_KEY] enforced world key:
 #            deathkeepequip` in LogOutput.log. The plugin writes the key with canSaveToServerOptionKeys
 #            = true, so it also lands in the world's startingGlobalKeys (.fwl) — which is why the old
 #            "grep the .fwl for deathkeepequip" check false-positived as KEEP-GEAR ACTIVE regardless
