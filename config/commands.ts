@@ -48,6 +48,8 @@ export type Audience =
   | 'any member'
   | 'a linked viking'
   | 'the viking who told it, or an admin'
+  | 'the Storyteller, or an admin of the hall'
+  | 'the viking who wrote it, the Storyteller, or an admin'
   | 'an admin of the hall';
 
 type Base = {
@@ -189,6 +191,48 @@ export const DISCORD_COMMANDS: DiscordCommand[] = [
     example: '@Eilif keep The Elder 2',
     source: 'services/discord-bot/src/tellings.js parseTellings, handleKeep, mayKeepTelling',
     flag: 'TELLINGS',
+  },
+  {
+    kind: 'discord',
+    id: 'tale',
+    text: '@Eilif tale <Title>: <your tale>',
+    copy: 'tale ',
+    also: ['@Eilif tale for yesterday <Title>: <your tale>', '@Eilif tale for Sep 12 <Title>: <your tale>'],
+    who: 'the Storyteller, or an admin of the hall',
+    what: 'Writes a tale of the hall about a night that was not a boss: a game night, an RP evening, whatever happened. It appears on the Saga inside that night’s episode, and on the Storyteller’s own page.',
+    example: '@Eilif tale for last night The Longship Race: two boats, one barrel, and Bren in the water',
+    note: 'With no day named it is about today. Name one with `for yesterday`, `for last night`, `for 2026-09-12` or `for Sep 12`; a night in the future is refused, and a bare month and day are read in the current year, so write the whole date when you mean an earlier one. Up to 4000 characters and an 80-character title, one tale every two minutes. A line break may stand in for any of the spaces, so you can write paragraphs.',
+    source: 'services/discord-bot/src/tales.js parseTales, handleWrite, mayWriteTale',
+  },
+  {
+    kind: 'discord',
+    id: 'tales',
+    text: '@Eilif tales',
+    copy: 'tales',
+    who: 'any member',
+    what: 'Lists the last ten tales of the hall, numbered, newest night first. The number is what you hand to untale or retale.',
+    example: '@Eilif tales',
+    source: 'services/discord-bot/src/tales.js parseTales, handleList',
+  },
+  {
+    kind: 'discord',
+    id: 'untale',
+    text: '@Eilif untale <n>',
+    copy: 'untale ',
+    who: 'the viking who wrote it, the Storyteller, or an admin',
+    what: 'Takes tale number n off the Saga. The numbers come from the list above.',
+    example: '@Eilif untale 2',
+    source: 'services/discord-bot/src/tales.js parseTales, handleUntale, mayEditTale',
+  },
+  {
+    kind: 'discord',
+    id: 'retale',
+    text: '@Eilif retale <n>: <the tale>',
+    copy: 'retale ',
+    who: 'the viking who wrote it, the Storyteller, or an admin',
+    what: 'Rewrites the words of tale number n, keeping its name and the night it is about.',
+    example: '@Eilif retale 2: how it actually went',
+    source: 'services/discord-bot/src/tales.js parseTales, handleRetale, mayEditTale',
   },
   {
     kind: 'discord',
@@ -417,6 +461,15 @@ export const NOTIFICATIONS: Notification[] = [
   },
   {
     kind: 'notification',
+    id: 'tale-echo',
+    text: 'The tale echo',
+    where: 'Spoken in game',
+    trigger: 'The Storyteller writes a tale of the hall',
+    cadence: 'Once per tale, and never on a rewrite',
+    source: 'services/discord-bot/src/tales.js TALE_VOICE_LINES',
+  },
+  {
+    kind: 'notification',
     id: 'voice-ambient',
     text: 'The Voice of the Hall',
     where: 'Spoken in game, center screen',
@@ -520,6 +573,14 @@ export const SITE_PAGES: SitePage[] = [
     label: 'Saga',
     what: 'Each night the vikings gather becomes a chapter, with the running feed of everything the hall recorded.',
     source: 'app/events/page.tsx',
+  },
+  {
+    kind: 'page',
+    id: 'page-storyteller',
+    text: '/events/storyteller',
+    label: 'The Storyteller’s work',
+    what: 'The same Saga, filtered to what vikings wrote themselves: every tale of a night, and every telling of a boss falling.',
+    source: 'app/events/storyteller/page.tsx',
   },
   {
     kind: 'page',

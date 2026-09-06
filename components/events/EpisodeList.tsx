@@ -3,6 +3,7 @@ import { Skull, Compass, Clock, ScrollText, Swords } from 'lucide-react';
 import type { Episode } from '@/lib/episodes';
 import { phraseDeath } from '@/lib/episodes';
 import { Card, EmptyState, VikingLink } from '@/components/ui';
+import { EpisodeTales } from './EpisodeTales';
 import { bossPath } from '@/lib/slug';
 
 const EVENT_TZ = 'America/Chicago';
@@ -104,6 +105,9 @@ function EpisodeCard({ ep }: { ep: Episode }) {
       {ep.description && (
         <p className="mt-2 text-sm leading-relaxed text-ash-dim">{ep.description}</p>
       )}
+
+      {/* what the Storyteller wrote about this night, when anyone did */}
+      <EpisodeTales tales={ep.tales} />
 
       {/* participant chips */}
       {ep.participants.length > 0 && (

@@ -192,6 +192,68 @@ we lost the shieldwall twice, and Bren held the gate alone
   verb answers "the Hall's ledgers are still being carved" and writes nothing, and the war-room
   renders `bosses.retelling` exactly as it did before.
 
+## Tales of the hall (always on, no flag)
+A telling hangs off a boss. A **tale** hangs off a **night**: a game night, a wedding, a longship
+race, anything the hall did that was not a forsaken falling. Tales live in `tales`
+(`db/2026-09-06_tales.sql`) and render on the Saga inside the episode for the day they are about,
+under the heading **As the Storyteller tells it**, plus their own view at `/events/storyteller`.
+
+```
+@Eilif tale The Longship Race: two boats, one barrel, and Bren in the water
+@Eilif tale for yesterday The Wedding: they danced until the fire went out
+@Eilif tale for last night The Long Dark: the mist came in and nobody moved
+@Eilif tale for 2026-09-12 A Night: ...
+@Eilif tale for Sep 12 A Night: ...
+
+@Eilif tales                   the last 10, numbered: newest night first
+@Eilif untale 2                withdraw tale 2
+@Eilif retale 2: new words     rewrite tale 2, keeping its name and its night
+```
+
+A line break may stand in for any of those spaces, so a long tale can be typed as
+`@Eilif tale for last night` / newline / `The Longship Race: ...` and the paragraphs survive.
+
+- **Only the Storyteller or a jarl may write one.** The holder of the office
+  (`db/2026-09-06_offices.sql`, `@Eilif elect storyteller`) or anyone with **Administrator** or
+  **Manage Server** or a role id in `ADMIN_ROLE_IDS` (the same check `@Eilif say:` uses, guild-pinned
+  the same way). Anyone else gets one line: *"The Storyteller keeps the tales of the hall. Ask them
+  to write it down."* and nothing is stored. **With no offices table, or with every term closed,
+  there is simply no holder** and a jarl is the only writer, which is also true before
+  `STORYTELLER=1` is ever set.
+- **`@Eilif tales` is open to any member**, because the tales are on the public Saga already and a
+  viking who cannot read the numbers cannot ask for a correction. **`untale` and `retale`** are for
+  the viking who wrote it, the Storyteller, or a jarl.
+- **The byline** is the character the writer's Discord is linked to (`@Eilif I am <name>`, then
+  shout the rune in-game). A jarl who has never linked a viking is credited by their **server
+  display name**, so the office works on night one.
+- **The day is `told_for`**, the America/Chicago calendar day the tale is ABOUT, and it is what puts
+  the tale on the right episode. With no `for ...` it is today. `for last night` is the **previous**
+  Central day before **06:00 CT** and today after it, so a tale filed at 02:00 lands on the evening
+  that just ended; say `for yesterday` or name the date when you mean a specific earlier night.
+  **A day in the future is refused** and so is one nobody can read, and neither costs the cooldown.
+  **A bare month and day are read in the CURRENT year and nowhere else**: `for Sep 12` typed on the
+  6th is refused as a night that has not happened, not quietly filed as last year's. Write the whole
+  date (`for 2025-09-12`) when you really do mean an earlier year. A `for` that names no day is
+  refused rather than quietly filed under today, so a tale whose title begins with the word "for"
+  has to name its day first.
+- Text is capped at **4000 characters** and the title at **80** (both are the columns' own check
+  constraints), stripped of control and bidi characters, and stored otherwise **raw**: markdown is
+  escaped on display, not on storage, so the Saga renders blank-line paragraphs as paragraphs and
+  keeps the single breaks inside one. A title so long that the colon after it is past the 120th
+  character is refused by name, rather than being read as a tale with no words.
+- **Every verb answers.** `@Eilif untale` and `@Eilif retale` with no number are told which number
+  is missing and where to find it, and no shape of these four verbs is ever met with silence except
+  a direct message or another guild.
+- **One tale per member per 2 minutes**, held in memory, so a restart forgets it. Who holds the
+  office is read once a minute rather than once a message.
+- One in-game voice line is queued per **new** tale (never on a rewrite), naming the writer and the
+  tale. Reaction **📜** on anything that worked.
+- Needs `SUPABASE_SERVICE_ROLE_KEY`. **Before `db/2026-09-06_tales.sql` is applied** every verb
+  answers "the Hall's ledgers are still being carved" and writes nothing, and the Saga renders
+  exactly as it does today.
+- **There is no `TALES` flag on purpose.** The office is the gate: a hall with no Storyteller and no
+  jarl typing has no tales, which is what an off switch would have given anyway.
+
 ## The Voice of the Hall (`VOICE_ENGINE=1`, off by default)
 Eilif's brain. A server-side game plugin polls `GET /api/voice` and **speaks** queued lines in-game
 as "Eilif"; this bot decides **what** gets queued and **when**, writing rows to the `voice_lines`

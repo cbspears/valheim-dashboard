@@ -69,9 +69,12 @@
 //     timeline has already turned over. Judge /world on its Great Deeds numbers,
 //     not on its boss row.
 //
-//     The routes are /world, /events, /gallery, /oath, /map and the eight
-//     /boss/<slug> pages. Dynamic routes (/, /players, /viking/[slug], /tv,
-//     /admin/ops, every /api/*) are not affected and need no warm-up.
+//     The routes are /world, /events, /events/storyteller, /gallery, /oath,
+//     /map and the eight /boss/<slug> pages. (/events/storyteller joined the
+//     list on 2026-09-06 with the Storyteller's tales; docs/LAUNCH-DAY.md step
+//     20 still names only the five older ones.) Dynamic routes (/, /players,
+//     /viking/[slug], /tv, /admin/ops, every /api/*) are not affected and need
+//     no warm-up.
 //
 // PER-REQUEST DEDUPE (2026-09-06). Every loader below is wrapped in React
 // `cache()`, so a page that reaches for the same data twice pays for it once.
@@ -109,6 +112,7 @@ import type {
   Milestone,
   Office,
   PinKind,
+  Tale,
 } from './types';
 import { AGGREGATE_STAT_COLUMNS, computeAggregates, type Aggregates } from './milestones';
 
@@ -708,6 +712,99 @@ export const getBossTellings = cache(async (bossId: string): Promise<BossTelling
   if (error) return [];
   return (data as unknown as BossTelling[]) ?? [];
 });
+
+/**
+ * Every viking-written boss telling, across every boss, newest first
+ * (db/2026-09-06_boss_tellings.sql).
+ *
+ * The war room asks for ONE boss's tellings (getBossTellings above); the Saga's
+ * Storyteller view asks for all of them at once, because "what have the vikings
+ * written" is a question about the hall rather than about a forsaken. Filtered
+ * to `source = 'player'` in the DATABASE rather than in the page: the Skald
+ * writes one on every kill, so an unfiltered read would be mostly machine text.
+ *
+ * `boss_id` comes back raw and the page resolves it against getBosses(), rather
+ * than asking PostgREST to embed `bosses(name)`. One less thing that can fail
+ * on a page whose whole point is to render text that is already written.
+ *
+ * BOUNDED AT 60, and newest first, so the cap drops old tellings rather than the
+ * ones a reader came for.
+ *
+ * TOLERATES THE TABLE NOT EXISTING and the `standing` column not existing, the
+ * same two ways getBossTellings does and for the same reasons.
+ */
+export const getPlayerTellings = cache(async (limit = 60): Promise<BossTelling[]> => {
+  const read = (cols: string) =>
+    db()
+      .from('boss_tellings')
+      .select(cols)
+      .eq('source', 'player')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit);
+
+  const withStanding = await read(BOSS_TELLINGS_PUBLIC_COLS_V2);
+  if (!withStanding.error) return (withStanding.data as unknown as BossTelling[]) ?? [];
+  const { data, error } = await read(BOSS_TELLINGS_PUBLIC_COLS);
+  if (error) return [];
+  return (data as unknown as BossTelling[]) ?? [];
+});
+
+// Explicit column list for public tale reads: every tales column EXCEPT
+// `author_discord_id`, which is the Discord account of whoever wrote it. Paired
+// with the REVOKE SELECT ... / GRANT SELECT (cols) in db/2026-09-06_tales.sql
+// exactly like BOSS_TELLINGS_PUBLIC_COLS above, so `select('*')` here would fail
+// outright with "permission denied for column author_discord_id".
+const TALES_PUBLIC_COLS = 'id, title, text, author_character, told_for, created_at';
+
+/**
+ * The tales of the hall (db/2026-09-06_tales.sql), newest night first.
+ *
+ * `sinceDay` is a `YYYY-MM-DD` Central calendar day, compared against
+ * `told_for`, which is the same kind of value: no timestamps, no timezone, no
+ * conversion. The Saga passes the start of its own 70-day window so the two
+ * reads cover the same stretch of the season.
+ *
+ * ORDERED BY THE NIGHT, then by when it was written. Two tales of one night
+ * therefore always come back adjacent and in a stable order, which is what
+ * lib/tales.ts talesByDay and the episode cards depend on.
+ *
+ * TOLERATES THE TABLE NOT EXISTING. This migration is unapplied at the time of
+ * writing and is applied by hand, so the deployed site must render correctly
+ * against a database without it: PostgREST answers PGRST205 and psql answers
+ * 42P01, and either way this returns [] and the Saga renders exactly as it did
+ * before. Every other error takes the same path for the same reason: a Saga
+ * that renders without its tales is better than one that does not render.
+ */
+const readTales = cache(async (sinceDay: string, limit: number): Promise<Tale[]> => {
+  let q = db().from('tales').select(TALES_PUBLIC_COLS);
+  if (sinceDay) q = q.gte('told_for', sinceDay);
+  const { data, error } = await q
+    .order('told_for', { ascending: false })
+    .order('created_at', { ascending: false })
+    // A stable last tie-break, so two tales filed in the same second render in
+    // the same order on every build.
+    .order('id', { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return (data as unknown as Tale[]) ?? [];
+});
+
+/**
+ * The object-shaped front door for readTales.
+ *
+ * React `cache()` keys on ARGUMENT IDENTITY, and two equal-but-distinct objects
+ * are two different keys, so a cached loader that took `{ sinceDay, limit }`
+ * directly would never dedupe a second call. The scalars go to the cached
+ * function and the options object stays out here, which is the only reason this
+ * is two functions instead of one.
+ */
+export async function getTales({
+  sinceDay = null,
+  limit = 200,
+}: { sinceDay?: string | null; limit?: number } = {}): Promise<Tale[]> {
+  return readTales(sinceDay ?? '', limit);
+}
 
 // Explicit column list for public office reads: every offices column EXCEPT
 // `holder_discord_id`, which is the Discord account behind the office. Paired

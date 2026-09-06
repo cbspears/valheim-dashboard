@@ -15,6 +15,7 @@
 // Pure and dependency-free (aside from the Oath row type) so it can be
 // unit-tested in isolation.
 import type { GameSession, GameEvent, Oath } from './types';
+import { taleByline } from './tales';
 
 export interface EpisodeParticipant {
   name: string;
@@ -35,6 +36,33 @@ export interface EpisodePlace {
 export interface EpisodeOath {
   name: string;
   text: string;
+}
+
+/**
+ * Minimal tale shape the episode builder needs (db/2026-09-06_tales.sql).
+ *
+ * `told_for` is ALREADY a Central calendar day, which is what makes attaching a
+ * tale different from everything else in this file: sessions, deaths, pins and
+ * oaths all carry an instant and have to be bucketed through ctDayKey, and a
+ * tale simply says which night it is about. Never run it through ctDayKey.
+ */
+export interface EpisodeTaleInput {
+  id?: string | null;
+  title: string;
+  text: string;
+  author_character?: string | null;
+  told_for: string;
+  created_at: string;
+}
+
+/** A tale as an episode card renders it. */
+export interface EpisodeTale {
+  id: string | null;
+  title: string;
+  text: string;
+  /** the byline: a character name, or 'the Storyteller' */
+  by: string;
+  createdAt: string;
 }
 
 /** Minimal pin shape the episode builder needs (bucketed by CT calendar day). */
@@ -65,6 +93,12 @@ export interface Episode {
   places: EpisodePlace[];
   /** oaths sworn before the hall this day */
   oaths: EpisodeOath[];
+  /**
+   * The Storyteller's tales OF this night, oldest first
+   * (db/2026-09-06_tales.sql). Empty on every day nobody wrote one about, which
+   * is every day before the migration runs.
+   */
+  tales: EpisodeTale[];
   /** [min, max] world day touched this day, or null if unknown */
   worldDayRange: [number, number] | null;
   title: string;
@@ -149,7 +183,8 @@ export function buildEpisodes(
   sessions: GameSession[],
   events: GameEvent[],
   oaths: Oath[] = [],
-  pins: EpisodePinInput[] = []
+  pins: EpisodePinInput[] = [],
+  tales: EpisodeTaleInput[] = []
 ): Episode[] {
   const buckets = new Map<string, DayBucket>();
 
@@ -172,8 +207,27 @@ export function buildEpisodes(
     b.minutesByName.set(name, (b.minutesByName.get(name) ?? 0) + mins);
   }
 
+  // A TALE DOES NOT OPEN AN EPISODE, and that is deliberate. An episode is a
+  // night somebody PLAYED (at least one session), and a tale about a night with
+  // no sessions has no card to sit on. It is not lost: /events/storyteller
+  // shows every tale whether or not its night produced an episode, which is the
+  // view that exists for exactly this reason.
+  const talesForDay = new Map<string, EpisodeTaleInput[]>();
+  for (const t of tales) {
+    // `told_for` is already a Central calendar day. Slicing rather than parsing
+    // is what keeps a `date` that PostgREST hands back as '2026-09-12' and one
+    // a caller built as '2026-09-12T00:00:00' on the same night.
+    const key = typeof t?.told_for === 'string' ? t.told_for.slice(0, 10) : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+    const list = talesForDay.get(key);
+    if (list) list.push(t);
+    else talesForDay.set(key, [t]);
+  }
+
   const days = [...buckets.keys()].sort(); // ascending ISO date == chronological
-  return days.map((key, i) => finishEpisode(buckets.get(key)!, i + 1, events, oaths, pins));
+  return days.map((key, i) =>
+    finishEpisode(buckets.get(key)!, i + 1, events, oaths, pins, talesForDay.get(key) ?? [])
+  );
 }
 
 function finishEpisode(
@@ -181,7 +235,8 @@ function finishEpisode(
   number: number,
   events: GameEvent[],
   oaths: Oath[],
-  pins: EpisodePinInput[]
+  pins: EpisodePinInput[],
+  dayTales: EpisodeTaleInput[] = []
 ): Episode {
   const deaths: EpisodeDeath[] = [];
   const raids: string[] = [];
@@ -239,6 +294,21 @@ function finishEpisode(
     ? [Math.min(...worldDays), Math.max(...worldDays)]
     : null;
 
+  // Oldest first, because two tales of one night read as a sequence. The bot's
+  // own list is newest first for a different reason (it is a working list a
+  // Storyteller numbers a correction against), and neither ordering is the
+  // other's business.
+  const episodeTales: EpisodeTale[] = [...dayTales]
+    .filter((t) => (t?.title ?? '').trim() && (t?.text ?? '').trim())
+    .sort((a, c) => ms(a.created_at) - ms(c.created_at))
+    .map((t) => ({
+      id: t.id ?? null,
+      title: t.title.trim(),
+      text: t.text,
+      by: taleByline(t.author_character),
+      createdAt: t.created_at,
+    }));
+
   const core: Omit<Episode, 'title' | 'description'> = {
     number,
     date: new Date(b.start).toISOString(),
@@ -252,6 +322,7 @@ function finishEpisode(
     bossKills,
     places,
     oaths: dayOaths,
+    tales: episodeTales,
     worldDayRange,
   };
 

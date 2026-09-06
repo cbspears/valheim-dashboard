@@ -249,6 +249,36 @@ export interface BossTelling {
 }
 
 /**
+ * One tale of the hall (db/2026-09-06_tales.sql): a game night, an RP evening,
+ * anything that happened on a given night and was not a forsaken falling.
+ * Written from Discord with `@Eilif tale <Title>: <text>` by the Storyteller of
+ * Eilif or a jarl (services/discord-bot/src/tales.js).
+ *
+ * `told_for` is THE CENTRAL-TIME CALENDAR DAY THE TALE IS ABOUT, as a plain
+ * `YYYY-MM-DD` date and not a timestamp, so it compares directly against the
+ * day keys lib/episodes.ts buckets sessions by. Never build a `Date` from it
+ * and format that in Central time: `new Date('2026-09-12')` is UTC midnight and
+ * renders as the 11th (lib/tales.ts taleDayLabel formats the key's own numbers
+ * for exactly that reason).
+ *
+ * `author_discord_id` is DELIBERATELY ABSENT, exactly as it is on BossTelling
+ * and Office: the column exists so the bot can let a tale's own author withdraw
+ * or rewrite it, and it is REVOKEd from anon. `lib/data.ts getTales` names its
+ * columns for that reason and must never go back to `select('*')`.
+ */
+export interface Tale {
+  id: string;
+  /** The tale's own name, at most 80 characters. */
+  title: string;
+  text: string;
+  /** The teller as the Hall knows them, or null when the name was lost. */
+  author_character: string | null;
+  /** The America/Chicago calendar day the tale is about, as `YYYY-MM-DD`. */
+  told_for: string;
+  created_at: string;
+}
+
+/**
  * What a map pin can be (`pins.kind`). Player pins are shouted in-game
  * (`/pin <name>`, app/api/webhook/route.ts); 'boss' is written by
  * /api/gs-ingest at the moment a forsaken falls, at the centroid of the war

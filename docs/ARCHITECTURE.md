@@ -282,6 +282,38 @@ non-empty (`officeKnown`), so a hall that has never had the office never asks fo
 `lib/epithets.ts` is untouched, because an office is a different kind of fact from a title someone
 earned.
 
+**Tales of the hall (`services/discord-bot/src/tales.js` and `lib/tales.ts`, always on).** A telling
+hangs off a boss, and most of what happens on this server is not a boss. A TALE hangs off a NIGHT:
+`db/2026-09-06_tales.sql` adds `tales` (title, text, author, `told_for`) where `told_for` is a
+`date` holding the America/Chicago calendar day the tale is ABOUT, which is the same key
+`lib/episodes.ts` buckets sessions by, so attaching a tale to its episode is a string comparison and
+never a second timezone conversion. There is no `chosen` flag and no partial unique index, because a
+day can hold as many tales as the hall wants to tell and there is nothing to choose between.
+`@Eilif tale <Title>: <text>` files one about today, `@Eilif tale for <yesterday | last night |
+2026-09-12 | Sep 12> <Title>: <text>` about a named night, `@Eilif tales` lists the last ten
+numbered, and `@Eilif untale <n>` and `@Eilif retale <n>: <text>` withdraw and rewrite one; a night
+in the future is refused, and so is a `for` that names no day, rather than being filed under today.
+`last night` is the previous Central day before 06:00 CT and today after it, which is what makes a
+tale written at 02:00 land on the evening that just ended. **Only the Storyteller or a jarl may
+write one, and the office is why this feature carries no env flag at all**: the holder comes from
+`storyteller.js readCurrentOffice` (cached a minute, and a missing `offices` table is simply no
+holder), so a hall with no Storyteller and no jarl typing has no tales, which is exactly what an off
+switch would have given. A jarl who has never linked a viking is credited by their server display
+name, so the office works on night one. `untale` and `retale` add the tale's own author to that set.
+On the site, `lib/data.ts getTales` reads the anon-safe columns (`author_discord_id` is REVOKEd from
+anon like every other Discord id in this schema) and tolerates the table not existing, the episode
+card renders the night's tales under "As the Storyteller tells it" as plain paragraphs, and
+`/events/storyteller` is the whole record of what vikings have written: every tale and every
+`source = 'player'` boss telling (`getPlayerTellings`) in one column ordered by when it was written,
+because that is the only date both kinds carry. One thing that view is load-bearing for: **a tale
+about a night nobody played opens no episode**, since an episode is a night with at least one
+session, so the filtered view is the only place such a tale appears. It is **its own static route
+and not a `?by=` on /events**, which is not a style choice: `searchParams` is a request-time API, so
+reading it on `app/events/page.tsx` opted the Saga out of its build-time prerender and put all six
+of its Supabase reads on every request (measured on a scratch build, 2026-09-06: `○ (Static)` with a
+1m revalidate became `ƒ (Dynamic)` answering `Cache-Control: private, no-cache`). Two static routes
+cost nothing, and both are on the ISR list the post-wipe warm-up walks.
+
 **Telling votes (`services/discord-bot/src/tellings-vote.js`, off unless `TELLING_VOTES=1`).**
 `@Eilif keep` is one viking's decision. When a boss has two or more accounts from the warband, the
 Storyteller or a jarl can call `@Eilif vote tellings <Boss>` and let the hall decide: one reaction
@@ -488,11 +520,15 @@ service-role key, either from a Vercel route or from the Discord bot.
 | `ops_alerts` | `/api/ops/watchdog` (upsert) | watchdog alert state and re-alert timing. Service-role only. |
 | `offices` | bot `storyteller.js` (insert, update) | terms of the Storyteller of Eilif, at most one open. **`db/2026-09-06_offices.sql` is UNAPPLIED.** `holder_discord_id` is revoked from anon. |
 | `office_nudges` | bot `storyteller.js` (insert) | which fallen boss each term has already been nudged about. Same migration, and RLS with NO select policy: bot bookkeeping, service-role only. |
+| `tales` | bot `tales.js` (insert, update, delete) | the Storyteller's account of a NIGHT rather than of a boss, keyed by `told_for`, the Central calendar day it is about. Rendered inside that night's Saga episode and at `/events/storyteller`. **`db/2026-09-06_tales.sql` is UNAPPLIED.** `author_discord_id` is revoked from anon. |
 
-That is all twenty-one, verified against the live project on 2026-09-06: the twenty that were
-there on 2026-09-05 plus `boss_tellings`, whose migration was applied that morning. Two of the
-rows above are UNAPPLIED migration files rather than live tables: `offices` and `office_nudges`
-(`db/2026-09-06_offices.sql`); a third file adds one column, `boss_tellings.standing`
+That is all twenty-two, verified against the live project on 2026-09-06: the twenty that were
+there on 2026-09-05, plus `boss_tellings`, whose migration was applied that morning, plus `tales`.
+Three of the rows above are UNAPPLIED migration files rather than live tables: `offices` and
+`office_nudges` (`db/2026-09-06_offices.sql`, whose own first line now says it was applied to
+production at ~11:10 CT on 2026-09-06; that file and this paragraph disagree, and whichever
+workflow applied it should settle which is right) and `tales`
+(`db/2026-09-06_tales.sql`); a third file adds one column, `boss_tellings.standing`
 (`db/2026-09-06_telling_votes.sql`), which is why `lib/data.ts getBossTellings` asks for that
 column and asks again without it when the read fails. Three columns are narrower than the
 rows they sit in: `players.steam_id` is revoked from the anon role by

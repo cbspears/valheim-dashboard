@@ -538,6 +538,7 @@ const indexSrc = read(`${BOT}/index.js`);
     'recap.js',       // the daily recap
     'gallery.js',     // the photo ingest
     'tellings.js',    // retell / tellings / keep, and the telling echo
+    'tales.js',       // tale / tales / untale / retale, and the tale echo
     'identity.js',    // I am / join / who am I, and both DMs
     'voice.js',       // say:, and every spoken line
     'titles.js',      // title proclamations

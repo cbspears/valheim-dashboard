@@ -13,6 +13,7 @@ import { createEventsSync } from './events.js';
 import { createGalleryIngest } from './gallery.js';
 import { createOathIngest } from './oaths.js';
 import { createTellings } from './tellings.js';
+import { createTales } from './tales.js';
 import { createIdentityLink, createIdentityConfirmations } from './identity.js';
 import { createVoiceEngine } from './voice.js';
 import { createTitlesAnnouncer } from './titles.js';
@@ -212,6 +213,17 @@ async function runLive() {
     createTellings({ client: poster.client, office: STORYTELLER_ON }).attach();
     extra += ', tellings on';
   }
+
+  // The Storyteller's tales of the hall: `@Eilif tale <Title>: <text>`,
+  // `@Eilif tales`, `@Eilif untale <n>`, `@Eilif retale <n>: <text>`. A tale is
+  // a telling with a DAY instead of a boss, so it lands on the Saga's episode
+  // for that night. ALWAYS ON and deliberately unflagged: only the Storyteller
+  // (db/2026-09-06_offices.sql) or a jarl may write one, so a hall that has
+  // neither has no tales, which is what an off switch would have given anyway.
+  // Reads and writes `tales`; before db/2026-09-06_tales.sql is applied every
+  // verb answers "the ledgers are still being carved" and writes nothing.
+  createTales({ client: poster.client }).attach();
+  extra += ', tales on';
 
   // Discord↔character identity: `@Eilif I am <name>` mints a claim code (the
   // in-game `/oath <CODE>` webhook is what actually links it). On by default
@@ -744,7 +756,7 @@ async function runDryRun({ loop = false } = {}) {
   console.log(
     '[dry-run] not rehearsed: events-sync (needs a live gateway, and POSTs to the webhook), ' +
       'identity-confirm (builds its own service-role client and DMs real users), ' +
-      'the gallery/oath/identity-link/tellings ingests (event handlers — a stub client never emits), ' +
+      'the gallery/oath/identity-link/tellings/tales ingests (event handlers — a stub client never emits), ' +
       'the Skald retelling (a ~90 s local LLM call per boss, best-effort live), ' +
       'the ops heartbeat (must not tell /admin/ops a bot is alive).'
   );

@@ -1236,7 +1236,7 @@ refuses to hand a targeted line to a plugin that did not advertise the capabilit
 order costs silence, never a private line on everyone's screen. Then `sudo systemctl restart
 eilif-discord-bot`. Leave it unset on a vanilla night.
 
-**Prerendered pages after the wipe.** `/world`, `/events`, `/gallery`, `/oath`, `/map` and
+**Prerendered pages after the wipe.** `/world`, `/events`, `/events/storyteller`, `/gallery`, `/oath`, `/map` and
 the eight `/boss/<slug>` pages are ISR pages (revalidate 60 s) since the 2026-09-05 perf
 pass, and the deploy at step 19 prerenders them against the **pre-wipe** database. Nothing
 in this repo invalidates them, so they have to be walked until they turn.
