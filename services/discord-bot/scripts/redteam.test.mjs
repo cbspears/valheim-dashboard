@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import {
   formatBossKill, formatFeedEvent, formatRecap, replyPayload, replySafeName,
-  defangLinks, nameMd, safeText,
+  defangLinks, nameMd, safeText, clipChars,
 } from '../src/format.js';
 import { clampEmbed, MENTION_STRICT } from '../src/discord.js';
 import { withIngestSlot, INGEST_BUSY } from '../src/gallery.js';
@@ -685,11 +685,17 @@ const embedSize = (e) =>
       return q;
     },
   });
+  // A message posted in this hall. `guild`/`guildId` are load-bearing since
+  // round 3 pinned this handler to GUILD_ID (case 26); an earlier case may have
+  // left GUILD_ID set, so track whatever it says.
+  const HERE = process.env.GUILD_ID || 'g1';
   const mkMessage = (dms, replies) => ({
     author: { id: 'U1', bot: false, username: 'bjorn', send: async (t) => { dms.push(t); } },
     member: { displayName: 'Bjorn' },
     content: '<@bot> I am Bjorn',
     mentions: { has: () => true },
+    guild: { id: HERE },
+    guildId: HERE,
     react: async () => {},
     reply: async (p) => { replies.push(typeof p === 'string' ? p : p.content); },
   });
@@ -736,6 +742,396 @@ const embedSize = (e) =>
   for (const [what, text] of playerFacing) {
     ok(!/[—–]/.test(text), `no em/en dash in ${what}`);
   }
+}
+
+// ── 21. No cap ever leaves half a character behind ────────────────────────
+// Round 3. Every cap in format.js was `String.prototype.slice`, which counts
+// UTF-16 CODE UNITS. A name whose 24th unit lands inside an astral character
+// (any emoji) was cut in half and left a LONE HIGH SURROGATE in the payload,
+// which Discord answers 400 Invalid Form Body — and 400 is the one status
+// relay.js treats as permanent, so that event is BURNED rather than retried.
+{
+  const lone = (t) => /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(t);
+
+  // 23 plain letters + one astral character: the 24th unit is the high half.
+  const split = `${'a'.repeat(23)}\u{1F480}`;
+  ok(!lone(nameMd(split)), `nameMd never strands a surrogate (${JSON.stringify(nameMd(split))})`);
+  eq(nameMd(split), 'a'.repeat(23), 'and drops the whole character, not half of it');
+  ok(!lone(clipChars(split, 24)), 'clipChars never strands a surrogate');
+
+  // Boundary sweep: whatever the cap, the result is always well formed and
+  // never longer than asked for.
+  const soup = `Björn\u{1F480}Halla\u{1F9F1}Ivaŕ\u{1F6E1}\u{1F480}`.repeat(4);
+  for (let n = 0; n <= soup.length + 2; n++) {
+    const out = clipChars(soup, n);
+    if (lone(out) || out.length > n || !soup.startsWith(out)) {
+      assert.fail(`clipChars(soup, ${n}) = ${JSON.stringify(out)}`);
+    }
+  }
+  passed++;
+
+  // A combining mark is never separated from the letter it belongs to.
+  eq(clipChars('éabc', 1), '', 'a cap that would strand a combining acute yields nothing');
+  eq(clipChars('aébc', 2), 'a', 'and backs off to the previous whole character');
+  eq(clipChars('abcde', 3), 'abc', 'plain text is unaffected');
+
+  // Honest names are byte-identical to before.
+  for (const n of ['Ivar Hollowleg', 'Chærlie', "O'Brien", 'Ann-Sofie', 'Ǫlvir']) {
+    eq(nameMd(n), n, `an honest name is unchanged: ${n}`);
+  }
+
+  // The oath echo and the reply-name cap take the same care.
+  ok(!lone(safeText(`${'a'.repeat(899)}\u{1F480}`, 900)), 'safeText never strands a surrogate');
+  ok(!lone(replySafeName(`${'a'.repeat(31)}\u{1F480}`)), 'replySafeName never strands a surrogate');
+  ok(!lone(clampEmbed({ description: `${'a'.repeat(4095)}\u{1F480}` }).description), 'clampEmbed never strands a surrogate');
+}
+
+// ── 22. The poller's chat mirror is defanged on BOTH paths ────────────────
+// Round 3. `postChat` escapes the shouted name on the webhook path, then falls
+// back to a bolded-name message when Discord 400s the username override — and
+// that fallback interpolated the RAW name with no SUPPRESS_EMBEDS flag. It is
+// the path a hostile name is MOST likely to take, because a strange name is
+// exactly what makes Discord reject the override.
+//
+// safeChatName lives in the poller (a separate npm project this test cannot
+// import from), so it is read out of the source and exercised here. That is
+// deliberate: the helper's own comment says "keep the two in step", and this is
+// what holds them there.
+{
+  const pollerSrc = await readFile(
+    new URL('../../log-poller/src/poller.js', import.meta.url), 'utf8',
+  );
+  const helpers = pollerSrc.match(/const COMBINING_MARK[\s\S]*?\nfunction safeChatUsername[\s\S]*?\n}\n/);
+  ok(helpers, 'the chat-name helpers are still where this test expects them');
+  const [safeChatName, safeChatUsername] =
+    new Function(`${helpers[0]}; return [safeChatName, safeChatUsername];`)();
+  const lone = (t) => /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(t);
+
+  eq(safeChatName('Ivar Hollowleg'), 'Ivar Hollowleg', 'an honest shouted name is unchanged');
+  eq(safeChatName('Ann-Sofie'), 'Ann-Sofie', 'a hyphen is not markdown');
+  eq(safeChatName('**bold**'), '\\*\\*bold\\*\\*', 'bold in a name is inert');
+  ok(!/https?:\/\//.test(safeChatName('http://a.co/pwn')), 'a URL name is defanged');
+  ok(!lone(safeChatName(`${'a'.repeat(23)}\u{1F480}`)), 'the 24-char clip never strands a surrogate');
+  eq(safeChatName('élodie'), 'élodie', 'an accented name survives whole');
+
+  // The webhook USERNAME override is a display name: Discord renders it
+  // literally and never linkifies it, so escaping it is not free — it is a
+  // visible backslash on the author line of every mirrored shout.
+  eq(safeChatUsername('Testman_2'), 'Testman_2', 'a username override carries no markdown escape');
+  eq(safeChatUsername('Björn*'), 'Björn*', 'nor an escaped asterisk');
+  eq(safeChatUsername('Halla | Skald'), 'Halla | Skald', 'nor an escaped pipe');
+  eq(safeChatName('Testman_2'), 'Testman\\_2', 'while the CONTENT path still escapes, because that one is markdown');
+  eq(safeChatUsername('a\u200bb'), 'ab', 'the username still loses invisible characters');
+  ok(!lone(safeChatUsername(`${'a'.repeat(79)}\u{1F480}`)), 'and never strands a surrogate at 80');
+
+  // Round 3 review: the comment on these helpers says to keep them in step with
+  // format.js nameMd, which now collapses, trims and falls back (case 27). The
+  // content path bolds the name, so a trailing space mirrored `**Ragnar :** \u2026`
+  // and an all-whitespace name `** :** \u2026`.
+  eq(safeChatName('Ragnar '), 'Ragnar', 'a trailing space never reaches the mirrored shout');
+  eq(safeChatName('Ivar  Hollowleg'), 'Ivar Hollowleg', 'nor a doubled inner space');
+  eq(safeChatName('   '), 'viking', 'an all-whitespace name falls back rather than bolding nothing');
+  eq(safeChatUsername('   '), 'viking', 'and the username override never goes out empty (Discord 400s it)');
+
+  // Both send paths escape the name and suppress previews.
+  const postChat = pollerSrc.slice(pollerSrc.indexOf('async postChat('), pollerSrc.indexOf('// --- Send one parsed event onward'));
+  ok(!/\$\{name\}/.test(postChat), 'no send path interpolates the raw shouted name');
+  eq((postChat.match(/flags: 4/g) || []).length, 3, 'every chat send carries SUPPRESS_EMBEDS');
+
+  // Round 3 review: the fix moved every NAME cap off `slice` and left the shout
+  // BODY on it, three lines above, in the same function — and the body is the
+  // field a player is far more likely to put an emoji in. Both go to Discord in
+  // the same JSON, so a torn character in either is the same 400.
+  ok(!/ev\.metadata\.text\.slice\(/.test(postChat), 'the shout body is not cut on code units');
+  ok(/clipChars\(String\(ev\.metadata\.text/.test(postChat), 'it goes through the same surrogate-safe clip');
+  const clipOnly = new Function(`${pollerSrc.match(/const COMBINING_MARK[\s\S]*?\nfunction clipChars[\s\S]*?\n}\n/)[0]}; return clipChars;`)();
+  ok(!lone(clipOnly(`${'a'.repeat(1899)}\u{1F480}`, 1900)), 'a 1900-char shout ending in an emoji is not torn');
+}
+
+// ── 23. The two off-by-default announcers use the hardened escape ──────────
+// Round 3. chronicle.js and bosspoll.js each carried their OWN escapeMd, frozen
+// at the pre-2026-09-05 version (`* _ ` ~` only): no backslash, no `|`, and no
+// link defang. Both are off by default, which is the only reason it never
+// shipped, and both are one env flag from being on.
+{
+  for (const file of ['chronicle.js', 'bosspoll.js']) {
+    const src = await readFile(new URL(`../src/${file}`, import.meta.url), 'utf8');
+    ok(!/function escapeMd\(/.test(src), `${file} no longer defines its own escapeMd`);
+    ok(/from '\.\/format\.js'/.test(src), `${file} imports the shared helpers`);
+  }
+  const { formatFirstBlood } = await import('../src/bosspoll.js');
+  const hostile = formatFirstBlood({ bossName: 'Bonemass', firstBlood: 'https://evil.example/x', crowdPick: '||hidden||' });
+  ok(!/:\/\//.test(hostile.content), `a URL name cannot post a live link in the poll follow-up (${hostile.content})`);
+  ok(!/\|\|hidden\|\|/.test(hostile.content), 'and a spoiler name cannot hide the rest of the line');
+  const honest = formatFirstBlood({ bossName: 'Bonemass', firstBlood: 'Astrid', crowdPick: 'Astrid', crowdVotes: 6, totalVotes: 11 });
+  ok(honest.content.includes('First blood on **Bonemass**: **Astrid**'), 'the honest follow-up is unchanged');
+}
+
+// ── 24. A stall names itself once, not once a tick ────────────────────────
+// Round 3. The stall rethrows and index.js safe() prints one bare
+// `[relay] Missing Permissions` per POLL_INTERVAL_MS — 40 identical lines in a
+// ten-minute outage, none of which says the feed is HOLDING rather than
+// dropping, or that it drains on its own. That per-tick line is the ops-cockpit
+// signal and stays; the explanation is what must not repeat.
+{
+  const rows = [
+    { id: 1, type: 'join', character_name: 'Ivar', created_at: '2026-09-04T00:00:01.000Z' },
+    { id: 2, type: 'leave', character_name: 'Ivar', created_at: '2026-09-04T00:00:02.000Z' },
+  ];
+  const db = {
+    from: () => ({ select: () => ({ gt: (_c, cur) => ({ order: () => ({ limit: async () => ({ data: rows.filter((r) => r.created_at > cur), error: null }) }) }) }) }),
+  };
+  const state = { relay: { lastEventAt: '2026-09-04T00:00:00.000Z' } };
+  const errors = [];
+  let broken = true;
+  const posted = [];
+  const relay = createRelay({
+    db, state, saveState: async () => {},
+    post: async (_ch, p) => {
+      if (broken) throw Object.assign(new Error('Missing Permissions'), { status: 403 });
+      posted.push(p.content);
+    },
+    log: { info() {}, warn() {}, error: (m) => errors.push(m) },
+  });
+
+  for (let i = 0; i < 10; i++) await relay.tick().catch(() => {});
+  eq(errors.length, 1, 'ten stalled ticks explain the outage exactly once');
+  ok(/STALLED/.test(errors[0]), 'and the one line says the feed is stalled');
+  ok(/No restart is needed/.test(errors[0]), 'and that it recovers without a restart');
+  ok(!/[—–]/.test(errors[0]), 'operator copy, but still no em/en dash');
+  eq(state.relay.lastEventAt, '2026-09-04T00:00:00.000Z', 'and the cursor never moved');
+
+  broken = false;
+  eq(await relay.tick(), 2, 'the whole backlog posts on recovery');
+  eq(posted.length, 2, 'both held events reach #server');
+  eq(errors.length, 2, 'recovery is announced once');
+  ok(/accepting posts again/.test(errors[1]), 'and says so plainly');
+
+  // A second outage in the same process explains itself again.
+  broken = true;
+  await relay.tick().catch(() => {});
+  eq(errors.length, 2, 'a stall with nothing new to relay says nothing');
+}
+
+// ── 24b. …and it names the RIGHT failure ──────────────────────────────────
+// Round 3 review. noteStall is called from the `!isPermanentPostError` branch,
+// which is EVERY retryable error, but its copy was written for 403 alone. A
+// plain rate limit printed "#server is refusing our posts … Check the bot's
+// Send Messages / View Channel on #server" — a confident misdiagnosis sending
+// whoever reads the journal to Discord's permission screens for something that
+// clears itself on the next tick. On launch night the relay posts up to 50 rows
+// a tick with no backoff of its own, so a 429 or a Discord 5xx is the single
+// most likely thing to land here.
+{
+  const row = { id: 1, type: 'join', character_name: 'Ivar', created_at: '2026-09-04T00:00:01.000Z' };
+  const START = '2026-09-04T00:00:00.000Z';
+  const stallWith = async (err) => {
+    const errors = [];
+    const state = { relay: { lastEventAt: START } };
+    const relay = createRelay({
+      db: { from: () => ({ select: () => ({ gt: (_c, cur) => ({ order: () => ({ limit: async () => ({ data: cur < row.created_at ? [row] : [], error: null }) }) }) }) }) },
+      state, saveState: async () => {},
+      post: async () => { throw err; },
+      log: { info() {}, warn() {}, error: (m) => errors.push(m) },
+    });
+    await relay.tick().catch(() => {});
+    eq(state.relay.lastEventAt, START, 'the cursor holds whatever the failure was');
+    eq(errors.length, 1, 'and the failure is explained exactly once');
+    return errors[0];
+  };
+
+  const PERMS = /Send Messages|View Channel|CHANNEL_SERVER/;
+  for (const [label, err] of [
+    ['429 rate limit', Object.assign(new Error('You are being rate limited.'), { status: 429 })],
+    ['500 from Discord', Object.assign(new Error('Internal Server Error'), { status: 500 })],
+    ['503 from Discord', Object.assign(new Error('Service Unavailable'), { status: 503 })],
+    ['a reset socket', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })],
+    ['a gateway hiccup', new Error('Opening handshake has timed out')],
+  ]) {
+    const line = await stallWith(err);
+    ok(!PERMS.test(line), `${label} does not send anyone to the permission screens (${line.slice(0, 90)}…)`);
+    ok(/transient/.test(line), `${label} says plainly that it is transient`);
+    ok(/retried on the next tick/.test(line), `${label} says what happens next`);
+    ok(/nothing is dropped/i.test(line), `${label} says the feed is not losing events`);
+    ok(!/[—–]/.test(line), `${label} keeps operator copy free of em/en dashes`);
+  }
+
+  for (const [label, err] of [
+    ['401', Object.assign(new Error('Unauthorized'), { status: 401 })],
+    ['403', Object.assign(new Error('Missing Permissions'), { status: 403 })],
+    ['404', Object.assign(new Error('Unknown Channel'), { status: 404 })],
+  ]) {
+    const line = await stallWith(err);
+    ok(PERMS.test(line), `${label} still sends the operator to the channel's permissions`);
+    ok(/STALLED/.test(line), `${label} still says the feed is stalled`);
+  }
+
+  // A twenty-second blip used to log "after about 0 minute(s)", which reads
+  // like a bug to whoever finds it in the journal at 23:00 on launch night.
+  {
+    const errors = [];
+    let broken = true;
+    const state = { relay: { lastEventAt: START } };
+    const relay = createRelay({
+      db: { from: () => ({ select: () => ({ gt: (_c, cur) => ({ order: () => ({ limit: async () => ({ data: cur < row.created_at ? [row] : [], error: null }) }) }) }) }) },
+      state, saveState: async () => {},
+      post: async () => { if (broken) throw Object.assign(new Error('Missing Permissions'), { status: 403 }); },
+      log: { info() {}, warn() {}, error: (m) => errors.push(m) },
+    });
+    await relay.tick().catch(() => {});
+    broken = false;
+    await relay.tick();
+    ok(!/0 minute/.test(errors[1]), `a short outage is not reported as zero minutes (${errors[1]})`);
+    ok(/second/.test(errors[1]), 'it is reported in seconds instead');
+    ok(!/[—–]/.test(errors[1]), 'and the recovery line has no em/en dash either');
+  }
+}
+
+// ── 25. clampEmbed guards the field NAME as well as the value ─────────────
+// Round 3. An empty field name is a 400 exactly like an empty value; the
+// backstop had a placeholder for one and not the other.
+{
+  const e = clampEmbed({ title: 't', fields: [{ name: '   ', value: 'x' }, { name: 'ok', value: '  ' }] });
+  ok(e.fields[0].name.length > 0, 'an all-whitespace field name gets a placeholder');
+  eq(e.fields[1].value, 'none', 'and an all-whitespace value still gets its own');
+  eq(e.fields[1].name, 'ok', 'an honest field name is untouched');
+  eq(e.fields[0].value, 'x', 'and an honest value with it');
+
+  // Round 3 review: the placeholder is a `.trim()`, so it also strips padding
+  // from every honest name that passes through. Deliberate (the value side has
+  // done exactly this since the backstop shipped) and safe (no formatter emits
+  // a padded field name), but it must not be a silent behaviour.
+  eq(clampEmbed({ fields: [{ name: ' Online ', value: 'x' }] }).fields[0].name, 'Online',
+    'a padded field name is trimmed, matching the value side');
+  eq(clampEmbed({ fields: [{ name: '​', value: 'x' }] }).fields[0].name, '​',
+    "and Discord's own blank-label idiom survives the trim");
+}
+
+// ── 26. Identity and oaths are pinned to this hall too ────────────────────
+// Round 3 review. d66384b gave all four mention handlers MENTION_STRICT and
+// pinned the voice puppet and the gallery to GUILD_ID — and stopped there.
+// Driven with the REAL MessageMentions and a typed <@bot>, a message from
+// another guild minted an identity_claims row and DM'd the rune, and reached
+// the oath ingest's service-role client. "Public Bot" is still on in the
+// Developer Portal, so inviting the bot to a guild of your own was the whole
+// attack. (A DM cannot be delivered today — the client asks for no
+// DirectMessages intent — so that half is defence in depth, exactly like the
+// guard gallery.js already carries.)
+{
+  const HALL = '111111111111111111';
+  const OTHER = '222222222222222222';
+  process.env.SUPABASE_URL ||= 'http://127.0.0.1:54321';
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
+  process.env.SUPABASE_ANON_KEY ||= 'test-anon-key';
+  process.env.GUILD_ID = HALL;
+
+  const BOT = { id: 'BOT1' };
+  const client = { user: BOT, on() {} };
+  const silent = { info() {}, warn() {}, error() {} };
+
+  // A real MessageMentions carrying an explicitly typed <@BOT1> (case 16's
+  // recipe): the honest path, so a refusal here can only be the guild gate.
+  const typed = () => {
+    const m = Object.create(MessageMentions.prototype);
+    m.client = { users: { resolve: (d) => (d && d.id === 'BOT1' ? BOT : null) }, channels: { resolve: () => null } };
+    m.everyone = false;
+    m.repliedUser = null;
+    m.users = new Collection([['BOT1', BOT]]);
+    m._parsedUsers = new Collection([['BOT1', BOT]]);
+    m.roles = new Collection();
+    m._channels = new Collection();
+    m._content = '';
+    m.guild = { roles: { resolve: () => null }, members: { resolve: () => null } };
+    return m;
+  };
+
+  const identityWrites = [];
+  const stubDb = {
+    from: (table) => ({
+      select() { return this; },
+      eq() { return this; },
+      async maybeSingle() { return { data: null, error: null }; },
+      async insert(row) { identityWrites.push([table, row]); return { error: null }; },
+    }),
+  };
+
+  const drive = async (over) => {
+    identityWrites.length = 0;
+    const dms = [];
+    const link = createIdentityLink({ client, log: silent, db: stubDb });
+    const message = {
+      author: { bot: false, id: 'ATT1', username: 'attacker', send: async (t) => { dms.push(t); } },
+      content: '<@BOT1> I am Ivar Hollowleg',
+      channelId: 'c1',
+      reply: async () => ({}),
+      react: async () => {},
+      guild: null, guildId: null, member: null,
+      ...over,
+    };
+    message.mentions = typed();
+    await link.handleMessage(message);
+    return { rows: identityWrites.length, dms: dms.length };
+  };
+
+  const dm = await drive({});
+  eq(dm.rows, 0, 'a DM never mints an identity claim');
+  eq(dm.dms, 0, 'and never gets a rune whispered back');
+  const foreign = await drive({ guild: { id: OTHER }, guildId: OTHER, member: { displayName: 'attacker' } });
+  eq(foreign.rows, 0, 'another guild never mints an identity claim');
+  eq(foreign.dms, 0, 'and never gets a rune either');
+  const home = await drive({ guild: { id: HALL }, guildId: HALL, member: { displayName: 'viking' } });
+  eq(home.rows, 1, 'a viking in this hall still gets a claim row');
+  eq(home.dms, 1, 'and still gets the rune');
+
+  // The DM lock on its own, with GUILD_ID taken away (the config a fresh .env
+  // has before anyone fills it in) — otherwise the guild lock masks it.
+  {
+    const saved = process.env.GUILD_ID;
+    delete process.env.GUILD_ID;
+    identityWrites.length = 0;
+    const unpinned = createIdentityLink({ client, log: silent, db: stubDb });
+    const message = {
+      author: { bot: false, id: 'ATT1', username: 'attacker', send: async () => {} },
+      content: '<@BOT1> I am Ivar Hollowleg',
+      channelId: 'c1', reply: async () => ({}), react: async () => {},
+      guild: null, guildId: null, member: null,
+      mentions: typed(),
+    };
+    await unpinned.handleMessage(message);
+    eq(identityWrites.length, 0, 'a DM is refused even with GUILD_ID unset');
+    process.env.GUILD_ID = saved;
+  }
+
+  // Both gates, in the source, on both handlers — the shape gallery.js has.
+  for (const file of ['identity.js', 'oaths.js', 'gallery.js']) {
+    const src = await readFile(new URL(`../src/${file}`, import.meta.url), 'utf8');
+    ok(/if \(!message\.guild\) return;/.test(src), `${file} refuses a direct message`);
+    ok(/if \(guildId && message\.guildId !== guildId\) return;/.test(src), `${file} refuses another guild`);
+  }
+}
+
+// ── 27. A player name never reaches the hall with stray whitespace ────────
+// Round 3 review. Every caller wraps nameMd in a bold run, and nameMd was the
+// one name helper that neither collapsed nor trimmed: a trailing space rendered
+// `**Ragnar **` and an all-whitespace name rendered `****`. safeText and
+// replySafeName have always collapsed, trimmed and fallen back.
+{
+  eq(nameMd('Ragnar '), 'Ragnar', 'a trailing space is gone');
+  eq(nameMd('  Ragnar'), 'Ragnar', 'and a leading one');
+  eq(nameMd('Ivar  Hollowleg'), 'Ivar Hollowleg', 'a doubled inner space collapses');
+  eq(nameMd('   '), 'viking', 'an all-whitespace name falls back rather than bolding nothing');
+  eq(nameMd(null), 'viking', 'and so does a missing one');
+  // …and nothing an honest viking is called moved.
+  for (const n of ['Ivar Hollowleg', 'Chærlie', "O'Brien", 'Ann-Sofie', 'Ǫlvir']) {
+    eq(nameMd(n), n, `an honest name is still unchanged: ${n}`);
+  }
+  eq(nameMd('Testman_2'), 'Testman\\_2', 'and the escape still runs');
+  eq(nameMd('Björn*'), 'Björn\\*', 'on every special');
+
+  const line = formatFeedEvent({ type: 'death', character_name: 'Ragnar ', metadata: { cause: 'Greydwarf' } }).content;
+  ok(line.includes('**Ragnar**'), `the bold run closes on the name, not on a space (${line})`);
+  const blank = formatFeedEvent({ type: 'join', character_name: '   ' }).content;
+  ok(blank.includes('**viking**'), `an all-whitespace name reads as a viking, not as four asterisks (${blank})`);
 }
 
 console.log(`\n  redteam.test.mjs: ${passed} assertions passed`);

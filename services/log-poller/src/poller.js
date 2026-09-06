@@ -41,23 +41,83 @@ const TWIN_TYPES = new Set(['chat', 'oath']);
 const WEBHOOK_RETRY_CAP_MS = 10000;
 const WEBHOOK_RETRY_DEFAULT_MS = 1000;
 
+// Player-typed character names reach Discord verbatim here, so clip them, escape
+// Discord markdown, and defang anything that would render as a live link. Mirrors
+// services/discord-bot/src/format.js nameMd; keep the two in step.
+//
+// THE TORN CHARACTER (red-team round 3, 2026-09-05). `slice` counts UTF-16 CODE
+// UNITS, so a name whose 24th unit lands inside an astral character (any emoji)
+// was cut in half and left a LONE HIGH SURROGATE in the JSON body — which
+// Discord answers with 400 Invalid Form Body, and postChat turns a 400 on the
+// webhook path into the raw-name fallback below. Back off to the last whole
+// character instead, and off a combining mark to the base letter it belongs to
+// so an accent is never separated from its vowel.
+const COMBINING_MARK = /\p{M}/u;
+function clipChars(s, max) {
+  if (max <= 0) return '';
+  if (s.length <= max) return s;
+  let end = max;
+  const backOffSurrogate = () => {
+    const hi = s.charCodeAt(end - 1);
+    if (hi >= 0xd800 && hi <= 0xdbff) end -= 1;
+  };
+  backOffSurrogate();
+  for (let guard = 0; guard < 8 && end > 0 && COMBINING_MARK.test(s[end] ?? ''); guard++) {
+    end -= 1;
+    backOffSurrogate();
+  }
+  return s.slice(0, end);
+}
+
+// Control, bidi and zero-width characters have no business in a name on either
+// path. Shared by both helpers below.
+function stripInvisible(name) {
+  return String(name ?? '').replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028\u2029]/g, '');
+}
+
+// For a name that lands inside MESSAGE CONTENT, which Discord renders as
+// markdown: collapse, clip, escape the specials, defang anything linkifiable.
+//
+// The collapse and the fallback keep this in step with format.js nameMd, which
+// gained both in round 3 for the same reason: every caller wraps the result in
+// a bold run, so a trailing space mirrored a shout as `**Ragnar :** …` and an
+// all-whitespace name as `** :** …`. safeChatUsername already trimmed.
+function safeChatName(name, max = 24) {
+  const t = stripInvisible(name).replace(/\s+/g, ' ').trim();
+  return (
+    clipChars(t, max)
+      .replace(/[\\*_`~|>]/g, '\\$&')
+      .replace(/\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/gi, '[link] ') || 'viking'
+  );
+}
+
+// For the webhook `username` OVERRIDE, which is a display name and is NOT
+// markdown and NOT linkified.
+//
+// THE BACKSLASHES PLAYERS WOULD HAVE SEEN (red-team round 3, 2026-09-05). This
+// field used the markdown helper, so an ordinary viking called `Testman_2` was
+// about to be mirrored into #server as the author `Testman\_2`, and `Björn*` as
+// `Björn\*`. Escaping is not a no-op in a context that never parsed markdown in
+// the first place: it is a visible defect on the exact name every message on
+// this path is labelled with. The transport is dark today (the bot has no
+// Manage Webhooks), which is the only reason nobody saw it.
+//
+// A username needs neither escape: Discord renders it literally, does not
+// linkify it, and `@everyone` in it pings nobody. It needs the invisible-
+// character strip and a length that Discord will accept, and that is all.
+function safeChatUsername(name, max = 80) {
+  // Discord requires 1..80 characters here. An empty override is a 400, which
+  // costs the extra round trip into the bolded-name fallback below for no
+  // reason, so fall back to the same word safeChatName does.
+  return clipChars(stripInvisible(name), max).trim() || 'viking';
+}
+
 /**
  * How long to wait before the single webhook retry: the `retry-after` header
  * (seconds), else a `retry_after` field in the body (seconds, Discord's shape),
  * else one second — clamped to [0, 10 s]. Exported so the clamp is testable
  * without actually sleeping for it.
  */
-// Player-typed character names reach Discord verbatim here, so clip them, escape
-// Discord markdown, and defang anything that would render as a live link. Mirrors
-// services/discord-bot/src/format.js nameMd; keep the two in step.
-function safeChatName(name, max = 24) {
-  return String(name ?? '')
-    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u2028\u2029]/g, '')
-    .slice(0, max)
-    .replace(/[\\*_`~|>]/g, '\\$&')
-    .replace(/\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/gi, '[link] ');
-}
-
 export function webhookRetryDelayMs(headerValue, body) {
   let after = parseFloat(headerValue ?? '');
   if (!Number.isFinite(after)) {
@@ -561,7 +621,14 @@ export class Poller {
     this.recentChat.set(key, now);
 
     const name = ev.characterName;
-    const text = ev.metadata.text.slice(0, 1900);
+    // clipChars, not slice, for the same reason the name caps moved off it
+    // (round 3 review, 2026-09-05): the shout BODY is the field a player is far
+    // more likely to put an emoji in, and it sits three lines from the name cap
+    // that was fixed. A code-unit cut at 1900 can strand a lone surrogate, and
+    // Discord answers that with 400 — which on the webhook path below drops us
+    // into the raw-name fallback for a reason that has nothing to do with the
+    // name, and on the bot-token path throws the whole tick.
+    const text = clipChars(String(ev.metadata.text ?? ''), 1900);
 
     // Past every dedup gate (same-batch plugin-preferred + cross-batch twin):
     // this is the single point where a shout is committed to the Discord
@@ -580,9 +647,15 @@ export class Poller {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ ...body, allowed_mentions: { parse: [] } }),
         });
-      let res = await send({ username: safeChatName(name, 80), content: text, flags: 4 });
+      let res = await send({ username: safeChatUsername(name), content: text, flags: 4 });
       if (res.status === 400) {
-        res = await send({ content: `**${name}:** ${text}` });
+        // THE HOLE IN THE DEFANG (red-team round 3, 2026-09-05). This fallback
+        // interpolated the RAW name and dropped the SUPPRESS_EMBEDS flag, so the
+        // one path a hostile name is most likely to reach — Discord 400s the
+        // username override precisely because the name is strange — was the one
+        // path with no escaping and a live preview card. Same treatment as the
+        // primary path.
+        res = await send({ content: `**${safeChatName(name)}:** ${text}`, flags: 4 });
       }
       if (!res.ok) {
         const detail = await res.text().catch(() => '');

@@ -15,6 +15,42 @@ function str(meta, key) {
 // Discord's embed field-value ceiling. Mirrors chronicle.js.
 const MAX_FIELD_VALUE = 1024;
 
+// Characters that are only ever the tail of somebody else's character: the
+// low half of a surrogate pair, and every combining mark.
+const COMBINING_MARK = /\p{M}/u;
+
+/**
+ * THE TORN CHARACTER THIS CLOSES (red-team round 3, 2026-09-05). Every cap in
+ * this file used `String.prototype.slice`, which counts UTF-16 CODE UNITS. A
+ * name whose 24th unit falls inside an astral character (any emoji, and every
+ * character above U+FFFF) was cut in half and left a LONE HIGH SURROGATE in the
+ * payload: `"aaaaaaaaaaaaaaaaaaaaaaa\ud83d"`. JSON.stringify escapes it rather
+ * than refusing it, so the malformed string reaches Discord, which answers 400
+ * Invalid Form Body — and a 400 is the one status relay.js treats as permanent,
+ * so the event is logged and BURNED rather than retried.
+ *
+ * Same rule one step out for combining marks: cutting between a base letter and
+ * the mark that belongs to it turns "é" into "e" mid-render. Step back to the
+ * start of the cluster instead. The guard is bounded because a hostile string
+ * can carry hundreds of marks in a row and this must not become a scan.
+ */
+export function clipChars(s, max) {
+  const t = String(s);
+  if (max <= 0) return '';
+  if (t.length <= max) return t;
+  let end = max;
+  const backOffSurrogate = () => {
+    const hi = t.charCodeAt(end - 1);
+    if (hi >= 0xd800 && hi <= 0xdbff) end -= 1;
+  };
+  backOffSurrogate();
+  for (let guard = 0; guard < 8 && end > 0 && COMBINING_MARK.test(t[end] ?? ''); guard++) {
+    end -= 1;
+    backOffSurrogate();
+  }
+  return t.slice(0, end);
+}
+
 // Escape Discord markdown specials so a name like "Bj*rn" can't break layout.
 // The backslash goes FIRST: escaping it last would leave "Bj\" + "\*" = "Bj\\*",
 // which renders as a literal backslash followed by a LIVE italic marker — the
@@ -47,9 +83,17 @@ export function defangLinks(s) {
 // Defensive 24-char cap (keeps us well under embed field limits) + escaping +
 // link defanging. The cap runs FIRST so the 24-char budget is measured against
 // what the player actually typed, not against the escapes we added.
+//
+// THE STRAY SPACE (round 3 review, 2026-09-05). Every caller wraps this in a
+// bold run, and this was the one player-name helper that neither collapsed nor
+// trimmed: a name carrying a trailing space reached the hall as
+// `**Ragnar **` (bold with a gap before the close), and an all-whitespace name
+// as `****`. safeText and replySafeName both already collapse, trim and fall
+// back; this now matches them, which also means whitespace can never eat part
+// of the 24-char budget.
 export function nameMd(s) {
-  const t = String(s);
-  return defangLinks(escapeMd(t.length > 24 ? t.slice(0, 24) : t));
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return defangLinks(escapeMd(clipChars(t, 24))) || 'viking';
 }
 
 /**
@@ -66,12 +110,12 @@ export function safeText(s, max = 1000) {
   // single-line by nature: an oath is one shouted line, a raid label is one
   // log label.
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
-  return defangLinks(escapeMd(t.length > max ? `${t.slice(0, max - 1)}\u2026` : t));
+  return defangLinks(escapeMd(t.length > max ? `${clipChars(t, max - 1)}\u2026` : t));
 }
 /** Join board lines and clip to the embed field ceiling. Mirrors chronicle.js. */
 function joinCapped(lines, sep = ', ') {
   const out = lines.filter(Boolean).join(sep);
-  return out.length > MAX_FIELD_VALUE ? `${out.slice(0, MAX_FIELD_VALUE - 1)}…` : out;
+  return out.length > MAX_FIELD_VALUE ? `${clipChars(out, MAX_FIELD_VALUE - 1)}…` : out;
 }
 
 // Norse-flavored POTY blurbs, keyed by category. Index 0 of EVERY category uses
@@ -615,7 +659,7 @@ export function replyPayload(content) {
 const MAX_CONTENT = 2000;
 function clipContent(s) {
   const t = String(s ?? '');
-  return t.length > MAX_CONTENT ? `${t.slice(0, MAX_CONTENT - 1)}…` : t;
+  return t.length > MAX_CONTENT ? `${clipChars(t, MAX_CONTENT - 1)}…` : t;
 }
 
 /**
@@ -626,7 +670,7 @@ function clipContent(s) {
  */
 export function replySafeName(s) {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
-  return defangLinks(escapeMd(t.length > 32 ? t.slice(0, 32) : t)) || 'viking';
+  return defangLinks(escapeMd(clipChars(t, 32))) || 'viking';
 }
 
 /** Manual announcement to #valheim with @everyone. */

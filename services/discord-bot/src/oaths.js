@@ -133,6 +133,14 @@ function parse(content, botId) {
 export function createOathIngest({ client, log = console }) {
   const db = serviceClient();
 
+  // Pinned to this hall for the same reason identity.js is (round 3 review,
+  // 2026-09-05): d66384b gave this handler MENTION_STRICT and stopped there, so
+  // a message from any other guild the bot is in still reached the service-role
+  // client. Lower stakes than identity's, because nothing is written until the
+  // sender resolves to an already-linked player, but it still spent a database
+  // round trip and replied on every foreign message. `guild` is null in a DM.
+  const guildId = process.env.GUILD_ID || null;
+
   // The SOLE source of truth for which viking a Discord oath/bio/role message
   // applies to: the sender's own identity link, not any name typed in the
   // message. Pre-migration (discord_user_id column absent) reports notReady
@@ -182,6 +190,8 @@ export function createOathIngest({ client, log = console }) {
     try {
       if (message.author?.bot) return;
       if (!message.mentions?.has(client.user, MENTION_STRICT)) return;
+      if (!message.guild) return;
+      if (guildId && message.guildId !== guildId) return;
 
       const parsed = parse(message.content, client.user.id);
       if (!parsed) return;

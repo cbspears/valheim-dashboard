@@ -23,7 +23,7 @@
 
 import { randomInt } from 'node:crypto';
 import { serviceClient } from './supabase.js';
-import { replyPayload, replySafeName } from './format.js';
+import { replyPayload, replySafeName, clipChars } from './format.js';
 import { MENTION_STRICT } from './discord.js';
 
 // A typed name is free text from a Discord message. It is stored on the claim
@@ -129,12 +129,16 @@ export function parseIdentity(content, botId) {
   if (m) {
     // First line only, then capped. A name is a name; a paragraph pasted after
     // "I am" is not one, and neither belongs in identity_claims.requested_name.
-    const name = m[1]
+    const raw = m[1]
       .split('\n')[0]
       .trim()
       .replace(/^["“]|["”.!]+$/g, '')
-      .trim()
-      .slice(0, MAX_REQUESTED_NAME);
+      .trim();
+    // clipChars, not slice: a code-unit cut can strand a lone surrogate, and
+    // this string goes into a JSON insert body. Postgres refuses an unpaired
+    // \uD83D escape, so the claim would fail and the viking would never get a
+    // rune. Same reason every cap in format.js moved off slice.
+    const name = clipChars(raw, MAX_REQUESTED_NAME);
     if (name) return { kind: 'claim', name };
   }
   return null;
@@ -144,6 +148,17 @@ export function createIdentityLink({ client, log = console, db: injectedDb }) {
   // `injectedDb` is a test seam — the same one createVoiceEngine already uses
   // for writeDb. Production passes nothing and builds the real service client.
   const db = injectedDb ?? serviceClient();
+
+  // THE HALL THIS PINS (round 3 review, 2026-09-05). d66384b tightened all four
+  // mention handlers to MENTION_STRICT and pinned the voice puppet and the
+  // gallery to GUILD_ID, but identity and oaths never got the guild gate that
+  // gallery.js:322 carries. Driven with the real MessageMentions and GUILD_ID
+  // set to this hall, a message from ANOTHER guild minted an identity_claims
+  // row and sent the rune: every service-role write this module makes was
+  // reachable by anyone who could invite the bot to a server of their own, and
+  // "Public Bot" in the Developer Portal is still on. Read at factory time,
+  // matching gallery.js and voice.js.
+  const guildId = process.env.GUILD_ID || null;
 
   // Mint a one-time claim code for this Discord user. Retries on the
   // vanishingly rare PK collision with a fresh code.
@@ -213,6 +228,13 @@ export function createIdentityLink({ client, log = console, db: injectedDb }) {
     try {
       if (message.author?.bot) return;
       if (!message.mentions?.has(client.user, MENTION_STRICT)) return;
+
+      // Same two locks gallery.js has, and for the same reasons. `guild` is
+      // null in a direct message: the bot asks for no DirectMessages intent
+      // today so nothing delivers one, but the intent list is a config away
+      // from changing and this handler mints rows and sends DMs.
+      if (!message.guild) return;
+      if (guildId && message.guildId !== guildId) return;
 
       const cmd = parseIdentity(message.content, client.user.id);
       if (!cmd) return;

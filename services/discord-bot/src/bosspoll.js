@@ -36,14 +36,21 @@ export const CANDIDATE_WINDOW_DAYS = 7;
 const MAX_POST_FAILURES = 3;
 
 import { sessionHours, pickTopHours } from './chronicle.js';
+import { escapeMd, defangLinks, clipChars } from './format.js';
 
-function escapeMd(s) {
-  return String(s).replace(/([*_`~])/g, '\\$1');
+// A player-typed string on its way into a poll question, a poll answer or the
+// follow-up message. This module used to carry its own escapeMd frozen at the
+// pre-2026-09-05 escape (`* _ \` ~` only, no backslash, no `|`, no link
+// defang), so a viking named `||x||` or `https://…` broke the poll line. Boss
+// polls are off by default (BOSS_POLLS=1), which is the only reason it never
+// shipped. One definition, in format.js.
+function safeMd(s) {
+  return defangLinks(escapeMd(s));
 }
 
 function clip(s, max) {
   const t = String(s ?? '').trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+  return t.length > max ? `${clipChars(t, max - 1)}…` : t;
 }
 
 // --- pure selection ---------------------------------------------------------
@@ -94,7 +101,7 @@ export function buildBossPoll({ bossName, candidates, durationHours = POLL_DURAT
   }
   return {
     content:
-      `**First blood: ${escapeMd(name)}**\n` +
+      `**First blood: ${safeMd(name)}**\n` +
       'Vote for the viking you think draws it. The book records who was right.',
     poll: {
       question: { text: clip(`Who lands first blood on ${name}?`, MAX_QUESTION) },
@@ -130,9 +137,9 @@ function sameViking(a, b) {
  *   crowdPick  — the poll's leading answer, or null (no votes / unreadable poll)
  */
 export function formatFirstBlood({ bossName, firstBlood, crowdPick, crowdVotes = 0, totalVotes = 0 }) {
-  const boss = escapeMd(clip(bossName, 60));
-  const fb = firstBlood ? escapeMd(clip(firstBlood, 24)) : null;
-  const pick = crowdPick ? escapeMd(clip(crowdPick, 24)) : null;
+  const boss = safeMd(clip(bossName, 60));
+  const fb = firstBlood ? safeMd(clip(firstBlood, 24)) : null;
+  const pick = crowdPick ? safeMd(clip(crowdPick, 24)) : null;
 
   // Compare the RAW names, not the escaped-and-clipped render: a 30-char name
   // clips differently on the two sides, and a case difference between the

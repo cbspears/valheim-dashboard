@@ -1,6 +1,8 @@
 // Discord connection + a uniform `post(channelKey, payload)` interface.
 // Two implementations: the real gateway client, and a dry-run console printer.
 import { Client, GatewayIntentBits, Events, Partials, MessageFlags } from 'discord.js';
+// Truncation that never leaves half a character behind (see format.js).
+import { clipChars } from './format.js';
 
 // Discord's hard limits. Anything longer is rejected outright (a 400), which
 // would otherwise stall whichever loop was posting it, so we trim instead.
@@ -19,7 +21,7 @@ const MAX_EMBED_TOTAL = 5900;
 
 function clip(s, max) {
   if (typeof s !== 'string' || s.length <= max) return s;
-  return `${s.slice(0, max - 1)}…`;
+  return `${clipChars(s, max - 1)}…`;
 }
 
 /**
@@ -104,7 +106,19 @@ export function clampEmbed(embed) {
   if (Array.isArray(out.fields)) {
     out.fields = out.fields.slice(0, MAX_EMBED_FIELDS).map((f) => ({
       ...f,
-      name: clip(String(f?.name ?? ''), MAX_FIELD_NAME),
+      // An empty field NAME is a 400 exactly like an empty value (round 3: the
+      // value had a placeholder and the name did not, so half the backstop was
+      // missing). U+200B rather than a word: Discord's own idiom for a field
+      // that wants no label, and it reads as nothing at all in the hall.
+      //
+      // The `.trim()` is deliberate and applies to EVERY name, not only the
+      // empty case, so the two halves behave the same way (the value side has
+      // trimmed since the backstop shipped). No formatter emits a field name
+      // with meaningful padding \u2014 every literal one is a plain label and the
+      // only dynamic ones are player names \u2014 and a U+200B label survives the
+      // trim, because ZWSP is a format character and not whitespace. Pinned in
+      // redteam.test.mjs case 25 so it stops being a silent behaviour.
+      name: clip(String(f?.name ?? '').trim() || '\u200b', MAX_FIELD_NAME),
       // A field with an empty value is a 400 of its own, so an all-whitespace
       // value becomes a visible placeholder rather than a rejected message.
       // 'none' rather than a dash: this string renders in an embed the hall

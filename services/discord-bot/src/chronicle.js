@@ -19,7 +19,7 @@
 // NO LLM. The Skald retelling (retelling.js) is a separate, best-effort thing
 // that calls a local model per boss; this is plain aggregation.
 import cron from 'node-cron';
-import { GOLD } from './format.js';
+import { GOLD, escapeMd, nameMd, defangLinks, clipChars } from './format.js';
 import { collapseDeathRows } from './recap.js';
 
 const FOOTER = 'Eilif · The Cozy Canon Playthrough';
@@ -41,21 +41,17 @@ const MAX_EMBED_TOTAL = 5600;
 
 // --- small pure helpers -----------------------------------------------------
 
-/** Escape Discord markdown specials so a name like "Bj*rn" can't break layout. */
-function escapeMd(s) {
-  return String(s).replace(/([*_`~])/g, '\\$1');
-}
-
-/** Defensive 24-char cap (well under the embed field limits) + escaping. */
-function nameMd(s) {
-  const t = String(s);
-  return escapeMd(t.length > 24 ? t.slice(0, 24) : t);
-}
+// escapeMd and nameMd come from format.js (imported above). This module used to
+// carry its OWN copies, frozen at the pre-2026-09-05 escape: they covered
+// `* _ \` ~` and nothing else, so a backslash in a name still broke out of the
+// escape, `||…||` still hid the rest of the line, and a URL in a name still
+// posted a live link. The Chronicle is off by default (WEEKLY_CHRONICLE=1), which
+// is the only reason that never shipped. One definition, in one place.
 
 /** Join board lines and clip to the embed field ceiling. */
 function joinLines(lines) {
   const out = lines.filter(Boolean).join('\n');
-  return out.length > MAX_FIELD_VALUE ? `${out.slice(0, MAX_FIELD_VALUE - 1)}…` : out;
+  return out.length > MAX_FIELD_VALUE ? `${clipChars(out, MAX_FIELD_VALUE - 1)}…` : out;
 }
 
 /**
@@ -191,7 +187,7 @@ export function fitBoards(boards, allowance) {
   if (total <= allowance) return boards;
   const nameChars = boards.reduce((n, f) => n + f.name.length, 0);
   const per = Math.max(60, Math.floor((allowance - nameChars) / boards.length));
-  return boards.map((f) => (f.value.length > per ? { ...f, value: `${f.value.slice(0, per - 1)}…` } : f));
+  return boards.map((f) => (f.value.length > per ? { ...f, value: `${clipChars(f.value, per - 1)}…` } : f));
 }
 
 // --- rendering (pure) -------------------------------------------------------
@@ -278,7 +274,9 @@ export function formatChronicle(chron) {
         chron.fallenTop.map(
           (r) =>
             `💀 **${nameMd(r.name)}** ×${r.count}` +
-            (r.cause ? ` · last cause: ${escapeMd(r.cause)}` : '')
+            // The cause is player-reachable text, so it is defanged as well
+            // as escaped (format.js causeNoun does the same on the feed side).
+            (r.cause ? ` · last cause: ${defangLinks(escapeMd(r.cause))}` : '')
         )
       ),
       inline: false,

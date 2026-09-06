@@ -85,6 +85,69 @@ export function createRelay({ db, post, state, saveState, log = console }) {
 
   // Future-dated rows already reported, so one warning per row per process.
   const warnedFuture = new Set();
+
+  // THE OUTAGE THE JOURNAL COULD NOT NAME (round 3, 2026-09-05). A stall
+  // rethrows, index.js safe() catches it, and the journal gets one bare
+  // `[relay] Missing Permissions` every POLL_INTERVAL_MS for as long as the
+  // outage lasts. That per-tick line is the ops-cockpit signal and must stay,
+  // but on its own it never says WHICH failure this is, that the feed is
+  // holding rather than dropping, or that the backlog drains by itself. So:
+  // one explanatory line when a stall starts, one when it clears, and nothing
+  // in between however many ticks it spans.
+  let stalledSince = null;
+
+  // THE CONFIDENT MISDIAGNOSIS (round 3 review, 2026-09-05). The first cut of
+  // noteStall was called from the `!isPermanentPostError` branch — which is
+  // EVERY retryable failure, not only the permission ones — but its copy was
+  // written for 403 alone. A plain rate limit printed "#server is refusing our
+  // posts ... Check the bot's Send Messages / View Channel on #server", which
+  // sends whoever reads the journal to Discord's permission screens for a
+  // problem that clears itself on the next tick. On launch night the relay
+  // posts up to 50 rows a tick with no backoff of its own, so a 429 or a
+  // Discord 5xx is the MOST likely thing to land here.
+  //
+  // The mechanics are identical either way: hold the cursor, retry the row.
+  // Only the diagnosis differs, so only the copy branches.
+  //   401/403/404 -> the ENVIRONMENT (token, channel, permissions). Somebody
+  //                  has to go fix something, and this says what.
+  //   everything else -> transient. Say so, and say what happens next.
+  const ENVIRONMENT_STATUSES = new Set([401, 403, 404]);
+  function noteStall(status, message) {
+    if (stalledSince) return;
+    stalledSince = Date.now();
+    const held = state.relay.lastEventAt;
+    if (ENVIRONMENT_STATUSES.has(status)) {
+      log.error?.(
+        `[relay] #server is refusing our posts (${status}: ${message}). The feed is STALLED, ` +
+          `not dropping: the cursor is holding at ${held} and every event since then posts ` +
+          `by itself once the channel accepts us again. Check the bot's Send Messages / View Channel on ` +
+          `#server, and that CHANNEL_SERVER still names a channel it can see. No restart is needed.`,
+      );
+      return;
+    }
+    log.error?.(
+      `[relay] #server did not accept a post (${status ?? 'no status'}: ${message}). This is a transient ` +
+        `failure, not a permission problem, so do not go looking at the channel yet: the cursor is holding ` +
+        `at ${held}, the same event is retried on the next tick, and nothing is dropped. No restart is ` +
+        `needed. If it never clears, check Discord's own status before anything on this box.`,
+    );
+  }
+  function noteRecovered() {
+    if (!stalledSince) return;
+    // Whole minutes made a twenty-second blip read "after about 0 minute(s)",
+    // which looks like a bug to whoever finds it in the journal at 23:00.
+    const ms = Date.now() - stalledSince;
+    let held;
+    if (ms < 90_000) {
+      const secs = Math.max(1, Math.round(ms / 1000));
+      held = `${secs} second${secs === 1 ? '' : 's'}`;
+    } else {
+      const mins = Math.round(ms / 60000);
+      held = `about ${mins} minute${mins === 1 ? '' : 's'}`;
+    }
+    log.error?.(`[relay] #server is accepting posts again after ${held}. Draining the backlog.`);
+    stalledSince = null;
+  }
   // name -> ISO timestamp of the last death we actually posted for that viking.
   // Persisted with the cursor so the collapse survives ticks AND restarts.
   if (!state.relay.lastDeathByName || typeof state.relay.lastDeathByName !== 'object') {
@@ -164,10 +227,14 @@ export function createRelay({ db, post, state, saveState, log = console }) {
       } else if (payload) {
         try {
           await post('server', payload);
+          noteRecovered();
           posted++;
           if (ev.type === 'death') rememberDeath(ev);
         } catch (e) {
-          if (!isPermanentPostError(e)) throw e; // retry this row next tick
+          if (!isPermanentPostError(e)) {
+            noteStall(Number(e?.status ?? e?.httpStatus) || null, e?.message ?? String(e));
+            throw e; // retry this row next tick
+          }
           // A poison row must never stall the feed: log it, walk past it (the
           // cursor advances below), keep the rest of the batch moving.
           log.error?.(`[relay] Discord rejected event ${ev.id ?? ev.created_at}: ${e.message}. Skipping it.`);
