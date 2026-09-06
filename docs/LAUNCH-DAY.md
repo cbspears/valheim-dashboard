@@ -1228,6 +1228,14 @@ GitHub Actions tab, and confirm the next scheduled run is green before anyone go
 
 ---
 
+**Voice targeting flag, set LAST.** `VOICE_TARGETING=1` in `services/discord-bot/.env` makes
+second-person oath lines private (only the swearer sees them). Set it only after BOTH are true:
+the box runs Companion 0.3.3 or later (grep the boot log for `voice targeting: supported`) AND the
+site deploy carrying the `/api/voice` target field is live (it is, since 2026-09-06). The route
+refuses to hand a targeted line to a plugin that did not advertise the capability, so the wrong
+order costs silence, never a private line on everyone's screen. Then `sudo systemctl restart
+eilif-discord-bot`. Leave it unset on a vanilla night.
+
 **Prerendered pages after the wipe.** `/world`, `/events`, `/gallery`, `/oath`, `/map` and
 the eight `/boss/<slug>` pages are ISR pages (revalidate 60 s) since the 2026-09-05 perf
 pass, and the deploy at step 19 prerenders them against the **pre-wipe** database. Nothing

@@ -37,6 +37,71 @@ vanilla 10 players. Set [ServerFallback] Enabled = true in the plugin config to 
 Grep the boot log for `ServerFallback: OFF and no ValheimPlus` as part of the launch-morning check,
 not just for `player cap 10 -> 20`.
 
+**Also in 0.3.3: per-player voice targeting.** A queued line can now name one recipient. It rides in
+the `voice_lines` row's existing `meta.target` jsonb key (no schema change, no new column); the API
+passes it through as a `target` member on the line, and `Speak()` sends the `ShowMessage` (or the
+`ChatMessage` variant, when `Voice.ChatType` is `shout`/`normal`) to that peer's `m_uid` alone
+instead of `ZRoutedRpc.Everybody`. The name is matched case-insensitively against
+`ZNetPeer.m_playerName` — the server's own name for the peer, the same field `SpeakerIdentity` uses,
+never the name inside a client packet. A line for somebody who is **not connected is dropped, not
+broadcast**: the queue is unaffected because `/api/voice` marks a line spoken when it hands it over
+(the claim IS the acknowledgement — this plugin has no ack POST), so a dropped line cannot loop.
+**No new Harmony patch class**, so `patch classes applied: 2/2` is unchanged.
+
+**SIX log lines are new** (0.3.3). The first is the one to grep on the launch-morning boot; the
+last two are WARNINGs that should never appear:
+
+```
+[Eilif] voice targeting: supported                                   # startup, unconditional
+[Eilif] voice target '<name>' is not online, line dropped            # targeted, nobody by that name
+[Eilif] Spoke (center) to '<name>': <text>                           # targeted center banner, delivered
+[Eilif] Spoke (<talkType>) as '<speaker>' to '<name>': <text>        # targeted chat line, delivered
+[Eilif] voice target '<name>' matches N connected peers (uids a, b); no server-side rule tells them apart, speaking to the first, uid <uid>.
+[Eilif] voice target lookup failed: <message>                        # the resolver's own catch
+```
+
+The `matches N connected peers` warning means two connected peers carry the same `m_playerName`
+(Valheim permits duplicate character names, and a modified client can send any name it likes during
+the handshake). **The first match in `ZNet.m_peers` wins — in practice, whoever connected earlier —
+and nothing server-side can do better.** Do not "improve" that tie-break by round-tripping the uid
+through `ZNet.GetPeer()`: 0.3.3 shipped that idea for an afternoon and it is a tautology, because
+`GetPeers()` returns `m_peers` itself and `GetPeer(uid)` re-finds the same object in it (decompile
+line numbers are in the source comment on `TryResolveTargetPeer`). Every matching uid is printed so
+an operator can at least see who received the line.
+
+`[Eilif] Spoke (center): <text>` — the untargeted line — is unchanged, as is the untargeted
+`to N peer(s)` chat line. None of the six are markers the log poller parses, so **the poller needs
+no matching edit**.
+
+Two other behaviours worth knowing: a dropped line does **not** spend the `LineSpacingSeconds`
+budget (nothing was said, so the next real line goes out on the next frame rather than 20 s later),
+and the plugin sends `x-eilif-caps: targeting` + `x-eilif-plugin: <version>` on every voice poll.
+
+### ⚠ DEPLOY ORDER — targeting fails OPEN if you get it wrong
+
+A targeted line is private. A Companion that predates 0.3.3 does not know the `target` member
+exists, ignores it, and speaks the line **to the whole hall**. So the three switches have to be
+thrown in this order, and no other:
+
+| # | Do this | Why it must come first |
+|---|---|---|
+| 1 | Upload **Companion 0.3.3+** to the box and restart (server STOPPED, DLL is file-locked) | Until it is on the box, the box cannot address a line at one viking |
+| 2 | Deploy the site (the `/api/voice` change) | Without it the route never returns a `target` field at all, and the plugin broadcasts |
+| 3 | Set `VOICE_TARGETING=1` in the **bot** `.env` and restart `eilif-discord-bot` | This is the only thing that makes the bot queue a private line. **Leave it unset until 1 and 2 are both true.** |
+
+Step 3 is the dangerous one because it is a hand-edited env var with no interlock —
+`services/discord-bot/src/voice.js` reads `process.env.VOICE_TARGETING === '1'` and nothing checks
+what is on the box. Two of the three orderings are covered anyway: the **route refuses to hand a
+targeted line to a plugin that did not advertise `x-eilif-caps: targeting`** (it consumes the line
+and logs `[voice] withheld targeted line …` to the Vercel runtime log instead of letting it be
+broadcast), so getting step 3 ahead of step 1 costs silence, not a leak. The uncovered one is step 3
+ahead of step 2: an undeployed route strips the target and the line goes out to everybody. Confirm
+the boot log line above and the deploy before flipping the var.
+
+To verify after the fact: grep the boot log for `voice targeting: supported`, and check the cockpit's
+`companion-voice` heartbeat for `metrics.targeting` (display only — the route gates on the live
+request header, not on that row, because the heartbeat write is throttled to one a minute).
+
 **Load-tested 2026-09-05** on the local creative dedicated server (`~/Valheim-Test-Server-2`, game
 0.221.12, BepInEx 5.4.23.3), six boots across two sessions, all clean, nothing left behind
 (all ten pre-existing plugin DLLs `md5sum -c` OK, config dir identical, `LogOutput.log` restored

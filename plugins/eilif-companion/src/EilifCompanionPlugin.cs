@@ -177,6 +177,20 @@ namespace EilifCompanion
             else
                 Log.LogInfo($"[Eilif] Voice half active. Polling {_voiceUrl.Value} every {_pollSeconds.Value}s while players online; speaking at most one line per {_lineSpacing.Value}s.");
 
+            // ⚠ STABLE STRING — the capability advertisement for per-player voice lines
+            // (v0.3.3). Whoever queues lines needs to know whether the build on the box can
+            // address one at a single viking, and the answer has to be greppable in the boot
+            // log because that log is the only thing a launch-morning operator can read off
+            // this host. Printed unconditionally, INCLUDING while the voice half is dormant:
+            // the question it answers is "what can this DLL do", not "is a token configured".
+            // The same fact leaves the box over the wire on every poll as the `x-eilif-caps`
+            // header (see FetchAsync), which is what the Discord bot actually gates on.
+            //
+            // This line is deliberately NOT a patch-roster entry: targeting adds no Harmony
+            // patch class, so `patch classes applied: 2/2` keeps meaning exactly what it has
+            // always meant and the fixed roster above is unchanged.
+            Log.LogInfo("[Eilif] voice targeting: supported");
+
             // Every attribute-declared patch class is applied ON ITS OWN (v0.3.1, audit plugins-6).
             // A bare PatchAll() throws on the FIRST target it cannot resolve and abandons the rest
             // of the batch — and the order it walks the classes in is not defined, so a single
@@ -336,9 +350,19 @@ namespace EilifCompanion
             if (_speakTimer < spacing) _speakTimer += Time.unscaledDeltaTime; // clamped: never grows unbounded while idle
             if (_speakTimer >= spacing && OutQueue.TryDequeue(out var line))
             {
-                _speakTimer = 0f;
-                try { Speak(line); }
+                // The spacing budget exists so two center-screen banners don't overwrite each other
+                // before anyone can read them — so only a line that ACTUALLY WENT OUT spends it
+                // (v0.3.3). A targeted line whose viking is offline is dropped saying nothing, and
+                // charging it 20 s of silence would let one poll's worth of lines for an absent
+                // player buy a minute of hush; the next real line goes out on the next frame instead.
+                //
+                // A line that THREW still spends it, deliberately: `spoke` stays true so a Speak()
+                // that is failing for everyone cannot spin the whole queue out in three frames,
+                // each with its own warning line, into the log the SFTP poller drags down.
+                bool spoke = true;
+                try { spoke = Speak(line); }
                 catch (Exception ex) { Log.LogWarning($"[Eilif] Failed to speak line {line?.id}: {ex.Message}"); }
+                if (spoke) _speakTimer = 0f;
             }
         }
 
@@ -479,6 +503,13 @@ namespace EilifCompanion
                 using (var req = new HttpRequestMessage(HttpMethod.Get, url))
                 {
                     req.Headers.TryAddWithoutValidation("x-voice-token", token);
+                    // Capability + version advertisement, read by /api/voice and recorded in
+                    // the `companion-voice` ops heartbeat. The bot has no way to read this
+                    // host's log, so the heartbeat is how it learns that the plugin on the
+                    // box can target a line. Both headers are optional on the API side and
+                    // are bounded/whitelisted there; an API that ignores them is unaffected.
+                    req.Headers.TryAddWithoutValidation("x-eilif-caps", "targeting");
+                    req.Headers.TryAddWithoutValidation("x-eilif-plugin", PluginVersion);
                     using (var resp = await Http.SendAsync(req).ConfigureAwait(false))
                     {
                         if (!resp.IsSuccessStatusCode)
@@ -530,14 +561,45 @@ namespace EilifCompanion
             }
         }
 
-        // Broadcast a line to all connected players. Main thread only.
-        private void Speak(VoiceLine line)
+        // Speak a line: to the whole hall, or to one viking when the line carries a target.
+        // Main thread only.
+        //
+        // TARGETING (v0.3.3). A line addressed to somebody who is NOT connected is DROPPED, never
+        // downgraded to a broadcast — the whole point of a targeted line is that the rest of the
+        // server does not read it, and "Bren, your third death today" on everyone's screen is a
+        // worse outcome than silence. Dropping is safe for the queue because the row was already
+        // flipped to 'spoken' by /api/voice when it handed the line over (see the claim-semantics
+        // comment in app/api/voice/route.ts): this plugin has no acknowledgement POST, the claim
+        // IS the acknowledgement, so a dropped line cannot loop.
+        //
+        // RETURNS false ONLY for that deliberate drop, and PumpSpeak reads it to decide whether the
+        // line-spacing budget was spent — nothing was said, so nothing is owed. Every OTHER way a
+        // line can come to nothing (no ZRoutedRpc yet, an empty hall) still returns true on purpose:
+        // those lines are lost either way, and pacing them is what 0.3.2 did, whereas returning
+        // false would let a null instance drain the whole queue at one line per FRAME.
+        private bool Speak(VoiceLine line)
         {
-            if (ZRoutedRpc.instance == null) return; // shouldn't happen; Update guards, queue may lag
+            if (ZRoutedRpc.instance == null) return true; // shouldn't happen; Update guards, queue may lag
 
             string speaker = string.IsNullOrEmpty(line.speaker) ? _speakerName.Value : line.speaker;
             string mode = (_chatType.Value ?? "center").ToLowerInvariant();
             string text = line.text ?? "";
+
+            string target = line.target == null ? "" : line.target.Trim();
+            bool hasTarget = target.Length > 0;
+            long targetUid = 0L;
+            if (hasTarget)
+            {
+                if (!TryResolveTargetPeer(target, out targetUid))
+                {
+                    // The stable shape asked for by the feature, so it greps cleanly. The name goes
+                    // through SafeName like every other field this plugin logs: it arrives from the
+                    // API as free text and LogOutput.log is line-parsed by the SFTP poller.
+                    Log.LogInfo("[Eilif] voice target '" + SpeakerIdentity.SafeName(target) +
+                                "' is not online, line dropped");
+                    return false; // said nothing -> does not spend the line-spacing budget
+                }
+            }
 
             if (mode == "center")
             {
@@ -545,10 +607,22 @@ namespace EilifCompanion
                 // No UserInfo involved, so it is immune to the platform privacy check that rejects
                 // synthetic chat senders ("Failed to get player info..."). Renders center-screen on
                 // every connected client, exactly like "The forest is moving...".
-                ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, "ShowMessage",
-                    new object[] { (int)MessageHud.MessageType.Center, text });
-                Log.LogInfo($"[Eilif] Spoke (center): {text}");
-                return;
+                //
+                // The ONLY difference for a targeted line is the routed-RPC recipient: one peer uid
+                // instead of ZRoutedRpc.Everybody. Same RPC, same payload, so nothing else about the
+                // path changes and an untargeted line is exactly what 0.3.2 sent.
+                var centerArgs = new object[] { (int)MessageHud.MessageType.Center, text };
+                if (hasTarget)
+                {
+                    ZRoutedRpc.instance.InvokeRoutedRPC(targetUid, "ShowMessage", centerArgs);
+                    Log.LogInfo($"[Eilif] Spoke (center) to '{SpeakerIdentity.SafeName(target)}': {text}");
+                }
+                else
+                {
+                    ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, "ShowMessage", centerArgs);
+                    Log.LogInfo($"[Eilif] Spoke (center): {text}");
+                }
+                return true;
             }
 
             var talkType = mode == "normal" ? Talker.Type.Normal : Talker.Type.Shout;
@@ -563,12 +637,107 @@ namespace EilifCompanion
 
             // Per-peer sends: never invoke the server's own ChatMessage handler (its player-info
             // lookup throws on synthetic senders); deliver straight to each connected client.
+            // A targeted line is the same send, to exactly one of them.
+            if (hasTarget)
+            {
+                ZRoutedRpc.instance.InvokeRoutedRPC(targetUid, "ChatMessage", args);
+                Log.LogInfo($"[Eilif] Spoke ({talkType}) as '{speaker}' to '{SpeakerIdentity.SafeName(target)}': {text}");
+                return true;
+            }
+
             var peers = ZNet.instance?.GetPeers();
-            if (peers == null || peers.Count == 0) return;
+            if (peers == null || peers.Count == 0) return true;
             foreach (var p in peers)
                 ZRoutedRpc.instance.InvokeRoutedRPC(p.m_uid, "ChatMessage", args);
 
             Log.LogInfo($"[Eilif] Spoke ({talkType}) as '{speaker}' to {peers.Count} peer(s): {text}");
+            return true;
+        }
+
+        /// <summary>
+        /// The peer uid to speak a targeted line to; false when nobody connected answers to that
+        /// name. Case-insensitive against ZNetPeer.m_playerName, the SERVER's own name for the peer
+        /// (SpeakerIdentity explains at length why the name inside a client packet is never used).
+        ///
+        /// DUPLICATE NAMES, AND WHY THE TIE-BREAK IS JUST "THE FIRST ONE". Valheim allows two
+        /// characters to be called the same thing, and a modified client can hand the server any
+        /// m_playerName it likes during the handshake — so a name match is not an identity, and
+        /// this method can genuinely be handed two candidates.
+        ///
+        /// There is NOTHING here to break the tie with, and that is worth writing down because the
+        /// obvious idea is wrong. 0.3.3 originally preferred the peer whose name still "round-trips"
+        /// through SpeakerIdentity.PeerName(p.m_uid) — the identity rule the chat hooks use. That
+        /// rule works there because it converts an UNTRUSTED uid from a packet into the server's own
+        /// name. Here the uid already came out of the server's own list, and the decompile
+        /// (assembly_valheim 0.221.12) shows why the check can therefore never fail:
+        ///
+        ///     public List&lt;ZNetPeer&gt; GetPeers() { return m_peers; }                            // 2468
+        ///     public ZNetPeer GetPeer(long uid) { foreach (…m_peers) if (peer.m_uid == uid) … }  // 1523
+        ///
+        /// GetPeer re-finds the very object the loop is holding — and it cannot find a different
+        /// one, because ZNet.RPC_PeerInfo refuses a second peer on an already-connected uid
+        /// ("Already connected to peer with UID:", line 956). So the round-trip re-read the string
+        /// it had just compared, every match "confirmed" itself, and the warning line printed a
+        /// count that corroborated nothing. It is removed rather than kept as reassurance.
+        ///
+        /// So: FIRST MATCH IN m_peers WINS, which in practice means whoever connected earlier. Be
+        /// clear-eyed about what that costs — a name-squatter who joins ahead of the real viking
+        /// receives that viking's private lines. Nothing available server-side distinguishes them
+        /// (only a SteamID→character binding the dashboard does not keep would), so the warning
+        /// below names EVERY matching uid: it is the only thing that lets an operator see it
+        /// happened and who got the line.
+        ///
+        /// Never throws: a game-API change here must cost at most one voice line, never the pump.
+        /// </summary>
+        private static bool TryResolveTargetPeer(string target, out long uid)
+        {
+            uid = 0L;
+            try
+            {
+                var peers = ZNet.instance?.GetPeers();
+                if (peers == null || peers.Count == 0) return false;
+
+                int matches = 0;
+                string allUids = null;
+
+                foreach (var p in peers)
+                {
+                    if (p == null) continue;
+                    string name = p.m_playerName;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    if (!string.Equals(name, target, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    long puid = p.m_uid;
+                    // 0 is ZRoutedRpc.Everybody. No real peer carries it (ZNetPeer.IsReady() is
+                    // literally `m_uid != 0`, and RouteRPC broadcasts on a target of 0), so a peer
+                    // record carrying it is refused rather than used: routing a targeted line to
+                    // uid 0 would broadcast the one thing that must not be broadcast.
+                    if (puid == 0L) continue;
+
+                    matches++;
+                    if (uid == 0L) uid = puid;                 // first match wins
+                    allUids = allUids == null ? puid.ToString() : allUids + ", " + puid;
+                }
+
+                if (matches == 0) return false;
+                if (matches > 1)
+                {
+                    // Should never appear. Two connected peers carrying the same m_playerName is
+                    // either a genuine duplicate character name or somebody probing, and either way
+                    // one of them is about to read a line meant for the other.
+                    Log?.LogWarning("[Eilif] voice target '" + SpeakerIdentity.SafeName(target) + "' matches " +
+                                    matches + " connected peers (uids " + allUids +
+                                    "); no server-side rule tells them apart, speaking to the first, uid " + uid + ".");
+                }
+                return uid != 0L;
+            }
+            catch (Exception ex)
+            {
+                // The caller logs the drop line; this says WHY, once, rather than letting a broken
+                // lookup masquerade as "the target was simply offline".
+                Log?.LogWarning("[Eilif] voice target lookup failed: " + ex.Message);
+                return false;
+            }
         }
     }
 
@@ -640,5 +809,16 @@ namespace EilifCompanion
         [DataMember(Name = "id")] public string id;
         [DataMember(Name = "text")] public string text;
         [DataMember(Name = "speaker")] public string speaker;
+
+        /// <summary>
+        /// OPTIONAL. A single character name this line is addressed to, spelled the way the
+        /// game shows it; matched case-insensitively against ZNetPeer.m_playerName. The API
+        /// sends the member only for a targeted line (it rides in the row's `meta.target`
+        /// jsonb key — there is no `target` column), so an untargeted line leaves this null
+        /// and Speak() broadcasts exactly as it always has. An older API that never sends
+        /// the member leaves it null too: DataContractJsonSerializer ignores members it does
+        /// not find, so this is forward- and backward-compatible with no version handshake.
+        /// </summary>
+        [DataMember(Name = "target")] public string target;
     }
 }
