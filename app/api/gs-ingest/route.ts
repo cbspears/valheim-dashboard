@@ -29,6 +29,7 @@ import {
   CLIENT_DAMAGE_SOURCE,
   type FightStats,
 } from '@/lib/boss-damage';
+import { foldFightStats } from '@/lib/fight-stats-cas';
 import { evaluateAndRecord } from '@/lib/milestones';
 import { ingestDeathEvents, ingestEilifDeath } from '@/lib/deaths';
 import { clampEventTime } from '@/lib/event-time';
@@ -669,14 +670,15 @@ async function ingestBossDamageDeltas(
   const deltas = bossDamageDeltas(prevGsStats, nextGsStats);
   if (deltas.size === 0) return; // nothing grew — no read, no write, no log noise
 
-  // One read for every boss this post touched, then a read-modify-write per row —
-  // the same shape ingestBossKillEvents uses. There is no is_killed filter on
+  // One read to resolve name → row id, then a compare-and-swap fold per row (the
+  // fold's own read is inside foldFightStats, because a stale `existing` is
+  // exactly what this used to get wrong). There is no is_killed filter on
   // purpose: pre-kill damage accrues so the record is complete the moment the
   // milestone flip lands (and that flip unions rather than replaces, see
   // ingestBossMilestones).
   const { data: rows, error: readErr } = await client
     .from('bosses')
-    .select('id, name, is_killed, fight_stats, players_present')
+    .select('id, name')
     .in('name', [...deltas.keys()]);
   if (readErr) {
     console.error(`[gs-ingest] boss-damage fallback: could not read bosses rows — ${readErr.message}`);
@@ -702,40 +704,39 @@ async function ingestBossDamageDeltas(
       );
     }
 
-    const existing = ((row as { fight_stats?: FightStats | null }).fight_stats ?? null) as FightStats | null;
-    const next = foldClientDamage(existing, reporter, delta, {
-      cap,
-      isKilled: !!(row as { is_killed?: boolean }).is_killed,
-    });
-    if (!next) continue; // nothing to fold (guarded inside the pure fold too)
-
-    // Fold the reporter into players_present as well (union — grow only, never
-    // blank/shrink), on the same reasoning ingestBossKillEvents folds its MVPs
-    // in: someone who dealt damage to this boss was demonstrably there for it.
-    const priorPresent = Array.isArray((row as { players_present?: unknown }).players_present)
-      ? (row as { players_present: unknown[] }).players_present.filter((n): n is string => typeof n === 'string')
-      : [];
-    const presentSet = new Set<string>(priorPresent);
-    presentSet.add(reporter);
-
-    const patch: Record<string, unknown> = { fight_stats: next };
-    if (presentSet.size > priorPresent.length) patch.players_present = [...presentSet];
-
-    const { error } = await client.from('bosses').update(patch).eq('id', row.id);
-    if (error) {
-      // Includes the pre-migration "no fight_stats column" case. Logged, never
-      // thrown: the next client post recomputes the delta from the row as it
-      // then stands, so a transient failure self-heals rather than compounding.
-      console.error(
-        `[gs-ingest] boss-damage fallback: could not fold ${Math.round(delta)} damage from ` +
-          `"${reporter}" into ${bossName} — ${error.message}`,
-      );
-      continue;
-    }
+    // COMPARE-AND-SWAP, not a blind update. `delta` is computed once from this
+    // payload; the fold that credits it re-runs on a freshly read row on every
+    // attempt, so an overlapping writer's fold is never discarded — see
+    // lib/fight-stats-cas.ts for the interleaving this closes.
+    let written: FightStats | null = null;
+    const outcome = await foldFightStats(
+      client,
+      row.id as string,
+      (existing, fresh) => {
+        const next = foldClientDamage(existing, reporter, delta, { cap, isKilled: fresh.is_killed });
+        written = next; // for the log line below; the helper stamps rev onto it
+        return next; // null = nothing to fold (guarded inside the pure fold too)
+      },
+      {
+        label: `boss-damage fallback (${bossName})`,
+        // Fold the reporter into players_present as well (union — grow only, never
+        // blank/shrink), on the same reasoning ingestBossKillEvents folds its MVPs
+        // in: someone who dealt damage to this boss was demonstrably there for it.
+        // Recomputed against the FRESH row each attempt, so this union cannot
+        // shrink a concurrent one either.
+        extraPatch: (fresh) => {
+          const presentSet = new Set<string>(fresh.players_present);
+          presentSet.add(reporter);
+          return presentSet.size > fresh.players_present.length ? { players_present: [...presentSet] } : null;
+        },
+      },
+    );
+    if (outcome !== 'written' || !written) continue; // 'noop' / 'gave-up' are logged by the helper
+    const stored: FightStats = written;
     console.info(
       `[gs-ingest] boss-damage fallback: credited "${reporter}" +${Math.round(Math.min(delta, cap))} damage on ${bossName} ` +
-        `(fighters now ${next.fighters?.length ?? 0}` +
-        `${next.topDamageFrom === CLIENT_DAMAGE_SOURCE ? `, top damage "${next.topDamagePlayer}"` : ''}).`,
+        `(fighters now ${stored.fighters?.length ?? 0}` +
+        `${stored.topDamageFrom === CLIENT_DAMAGE_SOURCE ? `, top damage "${stored.topDamagePlayer}"` : ''}).`,
     );
   }
 }
@@ -849,9 +850,11 @@ async function ingestObservedBossDamage(
     return;
   }
 
+  // One read to resolve name → row id; the fold's own read happens inside
+  // foldFightStats, on every compare-and-swap attempt.
   const { data: rows, error: readErr } = await client
     .from('bosses')
-    .select('id, name, is_killed, fight_stats, players_present')
+    .select('id, name')
     .in('name', [...byBoss.keys()]);
   if (readErr) {
     console.error(`[gs-ingest] observed boss damage: could not read bosses rows — ${readErr.message}`);
@@ -862,55 +865,60 @@ async function ingestObservedBossDamage(
     const bossName = row.name as string;
     const cums = byBoss.get(bossName);
     if (!cums) continue;
+    const cap = bossDamagePostCap(bossName);
 
-    const existing = ((row as { fight_stats?: FightStats | null }).fight_stats ?? null) as FightStats | null;
-    // Same ceiling and the same is_killed rule as the reporter-own path above:
-    // a bystander reading is self-reported too, just about somebody else.
-    const next = foldObservedDamage(existing, observer, cums, {
-      cap: bossDamagePostCap(bossName),
-      isKilled: !!(row as { is_killed?: boolean }).is_killed,
-    });
-    if (!next) continue; // nothing grew since this observer's last reading — skip the write entirely
+    // COMPARE-AND-SWAP. The observed ledger is a HIGH-WATER MARK read out of the
+    // row itself, so folding it against a stale `existing` was doubly wrong: the
+    // losing write both discarded the winner's damage AND rewound the ledger, so
+    // the next ~120s re-post re-credited blows already banked. Re-folding on the
+    // fresh row on every attempt is what makes the differencing honest.
+    let credited: ReadonlyArray<readonly [string, number]> = [];
+    let written: FightStats | null = null;
+    const outcome = await foldFightStats(
+      client,
+      row.id as string,
+      (existing, fresh) => {
+        // Same ceiling and the same is_killed rule as the reporter-own path above:
+        // a bystander reading is self-reported too, just about somebody else.
+        const next = foldObservedDamage(existing, observer, cums, { cap, isKilled: fresh.is_killed });
+        if (!next) return null; // nothing grew since this observer's last reading
 
-    // Who actually got credited: the players whose high-water mark advanced. Read
-    // defensively off the stored blob (jsonb, third-party-derived) so a junk prior
-    // entry reads as "never seen" exactly like the fold treats it.
-    const priorOf = (p: string): number => {
-      const v = (existing?.observed?.[observer] as Record<string, unknown> | undefined)?.[p];
-      return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
-    };
-    const creditedNow = Object.entries(next.observed?.[observer] ?? {})
-      .map(([p, cum]) => [p, cum - priorOf(p)] as const)
-      .filter(([, gained]) => gained > 0);
-    if (creditedNow.length === 0) continue; // belt-and-braces; foldObservedDamage already returned null for this
+        // Who actually got credited: the players whose high-water mark advanced.
+        // Read defensively off the stored blob (jsonb, third-party-derived) so a
+        // junk prior entry reads as "never seen" exactly like the fold treats it.
+        const priorOf = (p: string): number => {
+          const v = (existing?.observed?.[observer] as Record<string, unknown> | undefined)?.[p];
+          return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
+        };
+        credited = Object.entries(next.observed?.[observer] ?? {})
+          .map(([p, cum]) => [p, cum - priorOf(p)] as const)
+          .filter(([, gained]) => gained > 0);
+        // Belt-and-braces; foldObservedDamage already returned null for this.
+        if (credited.length === 0) return null;
 
-    // Fold the CREDITED fighters into players_present as well (union — grow only,
-    // never blank/shrink), on the same reasoning as ingestBossDamageDeltas: a
-    // viking someone watched land damage on this boss was demonstrably there.
-    const priorPresent = Array.isArray((row as { players_present?: unknown }).players_present)
-      ? (row as { players_present: unknown[] }).players_present.filter((n): n is string => typeof n === 'string')
-      : [];
-    const presentSet = new Set<string>(priorPresent);
-    for (const [p] of creditedNow) presentSet.add(p);
-
-    const patch: Record<string, unknown> = { fight_stats: next };
-    if (presentSet.size > priorPresent.length) patch.players_present = [...presentSet];
-
-    const { error } = await client.from('bosses').update(patch).eq('id', row.id);
-    if (error) {
-      // Includes the pre-migration "no fight_stats column" case. Logged, never
-      // thrown: the ledger only advances on a successful write, so the next post
-      // recomputes the same deltas and self-heals instead of losing them.
-      console.error(
-        `[gs-ingest] observed boss damage: could not fold "${observer}"'s observations into ${bossName} — ${error.message}`,
-      );
-      continue;
-    }
+        written = next;
+        return next;
+      },
+      {
+        label: `observed boss damage (${bossName})`,
+        // Fold the CREDITED fighters into players_present as well (union — grow
+        // only, never blank/shrink), on the same reasoning as
+        // ingestBossDamageDeltas: a viking someone watched land damage on this
+        // boss was demonstrably there.
+        extraPatch: (fresh) => {
+          const presentSet = new Set<string>(fresh.players_present);
+          for (const [p] of credited) presentSet.add(p);
+          return presentSet.size > fresh.players_present.length ? { players_present: [...presentSet] } : null;
+        },
+      },
+    );
+    if (outcome !== 'written' || !written) continue; // 'noop' / 'gave-up' are logged by the helper
+    const stored: FightStats = written;
     console.info(
       `[gs-ingest] observed boss damage: "${observer}" credited ` +
-        `${creditedNow.map(([p, gained]) => `"${p}" +${Math.round(gained)}`).join(', ')} on ${bossName} ` +
-        `(fighters now ${next.fighters?.length ?? 0}` +
-        `${next.topDamageFrom === CLIENT_DAMAGE_SOURCE ? `, top damage "${next.topDamagePlayer}"` : ''}).`,
+        `${credited.map(([p, gained]) => `"${p}" +${Math.round(gained)}`).join(', ')} on ${bossName} ` +
+        `(fighters now ${stored.fighters?.length ?? 0}` +
+        `${stored.topDamageFrom === CLIENT_DAMAGE_SOURCE ? `, top damage "${stored.topDamagePlayer}"` : ''}).`,
     );
   }
 }
@@ -943,23 +951,14 @@ async function ingestBossMilestones(
 
   const client = db();
   const names = [...new Set(milestones.map((m) => m.bossName))];
-  // fight_stats comes along for the ride: the client-damage fallback may already
-  // have carved real fighters (and a damage map) onto this row while it was still
-  // unkilled — see ingestBossDamageDeltas. The seed below unions rather than
-  // replaces, so that accrual survives the flip.
-  const { data: rows } = await client
-    .from('bosses')
-    .select('id, name, is_killed, fight_stats')
-    .in('name', names);
-  const byName = new Map<string, { id: string; is_killed: boolean; fight_stats: FightStats | null }>(
-    (rows ?? []).map((r) => [
-      r.name as string,
-      {
-        id: r.id as string,
-        is_killed: !!r.is_killed,
-        fight_stats: ((r as { fight_stats?: FightStats | null }).fight_stats ?? null) as FightStats | null,
-      },
-    ]),
+  // Just name → id + a cheap "already felled?" screen. The authoritative read of
+  // is_killed and fight_stats happens inside the compare-and-swap below, because
+  // the client-damage fallback may be folding fighters and a damage map onto this
+  // very row concurrently — see ingestBossDamageDeltas — and the seed must union
+  // with what is ACTUALLY stored, not with a read that has already gone stale.
+  const { data: rows } = await client.from('bosses').select('id, name, is_killed').in('name', names);
+  const byName = new Map<string, { id: string; is_killed: boolean }>(
+    (rows ?? []).map((r) => [r.name as string, { id: r.id as string, is_killed: !!r.is_killed }]),
   );
 
   for (const m of milestones) {
@@ -979,57 +978,93 @@ async function ingestBossMilestones(
     }
     const killedAt = killedAtClamp.iso;
 
-    // TRUE fighters if we have any; degrade to the online roster ONLY when empty
-    // (never blank a war party). The online roster is preserved separately on
-    // fight_stats.onlineAtKill so the war-room can still honestly note who else
-    // was in the realm without inflating the war-party.
-    // Union with anything the client-damage fallback already proved fought this
-    // beast (grow only — a war party is never shrunk). Those names are exactly as
-    // earned as the ones derived from this payload: each was banked off a positive
-    // per-boss damage delta, which a bystander cannot produce.
-    const prior = byName.get(m.bossName)?.fight_stats ?? null;
-    const priorFighters = Array.isArray(prior?.fighters)
-      ? prior.fighters.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
-      : [];
-    const fought = [...new Set([...priorFighters, ...(fighters[m.bossName] ?? [])])];
-    const present = fought.length > 0 ? fought : roster;
+    // What players_present becomes at the flip. Seeded from THIS payload alone so
+    // the degraded path below still has an honest war party (or the roster) even
+    // if the fold never got to run; the fold overwrites it with the union against
+    // whatever the damage folds have already banked.
+    let presentAtFlip: string[] = (fighters[m.bossName] ?? []).length
+      ? [...new Set(fighters[m.bossName])]
+      : roster;
 
-    // Guarded flip: .eq('is_killed', false) makes the re-POST a no-op and the
-    // returned rows tell us whether WE were the one to fell it (→ emit event once).
-    // Keep this write to columns that always exist so a pre-migration fight_stats
-    // column can never block the kill from registering.
-    const { data: flipped } = await client
-      .from('bosses')
-      .update({ is_killed: true, killed_at: killedAt, players_present: present })
-      .eq('id', row.id)
-      .eq('is_killed', false)
-      .select('id');
+    // ONE guarded, compare-and-swapped write: the flip AND the fight_stats seed
+    // together. Two separate writes is what this used to be, and the second one
+    // was a blind read-modify-write that could discard a concurrent damage fold's
+    // fighters and damage map (lib/fight-stats-cas.ts has the interleaving).
+    //
+    // `.eq('is_killed', false)` is kept as an extraFilter, so the flip is still
+    // exactly-once even against a duplicate re-POST landing in the same instant,
+    // and the fold below ALSO screens on the fresh row's is_killed — which is
+    // what turns "somebody else already flipped it" into a clean 'noop' instead
+    // of six pointless retries.
+    const flip = await foldFightStats(
+      client,
+      row.id,
+      (existing, fresh) => {
+        if (fresh.is_killed) return null; // already felled — not ours to flip
 
-    if (!flipped || flipped.length === 0) continue; // lost the race / already flipped
+        // TRUE fighters if we have any; degrade to the online roster ONLY when
+        // empty (never blank a war party). The online roster is preserved
+        // separately on fight_stats.onlineAtKill so the war-room can still
+        // honestly note who else was in the realm without inflating the war-party.
+        // Union with anything the client-damage fallback already proved fought
+        // this beast (grow only — a war party is never shrunk). Those names are
+        // exactly as earned as the ones derived from this payload: each was banked
+        // off a positive per-boss damage delta, which a bystander cannot produce.
+        const priorFighters = Array.isArray(existing?.fighters)
+          ? existing.fighters.filter((n): n is string => typeof n === 'string' && n.trim().length > 0)
+          : [];
+        const fought = [...new Set([...priorFighters, ...(fighters[m.bossName] ?? [])])];
+        presentAtFlip = fought.length > 0 ? fought : roster;
+
+        // Spread the sealed prior first so the seed ADDS to what the client-damage
+        // fallback accrued (its damage map, its observed ledger and its
+        // topDamageFrom marker) instead of wiping it. `source` deliberately becomes
+        // 'gs-milestone' — this row's real provenance — which is safe because the
+        // fallback's top-damage verdict is gated on topDamageFrom, not on source
+        // (see lib/boss-damage CLIENT_DAMAGE_SOURCE).
+        //
+        // The beast is down, so the fallback's verdict may now be carved from
+        // everything the two damage folds accrued while it was still standing.
+        // foldClientDamage deliberately withholds it on an UNFELLED boss (nothing
+        // real to compete with a fabricated number there — see lib/boss-damage
+        // BOSS_MAX_HP), and this is the moment that rule was waiting for. Returns
+        // null when a real bossKillEvents MVP already owns the verdict, which is
+        // left untouched exactly as before.
+        const sealed = sealClientDamageVerdict(existing) ?? existing;
+        return { ...(sealed ?? {}), fighters: fought, onlineAtKill: roster, source: 'gs-milestone' };
+      },
+      {
+        label: `boss milestone flip (${m.bossName})`,
+        extraPatch: () => ({ is_killed: true, killed_at: killedAt, players_present: presentAtFlip }),
+        extraFilter: { is_killed: false },
+      },
+    );
+
+    if (flip === 'noop') continue; // lost the race / already flipped — no event, no count
+
+    if (flip === 'gave-up') {
+      // DEGRADED FLIP. Either the fight_stats column is missing (the pre-migration
+      // case the old two-write shape existed to survive) or six contenders in a row
+      // beat us to the rev. Register the kill anyway with the write that only
+      // touches columns which have always existed — still `.eq('is_killed', false)`,
+      // so it stays exactly-once — and leave fight_stats to the damage folds and to
+      // ingestBossKillEvents. A kill that goes unrecorded is worse than a kill with
+      // a thinner record.
+      const { data: flipped } = await client
+        .from('bosses')
+        .update({ is_killed: true, killed_at: killedAt, players_present: presentAtFlip })
+        .eq('id', row.id)
+        .eq('is_killed', false)
+        .select('id');
+      if (!flipped || flipped.length === 0) continue;
+      console.warn(
+        `[gs-ingest] boss milestone ${m.bossName}: recorded the kill without seeding fight_stats ` +
+          `(the compare-and-swap could not land). The damage folds and bossKillEvents still fill it in.`,
+      );
+    }
+
     felled++;
-
-    // Seed fight_stats with the fighter list + the online-roster-at-kill (both
-    // best-effort so a missing column can't undo the flip above). ingestBossKillEvents
-    // unions richer fight detail on top and preserves both fields.
-    // Spread `prior` first so the seed ADDS to what the client-damage fallback
-    // accrued (its damage map and its topDamageFrom marker) instead of wiping it.
-    // `source` deliberately becomes 'gs-milestone' — this row's real provenance —
-    // which is safe because the fallback's top-damage verdict is gated on
-    // topDamageFrom, not on source (see lib/boss-damage CLIENT_DAMAGE_SOURCE).
-    // The beast is down, so the fallback's verdict may now be carved from
-    // everything the two damage folds accrued while it was still standing.
-    // foldClientDamage deliberately withholds it on an UNFELLED boss (nothing
-    // real to compete with a fabricated number there — see lib/boss-damage
-    // BOSS_MAX_HP), and this is the moment that rule was waiting for. Returns
-    // null when a real bossKillEvents MVP already owns the verdict, which is
-    // left untouched exactly as before.
-    const sealed = sealClientDamageVerdict(prior) ?? prior;
-    await client
-      .from('bosses')
-      .update({
-        fight_stats: { ...(sealed ?? {}), fighters: fought, onlineAtKill: roster, source: 'gs-milestone' },
-      })
-      .eq('id', row.id);
+    const present = presentAtFlip;
 
     await client.from('events').insert({
       type: 'boss',
@@ -1117,10 +1152,10 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client', r
   }
 
   const names = [...best.keys()];
-  const { data: rows, error: readErr } = await client
-    .from('bosses')
-    .select('id, name, fight_stats, players_present, is_killed')
-    .in('name', names);
+  // Name → row id only; the merge reads the row itself inside the CAS, because
+  // planBossKillUpdate derives its whole output from `existing` and folding it
+  // onto a stale one is how a concurrent damage fold used to get discarded.
+  const { data: rows, error: readErr } = await client.from('bosses').select('id, name').in('name', names);
   if (readErr) {
     console.error(`[gs-ingest] bossKillEvents: could not read bosses rows — ${readErr.message}`);
     return;
@@ -1130,34 +1165,44 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client', r
     const bossName = row.name as string;
     const e = best.get(bossName);
     if (!e) continue;
-    const existing = ((row as { fight_stats?: FightStats | null }).fight_stats ?? null) as FightStats | null;
-    const priorPresent = Array.isArray((row as { players_present?: unknown }).players_present)
-      ? ((row as { players_present: unknown[] }).players_present.filter((n): n is string => typeof n === 'string'))
-      : [];
 
-    // Every merge rule (including the four that gate a client report) lives in
-    // the pure planner so it can be unit-tested — see lib/boss-damage.
-    const plan = planBossKillUpdate({
-      source,
-      isKilled: (row as { is_killed?: unknown }).is_killed === true,
-      existing,
-      priorPresent,
-      report: e,
-      canonical,
-    });
-    if (plan.note) {
-      console.info(`[gs-ingest] ${source} bossKillEvents for "${bossName}": ${plan.note}.`);
-    }
-    if (!plan.fightStats) continue;
+    let nextFightStats: FightStats | null = null;
+    let plannedPresent: string[] | null = null;
+    let noted = false;
+    const outcome = await foldFightStats(
+      client,
+      row.id as string,
+      (existing, fresh) => {
+        // Every merge rule (including the four that gate a client report) lives in
+        // the pure planner so it can be unit-tested — see lib/boss-damage. It is
+        // re-run per attempt against the fresh row, which is what keeps the
+        // preserved `damage` / `observed` maps current rather than stale.
+        const plan = planBossKillUpdate({
+          source,
+          isKilled: fresh.is_killed,
+          existing,
+          priorPresent: fresh.players_present,
+          report: e,
+          canonical,
+        });
+        // Log the note once, not once per compare-and-swap attempt.
+        if (plan.note && !noted) {
+          noted = true;
+          console.info(`[gs-ingest] ${source} bossKillEvents for "${bossName}": ${plan.note}.`);
+        }
+        plannedPresent = plan.playersPresent ?? null;
+        nextFightStats = plan.fightStats;
+        return plan.fightStats;
+      },
+      {
+        label: `${source} bossKillEvents (${bossName})`,
+        extraPatch: () => (plannedPresent ? { players_present: plannedPresent } : null),
+      },
+    );
+    if (outcome !== 'gave-up' || !nextFightStats) continue;
 
-    const nextFightStats = plan.fightStats;
-    const patch: Record<string, unknown> = { fight_stats: nextFightStats };
-    if (plan.playersPresent) patch.players_present = plan.playersPresent;
-
-    const { error } = await client.from('bosses').update(patch).eq('id', row.id);
-    if (!error) continue;
-
-    // Graceful degradation (fight_stats column missing): merge onto the latest
+    // Graceful degradation (fight_stats column missing, or the row is under such
+    // contention that six compare-and-swaps all missed): merge onto the latest
     // boss event row for this boss instead.
     const { data: ev } = await client
       .from('events')

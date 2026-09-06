@@ -112,6 +112,24 @@ export const CLIENT_DAMAGE_SOURCE = 'gs-client-damage';
  * rather than keeping a second copy that can drift.
  */
 export interface FightStats {
+  /**
+   * OPTIMISTIC-CONCURRENCY COUNTER — owned entirely by lib/fight-stats-cas.ts,
+   * read by nothing else, rendered nowhere.
+   *
+   * Every writer of this blob does read → fold → write, and the ingest is not
+   * serial (twenty clients re-POST a cumulative snapshot every ~120s), so two
+   * overlapping folds used to interleave and the second silently discarded the
+   * first — see the header of lib/fight-stats-cas.ts for the smoke run that
+   * caught it. `rev` is the precondition that makes each write conditional:
+   * PostgREST filters on `fight_stats->>rev`, so a writer whose rev has moved
+   * matches zero rows, re-reads and re-folds instead of clobbering.
+   *
+   * The FOLDS in this module do not have to maintain it — foldFightStats stamps
+   * `existing.rev + 1` after the fold returns — but every fold that spreads
+   * `existing` carries it through harmlessly, and planBossKillUpdate's key
+   * whitelist may drop it without consequence for the same reason.
+   */
+  rev?: number;
   fightSec?: number;
   firstBlood?: string | null;
   topDamagePlayer?: string | null;
