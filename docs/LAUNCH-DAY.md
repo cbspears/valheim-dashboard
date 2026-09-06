@@ -130,8 +130,8 @@ Facts as of 2026-09-05, verified by execution, that the morning assumes:
 - On Thunderstore: `Eilif-EilifCompanionClient-0.3.2` is **live** (still works; 0.3.3 adds a
   startup health line **and** wraps `Update()` in a rate-limited try/catch — see step 16,
   where the pin-0.3.2-or-upload-0.3.3 decision is written out).
-  `plugins/thunderstore/EilifCompanionClient-0.3.3.zip` and
-  `plugins/thunderstore/EilifPaths-1.5.0.zip` are staged and ready for Charlie to upload.
+  `Eilif-EilifCompanionClient-0.3.3` and `Eilif-EilifPaths-1.5.0` are **live on Thunderstore**
+  (uploaded 2026-09-06 10:01 CT; the r2modman listing index catches up within ~80 min).
   `Eilif-EilifPaths-1.5.0` is **not uploaded** — the package API 404s it. Until Charlie
   uploads it, `--paths 1.5.0` cannot be minted, and `--fallback on` is refused without
   `--paths 1.5.0`. This is the single longest pole in the day. Uploading it before the 9th
