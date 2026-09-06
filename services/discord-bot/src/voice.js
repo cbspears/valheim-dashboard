@@ -30,7 +30,8 @@
 // Gated behind VOICE_ENGINE=1 (see index.js), like GALLERY_INGEST.
 
 import { serviceClient } from './supabase.js';
-import { causeNoun } from './format.js';
+import { causeNoun, nameMd, safeText } from './format.js';
+import { MENTION_STRICT } from './discord.js';
 
 const TICK_MS = 60_000;                 // the caller ticks us every 60s
 const CADENCE_MINUTES = 120;            // one ambient line per ~2h online-time
@@ -472,7 +473,17 @@ export function createVoiceEngine({
           embeds: [
             {
               title: '📜 A new oath is sworn',
-              description: `**${name}** swore on the charter, and the hall heard it.\n\n_"${o.oath_text}"_`,
+              // THE RAW SHOUT THIS CLOSES (red-team round 2, 2026-09-05). Both
+              // halves used to be interpolated verbatim. `oath_text` is the
+              // text of an in-game `/s /oath …` shout, which /api/webhook
+              // records for ANY viking with no cap and no sanitising
+              // (lib/webhook/oath.ts normalizeOathText only trims), and
+              // `character_name` is player-chosen. Unescaped, a `_` or `"`
+              // broke straight out of the italic wrapper, `||…||` hid the rest
+              // of the embed, and a `https://…` in the oath put a live link
+              // into the hall in Eilif's own voice. Same treatment every other
+              // announcement path already had.
+              description: `**${nameMd(name)}** swore on the charter, and the hall heard it.\n\n_"${safeText(o.oath_text, 900)}"_`,
               color: 0xc8952a,
               footer: { text: 'Eilif · The Cozy Canon Playthrough' },
             },
@@ -654,8 +665,19 @@ export function createVoiceEngine({
     .map((s) => s.trim())
     .filter(Boolean);
 
+  // THE WRONG GUILD (red-team, 2026-09-05). `member.permissions` is authority
+  // in the guild the message came from — not in this hall. If the bot is ever
+  // in a second guild (a staging server, or a public-bot invite), the owner of
+  // THAT guild is an Administrator there, and `@Eilif say: <line>` would put
+  // their text on every Eilif player's screen, center-screen, in Eilif's voice.
+  // GUILD_ID is already set on the live bot and already used by the events
+  // sync; this pins the puppet to it.
+  const PUPPET_GUILD_ID = process.env.GUILD_ID || null;
+
+
   function mayPuppet(member) {
-    if (!member) return false;
+    if (!member) return false; // a DM has no member, so it has no permissions
+    if (PUPPET_GUILD_ID && member.guild?.id !== PUPPET_GUILD_ID) return false;
     if (member.permissions?.has?.('Administrator')) return true;
     if (member.permissions?.has?.('ManageGuild')) return true;
     return ADMIN_ROLE_IDS.some((id) => member.roles?.cache?.has?.(id));
@@ -665,7 +687,7 @@ export function createVoiceEngine({
     try {
       if (!writeDb) return;
       if (message.author?.bot) return;
-      if (!message.mentions?.has(client.user)) return;
+      if (!message.mentions?.has(client.user, MENTION_STRICT)) return;
 
       // Parse the say-command BEFORE anything else, but only for admins — so an
       // ordinary member's message falls straight through to the oath ingest.

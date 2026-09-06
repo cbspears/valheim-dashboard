@@ -23,6 +23,14 @@
 
 import { randomInt } from 'node:crypto';
 import { serviceClient } from './supabase.js';
+import { replyPayload, replySafeName } from './format.js';
+import { MENTION_STRICT } from './discord.js';
+
+// A typed name is free text from a Discord message. It is stored on the claim
+// row and echoed nowhere, but "unbounded" and "goes in a database column" do
+// not belong in the same sentence on launch night. 64 is four times the longest
+// name Valheim's own field will produce.
+const MAX_REQUESTED_NAME = 64;
 
 const MISSING_COLUMN = /discord_user_id|discord_username|column .* does not exist|schema cache/i;
 const MISSING_TABLE = /identity_claims|relation .* does not exist|could not find the table|schema cache/i;
@@ -32,6 +40,21 @@ const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_LEN = 6;
 export const CLAIM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 const CLAIM_TTL_MS = 20 * 60 * 1000;
+
+// THE FLOOD THIS CLOSES (red-team round 2, 2026-09-05). `@Eilif I am <name>`
+// minted a fresh identity_claims row AND sent a DM every single time, with no
+// throttle of any kind: one member holding down enter filled the table with
+// service-role writes and DM'd themselves as fast as the gateway allowed.
+//
+// A cooldown rather than a lock: an honest viking who mistypes their name, or
+// whose rune scrolled away, retries after a few seconds and the copy tells them
+// the rune they already hold is still good. 45 s is well inside the 20-minute
+// rune life, so nobody is ever left without a usable code.
+const CLAIM_COOLDOWN_MS = 45_000;
+// Ten times the player cap. The key is a Discord user id, so the key space is
+// "everyone in the guild" rather than "the roster" — bounded on the same
+// oldest-first rule relay.js uses for its death memory.
+const CLAIM_MEMORY_MAX = 200;
 
 function generateCode() {
   let code = '';
@@ -104,17 +127,49 @@ export function parseIdentity(content, botId) {
   if (/^join\b\??$/i.test(stripped)) return { kind: 'claim', name: null };
   const m = stripped.match(/^i\s*['’]?\s*am\b\s*[:\-—–]?\s*([\s\S]+)$/i);
   if (m) {
-    const name = m[1].trim().replace(/^["“]|["”.!]+$/g, '').trim();
+    // First line only, then capped. A name is a name; a paragraph pasted after
+    // "I am" is not one, and neither belongs in identity_claims.requested_name.
+    const name = m[1]
+      .split('\n')[0]
+      .trim()
+      .replace(/^["“]|["”.!]+$/g, '')
+      .trim()
+      .slice(0, MAX_REQUESTED_NAME);
     if (name) return { kind: 'claim', name };
   }
   return null;
 }
 
-export function createIdentityLink({ client, log = console }) {
-  const db = serviceClient();
+export function createIdentityLink({ client, log = console, db: injectedDb }) {
+  // `injectedDb` is a test seam — the same one createVoiceEngine already uses
+  // for writeDb. Production passes nothing and builds the real service client.
+  const db = injectedDb ?? serviceClient();
 
   // Mint a one-time claim code for this Discord user. Retries on the
   // vanishingly rare PK collision with a fresh code.
+  // discordId -> ms of that user's last successful mint. In process only: a
+  // restart forgets it, which is the right trade (the DB row is the real
+  // record, and this exists to stop a burst, not to enforce a quota).
+  const lastMintAt = new Map();
+
+  function mintCooldownLeftMs(discordId) {
+    const at = lastMintAt.get(discordId);
+    if (typeof at !== 'number') return 0;
+    const left = CLAIM_COOLDOWN_MS - (Date.now() - at);
+    return left > 0 ? left : 0;
+  }
+
+  function rememberMint(discordId) {
+    lastMintAt.set(discordId, Date.now());
+    if (lastMintAt.size <= CLAIM_MEMORY_MAX) return;
+    // Map iterates in insertion order and every entry is re-inserted on mint,
+    // so the front of the map is the least recently used.
+    for (const key of lastMintAt.keys()) {
+      lastMintAt.delete(key);
+      if (lastMintAt.size <= CLAIM_MEMORY_MAX) break;
+    }
+  }
+
   async function mintClaim({ discordId, username, requestedName }) {
     const expiresAt = new Date(Date.now() + CLAIM_TTL_MS).toISOString();
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -126,7 +181,10 @@ export function createIdentityLink({ client, log = console }) {
         requested_name: requestedName,
         expires_at: expiresAt,
       });
-      if (!error) return { ok: true, code };
+      if (!error) {
+        rememberMint(discordId);
+        return { ok: true, code };
+      }
       if (MISSING_TABLE.test(error.message)) return { ok: false, notReady: true };
       if (error.code === '23505') continue; // code collision — try again
       throw new Error(`insert claim: ${error.message}`);
@@ -147,13 +205,14 @@ export function createIdentityLink({ client, log = console }) {
     return { name: data?.character_name ?? null };
   }
 
-  const reply = (message, content) =>
-    message.reply({ content, allowedMentions: { repliedUser: false } }).catch(() => {});
+  // parse: [] (see format.js replyPayload) — a nickname of "@everyone" echoed
+  // back must render as four words, not ping the guild.
+  const reply = (message, content) => message.reply(replyPayload(content)).catch(() => {});
 
   async function handleMessage(message) {
     try {
       if (message.author?.bot) return;
-      if (!message.mentions?.has(client.user)) return;
+      if (!message.mentions?.has(client.user, MENTION_STRICT)) return;
 
       const cmd = parseIdentity(message.content, client.user.id);
       if (!cmd) return;
@@ -163,7 +222,7 @@ export function createIdentityLink({ client, log = console }) {
         if (cur.notReady) {
           await reply(message, 'The Hall’s ledgers are still being carved. Ask again shortly.');
         } else if (cur.name) {
-          await reply(message, `The Hall knows you as **${cur.name}**.`);
+          await reply(message, `The Hall knows you as **${replySafeName(cur.name)}**.`);
         } else {
           await reply(
             message,
@@ -174,7 +233,23 @@ export function createIdentityLink({ client, log = console }) {
       }
 
       // kind === 'claim'
+      // `username` is a Discord DISPLAY NAME: user-chosen, and echoed back into a
+      // channel message below. Escaped + capped at the point of use so the copy
+      // reads the same for an honest nickname and cannot be used as a payload.
       const username = message.member?.displayName ?? message.author.username;
+      const shownName = replySafeName(username);
+
+      // Rate limit (see CLAIM_COOLDOWN_MS). Deliberately BEFORE the insert and
+      // before the DM, so a burst costs one reply and nothing else.
+      if (mintCooldownLeftMs(message.author.id) > 0) {
+        await reply(
+          message,
+          'Your rune is already carved and still good. Look in your private messages and shout it in-game. ' +
+            'Ask again in a minute if it never reached you.'
+        );
+        return;
+      }
+
       const res = await mintClaim({
         discordId: message.author.id,
         username,
@@ -199,7 +274,7 @@ export function createIdentityLink({ client, log = console }) {
       // already-sworn vikings at that instead.
       let alreadySworn = false;
       try {
-        const db2 = serviceClient();
+        const db2 = injectedDb ?? serviceClient();
         if (db2) {
           const { data: existing } = await db2
             .from('oaths')
@@ -225,7 +300,7 @@ export function createIdentityLink({ client, log = console }) {
         await message.author.send(rune);
         await reply(
           message,
-          `I have whispered your rune in a private message, **${username}**. Shout it in-game to bind your viking.`
+          `I have whispered your rune in a private message, **${shownName}**. Shout it in-game to bind your viking.`
         );
         await message.react('📜').catch(() => {});
         log.info?.(`[identity] ${username} minted claim (rune DM'd)`);
@@ -233,7 +308,7 @@ export function createIdentityLink({ client, log = console }) {
         // DMs are closed — tell them how to open them; NEVER post the code here.
         await reply(
           message,
-          `I could not send you a private message, **${username}**. Open your DMs for this server ` +
+          `I could not send you a private message, **${shownName}**. Open your DMs for this server ` +
             `(Privacy Settings → Direct Messages), then ask again: \`@Eilif I am <YourViking>\`.`
         );
         await message.react('⚠️').catch(() => {});

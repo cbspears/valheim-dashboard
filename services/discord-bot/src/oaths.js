@@ -16,6 +16,8 @@
 // Gated behind OATH_INGEST=1 (see index.js).
 
 import { serviceClient } from './supabase.js';
+import { replyPayload } from './format.js';
+import { MENTION_STRICT } from './discord.js';
 
 const KINDS = ['oath', 'bio', 'role'];
 const FUZZY_THRESHOLD = 0.75;
@@ -170,13 +172,16 @@ export function createOathIngest({ client, log = console }) {
     if (error) throw new Error(`update ${parsed.kind}: ${error.message}`);
   }
 
-  const reply = (message, content) =>
-    message.reply({ content, allowedMentions: { repliedUser: false } }).catch(() => {});
+  // parse: [] (see format.js replyPayload). Every line this module replies with
+  // is fixed copy today, so nothing pings now either way — but the next person
+  // who echoes a name into one of them should not have to rediscover that
+  // omitting `parse` is Discord's parse-everything default.
+  const reply = (message, content) => message.reply(replyPayload(content)).catch(() => {});
 
   async function handleMessage(message) {
     try {
       if (message.author?.bot) return;
-      if (!message.mentions?.has(client.user)) return;
+      if (!message.mentions?.has(client.user, MENTION_STRICT)) return;
 
       const parsed = parse(message.content, client.user.id);
       if (!parsed) return;

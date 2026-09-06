@@ -23,6 +23,7 @@
 import { PermissionFlagsBits } from 'discord.js';
 import { serviceClient } from './supabase.js';
 import { matchPinInCaption } from './pinMatch.js';
+import { MENTION_STRICT } from './discord.js';
 
 const IMAGE_TYPE = /^image\//;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
@@ -34,6 +35,56 @@ const TRASH_EMOJI = '🗑️';
 // This is the *download* guard: it applies to the original attachment, before
 // the resize below shrinks what actually reaches Supabase.
 const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024; // 12 MB
+// Generous for 12 MB over Discord's CDN, short enough that a stalled socket
+// cannot pin a buffer for the rest of the evening.
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+// THE FLOOD THIS BOUNDS (red-team round 2, 2026-09-05). The download+buffer step
+// is NOT serialised: `messageCreate` handlers all run concurrently, and only the
+// sharp decode below is behind decodeExclusively. Each message in flight holds
+// up to MAX_ATTACHMENT_BYTES plus a transient copy from `Buffer.from()`, so
+// roughly twenty concurrent posts clear the unit's MemoryMax=512M and systemd
+// OOM-kills the bot; Restart=always brings it straight back to a channel still
+// full of photos, and the hall's bot flaps for as long as the flood lasts. With
+// CHANNEL_GALLERY unset the trigger is a post in ANY channel of the guild.
+//
+// Two permits: enough that one slow CDN fetch does not stall the next honest
+// photo, few enough that peak buffered bytes stay near 2 x 12 MB. Waiters are
+// capped too, so a raid cannot pile up unbounded pending handlers; over the cap
+// a photo is refused loudly rather than queued.
+const MAX_CONCURRENT_INGEST = 2;
+const MAX_QUEUED_INGEST = 20;
+let ingestActive = 0;
+const ingestWaiters = [];
+
+function releaseIngestSlot() {
+  const next = ingestWaiters.shift();
+  if (next) next();
+  else ingestActive--;
+}
+
+/** Returned instead of running `fn` when the ingest queue is full. */
+export const INGEST_BUSY = Symbol('gallery ingest busy');
+
+/**
+ * Run `fn` holding one ingest permit. Returns INGEST_BUSY WITHOUT running it
+ * when the queue is already full — a distinct value from `fn`'s own `false`
+ * ("already stored", "over the size cap") so the caller can say which happened.
+ * Exported for the tests.
+ */
+export async function withIngestSlot(fn) {
+  if (ingestActive >= MAX_CONCURRENT_INGEST) {
+    if (ingestWaiters.length >= MAX_QUEUED_INGEST) return INGEST_BUSY;
+    await new Promise((resolve) => ingestWaiters.push(resolve));
+  } else {
+    ingestActive++;
+  }
+  try {
+    return await fn();
+  } finally {
+    releaseIngestSlot();
+  }
+}
 
 // ── Resize on ingest ────────────────────────────────────────────────────────
 // Valheim screenshots arrive as 3–7 MB full-resolution PNGs. Stored and served
@@ -147,6 +198,9 @@ const MISSING_PIN_COLUMN = /pin_id|column .* does not exist|schema cache/i;
 export function createGalleryIngest({ client, log = console }) {
   const db = serviceClient();
   const galleryChannelId = process.env.CHANNEL_GALLERY;
+  // The one guild whose posts may reach the site. Unset = accept any guild the
+  // bot is in (the pre-2026-09-05 behaviour, minus DMs).
+  const guildId = process.env.GUILD_ID || null;
   let warnedUngated = false;
 
   // The caption is the message text with the bot mention stripped out.
@@ -171,7 +225,11 @@ export function createGalleryIngest({ client, log = console }) {
       return false;
     }
 
-    const res = await fetch(att.url);
+    // undici has no default timeout. A CDN socket that opens and then stalls
+    // held this handler (and the 12 MB buffer behind it) open forever, and
+    // messageCreate handlers are not serialised — a handful of stalled posts is
+    // a memory leak the OOM killer resolves for us.
+    const res = await fetch(att.url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`download ${res.status}`);
     const bytes = Buffer.from(await res.arrayBuffer());
     if (bytes.length > MAX_ATTACHMENT_BYTES) {
@@ -250,12 +308,27 @@ export function createGalleryIngest({ client, log = console }) {
   async function handleMessage(message) {
     try {
       if (message.author?.bot) return;
-      if (!message.mentions?.has(client.user)) return;
+      if (!message.mentions?.has(client.user, MENTION_STRICT)) return;
+
+      // THE OPEN DOOR THIS CLOSES (red-team, 2026-09-05). CHANNEL_GALLERY is
+      // unset on the live bot, so the ingest was "ungated" — and ungated meant
+      // literally any channel, INCLUDING a direct message. Anyone who shares a
+      // guild with the bot could DM it an image with a mention and have that
+      // image published to the public /gallery page under their own name, with
+      // no member of the hall ever seeing the post. `guild` is null in a DM.
+      //
+      // The guild check is the floor; the channel gate above it is still the
+      // thing that should be set (see this module's header).
+      if (!message.guild) return;
+      if (guildId && message.guildId !== guildId) return;
 
       if (galleryChannelId) {
         if (message.channelId !== galleryChannelId) return;
       } else if (!warnedUngated) {
-        log.warn?.('[gallery] CHANNEL_GALLERY not set — gallery ingest is ungated (any channel accepted)');
+        log.warn?.(
+          '[gallery] CHANNEL_GALLERY not set — gallery ingest accepts ANY channel in the guild. ' +
+            'Set it to the photo channel id so a screenshot posted in #server does not land on the site.',
+        );
         warnedUngated = true;
       }
 
@@ -279,7 +352,15 @@ export function createGalleryIngest({ client, log = console }) {
       // insert) is logged and the rest of the post still lands.
       for (const att of images) {
         try {
-          if (await storeOne(att, ctx)) added++;
+          // The permit covers the whole download → decode → upload → insert,
+          // because the 12 MB buffer is held for all of it.
+          const r = await withIngestSlot(() => storeOne(att, ctx));
+          if (r === INGEST_BUSY) {
+            log.warn?.(
+              `[gallery] too many photos at once — skipped ${att.name || att.id}. ` +
+                `Post it again in a moment.`,
+            );
+          } else if (r) added++;
         } catch (e) {
           log.error?.(`[gallery] ${att.name || att.id}: ${e.message}`);
         }
@@ -303,6 +384,9 @@ export function createGalleryIngest({ client, log = console }) {
 
       const message = reaction.message.partial ? await reaction.message.fetch().catch(() => null) : reaction.message;
       if (!message?.guild) return;
+      // Same guild pin as the ingest side: Manage Messages in SOME other guild
+      // is not authority over this hall's gallery.
+      if (guildId && message.guildId !== guildId) return;
       if (galleryChannelId && message.channelId !== galleryChannelId) return;
 
       const member = await message.guild.members.fetch(user.id).catch(() => null);

@@ -12,14 +12,66 @@ function str(meta, key) {
 
 // --- Leaderboard helpers (deaths board + Player of the Day) ----------------
 
+// Discord's embed field-value ceiling. Mirrors chronicle.js.
+const MAX_FIELD_VALUE = 1024;
+
 // Escape Discord markdown specials so a name like "Bj*rn" can't break layout.
-function escapeMd(s) {
-  return String(s).replace(/([*_`~])/g, '\\$1');
+// The backslash goes FIRST: escaping it last would leave "Bj\" + "\*" = "Bj\\*",
+// which renders as a literal backslash followed by a LIVE italic marker — the
+// one input that walked straight through the old escape.
+export function escapeMd(s) {
+  return String(s).replace(/([\\*_`~|])/g, '\\$1');
 }
-// Defensive 24-char cap (keeps us well under embed field limits) + escaping.
-function nameMd(s) {
+
+// THE UNFURL THIS CLOSES (red-team round 2, 2026-09-05). Escaping markdown does
+// nothing to a URL: `:` `/` and `.` are not markdown specials, so a viking who
+// named himself `http://a.co/pwn`, or a forged death whose `cause` was a link,
+// put a LIVE link into #server and Discord rendered the attacker's own preview
+// card (title, description, image) under it. Character names and death causes
+// reach the events table through ingest paths that carry no token, so this was
+// a defacement channel into the community channel with no account required.
+//
+// Two locks. This is the text one: any `scheme://…` or `www.…` run inside a
+// player-typed field is replaced with the word `link`, so nothing linkifiable
+// survives into the copy. The second lock is `flags: SuppressEmbeds` on every
+// content-only message in discord.js, which kills the preview card even for a
+// formatter that forgets to come through here.
+//
+// No honest input is touched: a Valheim character name cannot contain `/`, and
+// no death cause, creature name or raid label in the game contains `://`.
+const LINK_RUN = /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S*/gi;
+export function defangLinks(s) {
+  return String(s).replace(LINK_RUN, 'link');
+}
+
+// Defensive 24-char cap (keeps us well under embed field limits) + escaping +
+// link defanging. The cap runs FIRST so the 24-char budget is measured against
+// what the player actually typed, not against the escapes we added.
+export function nameMd(s) {
   const t = String(s);
-  return escapeMd(t.length > 24 ? t.slice(0, 24) : t);
+  return defangLinks(escapeMd(t.length > 24 ? t.slice(0, 24) : t));
+}
+
+/**
+ * Free text typed by a player that is about to land in a message or an embed:
+ * clipped, markdown-escaped and link-defanged. Used for the in-game oath echo
+ * (voice.js), where the raw shout text used to go into an embed description
+ * with no treatment at all.
+ */
+export function safeText(s, max = 1000) {
+  // Whitespace collapses to single spaces FIRST. escapeMd does not cover `#`,
+  // `>` or `-`, which Discord only treats as markdown at the START of a line —
+  // so removing the line breaks removes that whole class (heading, quote and
+  // list injection) instead of growing the escape table. Both callers are
+  // single-line by nature: an oath is one shouted line, a raid label is one
+  // log label.
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return defangLinks(escapeMd(t.length > max ? `${t.slice(0, max - 1)}\u2026` : t));
+}
+/** Join board lines and clip to the embed field ceiling. Mirrors chronicle.js. */
+function joinCapped(lines, sep = ', ') {
+  const out = lines.filter(Boolean).join(sep);
+  return out.length > MAX_FIELD_VALUE ? `${out.slice(0, MAX_FIELD_VALUE - 1)}…` : out;
 }
 
 // Norse-flavored POTY blurbs, keyed by category. Index 0 of EVERY category uses
@@ -330,7 +382,9 @@ export function causeNoun(rawCause, { markdown = true } = {}) {
   const low = cause.toLowerCase();
   const noun = own(CAUSE_NOUNS, low);
   if (noun) return noun;
-  const shown = markdown ? escapeMd(cause) : cause;
+  // Defanged as well as escaped on the markdown path: the cause is player-
+  // reachable text (see defangLinks above) and this one lands in #server.
+  const shown = markdown ? defangLinks(escapeMd(cause)) : cause;
   if (BOSS_NAMES.has(low) || /^the\s/i.test(cause)) return shown;
   return `${article(cause)} ${shown}`;
 }
@@ -355,7 +409,7 @@ export function buildDeathMessage(boldName, rawCause) {
   if (!cause) return fillTemplate(pickOne(NO_CAUSE_TEMPLATES), { name: boldName });
 
   const low = cause.toLowerCase();
-  const escapedCause = escapeMd(cause);
+  const escapedCause = defangLinks(escapeMd(cause));
 
   const envPool = own(ENV_DEATH_POOLS, low);
   if (envPool) {
@@ -400,7 +454,7 @@ export function formatFeedEvent(event) {
     case 'raid':
       // No name in a raid line, but the label is free text from the log, so it
       // gets the same markdown escaping (without the 24-char name cap).
-      return { content: `⚔️ ${escapeMd(str(meta, 'event') || 'A raid has begun')}` };
+      return { content: `⚔️ ${safeText(str(meta, 'event') || 'A raid has begun', 200)}` };
     default:
       return null; // chat / boss / sync / anything else: not for the feed
   }
@@ -418,12 +472,22 @@ export function formatBossKill(boss) {
       : Array.isArray(boss.players_present)
         ? boss.players_present
         : [];
+  // THE WEDGE THIS CLOSES (red-team, 2026-09-05). These are CHARACTER NAMES —
+  // the player picks them in the game's own name field, and they reach
+  // fight_stats/players_present through ingest paths that carry no token. Raw
+  // and uncapped they used to be able to push this field past Discord's 1024
+  // ceiling, and a 400 here throws out of bosses.tick() BEFORE the boss is
+  // marked announced: the @everyone first-kill announcement never posts and
+  // re-throws every 30 seconds, for good. Same treatment the chronicle's war
+  // party already got: cap each name, escape its markdown, clip the join.
   const names = warParty.map((n) => String(n || '').trim()).filter(Boolean);
   if (names.length > 0) {
-    fields.push({ name: '⚔️ War party', value: names.join(', ') });
+    fields.push({ name: '⚔️ War party', value: joinCapped(names.map(nameMd)) });
   }
+  // Notes are admin-authored (scripts/mark-boss.js, service role), so their
+  // markdown is deliberate and stays live. The length cap is not optional.
   if (boss.notes) {
-    fields.push({ name: '📜 Notes', value: boss.notes });
+    fields.push({ name: '📜 Notes', value: joinCapped([String(boss.notes)]) });
   }
   return {
     content: '@everyone',
@@ -526,6 +590,43 @@ export function formatRecap(stats) {
       },
     ],
   };
+}
+
+// --- Replies to Discord messages -------------------------------------------
+
+/**
+ * THE PING THIS CLOSES (red-team, 2026-09-05). identity.js and oaths.js replied
+ * with `allowedMentions: { repliedUser: false }`. Leaving `parse` OUT is not
+ * "no mentions" — it is Discord's DEFAULT, which parses every mention in the
+ * content. identity.js echoes the sender's own server nickname back
+ * ("I have whispered your rune, **<nick>**"), and a nickname may be `@everyone`
+ * or `<@&roleId>`: any guild member could make the bot mass-ping the server, on
+ * demand, because the bot holds Mention Everyone for the boss announcement.
+ *
+ * Every reply the bot makes to a member goes through here. `parse: []` is the
+ * whole fix; the caller should still `replySafeName` anything it echoes so the
+ * text reads as text instead of a dead ping.
+ */
+export function replyPayload(content) {
+  return { content: clipContent(content), allowedMentions: { parse: [], repliedUser: false } };
+}
+
+/** Discord's message-content ceiling, enforced here as well as in the poster. */
+const MAX_CONTENT = 2000;
+function clipContent(s) {
+  const t = String(s ?? '');
+  return t.length > MAX_CONTENT ? `${t.slice(0, MAX_CONTENT - 1)}…` : t;
+}
+
+/**
+ * A name (Discord nickname or character name) that is safe to echo INTO a reply:
+ * capped at 32 (Discord's own nickname limit) and markdown-escaped. With
+ * `parse: []` above this is belt-and-braces, but it also stops a nickname full
+ * of backticks from eating the rest of the sentence.
+ */
+export function replySafeName(s) {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  return defangLinks(escapeMd(t.length > 32 ? t.slice(0, 32) : t)) || 'viking';
 }
 
 /** Manual announcement to #valheim with @everyone. */

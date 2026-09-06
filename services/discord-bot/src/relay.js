@@ -9,6 +9,14 @@ import { formatFeedEvent } from './format.js';
 const DEATH_COLLAPSE_MS = 10_000;
 // How long a name's last-death stamp is kept in state.json.
 const DEATH_MEMORY_MS = 3600_000;
+// …and how many names at once, whatever the clock says. The map is keyed by a
+// name from the events table, and two of the ingest paths that write that table
+// carry no token, so the key space is not "the roster" — it is "whatever anyone
+// posted". state.json is rewritten after EVERY relayed row, so an hour of
+// distinct forged names turned a 1 KB file into a megabyte one and then wrote
+// it fifty times a tick. 200 is ten times the player cap; the oldest go first,
+// which is exactly what the time-based prune would have done anyway.
+const DEATH_MEMORY_MAX = 200;
 
 // How far ahead of now an event row may be dated and still be relayed. Kept in
 // step with lib/event-time.ts FUTURE_EVENT_TOLERANCE_MS on the site side (this
@@ -29,12 +37,28 @@ const FUTURE_EVENT_TOLERANCE_MS = 5 * 60_000;
 // do not control) stops the batch instead of consuming it, so the cursor stays
 // where the last honest event left it and the feed keeps running.
 
-// discord.js throws a DiscordAPIError carrying the HTTP status. A 4xx means
-// this row will NEVER post (bad content, missing perms), so the feed must step
-// over it; 429/5xx/network errors are transient and are retried next tick.
+// discord.js throws a DiscordAPIError carrying the HTTP status.
+//
+// PERMANENT means "this ROW will never post" — the payload itself is the
+// problem — and only then may the feed step over it and burn the event.
+//
+// THE SILENT LOSS THIS FIXES (red-team, 2026-09-05). The old test was "any 4xx
+// but 429", with "bad content, missing perms" in its comment. Missing perms is
+// not a property of the row: pull Send Messages on #server for ten minutes on
+// launch night (or move the channel under a category that denies it, or have
+// the bot's role reordered) and every join, leave and death in that window was
+// logged as a poison row and skipped, cursor and all. Nobody would ever know
+// which events were lost — a skip is one line in the journal and the feed looks
+// healthy again the moment the permission comes back.
+//
+// So: 400 (Invalid Form Body — the payload) and 413 (too large) are permanent.
+// 401/403/404 are the ENVIRONMENT, and stall the feed instead. Stalling is the
+// right failure: the backlog drains by itself once someone fixes the channel,
+// the loop reports failing to the ops cockpit the whole time, and the worst
+// case is a late feed rather than a hole in the saga nobody can reconstruct.
 function isPermanentPostError(e) {
   const status = Number(e?.status ?? e?.httpStatus);
-  return Number.isFinite(status) && status >= 400 && status < 500 && status !== 429;
+  return status === 400 || status === 413;
 }
 
 export function createRelay({ db, post, state, saveState, log = console }) {
@@ -88,6 +112,16 @@ export function createRelay({ db, post, state, saveState, log = console }) {
     for (const [k, v] of Object.entries(map)) {
       const t = Date.parse(v);
       if (!Number.isFinite(t) || t < cutoff) delete map[k];
+    }
+    // Hard size cap on top of the clock (see DEATH_MEMORY_MAX): drop the oldest
+    // stamps until the map fits. The name we just recorded is the newest, so it
+    // is never the one dropped.
+    const keys = Object.keys(map);
+    if (keys.length > DEATH_MEMORY_MAX) {
+      keys
+        .sort((a, b) => (Date.parse(map[a]) || 0) - (Date.parse(map[b]) || 0))
+        .slice(0, keys.length - DEATH_MEMORY_MAX)
+        .forEach((k) => delete map[k]);
     }
   }
 

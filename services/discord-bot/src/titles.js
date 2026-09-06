@@ -27,6 +27,8 @@
 // gracefully before db/2026-07-05_titles.sql is applied: it detects the missing
 // column, logs once, and skips (no seed, no announcement).
 
+import { nameMd, escapeMd } from './format.js';
+
 const firstName = (s) => String(s || '').trim().split(/\s+/)[0] || 'viking';
 
 // undici has no default timeout, so a stalled dashboard socket would hold this
@@ -75,7 +77,15 @@ export function createTitlesAnnouncer({
 
   async function announce(row, title) {
     const name = (row.character_name || '').trim() || 'A viking';
-    const line = `⚔️ **${name}** has earned a new title: **${title}**`;
+    // THE ONE THAT GOT MISSED (red-team round 2, 2026-09-05). Every sibling
+    // announcement path escapes the character name — chronicle.js, bosspoll.js,
+    // and formatBossKill as of this round — but this line interpolated it raw.
+    // The name is player-chosen, so `**`, a backtick or `||…||` broke the line's
+    // formatting and a URL in a name posted a live link into the channel.
+    // `title` is server-authored (lib/epithets.ts, via GET /api/titles) and
+    // contains no markdown characters today; escaping it costs nothing and
+    // keeps that from becoming load-bearing.
+    const line = `⚔️ **${nameMd(name)}** has earned a new title: **${escapeMd(title)}**`;
     if (dryRun) {
       log.info?.(`[titles] (dry) would announce: ${name} -> "${title}"`);
       return;
