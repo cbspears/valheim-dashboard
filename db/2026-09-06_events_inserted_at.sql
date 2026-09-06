@@ -1,7 +1,7 @@
 -- APPLIED to production 2026-09-05 ~23:50 CT (Fable session) via SQL; backfill verified. Idempotent; safe to re-run.
 -- events.inserted_at — an INSERTION-ORDER column for the #server relay cursor.
 --
--- STATUS: UNAPPLIED. Hand-apply against the Supabase project (syuwavxpmtdmxupxjzje)
+-- STATUS: APPLIED (see line 1). Idempotent; safe to re-run.
 -- like every other file in db/. Idempotent: safe to run twice, safe to run after
 -- the relay is already on the new code, safe to run while the bot is running.
 --

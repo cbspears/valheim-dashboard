@@ -242,6 +242,30 @@ now SKIPS such a row and advances instead of stalling on it — under insertion 
 forged row is not last in the scan, and stalling would hold the cursor in front of every
 honest row behind it.
 
+**`now()` is not commit order either, so the cursor lags.** `now()` is fixed at
+TRANSACTION START and a row only becomes visible at COMMIT, so two overlapping writers can
+commit in the opposite order to their stamps — transaction A starts at `12:00:10.000` and
+takes 40 ms (a contended `ingest_death` advisory lock is the realistic case), transaction B
+starts at `12:00:10.020` and commits at `12:00:10.021`. A tick landing in that window sees
+only B, parks the cursor at B's stamp, and `.gte` never matches A again: bug 1 all over,
+one row at a time and just as silent. So each tick reads from `RELAY_INSERTION_LAG_MS`
+(default 2000 ms) BEHIND the high-water mark, `lastInsertedIds` is a rolling window of the
+last 200 relayed ids rather than "the ids at exactly the cursor", and `insertionFloor`
+stops the lag from ever reaching back past the point the cursor was seeded or repaired at,
+where there are no ids to recognise history with. Everything the lag re-reads is dropped by
+id, so the cost is a few wasted rows per tick and the benefit is that no commit this system
+performs is fast enough to slip behind the cursor. A 300-trial randomized differential run
+(`scripts/relay-cursor.test.mjs` is its deterministic residue) lost rows in 299 trials with
+the lag at 0 and none with it at 2 s.
+
+**The pre-migration fallback flips forward the moment it can.** `fetchByCreatedAt` selects
+`*`, so once the ALTER has run its answers carry `inserted_at` — which is proof the
+migration is applied. The relay flips on that evidence and re-reads on the insertion cursor
+rather than waiting out the 5-minute probe, because relaying a post-ALTER row on the legacy
+path copies its `created_at` into the insertion cursor and mis-sets it: a poller leave
+stamped 12:00:20 and written at 12:00:35, followed by a client join stamped 12:00:30 and
+written at 12:00:31, leaves the cursor at 12:00:30 with the leave's insert time ahead of it.
+
 Persistent local state is `services/discord-bot/state.json` (announced bosses, among
 other things). This file is why the launch wipe stops the bot first: its voice tick ends
 in an unconditional save every 60 s, so a wipe with the bot running gets a resurrected

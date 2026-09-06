@@ -58,9 +58,20 @@ const death = (id, name, created_at, inserted_at) =>
 //
 // `hasInsertedAt: false` models the database BEFORE the migration: PostgREST
 // answers any reference to the column with SQLSTATE 42703.
-function fakeEvents(rows, { hasInsertedAt = true } = {}) {
+// Postgres compares timestamptz as a POINT IN TIME at microsecond resolution,
+// which is not what `String(a) < String(b)` does once a fixture carries the
+// microseconds and the `+00:00` offset PostgREST actually sends. Comparing on
+// this key is what lets the fixtures below use real PostgREST-shaped values.
+function micros(ts) {
+  const m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/.exec(String(ts));
+  if (!m) throw new Error(`fixture is not a PostgREST timestamp: ${ts}`);
+  return BigInt(Date.parse(`${m[1]}${m[3]}`)) * 1000n + BigInt((m[2] ?? '').padEnd(6, '0').slice(0, 6));
+}
+const cmpTs = (a, b) => (micros(a) < micros(b) ? -1 : micros(a) > micros(b) ? 1 : 0);
+
+function fakeEvents(rows, { hasInsertedAt = true, tieBreak = 'reverse' } = {}) {
   const migrated = () => (typeof hasInsertedAt === 'function' ? hasInsertedAt() : hasInsertedAt);
-  const seen = { limits: [], queries: 0 };
+  const seen = { limits: [], queries: 0, cursors: [] };
   const db = {
     seen,
     from(table) {
@@ -71,8 +82,8 @@ function fakeEvents(rows, { hasInsertedAt = true } = {}) {
       let lim = Infinity;
       const q = {
         select: () => q,
-        gt: (c, v) => { cols.push(c); filters.push((r) => String(r[c] ?? '') > String(v)); return q; },
-        gte: (c, v) => { cols.push(c); filters.push((r) => String(r[c] ?? '') >= String(v)); return q; },
+        gt: (c, v) => { cols.push(c); filters.push((r) => cmpTs(r[c], v) > 0); return q; },
+        gte: (c, v) => { cols.push(c); seen.cursors.push(v); filters.push((r) => cmpTs(r[c], v) >= 0); return q; },
         order: (c, opts) => { cols.push(c); orders.push([c, opts?.ascending !== false]); return q; },
         limit: (n) => { lim = n; seen.limits.push(n); return q; },
       };
@@ -92,15 +103,23 @@ function fakeEvents(rows, { hasInsertedAt = true } = {}) {
         const keys = orders.length ? orders : [['created_at', true]];
         const data = rows
           .filter((r) => filters.every((f) => f(r)))
-          .sort((a, b) => {
+          .map((r, i) => [r, i])
+          .sort(([a, ai], [b, bi]) => {
             for (const [c, asc] of keys) {
-              const d = String(a[c] ?? '').localeCompare(String(b[c] ?? ''));
+              const d = cmpTs(a[c], b[c]);
               if (d) return asc ? d : -d;
             }
-            return 0;
+            // PostgREST promises NOTHING about the order of rows that tie on
+            // every ORDER BY key, so the fake picks the awkward one on purpose.
+            return tieBreak === 'reverse' ? bi - ai : ai - bi;
           })
+          .map(([r]) => r)
           .slice(0, lim);
-        return Promise.resolve({ data, error: null }).then(onOk, onErr);
+        // A column that does not exist cannot come back in the payload either.
+        // Returning it anyway hid a real bug: the relay can tell the migration
+        // landed by looking at what the LEGACY query answered with.
+        const shaped = migrated() ? data : data.map(({ inserted_at, ...rest }) => rest);
+        return Promise.resolve({ data: shaped, error: null }).then(onOk, onErr);
       };
       return q;
     },
@@ -156,11 +175,15 @@ function recorder() {
   const rows = [join('a1', 'Astrid', at(19), shared), join('a2', 'Bjorn', at(19), shared)];
   const db = fakeEvents(rows);
   const posted = [];
-  let failNext = true;
+  // Fail whichever row the database hands over SECOND. Naming one of them would
+  // quietly assume an order PostgREST does not promise for rows that tie on
+  // every ORDER BY key — and the fake deliberately hands them over reversed.
+  let attempts = 0;
+  let failSecond = true;
   const post = async (ch, payload) => {
-    const s = lineOf(payload);
-    if (failNext && s.includes('Bjorn')) throw Object.assign(new Error('rate limited'), { status: 429 });
-    posted.push(s);
+    attempts++;
+    if (failSecond && attempts === 2) throw Object.assign(new Error('rate limited'), { status: 429 });
+    posted.push(lineOf(payload));
   };
   const state = { relay: { lastEventAt: at(0), lastInsertedAt: at(0), lastInsertedIds: [] } };
   const relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
@@ -170,7 +193,7 @@ function recorder() {
   eq(state.relay.lastInsertedAt, shared, 'the cursor is ON the shared timestamp, not past it');
   eq(state.relay.lastInsertedIds.length, 1, 'and remembers the one id it already relayed');
 
-  failNext = false;
+  failSecond = false;
   eq(await relay.tick(), 1, 'the second row of the pair posts on the next tick');
   eq(posted.length, 2, 'both rows posted');
   ok(posted.some((p) => p.includes('Astrid')) && posted.some((p) => p.includes('Bjorn')),
@@ -253,7 +276,7 @@ function recorder() {
   // the moment the column appears `.gte(stale cursor)` re-reads the whole legacy
   // window and posts every line of it again.
   eq(state.relay.lastInsertedAt, at(60), 'the fallback kept the insertion cursor in step');
-  eq(String(state.relay.lastInsertedIds), 'p2', 'including the id of the boundary row');
+  ok(state.relay.lastInsertedIds.includes('p2'), 'including the id of the boundary row');
 }
 
 // ── 4b. applying the migration under a relay that was on the fallback ───────
@@ -402,6 +425,243 @@ function recorder() {
   ok(state.relay.lastInsertedAt < '2999', 'a year-2999 insertion cursor is pulled back to now');
   eq(state.relay.lastInsertedIds.length, 0, 'and its stale tie list is dropped');
   ok(errors.some((m) => m.includes('in the future')), 'loudly');
+}
+
+// ── 9. a MICROSECOND cursor round-trips through state.json verbatim ─────────
+//
+// PostgREST sends `2026-09-05T23:00:00.123456+00:00`, not the millisecond `Z`
+// form `new Date().toISOString()` produces. If the cursor were ever re-derived
+// through a Date the microseconds would be gone, and `.gte` would sit up to
+// 999 us EARLIER than the row it is meant to be standing on — silently
+// re-reading rows for as long as the value survived. So: stored verbatim,
+// compared verbatim.
+{
+  const usec = (secs, micros) =>
+    new Date(T + secs * 1000).toISOString().replace(/\.\d{3}Z$/, `.${String(micros).padStart(6, '0')}+00:00`);
+  const a = usec(400, 123456);
+  const b = usec(400, 123999); // SAME millisecond, 543 us later
+  const rows = [join('u1', 'Hilde', usec(399, 500000), a), join('u2', 'Orm', usec(399, 900000), b)];
+  const db = fakeEvents(rows);
+  const { posted, post } = recorder();
+  let state = { relay: { lastEventAt: at(300), lastInsertedAt: usec(300, 0), lastInsertedIds: [] } };
+  let relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+
+  eq(await relay.tick(), 2, 'both microsecond-apart rows post');
+  eq(state.relay.lastInsertedAt, b,
+    'the cursor is the PostgREST string byte for byte — no Date round-trip, no lost microseconds');
+  ok(state.relay.lastInsertedAt.endsWith('+00:00'), 'offset form preserved');
+  ok(/\.\d{6}\+/.test(state.relay.lastInsertedAt), 'six fractional digits preserved');
+
+  // …and it survives state.json.
+  state = JSON.parse(JSON.stringify(state));
+  eq(state.relay.lastInsertedAt, b, 'and state.json gives it back unchanged');
+  relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+  eq(await relay.tick(), 0, 'so the next tick re-reads them and posts neither again');
+  eq(posted.length, 2, 'exactly two lines in #server');
+  // The lag means the read really did cover both rows: this is not a pass by
+  // virtue of a filter that excluded them.
+  ok(db.seen.cursors.some((c) => cmpTs(c, a) <= 0),
+    'the query reached back far enough to re-read both, and dropped them by id');
+}
+
+// ── 10. COMMIT ORDER: a late-committing, earlier-stamped row still posts ─────
+//
+// `inserted_at` defaults to now(), which Postgres fixes at TRANSACTION START,
+// and a row appears at COMMIT. Two overlapping writers can therefore commit in
+// the opposite order to their stamps. A cursor parked exactly on the high-water
+// mark loses the late one for good — bug 1 again, one row at a time.
+{
+  const A = leave('c1', 'Bren', at(510), at(510));   // txn starts first, commits slowly
+  const B = join('c2', 'Astrid', at(511), at(511));  // starts later, commits first
+  const visible = [B];
+  const db = fakeEvents(visible);
+  const { posted, post } = recorder();
+  const state = { relay: { lastEventAt: at(500), lastInsertedAt: at(500), lastInsertedIds: [] } };
+  const relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+
+  eq(await relay.tick(), 1, 'the row that committed first posts');
+  eq(state.relay.lastInsertedAt, at(511), 'and the high-water mark is past the other row stamp');
+
+  visible.push(A); // the slow transaction commits
+  eq(await relay.tick(), 1, 'the late-committing row is NOT lost behind the cursor');
+  ok(posted.some((p) => p.includes('Bren')), 'and it is the one that committed second');
+  eq(await relay.tick(), 0, 'and it does not keep re-posting');
+  eq(posted.length, 2, 'two lines, each exactly once');
+}
+
+// ── 11. the lag never reaches back before the seed ──────────────────────────
+//
+// Everything at or after the floor that was already relayed is in
+// lastInsertedIds. Everything BEFORE it was relayed by the old created_at
+// cursor, whose ids nobody kept — so reaching back there would repost history
+// with nothing able to recognise it.
+{
+  const seed = at(600);
+  const rows = [
+    join('h1', 'Ghost', at(598), at(598)),   // 2 s of history the lag would otherwise touch
+    join('h2', 'Runa', at(601), at(601)),
+  ];
+  const db = fakeEvents(rows);
+  const { posted, post } = recorder();
+  const state = { relay: { lastEventAt: seed, lastDeathByName: {} } };
+  const relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+  eq(state.relay.insertionFloor, seed, 'the floor is planted where the cursor was seeded');
+  eq(await relay.tick(), 1, 'only the row after the seed posts');
+  ok(!posted.some((p) => p.includes('Ghost')), 'history before the seed is never re-read');
+  ok(db.seen.cursors.every((c) => cmpTs(c, seed) >= 0), 'no query ever asked for anything older');
+}
+
+// ── 12. the seed boundary row posts ONCE, not once per restart ──────────────
+//
+// `.gte` at the seeded cursor deliberately re-reads the single row the old
+// created_at cursor last landed on. That costs one duplicate line at the moment
+// of the switch — but only one, ever: the id is recorded on the first pass and
+// a restart with both cursors present skips the seed path entirely.
+{
+  const seed = at(700);
+  const rows = [
+    join('n0', 'Boundary', seed, seed),     // the row the old cursor stopped on
+    join('n1', 'Sten', at(702), at(702)),
+  ];
+  const db = fakeEvents(rows);
+  const { posted, post } = recorder();
+  let state = { relay: { lastEventAt: seed, lastDeathByName: {} } };
+  let relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+  eq(await relay.tick(), 2, 'the boundary row is re-read once at the switch');
+  eq(posted.filter((p) => p.includes('Boundary')).length, 1, 'one duplicate line, by design');
+  ok(state.relay.lastInsertedIds.includes('n0'), 'and its id is recorded');
+
+  for (const restart of [1, 2, 3]) {
+    state = JSON.parse(JSON.stringify(state));
+    relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+    eq(await relay.tick(), 0, `restart ${restart} posts nothing`);
+  }
+  eq(posted.filter((p) => p.includes('Boundary')).length, 1,
+    'the boundary row is still at exactly one line after three restarts');
+  eq(posted.length, 2, 'and the evening is two lines total');
+}
+
+// ── 13. a tie group split by the 50-row batch limit loses nothing ───────────
+{
+  const rows = [];
+  for (let i = 0; i < 46; i++) rows.push(join(`w${i}`, `Solo${i}`, at(800 + i * 10), at(800 + i * 10)));
+  const shared = at(1400);
+  for (let i = 0; i < 8; i++) rows.push(join(`s${i}`, `Tied${i}`, at(1399), shared)); // one statement
+  const db = fakeEvents(rows);
+  const { posted, post } = recorder();
+  const state = { relay: { lastEventAt: at(700), lastInsertedAt: at(700), lastInsertedIds: [] } };
+  const relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+
+  eq(await relay.tick(), 50, 'the first tick consumes exactly the batch');
+  eq(db.seen.limits[0], 50, 'asking for 50 with nothing to skip');
+  const second = await relay.tick();
+  eq(second, 4, 'the four rows past the limit, all on the timestamp the batch ended ON');
+  ok(db.seen.limits[1] > 50, 'the second query asked for 50 PLUS the ids it would skip');
+  eq(await relay.tick(), 0, 'and then it is caught up');
+  eq(posted.length, 54, 'every row posted');
+  eq(new Set(posted).size, 54, 'and not one of them twice');
+}
+
+// ── 14. a transient failure mid-tie-group keeps the ids of what already posted ─
+{
+  const shared = at(1500);
+  const rows = [0, 1, 2].map((i) => join(`k${i}`, `Kettil${i}`, at(1499), shared));
+  const db = fakeEvents(rows);
+  const posted = [];
+  let attempts = 0;
+  let failThird = true;
+  const post = async (ch, p) => {
+    attempts++;
+    if (failThird && attempts === 3) throw Object.assign(new Error('gateway'), { status: 502 });
+    posted.push(lineOf(p));
+  };
+  let state = { relay: { lastEventAt: at(1400), lastInsertedAt: at(1400), lastInsertedIds: [] } };
+  let relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+  await relay.tick().catch(() => {});
+  eq(posted.length, 2, 'two of the three went out before the throw');
+  eq(state.relay.lastInsertedIds.length, 2,
+    'and BOTH ids were persisted before the throw, not just the last one');
+
+  failThird = false;
+  state = JSON.parse(JSON.stringify(state)); // the throw could equally have been a crash
+  relay = createRelay({ db, post, state, saveState: async () => {}, log: quiet });
+  eq(await relay.tick(), 1, 'the restart posts only the row that never went out');
+  eq(posted.length, 3, 'three lines');
+  eq(new Set(posted).size, 3, 'none of them twice');
+}
+
+// ── 15. a PERMANENT rejection inside a tie group burns only that row ────────
+{
+  const shared = at(1600);
+  const rows = [join('m1', 'Frida', at(1599), shared), join('m2', 'Gunnar', at(1599), shared)];
+  const db = fakeEvents(rows);
+  const posted = [];
+  let attempts = 0;
+  const rejected = [];
+  const post = async (ch, p) => {
+    attempts++;
+    if (attempts === 1) { rejected.push(lineOf(p)); throw Object.assign(new Error('Invalid Form Body'), { status: 400 }); }
+    posted.push(lineOf(p));
+  };
+  let state = { relay: { lastEventAt: at(1500), lastInsertedAt: at(1500), lastInsertedIds: [] } };
+  let relay = createRelay({ db, post, state, saveState: async () => {}, log: { info(){}, warn(){}, error(){} } });
+  eq(await relay.tick(), 1, 'the poison row is stepped over and the other one posts');
+  eq(state.relay.lastInsertedIds.length, 2, 'both ids are on the cursor, including the burned one');
+
+  state = JSON.parse(JSON.stringify(state));
+  relay = createRelay({ db, post, state, saveState: async () => {}, log: { info(){}, warn(){}, error(){} } });
+  eq(await relay.tick(), 0, 'neither row is retried after a restart');
+  eq(posted.length, 1, 'one line in #server');
+  eq(rejected.length, 1, 'and the rejected row was attempted exactly once');
+}
+
+// ── 16. the migration landing MID-RUN does not double-post ─────────────────
+//
+// Between the ALTER TABLE and the 5-minute re-probe the relay is still on the
+// legacy cursor, but its rows now carry a REAL inserted_at. Copying created_at
+// into the insertion cursor there mis-set it, and the flip re-posted any row
+// whose insert time ran ahead of the last relayed row's created_at — the poller
+// leave / client join pairing that happens constantly.
+{
+  let migrated = false;
+  const rows = [join('z0', 'Before', at(1700), at(1700))]; // pre-migration: backfilled
+  const db = fakeEvents(rows, { hasInsertedAt: () => migrated });
+  const posted = [];
+  const post = async (ch, p) => posted.push(lineOf(p));
+  const state = { relay: { lastEventAt: at(1690), lastInsertedAt: at(1690), lastInsertedIds: [] } };
+  const relay = createRelay({ db, post, state, saveState: async () => {}, log: { info(){}, warn(){}, error(){} } });
+  eq(await relay.tick(), 1, 'the fallback relays the pre-migration row');
+
+  // Charlie applies the migration. The relay has NOT re-probed yet.
+  migrated = true;
+  rows.push(leave('z1', 'Bren', at(1720), at(1735)));   // poller, written 15 s late
+  rows.push(join('z2', 'Astrid', at(1730), at(1731)));  // client, written at once
+
+  eq(await relay.tick(), 2, 'both new rows post');
+  eq(await relay.tick(), 0, 'and the next tick has nothing left');
+  eq(posted.length, 3, 'three lines total');
+  eq(new Set(posted).size, 3, 'not one of them posted twice by the flip');
+
+  // …and the relay really is back on the insertion cursor: a back-dated row
+  // written after all of them still reaches #server.
+  rows.push(leave('z3', 'Astrid', at(1600), at(1740)));
+  eq(await relay.tick(), 1, 'a back-dated row written last still posts — the insertion cursor is live');
+}
+
+// ── 17. saveState failing mid-batch neither loses nor duplicates a row ──────
+{
+  const rows = [0, 1, 2].map((i) => join(`v${i}`, `Vidar${i}`, at(1800 + i), at(1800 + i)));
+  const db = fakeEvents(rows);
+  const { posted, post } = recorder();
+  let saves = 0;
+  const saveState = async () => { saves++; if (saves === 2) throw new Error('ENOSPC'); };
+  const state = { relay: { lastEventAt: at(1790), lastInsertedAt: at(1790), lastInsertedIds: [] } };
+  const relay = createRelay({ db, post, state, saveState, log: quiet });
+  await relay.tick().catch(() => {});
+  eq(posted.length, 2, 'the batch aborted after the failed save');
+  eq(await relay.tick(), 1, 'the next tick resumes from the in-memory cursor');
+  eq(posted.length, 3, 'every row posted');
+  eq(new Set(posted).size, 3, 'and none of them twice');
 }
 
 console.log(`relay-cursor.test: ${passed} assertions passed`);

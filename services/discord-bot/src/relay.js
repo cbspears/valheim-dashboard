@@ -68,18 +68,56 @@ const FUTURE_EVENT_TOLERANCE_MS = 5 * 60_000;
 // TIES. `inserted_at` has microsecond resolution, but `now()` is fixed for a
 // whole transaction, so two rows written by one statement share a value and a
 // plain `.gt` on it would skip the second one — the same class of silent loss.
-// So the query is `.gte(cursor)` and the ids already relayed AT EXACTLY that
-// timestamp are carried in state.relay.lastInsertedIds and skipped by id. The
-// query asks for BATCH + that list's length so the re-read rows cannot starve
-// real ones out of the window.
+// So the query is `.gte(cursor)` and the ids already relayed are carried in
+// state.relay.lastInsertedIds and skipped by id. The query asks for BATCH +
+// that list's length so the re-read rows cannot starve real ones out of the
+// window.
+//
+// 3. COMMIT ORDER (launch-eve review, 2026-09-06). `now()` is transaction START
+//    time and a row appears at COMMIT, so overlapping writers can commit out of
+//    `inserted_at` order and a `.gte` parked exactly on the high-water mark
+//    loses the late-committing, earlier-stamped row. See INSERTION_LAG_MS: the
+//    query starts a fixed distance BEHIND the high-water mark, and
+//    lastInsertedIds is therefore a ROLLING window of the last relayed ids (not
+//    "the ids at exactly the cursor") so everything the lag re-reads is dropped
+//    by id. state.relay.insertionFloor stops the lag from ever reaching back
+//    before the point the cursor was seeded or repaired at, where there are no
+//    ids to protect with.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// How many already-relayed ids are remembered for the current lastInsertedAt.
-// One statement writing >200 events rows in a single transaction is the only
-// way to exceed it, and nothing in this repo does that. If it ever happened the
-// oldest ids are dropped, which risks a REPEATED line rather than a lost one —
-// the trade this whole file is built around.
+// How many already-relayed ids are remembered. This is a ROLLING window over
+// the rows the relay has posted, not a per-timestamp list, because the query
+// re-reads INSERTION_LAG_MS of history every tick and every one of those rows
+// has to be recognisable. Overflowing it needs >200 events rows inside the lag
+// window — 100 rows a second, five times the player cap's plausible ceiling —
+// and if it ever happened the oldest ids are dropped, which risks a REPEATED
+// line rather than a lost one: the trade this whole file is built around.
 const INSERTED_IDS_MAX = 200;
+
+// COMMIT ORDER IS NOT `now()` ORDER (found by the launch-eve review, 2026-09-06).
+//
+// `inserted_at` defaults to `now()`, which Postgres fixes at TRANSACTION START,
+// but a row only becomes VISIBLE at COMMIT. Two writers that overlap can
+// therefore commit in the opposite order to their stamps: transaction A starts
+// at 12:00:10.000 and takes 40 ms (a contended `ingest_death` advisory lock is
+// the realistic case); transaction B starts at 12:00:10.020 and commits at
+// 12:00:10.021. A relay tick landing in that 20 ms window sees only B, parks the
+// cursor at 12:00:10.020, and `.gte` never matches A again — bug 1 all over
+// again, one row at a time and just as silent.
+//
+// So the query does not start AT the high-water mark, it starts this far BEHIND
+// it, and every id already relayed is skipped by id (see lastInsertedIds, which
+// is a rolling window rather than "the ids at exactly the cursor"). Two seconds
+// is two orders of magnitude wider than any commit this system performs and is
+// still only a handful of rows to re-read and discard on a 15 s tick.
+//
+// The cost of getting this wrong in either direction is asymmetric on purpose:
+// too much lag re-reads rows that are then dropped by id, too little loses a
+// line from the saga with nothing in any log to say so.
+const INSERTION_LAG_MS = (() => {
+  const raw = Number(process.env.RELAY_INSERTION_LAG_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 2000;
+})();
 
 // discord.js throws a DiscordAPIError carrying the HTTP status.
 //
@@ -152,13 +190,24 @@ export function createRelay({ db, post, state, saveState, log = console }) {
   // show twice). That is deliberate: the alternative — "skip anything dated at
   // or before the seed" — is the exact rule that lost twenty leaves.
   if (!Array.isArray(state.relay.lastInsertedIds)) state.relay.lastInsertedIds = [];
+  // The earliest point the lag may ever re-read from. Everything at or after it
+  // that was already relayed is in lastInsertedIds; everything before it was
+  // relayed by an older cursor whose ids nobody kept, so reaching back there
+  // would repost history. Seeding, repairing or resetting the cursor moves the
+  // floor with it. An upgraded state.json has no floor, so it starts where the
+  // cursor already is: this bot posts exactly what it would have posted before,
+  // and the lag only opens up as the cursor moves forward under the new code.
+  const setInsertionCursor = (value) => {
+    state.relay.lastInsertedAt = value;
+    state.relay.insertionFloor = value;
+    state.relay.lastInsertedIds = [];
+  };
   {
     const cur = Date.parse(state.relay.lastInsertedAt);
     const limit = Date.now() + FUTURE_EVENT_TOLERANCE_MS;
     if (typeof state.relay.lastInsertedAt !== 'string' || !Number.isFinite(cur)) {
       const was = state.relay.lastInsertedAt;
-      state.relay.lastInsertedAt = state.relay.lastEventAt;
-      state.relay.lastInsertedIds = [];
+      setInsertionCursor(state.relay.lastEventAt);
       if (was === undefined || was === null) {
         log.info?.(
           `[relay] first run on the insertion-order cursor: seeded lastInsertedAt from lastEventAt ` +
@@ -176,14 +225,20 @@ export function createRelay({ db, post, state, saveState, log = console }) {
       // clock or a hand-edited state.json. Either way the feed is frozen until
       // it is pulled back.
       const was = state.relay.lastInsertedAt;
-      state.relay.lastInsertedAt = new Date().toISOString();
-      state.relay.lastInsertedIds = [];
+      setInsertionCursor(new Date().toISOString());
       log.error?.(
         `[relay] the saved insertion cursor was ${was}, which is in the future — reset to ` +
           `${state.relay.lastInsertedAt}. Events between the last relayed row and now are not posted. ` +
           `inserted_at is written by the database, so check the Postgres clock.`,
       );
     }
+  }
+
+  if (
+    typeof state.relay.insertionFloor !== 'string' ||
+    !Number.isFinite(Date.parse(state.relay.insertionFloor))
+  ) {
+    state.relay.insertionFloor = state.relay.lastInsertedAt;
   }
 
   // Future-dated rows already reported, so one warning per row per process.
@@ -295,7 +350,10 @@ export function createRelay({ db, post, state, saveState, log = console }) {
     }
   }
 
-  // Remember an id as already relayed at the CURRENT lastInsertedAt.
+  // Remember an id as already relayed. A ROLLING window over recent rows, not a
+  // per-timestamp list: the query re-reads INSERTION_LAG_MS of history on every
+  // tick and every one of those rows has to be recognisable (see
+  // INSERTION_LAG_MS). Oldest out first when the cap is reached.
   function rememberInserted(id) {
     if (!id) return;
     const ids = state.relay.lastInsertedIds;
@@ -304,28 +362,39 @@ export function createRelay({ db, post, state, saveState, log = console }) {
     if (ids.length > INSERTED_IDS_MAX) ids.splice(0, ids.length - INSERTED_IDS_MAX);
   }
 
-  // Move the insertion-order cursor onto a consumed row. Never backwards: the
-  // query is ordered, but a fake/replaying source (or a row with no
-  // inserted_at at all) must not be able to rewind the feed into a replay.
+  // Move the insertion-order cursor onto a consumed row. The id is ALWAYS
+  // remembered — the lag re-reads the recent past every tick and each of those
+  // rows has to be recognised — and lastInsertedAt is a HIGH-WATER MARK that
+  // never moves backwards: the query is ordered, but a late-committing row (or
+  // a fake/replaying source, or a row with no inserted_at at all) must not be
+  // able to rewind the feed into a replay.
   function advanceInsertion(ev) {
     const id = ev.id === undefined || ev.id === null ? '' : String(ev.id);
+    rememberInserted(id);
     const ins = typeof ev.inserted_at === 'string' && ev.inserted_at ? ev.inserted_at : null;
-    if (!ins) {
-      rememberInserted(id);
-      return;
-    }
-    if (ins === state.relay.lastInsertedAt) {
-      rememberInserted(id);
-      return;
-    }
+    if (!ins || ins === state.relay.lastInsertedAt) return;
     const next = Date.parse(ins);
     const cur = Date.parse(state.relay.lastInsertedAt);
-    if (Number.isFinite(next) && Number.isFinite(cur) && next < cur) {
-      rememberInserted(id);
-      return;
-    }
+    if (Number.isFinite(next) && Number.isFinite(cur) && next < cur) return;
     state.relay.lastInsertedAt = ins;
-    state.relay.lastInsertedIds = id ? [id] : [];
+  }
+
+  // Where this tick's read starts: INSERTION_LAG_MS behind the high-water mark,
+  // never before the floor.
+  //
+  // Date.parse() truncates the microseconds PostgREST sends
+  // (`2026-09-05T23:00:00.123456+00:00` -> …123 ms), so the lagged value can
+  // land up to one millisecond EARLIER than the arithmetic says. That is the
+  // safe direction — a hair more re-reading, which the id list absorbs — and it
+  // is why the high-water mark itself is only ever stored VERBATIM and never
+  // round-tripped through a Date.
+  function insertionCursor() {
+    const hi = Date.parse(state.relay.lastInsertedAt);
+    if (!Number.isFinite(hi) || INSERTION_LAG_MS === 0) return state.relay.lastInsertedAt;
+    const lagged = new Date(hi - INSERTION_LAG_MS).toISOString();
+    const floor = Date.parse(state.relay.insertionFloor);
+    if (Number.isFinite(floor) && Date.parse(lagged) < floor) return state.relay.insertionFloor;
+    return lagged;
   }
 
   // The cursor of record: insertion order, which no producer supplies.
@@ -333,7 +402,7 @@ export function createRelay({ db, post, state, saveState, log = console }) {
     return db
       .from('events')
       .select('*')
-      .gte('inserted_at', state.relay.lastInsertedAt)
+      .gte('inserted_at', insertionCursor())
       .order('inserted_at', { ascending: true })
       .order('created_at', { ascending: true })
       .limit(BATCH + state.relay.lastInsertedIds.length);
@@ -383,9 +452,36 @@ export function createRelay({ db, post, state, saveState, log = console }) {
     if (error) throw new Error(`events query: ${error.message}`);
     if (!data || data.length === 0) return 0;
 
-    // Ids relayed at exactly lastInsertedAt. The list only ever holds ids at the
-    // cursor's own timestamp, and ids are UUIDs, so matching on id alone cannot
-    // skip an unrelated row.
+    // THE MIGRATION LANDED UNDER US (launch-eve review, 2026-09-06). Between the
+    // ALTER TABLE and the next 5-minute probe the relay is still on the legacy
+    // cursor, but its rows now CARRY inserted_at — and for anything written
+    // after the ALTER that value is the real insert time, not created_at. The
+    // legacy branch below copies created_at into the insertion cursor, so
+    // relaying even one such row there mis-sets it: a poller leave stamped
+    // 12:00:20 and written at 12:00:35, followed by a client join stamped
+    // 12:00:30 and written at 12:00:31, leaves the insertion cursor at 12:00:30
+    // and the leave's inserted_at (12:00:35) AHEAD of it — so the flip re-posts
+    // the leave. Measured: one duplicate #server line per such pair.
+    //
+    // The column's presence in the answer is proof the migration is applied, so
+    // flip NOW and re-read on the insertion cursor rather than relaying this
+    // batch on the lossy one. The insertion cursor is still in step at this
+    // point (every row relayed on the legacy path so far predates the ALTER and
+    // was backfilled to inserted_at = created_at), and the boundary row's id is
+    // in lastInsertedIds, so nothing is replayed and nothing is skipped.
+    if (!byInsertion && typeof data[0]?.inserted_at === 'string' && data[0].inserted_at) {
+      pendingMigration = false;
+      nextMigrationProbe = 0;
+      byInsertion = true;
+      log.error?.('[relay] events.inserted_at is present now — back on the insertion-order cursor.');
+      ({ data, error } = await fetchByInsertion());
+      if (error) throw new Error(`events query: ${error.message}`);
+      if (!data || data.length === 0) return 0;
+    }
+
+    // Ids already relayed. This is a rolling window over recent rows rather than
+    // "the ids at the cursor's own timestamp" (see INSERTION_LAG_MS), and ids
+    // are UUIDs, so matching on id alone cannot skip an unrelated row.
     const alreadyRelayed = byInsertion ? new Set(state.relay.lastInsertedIds) : null;
 
     let posted = 0;
@@ -450,7 +546,7 @@ export function createRelay({ db, post, state, saveState, log = console }) {
         // legacy window and post all of it a second time. The id goes with it so
         // the boundary row itself is skipped rather than duplicated.
         state.relay.lastInsertedAt = ev.created_at;
-        state.relay.lastInsertedIds = rowId ? [rowId] : [];
+        rememberInserted(rowId);
       }
       // lastEventAt is now only the legacy/pre-migration cursor and the seed for
       // lastInsertedAt, so on the insertion path it is kept MONOTONE: a
