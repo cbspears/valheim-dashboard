@@ -26,6 +26,7 @@ import {
   decideRelink,
   steamMismatchLog,
   steamMismatchBody,
+  steamMismatchMeta,
   relinkRefusalLog,
   relinkRefusalBody,
 } from '@/lib/webhook/identity';
@@ -962,7 +963,12 @@ export async function POST(request: Request) {
           }
         } else if (decision === 'mismatch') {
           identityMismatch = true;
-          identityMeta = { identity: 'steam_mismatch', seenSteamId: steamId, boundSteamId };
+          // FINGERPRINTS, NOT IDS (T-3 audit, data-2): `events` is anon-readable
+          // in full, so the row carries a 12-hex sha256 prefix of each side
+          // instead of two pasteable Steam64 profile ids. The operator still
+          // gets both in the journal line below and in players.steam_id, which
+          // the ops cockpit reads under the service role.
+          identityMeta = steamMismatchMeta(boundSteamId, steamId);
           console.warn(`[webhook] STEAM MISMATCH ${characterName}: bound ${boundSteamId} saw ${steamId}`);
         }
       }

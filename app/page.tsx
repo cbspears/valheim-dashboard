@@ -40,6 +40,7 @@ import {
   statsFreshness,
 } from '@/lib/data';
 import { summarizeMilestones } from '@/lib/milestones';
+import { summarizeBosses } from '@/lib/bosses';
 import { describeEvent } from '@/lib/events';
 import { timeAgo, formatEventWhen } from '@/lib/format';
 import { SERVER_NAME, SERVER_TAGLINE, SERVER_ADDRESS, MAX_PLAYERS } from '@/config/server';
@@ -76,11 +77,15 @@ export default async function HomePage() {
   const playerCount = status?.player_count ?? online.length;
   const worldDay = status?.world_day ?? 0;
 
-  const totalBosses = bosses.length || 8;
-  const felledBosses = bosses.filter((b) => b.is_killed);
-  const felledCount = felledBosses.length;
-  const nextBoss = bosses.find((b) => !b.is_killed) ?? null;
-  const bossPercent = totalBosses > 0 ? Math.round((felledCount / totalBosses) * 100) : 0;
+  // The ledger, reduced in one place (lib/bosses). `ledgerEmpty` is the guard that
+  // matters: getBosses() returns [] for a FAILED read as well as an unfelled world,
+  // and "no unfelled boss" was previously enough to announce a completed saga.
+  const saga = summarizeBosses(bosses);
+  const felledBosses = saga.felled;
+  const felledCount = saga.felledCount;
+  const nextBoss = saga.next;
+  const totalBosses = saga.total || 8;
+  const bossPercent = saga.percent;
 
   // The soonest scheduled Discord event (recurring rows already rolled forward
   // by getUpcomingEvents). Null when nothing is on the calendar — the hero then
@@ -366,7 +371,7 @@ export default async function HomePage() {
                 </p>
               </div>
             </div>
-          ) : (
+          ) : saga.sagaComplete ? (
             <div className="flex items-start gap-3">
               <span className="mt-0.5 shrink-0 text-gold-light">
                 <Crown size={18} />
@@ -375,6 +380,20 @@ export default async function HomePage() {
                 <p className="text-xs uppercase tracking-wider text-muted">The saga is complete</p>
                 <p className="mt-0.5 text-ash">
                   Every forsaken one has fallen. The tenth world belongs to the bold.
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* Empty ledger: the read failed, or the rows are not there yet. Say so —
+               claiming victory here is exactly the T-3 audit finding (site-2). */
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 shrink-0 text-muted">
+                <Skull size={18} />
+              </span>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted">Current objective</p>
+                <p className="mt-0.5 text-ash-dim">
+                  Unknown for now. The ledger of the Forsaken did not answer.
                 </p>
               </div>
             </div>
@@ -387,7 +406,9 @@ export default async function HomePage() {
             <p className="mb-2 text-xs uppercase tracking-wider text-muted">Felled so far</p>
             {felledBosses.length === 0 ? (
               <p className="text-sm text-ash-dim">
-                None yet. Every forsaken one still holds its ground.
+                {saga.ledgerEmpty
+                  ? 'The ledger did not answer. Nothing can be counted right now.'
+                  : 'None yet. Every forsaken one still holds its ground.'}
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">

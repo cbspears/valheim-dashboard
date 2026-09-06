@@ -32,7 +32,18 @@ W=${W:-Eilif}
 BOT=${EILIF_BOT_ENV:-services/discord-bot/.env}
 POL=${EILIF_POLLER_ENV:-services/log-poller/.env}
 UNIT=${EILIF_BOT_UNIT:-/etc/systemd/system/eilif-discord-bot.service}
+# The off-box world backup names its world as an ExecStart ARGUMENT, so it is the
+# one world-dependent setting on this PC that no .env can carry (T-3 audit, ops-3).
+BACKUP_UNIT=${EILIF_BACKUP_UNIT:-/etc/systemd/system/eilif-world-backup.service}
 NEST=/191.101.30.229_6028
+
+# The world eilif-world-backup.service currently pulls, or '' when the unit is
+# not installed / not readable.
+backup_world() {
+  [ -r "$BACKUP_UNIT" ] || return 0
+  sed -n 's#^ExecStart=.*pull-world\.sh[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*#\1#p' "$BACKUP_UNIT" | head -1
+}
+BACKUP_W=$(backup_world)
 echo "== cutover-env for world '$W' ($([ $APPLY = 1 ] && echo APPLYING || echo dry run)) =="
 plan() { printf '  %-44s %s\n' "$1" "$2"; }
 plan "$BOT RECAPS_START" "-> 2026-09-09"
@@ -41,6 +52,13 @@ plan "$BOT TITLE_CHANNEL" "-> valheim"
 plan "$UNIT Environment=RECAPS_START" "-> line removed (unit must stop overriding .env)"
 plan "$POL MAP_REMOTE_DIR" "-> $NEST/BepInEx/plugins/WebMap/map_data/$W"
 plan "$POL LOG_PATH" "unchanged (log path does not depend on the world)"
+if [ -z "$BACKUP_W" ]; then
+  plan "$BACKUP_UNIT ExecStart world" "-> unit not installed/readable here — nothing to repoint"
+elif [ "$BACKUP_W" = "$W" ]; then
+  plan "$BACKUP_UNIT ExecStart world" "-> already $W (off-box backups follow the launch world)"
+else
+  plan "$BACKUP_UNIT ExecStart world" "-> $W (currently $BACKUP_W) — needs sudo, printed below"
+fi
 
 # Set a key to a value whether or not it is already in the file. `sed -i s/^K=.*/`
 # alone did NOTHING when the key was absent, and services/discord-bot/src/index.js
@@ -93,6 +111,32 @@ if [ $APPLY = 1 ]; then
     echo "  Restart order: poller, then bot (after the wipe), map-snapshot LAST (after map_data/$W exists)."
   fi
 fi
+# ── THE OFF-BOX WORLD BACKUP (T-3 audit, ops-3) ─────────────────────────────
+# eilif-world-backup.timer keeps firing after the cutover, but its service hard-codes
+# the world as an ExecStart argument, so it goes on pulling the OLD world. LAUNCH-DAY
+# step 12 deletes that world off the box, so every firing from then on exits 1 with
+# "NOTHING was fetched" — a failed unit every six hours that nothing alerts on, while
+# the launch world, whose saves are forward-only and whose only rollback is an off-box
+# copy, has no backup at all. Preflight does not catch it either: it grades the timer
+# on `systemctl is-active` alone, so an active timer pulling a deleted world PASSes.
+#
+# This one is PRINTED, never attempted: it is a root-owned unit file, and a silent
+# `sudo -n` failure here would leave the operator believing backups followed the world.
+if [ -n "$BACKUP_W" ] && [ "$BACKUP_W" != "$W" ]; then
+  echo "== off-box world backup: repoint it (needs sudo, run by hand) =="
+  echo "  The timer still pulls '$BACKUP_W'. After the cutover that world is gone from the box,"
+  echo "  so the backup fails every 6 h and '$W' has no off-box copy."
+  echo "    sudo sed -i 's#\\(pull-world\\.sh\\)[[:space:]]\\{1,\\}$BACKUP_W#\\1 $W#' $BACKUP_UNIT"
+  echo "    sudo systemctl daemon-reload"
+  echo "    sudo systemctl start eilif-world-backup.service"
+  echo "    journalctl -u eilif-world-backup -n 20 --no-pager   # look for: flat layout: got $W.db + $W.fwl"
+  echo "  Verify:  systemctl cat eilif-world-backup.service | grep ExecStart"
+elif [ -n "$BACKUP_W" ]; then
+  echo "== off-box world backup: already pinned to '$W' — nothing to do =="
+else
+  echo "== off-box world backup: $BACKUP_UNIT not installed here — no timer to repoint =="
+fi
+
 echo "== remote steps (Charlie / Claude, not scriptable here) =="
 echo "  1. Vercel: vercel env rm GS_EXPECTED_WORLD production --yes; printf '$W' | vercel env add GS_EXPECTED_WORLD production   -> then vercel deploy --prod"
 echo "  2. GTX (server STOPPED): BepInEx/config/net.cproudlock.gsvalheimstats.cfg  [General] World = $W"

@@ -255,6 +255,29 @@ function checkUnits() {
     const state = stdout.trim() || 'unknown';
     graded(`unit:${timer}`, timer, state === 'active', `${state} — off-box world + DB copies`, 'warn');
   }
+
+  // AN ACTIVE TIMER IS NOT A BACKUP (T-3 audit, ops-3). eilif-world-backup.service
+  // names its world as an ExecStart ARGUMENT, and the cutover deletes the old world
+  // off the box — so an active timer can be failing every six hours while the launch
+  // world, whose saves are forward-only, has no off-box copy at all. `is-active`
+  // above cannot see that; this reads the argument. WARN, not FAIL: repointing it
+  // needs sudo and is a printed manual step (scripts/cutover-env.sh).
+  {
+    const unitFile = '/etc/systemd/system/eilif-world-backup.service';
+    const text = fs.existsSync(unitFile) ? fs.readFileSync(unitFile, 'utf8') : '';
+    const pinned = text.match(/^ExecStart=.*pull-world\.sh\s+(\S+)/m)?.[1] ?? null;
+    graded(
+      'unit:world-backup-world',
+      'world backup pulls --world',
+      pinned === WORLD,
+      pinned
+        ? pinned === WORLD
+          ? `pull-world.sh ${pinned} — off-box copies follow the launch world`
+          : `pull-world.sh ${pinned}, but this run is for "${WORLD}" — repoint ExecStart (scripts/cutover-env.sh prints the sudo line), else "${WORLD}" has NO off-box backup`
+        : `${unitFile} not installed or has no pull-world.sh ExecStart`,
+      'warn',
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -865,19 +888,33 @@ function checkGtx() {
 // gtx-1: on 2026-09-03 this was serving the full 4.5 MB map.png, the WebMap config and
 // live player positions to the open internet. The fix is a GTX firewall ticket, NOT
 // webmap.cfg server_port=0 (that NREs at world load).
+//
+// GRADED WARN, NOT FAIL, IN EVERY PHASE (T-3 audit, ops-4). The ticket was skipped by
+// owner decision on 2026-09-05, so an open port is the EXPECTED state on the night.
+// Graded as a hard gate it made the summary print "HOLD. Do not advance the cutover"
+// at steps 20c and 20e of a perfect launch — the banner that is supposed to stop the
+// operator, firing on the one condition nobody intends to fix. The check itself is
+// unchanged: it still probes, still names the exposure, and still shows up in the
+// output every run.
+const PORT_3000_DECISION =
+  'GTX firewall ticket skipped by owner decision 2026-09-05 — known exposure, not a hold';
+
 async function checkPort3000() {
-  section('WebMap port 3000 (must be closed to the public internet)');
+  section('WebMap port 3000 (must be closed to the public internet — waived for launch by decision)');
   let open = false;
   let detail = '';
   try {
     const res = await httpGet(WEBMAP_URL, { timeoutMs: 8000 });
     open = true;
-    detail = `HTTP ${res.status} from ${WEBMAP_URL} — the world map, config and live positions are public`;
+    detail =
+      `HTTP ${res.status} from ${WEBMAP_URL} — the world map, config and live positions are public. ` +
+      PORT_3000_DECISION;
     await res.text().catch(() => {});
   } catch (e) {
     detail = `no HTTP response within 8s (${e.name === 'AbortError' ? 'timeout' : e.message}) — closed, which is what launch wants`;
   }
-  graded('gtx:port3000', 'port 3000 closed', open, detail, false);
+  // want:'warn' grades the boolean the other way round: true is the good state.
+  graded('gtx:port3000', 'port 3000 closed', !open, detail, 'warn');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

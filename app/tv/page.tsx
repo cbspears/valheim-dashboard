@@ -9,7 +9,7 @@ import {
 } from '@/lib/data';
 import { getRecentChat, getFreshPositions } from './data';
 import { describeEvent } from '@/lib/events';
-import { timeAgo, eventCountdown, formatEventWhen } from '@/lib/format';
+import { timeAgo, gatheringCountdown, formatEventWhen } from '@/lib/format';
 import { SERVER_NAME } from '@/config/server';
 import { TvMap, type TvPlayerDot } from '@/components/tv/TvMap';
 import { TvRefresh } from '@/components/tv/TvRefresh';
@@ -217,7 +217,7 @@ export default async function TvPage({
               <p className="mt-1 truncate font-display text-xl text-ash">{nextUp.name}</p>
               <p className="text-base text-ash-dim">
                 {formatEventWhen(nextUp.next_at)}
-                <span className="text-gold-light"> · {eventCountdown(nextUp.next_at)}</span>
+                <span className="text-gold-light"> · {gatheringCountdown(nextUp.next_at)}</span>
               </p>
             </div>
           )}

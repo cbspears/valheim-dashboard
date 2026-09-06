@@ -1,15 +1,13 @@
 -- APPLIED TO PROD 2026-09-06 (Supabase MCP execute_sql; three deed lines, none achieved at the time).
 -- Collective Milestones ("Great Deeds") — three copy corrections.
 --
--- ⚠️ UNAPPLIED. Hand-apply against Supabase (project syuwavxpmtdmxupxjzje) when
--- Charlie chooses — there is no migration runner in this repo.
---   psql "$SUPABASE_DB_URL" -f db/2026-09-06_deed_copy.sql
--- or paste into the Supabase SQL editor.
+-- STATUS: APPLIED (see line 1). Idempotent; safe to re-run. The "⚠️ UNAPPLIED, hand-apply
+-- when Charlie chooses" block that used to sit here contradicted line 1 in the same file
+-- (commit 18325a6 added the stamp and left the warning) and was removed 2026-09-06.
 --
 -- WHAT THIS IS: three `line` rewrites, nothing else. It follows the full copy
--- pass in db/2026-08-23_milestones_copy_pass.sql (whose text IS live on prod,
--- despite that file's header still saying unapplied — verified by reading the
--- ladder on 2026-09-05). The other 35 deeds were re-read line by line in the
+-- pass in db/2026-08-23_milestones_copy_pass.sql, which is also live on prod (that
+-- file's header now says so too). The other 35 deeds were re-read line by line in the
 -- same pass and need no change: no dashes, no AI tells, no {value} tokens, no
 -- pluralisation traps, and every equivalence still checks out arithmetically.
 --

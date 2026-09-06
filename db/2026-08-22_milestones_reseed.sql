@@ -1,9 +1,16 @@
+-- APPLIED TO PROD. Verified 2026-09-06 (T-3 audit, data area): all 34 db/*.sql files were
+-- replayed into an empty Postgres and the resulting 38-row Great Deeds ladder was diffed
+-- field by field against production (anon GET on `milestones`) — 0 rows only on one side,
+-- 0 rows differing. This file's 38 rows ARE the live ladder.
+--
 -- Collective Milestones ("Great Deeds") — LAUNCH RESEED of the definition set.
 --
--- ⚠️ UNAPPLIED. Hand-apply against Supabase (project syuwavxpmtdmxupxjzje) when
--- Charlie chooses — there is no migration runner in this repo.
---   psql "$SUPABASE_DB_URL" -f db/2026-08-22_milestones_reseed.sql
--- or paste into the Supabase SQL editor.
+-- STATUS: APPLIED (see line 1). Idempotent — delete-all + insert of literals, so
+-- re-running it is safe and is a no-op against the current ladder. The header used to
+-- read "⚠️ UNAPPLIED / hand-apply when Charlie chooses"; that was wrong for at least
+-- two weeks, and on launch morning a wrong applied-status is the expensive kind of
+-- wrong (AGENTS.md: never assume a migration ran because the file exists — which cuts
+-- both ways, and this file is the reason the rule needed a re-read).
 --
 -- Same engine, same table, same column shape as db/2026-07-05_milestones.sql
 -- (the DDL of record). Like db/2026-07-06_milestones_rebalance.sql this is a

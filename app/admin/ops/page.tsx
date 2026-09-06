@@ -319,7 +319,7 @@ function IdentityMismatches({
             <tr className="border-b border-rune text-xs uppercase tracking-wider text-muted">
               <th className="px-4 py-2.5 font-medium">Character</th>
               <th className="px-4 py-2.5 font-medium">Bound Steam ID</th>
-              <th className="px-4 py-2.5 font-medium">Seen Steam ID</th>
+              <th className="px-4 py-2.5 font-medium">Joining account</th>
               <th className="px-4 py-2.5 font-medium">When</th>
             </tr>
           </thead>
@@ -328,10 +328,14 @@ function IdentityMismatches({
               <tr key={`${r.characterName}-${r.at}`} className="border-b border-rune/50 last:border-0">
                 <td className="px-4 py-3 font-medium text-ash">{r.characterName}</td>
                 <td className="px-4 py-3 font-mono text-xs text-ash-dim">
-                  {r.boundSteamId ?? <span className="text-muted">unknown</span>}
+                  {r.boundSteamId ?? (
+                    <span className="text-muted">
+                      {r.boundSteamIdHash ? `released (was ${r.boundSteamIdHash})` : 'unknown'}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-death">
-                  {r.seenSteamId ?? <span className="text-muted">unknown</span>}
+                  {r.seenSteamIdHash ?? <span className="text-muted">unknown</span>}
                 </td>
                 <td className="px-4 py-3 text-ash-dim">{new Date(r.at).toLocaleString()}</td>
               </tr>
@@ -345,6 +349,14 @@ function IdentityMismatches({
             Showing the {rows.length} newest. More were recorded in this window.
           </p>
         )}
+        <p className="mb-1.5">
+          The bound Steam ID is read live from{' '}
+          <span className="font-mono text-ash-dim">players</span> under the service role. The
+          joining account is shown as a 12-character fingerprint: the event row that records a
+          mismatch is readable by anyone with the publishable key, so it stores no Steam ID. The
+          full ID of whoever joined is in the bot host&apos;s journal, on the{' '}
+          <span className="font-mono text-ash-dim">STEAM MISMATCH</span> line for this character.
+        </p>
         <p>
           The bound account keeps the name. Oaths, pins and the Discord link stay frozen for it until
           an admin releases the binding in Supabase, and the next join binds it fresh. One statement

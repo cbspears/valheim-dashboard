@@ -66,11 +66,26 @@ Thunderstore under the `Eilif` namespace: **publish the plugin first, wait for t
 then mint.** The order is not negotiable. `plugins/eilif-companion-client/PACK.md` and each
 `plugins/thunderstore/<pkg>/UPLOAD.md` cover the upload side.
 
-As of 2026-09-04 the staged client build is **EilifCompanionClient 0.3.2**, not uploaded
-(`plugins/thunderstore/EilifCompanionClient-<ver>/` is the source of truth for what is staged
-right now, and it moves). Thunderstore's latest is still 0.2.0, which is what pack v11 pins.
-EilifPaths is published at 1.4.0 and staged at **1.5.0**, the build that adds `[VPlusFallback]`. A re-mint that pins an unpublished version is refused until
-that package is uploaded and the index rebuilds - that refusal is the tool working, not a bug.
+**State as of 2026-09-06** (re-checked against the Thunderstore package API; the earlier
+paragraph here said the staged client was 0.3.2 and Thunderstore's latest was 0.2.0, and
+both halves went stale on 2026-09-05):
+
+| Package | Published (immutable) | Staged in this repo |
+|---|---|---|
+| `Eilif/EilifCompanionClient` | **0.3.2**, uploaded 2026-09-05 22:11 UTC | **0.3.3** (`plugins/thunderstore/EilifCompanionClient-0.3.3/`) |
+| `Eilif/EilifPaths` | **1.4.0**, 2026-08-24 | **1.5.0** (`plugins/thunderstore/EilifPaths-1.5.0/`) — the build that adds `[VPlusFallback]` |
+
+Pack v11 pins Companion Client **0.2.0**, which is why the tombstone keep-list is dark for
+everyone until v12 is minted. `plugins/thunderstore/<Name>-<ver>/` is the source of truth
+for what is staged right now, and it moves — read it rather than this table when they
+disagree. A re-mint that pins an unpublished version is refused until that package is
+uploaded and the index rebuilds; that refusal is the tool working, not a bug.
+
+**Never hard-code a client version in a command you are about to copy.** 0.3.2 is published
+and therefore immutable, and it was compiled against 0.221.12 — a pack minted with
+`--companion-client 0.3.2` after the box has gone to 1.0 hands every player a pre-1.0 client
+DLL. The worked examples below use `<ver>` for that reason; `docs/LAUNCH-DAY.md` step 16
+defines it once as `$M` and steps 18 and 19 reuse it.
 
 **3. AzuCraftyBoxes moves in lockstep.** Its `Prevent Pulling Logic` hotkey setting is
 client-side and *not* server-synced, so only the pack can unbind Alt+O fleet-wide (that
@@ -89,8 +104,9 @@ the `Token =` lines ship blank on purpose. The ingest token is server-side only.
 
 **6. ValheimPlus is all-or-nothing, on both sides at once.** V+ `enforceMod = true` is a
 version check in **both** directions: a server running V+ refuses every client without it,
-and a client from a V+ pack is refused by a server without it. So `--no-vplus` and deleting
-`BepInEx/plugins/ValheimPlus/` on the box are one decision, taken in one stopped window. The
+and a client from a V+ pack is refused by a server without it. So `--no-vplus` and deleting the file
+`BepInEx/plugins/ValheimPlus.dll` on the box (it is a loose DLL, not a directory — V+ logs
+that path itself on every boot) are one decision, taken in one stopped window. The
 minter cannot check the box, so it prints the reminder loudly instead, twice.
 
 **Removing V+ turns nothing on.** Two switches replace it, they live on opposite sides of the
@@ -204,7 +220,7 @@ with the flags already in it, which is why copying it beats retyping it.
    over (this uploads nothing):
 
    ```bash
-   node scripts/mint-pack.mjs --world <World> --companion-client 0.3.2 --dry-run
+   node scripts/mint-pack.mjs --world <World> --companion-client <ver> --dry-run
    ```
 
    Re-run until every row reads `ok / ok`.
@@ -213,7 +229,7 @@ with the flags already in it, which is why copying it beats retyping it.
    and byte-compares every file, then prints a code labelled TEST.
 
    ```bash
-   node scripts/mint-pack.mjs --world <World> --companion-client 0.3.2
+   node scripts/mint-pack.mjs --world <World> --companion-client <ver>
    ```
 
    "TEST" is a label in our terminal and nowhere else: the bytes uploaded are deliberately
@@ -226,7 +242,7 @@ with the flags already in it, which is why copying it beats retyping it.
    own profile and delete it afterwards:
 
    ```bash
-   node scripts/mint-pack.mjs --world <World> --companion-client 0.3.2 \
+   node scripts/mint-pack.mjs --world <World> --companion-client <ver> \
      --profile-name 'Eilif TEST'
    ```
 
@@ -238,7 +254,7 @@ with the flags already in it, which is why copying it beats retyping it.
 3. **Real mint.**
 
    ```bash
-   node scripts/mint-pack.mjs --world <World> --companion-client 0.3.2 \
+   node scripts/mint-pack.mjs --world <World> --companion-client <ver> \
      --publish --version-label 'Pack v12 · Sep 9'
    ```
 
@@ -252,12 +268,20 @@ with the flags already in it, which is why copying it beats retyping it.
    - `config/server.ts` `MAX_PLAYERS` — the number the box actually enforces (rule 6), not
      a guess. The minter prints it if you pass `--cap <n>`.
    - `config/mods.ts` — delete the row, or `/mods` advertises a mod nobody has.
-   - `app/get-started/page.tsx` — **the Mac path's hard-coded "install these seven" list**,
-     twelve lines above `CONFIG_BUNDLE_URL`. It names ValheimPlus by hand. A Mac player who
-     follows that page installs V+ and is then refused by the box, which is `enforceMod`
-     working exactly as designed. Drop the name, and the word "seven" with it. (Deriving
-     that list and its count from `config/mods.ts` filtered on the client-installed mods
-     would make this one edit instead of three; not done yet.)
+   - `app/get-started/page.tsx` — **three pinned places, not one.** Grep, do not count:
+     `grep -n "CONFIG_BUNDLE_URL\|Eilif Paths 1\.\|GsValheimStatsClient 0\." app/get-started/page.tsx`.
+     (a) `CONFIG_BUNDLE_URL` (line 66). (b) The Mac path's hard-coded "install these seven"
+     list (lines 427-432, under the `CUTOVER ANCHOR` comment). It names ValheimPlus by hand,
+     so a Mac player who follows that page installs V+ and is then refused by the box —
+     `enforceMod` working exactly as designed. Drop the name, and the word "seven" with it.
+     (c) **The update card's self-check sentence, ~180 lines further down** (lines 609-610):
+     *"Installed: Eilif Paths 1.4.0 and GsValheimStatsClient 0.2.12 means you are on
+     {MODPACK_VERSION_LABEL}."* Eilif Paths moves to 1.5.0 in v12 and that sentence does
+     not, so it tells a viking still on the old pack that they are current on the one night
+     an old pack gets them kicked. This list, `docs/LAUNCH-DAY.md` step 19 and `mint-pack`'s
+     own printed checklist all used to stop at (b). (Deriving that Mac list and its count
+     from `config/mods.ts` filtered on the client-installed mods would make this one edit
+     instead of three; not done yet.)
    - `PACK_V12_PINS` in `scripts/launch-preflight.mjs` — or pass preflight `--pins`, or it
      grades a pin the pack does not have.
 
@@ -277,7 +301,7 @@ with the flags already in it, which is why copying it beats retyping it.
 6. **Rebuild the Mac bundle** with the same world and the same pins:
 
    ```bash
-   node scripts/build-config-bundle.mjs --world <World> --companion-client 0.3.2 \
+   node scripts/build-config-bundle.mjs --world <World> --companion-client <ver> \
      --pack-number 12 --pack-date 'Sep 9, 2026'
    ```
 

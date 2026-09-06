@@ -1,3 +1,14 @@
+-- APPLIED TO PROD. Settled 2026-09-06 (T-3 audit): `players_character_name_key` EXISTS on
+-- production — verified by the coordinator against the live project, which is the check
+-- db/2026-09-06_perf_indexes.sql asked for (`select indexname from pg_indexes where
+-- tablename = 'players'`). The constraint is in force; nothing to apply.
+--
+-- STATUS: APPLIED (see line 1). Idempotent (`create unique index if not exists`).
+-- This file had carried no status marker at all since it was written, which made it the
+-- one migration nobody could state the state of — and launch night is exactly the
+-- condition it guards: after the wipe the `players` table is empty while twenty vikings
+-- connect at once, the same shape as the 07-25 incident below.
+--
 -- 2026-07-25 · players.character_name must be unique.
 --
 -- Incident: the stats webhook's find-or-create looked the player up with

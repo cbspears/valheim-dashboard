@@ -88,22 +88,6 @@ export function formatEventWhen(iso: string | null | undefined): string {
   }
 }
 
-/** Forward-looking countdown chip: "in 40 min" / "tomorrow" / "in 5 days". Timezone-independent (pure duration). */
-export function eventCountdown(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const ms = new Date(iso).getTime() - Date.now();
-  if (Number.isNaN(ms)) return '';
-  if (ms <= 0) return 'happening now';
-  const mins = Math.round(ms / 60000);
-  if (mins < 60) return `in ${mins} min`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `in ${hrs}h`;
-  const days = Math.round(hrs / 24);
-  if (days <= 1) return 'tomorrow';
-  if (days < 14) return `in ${days} days`;
-  return `in ${Math.round(days / 7)} weeks`;
-}
-
 /**
  * Which calendar day (in Central) a moment falls on, as a plain day number so
  * two moments can be compared. "en-CA" formats as YYYY-MM-DD, which parses
@@ -152,12 +136,23 @@ function centralHour(d: Date): number {
 }
 
 /**
- * Countdown for the nav's next-gathering pill: same job as `eventCountdown`,
- * but it counts calendar days rather than 24-hour blocks, so a gathering this
- * evening reads "tonight" and one the next morning reads "tomorrow" — the way
- * a person would say it. Days are judged in Central, matching every other
- * event time on the site. `now` is injectable so the pill can recompute on the
- * client after mount (and so this is testable).
+ * THE countdown for a scheduled gathering. Every place on the site that says how
+ * far away a gathering is calls THIS — the nav pill, the Coming Up card on the
+ * Hall, /world's Scheduled Gatherings and /tv.
+ *
+ * ONE FUNCTION, DELIBERATELY (T-3 audit, site-3). There used to be two. The pill
+ * counted CALENDAR days in Central; the card counted 24-hour blocks and rounded
+ * them, so on 2026-09-06 the Hall rendered "Deep North Launch Night · in 3 days"
+ * in the nav and "in 4 days" in the card, both on screen at once, and the card
+ * was the wrong one (Sep 9 is three sleeps from Sep 6). Anything that shows a
+ * countdown imports this; there is no second formatter to drift from.
+ *
+ * Days are judged in Central, matching every other event time on the site, so a
+ * gathering this evening reads "tonight" and one the next morning "tomorrow" —
+ * the way a person would say it. Below that the hour count from the old card
+ * formatter survives ("in 3h"), which is the register that is actually useful on
+ * the day itself. `now` is injectable so the pill can recompute on the client
+ * after mount (and so this is testable).
  */
 export function gatheringCountdown(
   iso: string | null | undefined,
@@ -173,7 +168,9 @@ export function gatheringCountdown(
   if (mins < 60) return `in ${mins} min`;
 
   const dayGap = centralDayIndex(start) - centralDayIndex(new Date(now));
-  if (dayGap <= 0) return centralHour(start) >= 17 ? 'tonight' : 'later today';
+  // Today, in Central. An evening gathering is "tonight"; earlier in the day the
+  // hour count says more than "later today" ever did.
+  if (dayGap <= 0) return centralHour(start) >= 17 ? 'tonight' : `in ${Math.round(mins / 60)}h`;
   if (dayGap === 1) return 'tomorrow';
   if (dayGap < 14) return `in ${dayGap} days`;
   return `in ${Math.round(dayGap / 7)} weeks`;

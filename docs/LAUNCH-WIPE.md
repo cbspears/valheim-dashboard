@@ -175,7 +175,9 @@ you'd be wiping real launch data along with the pilot's.
    and elsewhere on the host:
 
    - `BepInEx/plugins/WebMap/map_data/<old world>/`
-   - `vplus-data/<old world>_mapSync.dat`
+   - `vplus-data/<old world>_mapSync.dat` — **under `BepInEx/`.** The T-3 audit's read-only
+     SFTP listing (2026-09-06) found it at `BepInEx/vplus-data/<world>_mapSync.dat` and
+     found no `vplus-data` at the nest root.
 
 6. **Do the post-wipe checklist** the script prints at the end (world upload +
    `Start.bat World=`, panel death penalty = **Casual**, Combat per the launch
@@ -572,7 +574,15 @@ the 9th puts it back.
     `meta` on rows currently marked achieved.
   - `bosses` — flips `is_killed` back to `false` and clears `killed_at` /
     `players_present` / `fight_stats` / `retelling` / `retelling_generated_at`,
-    on **every** row. **This changed on 2026-09-06.** It used to reset only the
+    on **every** row. **It does not touch `name`, and that matters if the table is
+    ever rebuilt rather than reset:** `db/0000_initial_schema.sql:130` seeds the eighth
+    row as `('The Bog Witch', 'Deep North', 8)` while production runs **`Forsaken VIII`**
+    (verified 2026-09-06 — the first seven match, and no later `db/*.sql` renames row 8).
+    So a rebuild from `db/*.sql` in filename order silently renames the one boss Valheim
+    1.0 makes reachable, and the site, `/api/gs-ingest` and the boss tests all key on
+    `Forsaken VIII`. After any such rebuild:
+    `update public.bosses set name = 'Forsaken VIII' where sort_order = 8 and name = 'The Bog Witch';`
+    The wipe itself is unaffected — it resets rows, it does not re-seed them. **This changed on 2026-09-06.** It used to reset only the
     rows with `is_killed = true`, which misses a boss the pilot world FOUGHT and
     never killed: `gs-ingest` folds client damage into `players_present` and
     `fight_stats` on every snapshot, kill or no kill, and both folds are

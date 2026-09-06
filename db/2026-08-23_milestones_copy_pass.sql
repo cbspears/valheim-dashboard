@@ -1,9 +1,13 @@
+-- APPLIED TO PROD. Verified 2026-09-06 (T-3 audit, data area): the full db/*.sql replay
+-- and production's live `milestones` ladder differ in zero fields, and the text in this
+-- file IS the text on prod. db/2026-09-06_deed_copy.sql said so in passing on 09-05; the
+-- header here had never been updated.
+--
 -- Collective Milestones ("Great Deeds") — COPY-ONLY pass over the launch set.
 --
--- ⚠️ UNAPPLIED. Hand-apply against Supabase (project syuwavxpmtdmxupxjzje) when
--- Charlie chooses — there is no migration runner in this repo.
---   psql "$SUPABASE_DB_URL" -f db/2026-08-23_milestones_copy_pass.sql
--- or paste into the Supabase SQL editor.
+-- STATUS: APPLIED (see line 1). Idempotent; safe to re-run. The header used to read
+-- "⚠️ UNAPPLIED / hand-apply when Charlie chooses" — wrong, and the db/ headers are the
+-- only record of applied status this repo has.
 --
 -- WHAT THIS IS: a rewrite of the two prose columns only — `line` (the
 -- ceremonial announcement) and `equivalence` (the "that is" comparison) — for

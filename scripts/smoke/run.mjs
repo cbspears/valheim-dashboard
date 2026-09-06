@@ -351,7 +351,9 @@ function ensureProject(projectDir) {
  * plain lexicographic sort is correct.)
  */
 function syncMigrations(projectDir) {
-  const NEVER_APPLIED = new Set(['2026-08-24_loa_zero_baseline.sql']);
+  // Files headed STATUS: UNAPPLIED that production has not run either, so a
+  // rebuilt stack matches production rather than running ahead of it.
+  const NEVER_APPLIED = new Set(['2026-08-24_loa_zero_baseline.sql', '2026-09-06_death_ceiling.sql']);
   const src = join(REPO, 'db');
   const files = readdirSync(src)
     .filter((f) => f.endsWith('.sql') && !NEVER_APPLIED.has(f))

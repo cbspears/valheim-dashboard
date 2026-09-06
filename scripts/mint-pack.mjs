@@ -797,7 +797,7 @@ function printNoVplusReminder(cap) {
   console.log('  The SERVER must not run ValheimPlus either.');
   console.log('  V+ enforceMod = true is a version check in both directions: a box with V+');
   console.log('  loaded refuses every client without it, and this pack ships none. Delete');
-  console.log('  BepInEx/plugins/ValheimPlus/ on the GTX box in the same stopped window, and');
+  console.log('  BepInEx/plugins/ValheimPlus.dll (a loose DLL, not a folder) on the GTX box in the same stopped window, and');
   console.log('  do not put valheim_plus.cfg back.');
   console.log('');
   console.log('  Two switches replace it. Both ship OFF, and only the first is in this pack:');

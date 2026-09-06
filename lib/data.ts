@@ -31,7 +31,7 @@
 //     is true of the server's copy and not of a tab that has already been there.
 //     A hard reload (or a fresh tab, or curl) is the only thing that beats it,
 //     which is also why the launch-morning wipe check at docs/LAUNCH-DAY.md
-//     step 20d must be run on a page that was never opened before the wipe —
+//     the closing block of step 20 must be run on a page that was never opened before the wipe —
 //     otherwise it can read "the page did not turn" while the server is fine.
 //   • A WORLD WIPE NEEDS A WARM-UP, AND COUNTING REQUESTS IS THE WRONG CHECK.
 //     `revalidate` pages are prerendered AT BUILD TIME, so whatever the database
@@ -59,7 +59,7 @@
 //
 //     So do not count to two, or to three. Reload until the page itself says the
 //     world is new — no boss felled, an empty ledger — which is what
-//     docs/LAUNCH-DAY.md step 20d asks for, and redeploy if it will not turn.
+//     docs/LAUNCH-DAY.md the closing block of step 20 asks for, and redeploy if it will not turn.
 //
 //     /world lags longest, because it sits behind TWO independent 60 s caches:
 //     the page's own ISR window and getMilestoneAggregates' `unstable_cache`

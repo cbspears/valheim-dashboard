@@ -4,6 +4,31 @@
 -- BASE SCHEMA — EXPORTED FROM PRODUCTION 2026-09-04. DISASTER RECOVERY ONLY.
 -- ============================================================================
 --
+-- ⚠️ ONE KNOWN DIVERGENCE FROM PRODUCTION (found 2026-09-06, T-3 audit; SQL deliberately
+-- left as-is so this file keeps matching the export it came from):
+--
+--   THE EIGHTH BOSS IS NAMED DIFFERENTLY HERE THAN ON PROD.
+--     this file, line ~130:  ('The Bog Witch', 'Deep North', 8)
+--     production:            ('Forsaken VIII', 'Deep North', 8)
+--   The first seven rows match exactly. No later db/*.sql renames row 8, so a rebuild
+--   from db/*.sql in filename order lands on "The Bog Witch" and SILENTLY RENAMES the
+--   boss the whole site, the ingest route and the tests key on: lib/gs-client.ts:403,
+--   app/api/gs-ingest/route.ts:966, scripts/gs-boss.test.mjs:52 and :320 all say
+--   'Forsaken VIII'. `services/discord-bot/scripts/mark-boss.js:29` — the manual
+--   boss-marking tool — prints "The Bog Witch" in its Known-bosses help too, so it
+--   would fail on its own help text.
+--
+--   AFTER ANY REBUILD FROM db/*.sql, run:
+--     update public.bosses set name = 'Forsaken VIII'
+--      where sort_order = 8 and name = 'The Bog Witch';
+--
+--   Deep North is 1.0 content, so row 8 is the one Valheim 1.0 makes reachable. Iron
+--   Gate has not revealed the real name; 'Forsaken VIII' is the placeholder of record
+--   and the copy drift also lives in db/2026-07-06_milestones_rebalance.sql:16/44/47 and
+--   db/2026-08-22_milestones_reseed.sql:50, which still say "the Bog Witch of the Deep
+--   North" in player-facing deed text. Fix the name and the copy in one pass when the
+--   real name lands. Restore notes: docs/OPS-COCKPIT.md §8 and docs/LAUNCH-WIPE.md.
+--
 -- This file is NOT a migration to apply to the live project — every object in it
 -- already exists there. It exists because, until now, the base schema lived ONLY
 -- inside the database: db/*.sql started at 2026-06-24_player_stats_extra_columns

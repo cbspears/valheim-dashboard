@@ -153,6 +153,44 @@ export function createMilestonesAnnouncer({
   let warnedNoWrite = false;
   const gapMs = Number.isFinite(minGapMs) && minGapMs >= 0 ? minGapMs : DEFAULT_MIN_GAP_MS;
 
+  // Deeds THIS PROCESS has already posted. The database row is the truth across
+  // restarts; this set covers the window the row cannot — between the embed
+  // going out and `announced_at` being written. See the note in tick().
+  const announcedHere = new Set();
+  // Deed ids whose failed mark has already been reported once, so the quiet
+  // retry does not become a per-minute error line.
+  const markFailureLogged = new Set();
+
+  /**
+   * Stamp announced_at. `.is('announced_at', null)` keeps it a safe claim: a
+   * concurrent tick (or a second bot) can never double-mark. Returns true when
+   * the write reported no error; never throws.
+   */
+  async function markAnnounced(deed) {
+    let error = null;
+    try {
+      ({ error } = await writeDb
+        .from('milestones')
+        .update({ announced_at: new Date().toISOString() })
+        .eq('id', deed.id)
+        .is('announced_at', null));
+    } catch (e) {
+      error = e;
+    }
+    if (!error) {
+      markFailureLogged.delete(deed.id);
+      return true;
+    }
+    if (!markFailureLogged.has(deed.id)) {
+      markFailureLogged.add(deed.id);
+      log.error?.(
+        `[milestones] mark announced failed for ${deed.id}: ${error.message ?? String(error)} — ` +
+          'already announced in this process; retrying the write quietly',
+      );
+    }
+    return false;
+  }
+
   // Epoch ms of the last deed announcement, persisted across restarts.
   function lastPostAt() {
     const t = Date.parse(state.lastMilestonePostAt ?? '');
@@ -251,6 +289,21 @@ export function createMilestonesAnnouncer({
     const deed = pending?.[0];
     if (!deed) return 0;
 
+    // ALREADY ANNOUNCED BY THIS PROCESS (T-3 audit, bot-1).
+    //
+    // The embed and the in-game voice line fire before `announced_at` can be
+    // written, and that write can fail (a permission error, a dropped
+    // connection). It used to be logged and forgotten: the row still matched the
+    // pending filter, so the SAME deed announced again on the next tick — one
+    // duplicate embed plus one duplicate center-screen voice line, for every
+    // player online, every MILESTONE_MIN_GAP_MS, until the write happened to
+    // succeed. The set is the memory the row cannot provide until it is stamped.
+    // Retry the mark quietly here and announce nothing.
+    if (announcedHere.has(deed.id)) {
+      await markAnnounced(deed);
+      return 0;
+    }
+
     // Progress toward the nearest unachieved deed (best-effort; never blocks).
     let next = null;
     try {
@@ -264,6 +317,10 @@ export function createMilestonesAnnouncer({
     const line = renderLine(deed.line, deed.achieved_value);
 
     await post(channel, buildEmbed(deed, next, line));
+    // The embed is out. From this line on the deed counts as announced whatever
+    // the database write below does — a post that happened cannot be unhappened,
+    // and repeating it is worse than losing the record of it.
+    announcedHere.add(deed.id);
 
     // Eilif speaks the same ceremonial line center-screen, with the deed's
     // equivalence tacked on when it fits. Exempt from the voice engine's
@@ -283,13 +340,10 @@ export function createMilestonesAnnouncer({
       log.error?.(`[milestones] voice enqueue failed for ${deed.id}: ${e.message}`);
     }
 
-    // Mark announced (guarded so a concurrent tick can't double-post).
-    const { error: upErr } = await writeDb
-      .from('milestones')
-      .update({ announced_at: new Date().toISOString() })
-      .eq('id', deed.id)
-      .is('announced_at', null);
-    if (upErr) log.error?.(`[milestones] mark announced failed for ${deed.id}: ${upErr.message}`);
+    // Mark announced. A failure here is no longer load-bearing: `announcedHere`
+    // already holds this deed, so the next tick retries the write instead of the
+    // announcement.
+    await markAnnounced(deed);
 
     state.lastMilestonePostAt = new Date().toISOString();
     await saveState();

@@ -483,8 +483,14 @@ dry first; it is a dry run unless `--apply` is passed.
 
 All four are BepInEx 5 plugins built from this repo, and **all four need a recompile for
 Valheim 1.0**. Each has a `BUILD.md` carrying the launch-day sequence: confirm Steam is on
-1.0, md5-compare the box's `assembly_valheim.dll`, rebuild, stop the server, upload,
-start, and only then re-mint the pack.
+1.0, confirm the **box** is on the same build by reading its `Valheim version:` line out of
+`console.log` (`scripts/verify-restart.sh` step ⓪), rebuild, stop the server, upload, start,
+and only then re-mint the pack. **Corrected 2026-09-06:** that step used to say
+"md5-compare the box's `assembly_valheim.dll`" against the local client's. It can never
+pass — the dedicated-server and client assemblies are different compilations of the same
+game (measured: 2,119,680 B vs 2,126,848 B on identical `l-0.221.12`, and only the server
+one carries `SetMaxPlayerCount` / `SteamGameServer`) — so it produced a guaranteed false
+STOP. `docs/LAUNCH-DAY.md` step 1 never used it and is correct as written.
 
 | Plugin | Side | Repo version | GUID | What it hooks |
 |---|---|---|---|---|

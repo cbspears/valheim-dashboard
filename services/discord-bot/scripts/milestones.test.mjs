@@ -28,10 +28,12 @@ function fakeClient(handler) {
   };
 }
 
-function harness({ milestones = [], state = {}, minGapMs, readError = null } = {}) {
+function harness({ milestones = [], state = {}, minGapMs, readError = null, updateError = null, log = silentLog } = {}) {
+  let writeFailure = updateError; // flipped by healWrites() to simulate recovery
   const rows = milestones.map((m) => ({ ...m }));
   const queued = [];   // voice_lines inserts
   const posts = [];    // discord posts
+  const updates = [];  // every attempted announced_at write
   const handler = (table, ops) => {
     const insert = ops.find((o) => o.op === 'insert');
     if (insert) {
@@ -41,6 +43,10 @@ function harness({ milestones = [], state = {}, minGapMs, readError = null } = {
     const update = ops.find((o) => o.op === 'update');
     if (update) {
       const eq = ops.find((o) => o.op === 'eq');
+      updates.push({ table, id: eq?.args?.[1] });
+      // A write client that refuses the mark (permission denied, a dropped
+      // connection): the row is NOT stamped and the caller gets an error.
+      if (writeFailure && table === 'milestones') return { data: null, error: writeFailure };
       const row = rows.find((r) => r.id === eq?.args?.[1]);
       if (row) Object.assign(row, update.args[0]);
       return { data: null, error: null };
@@ -66,10 +72,10 @@ function harness({ milestones = [], state = {}, minGapMs, readError = null } = {
     channel: 'valheim',
     state,
     saveState: async () => { state._saves = (state._saves || 0) + 1; },
-    log: silentLog,
+    log,
     ...(minGapMs === undefined ? {} : { minGapMs }),
   });
-  return { announcer, rows, queued, posts, state };
+  return { announcer, rows, queued, posts, state, updates, healWrites: () => { writeFailure = null; } };
 }
 
 const DEEDS = [
@@ -243,6 +249,61 @@ const DEEDS = [
     `no em-dash in the deed embed or its voice line, got: ${JSON.stringify(visible.filter((s) => String(s).includes('—')))}`);
   ok(embed.fields.some((f) => f.name === 'Next deed' && /\(\d+%\)$/.test(f.value)),
     `the next-deed field reads "Title (nn%)", got: ${JSON.stringify(embed.fields)}`);
+}
+
+// ── 9. A FAILED announced_at write must not re-announce the deed ────────
+// T-3 audit (bot-1): the embed and the voice line fire before the row can be
+// marked. When the mark failed it was logged and forgotten, the deed still
+// matched the pending filter, and the live bot (MILESTONES_INTERVAL_MS=60000,
+// 60 s gap) re-posted the embed AND re-spoke the center-screen line once a
+// minute, for every player online, until the write happened to succeed.
+{
+  const errors = [];
+  const h = harness({
+    milestones: [DEEDS[0]],
+    minGapMs: 0,
+    updateError: { code: '42501', message: 'permission denied for table milestones' },
+    log: { info() {}, warn() {}, error: (m) => errors.push(String(m)) },
+  });
+
+  const n1 = await h.announcer.tick();
+  ok(n1 === 1 && h.posts.length === 1 && h.queued.length === 1,
+    'the deed is announced once: embed + voice line');
+  ok(h.rows[0].announced_at == null, 'the mark did not land (the write client refused it)');
+
+  const n2 = await h.announcer.tick();
+  const n3 = await h.announcer.tick();
+  ok(n2 === 0 && n3 === 0, `later ticks announce nothing, got ${n2} and ${n3}`);
+  ok(h.posts.length === 1, `still ONE embed after three ticks, got ${h.posts.length}`);
+  ok(h.queued.length === 1, `still ONE in-game voice line after three ticks, got ${h.queued.length}`);
+
+  // The write is retried on every tick, quietly.
+  ok(h.updates.filter((u) => u.table === 'milestones' && u.id === 'run-marathon').length === 3,
+    `the announced_at write is retried each tick, got ${h.updates.length}`);
+  ok(errors.length === 1, `the failure is logged ONCE, not once per tick, got ${errors.length}`);
+  ok(errors[0].includes('run-marathon') && errors[0].includes('permission denied'),
+    `the one log line names the deed and the cause, got: ${errors[0]}`);
+}
+
+// ── 10. When the write recovers, the mark lands and the queue moves on ──
+{
+  const h = harness({
+    milestones: DEEDS,
+    minGapMs: 0,
+    updateError: { code: '42501', message: 'permission denied for table milestones' },
+  });
+  await h.announcer.tick();
+  ok(h.posts.length === 1 && h.rows[0].announced_at == null, 'first deed announced, mark refused');
+
+  h.healWrites();
+  const n = await h.announcer.tick();
+  ok(n === 0 && h.posts.length === 1, 'the recovery tick retries the WRITE, it does not re-announce');
+  ok(h.rows[0].announced_at != null, 'the retried mark lands on the first deed');
+
+  const n2 = await h.announcer.tick();
+  ok(n2 === 1 && h.posts.length === 2 && h.posts[1].p.embeds[0].title.includes('Crossing the Skagerrak'),
+    'with the head deed marked, the queue moves on to the next one');
+  ok(h.rows.every((r) => r.announced_at != null), 'both deeds end up marked exactly once');
 }
 
 console.log(`milestones.test: ${passed} assertions passed`);

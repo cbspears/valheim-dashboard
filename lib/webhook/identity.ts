@@ -13,6 +13,51 @@
 // out of; the log lines are what an admin greps for at 2am, so they must not
 // drift.
 
+import { createHash } from 'node:crypto';
+
+/**
+ * A short fingerprint of a Steam id, for a row THE PUBLIC CAN READ.
+ *
+ * WHY (T-3 audit, data-2). A mismatched join annotates its `events` row, and
+ * `events` carries a `public read events` policy: anon holds SELECT on every
+ * column including `metadata`, so
+ * `events?metadata->>identity=eq.steam_mismatch&select=metadata` used to hand
+ * both Steam64 ids to anyone holding the publishable key. That is exactly the
+ * value db/2026-07-11_players_pii_revoke.sql took away from anon on the
+ * `players` table — a real external account id the public site never uses, and
+ * one you can paste straight into steamcommunity.com/profiles/<id>. The launch
+ * wipe re-binds every name from scratch, which is when a mismatch gets likely.
+ *
+ * Twelve hex characters of sha256 is enough to tell two accounts apart in the
+ * cockpit and in a journal line, and it is not a profile id. It is a
+ * CORRELATION HANDLE, not a secret-grade digest: Steam64 ids are a small,
+ * enumerable space, so anyone determined can grind candidates against it. The
+ * operator never needs to — the full ids are in the journal line
+ * (steamMismatchLog) and in players.steam_id, which the ops cockpit reads under
+ * the service role.
+ */
+export function steamIdFingerprint(steamId: string | null | undefined): string | null {
+  if (typeof steamId !== 'string') return null;
+  const trimmed = steamId.trim();
+  if (!trimmed) return null;
+  return createHash('sha256').update(trimmed).digest('hex').slice(0, 12);
+}
+
+/**
+ * The metadata a mismatched join may carry on its (public) `events` row:
+ * the marker plus a fingerprint of each side, never the ids themselves.
+ */
+export function steamMismatchMeta(
+  boundSteamId: string | null | undefined,
+  seenSteamId: string | null | undefined,
+) {
+  return {
+    identity: 'steam_mismatch' as const,
+    boundSteamIdHash: steamIdFingerprint(boundSteamId),
+    seenSteamIdHash: steamIdFingerprint(seenSteamId),
+  };
+}
+
 /** Escape ilike wildcards so a character name is matched literally. */
 export function escapeLikePattern(value: string): string {
   return value.replace(/[%_]/g, (c) => `\\${c}`);

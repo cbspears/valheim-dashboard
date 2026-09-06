@@ -1,6 +1,6 @@
 import { CalendarClock, Repeat, MapPin, Users, ExternalLink } from 'lucide-react';
 import { Badge, EmptyState } from '@/components/ui';
-import { formatEventWhen, eventCountdown } from '@/lib/format';
+import { formatEventWhen, gatheringCountdown } from '@/lib/format';
 import type { UpcomingEvent } from '@/lib/types';
 
 /**
@@ -44,7 +44,7 @@ export function UpcomingEvents({
                 {ev.host && <span className="text-muted"> · hosted by {ev.host}</span>}
               </p>
               <Badge tone="gold" className="shrink-0">
-                {eventCountdown(ev.next_at)}
+                {gatheringCountdown(ev.next_at)}
               </Badge>
             </div>
 

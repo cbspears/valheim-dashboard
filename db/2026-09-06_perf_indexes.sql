@@ -73,13 +73,18 @@ create index if not exists sessions_open_by_character_idx
 --    scan, correctly, and an index there is maintenance cost for nothing.
 
 
--- ── ONE UNKNOWN WORTH SETTLING (not this file's job to fix) ──────────────────
+-- ── THE ONE UNKNOWN — SETTLED 2026-09-06 ────────────────────────────────────
 --
--- `players_character_name_key` (db/2026-07-25_players_unique_name.sql) is the
--- only index this codebase has ever assumed and never recorded applying: that
--- file carries no APPLIED marker and no doc mentions it having been run. Its own
--- prereq ("dedupe players by character_name before applying") means it may have
--- been deliberately deferred during the 07-25 incident cleanup.
+-- `players_character_name_key` (db/2026-07-25_players_unique_name.sql) EXISTS on
+-- production. Checked against the live project on 2026-09-06 (T-3 audit), which is
+-- the query this block asks for below; the 07-25 file now carries an APPLIED marker.
+-- Nothing to do. The rest of this block is kept as the reasoning, and because the same
+-- query is worth re-running after the launch wipe.
+--
+-- (It had been the only index this codebase ever assumed and never recorded applying:
+-- no APPLIED marker, no doc mentioning it, and its own prereq — "dedupe players by
+-- character_name before applying" — left it plausible that it had been deferred during
+-- the 07-25 incident cleanup.)
 --
 -- No code path depends on it as of 2026-09-06 — /api/webhook's `sync` was briefly
 -- written against it with `upsert(..., { onConflict: 'character_name' })`, which
@@ -89,7 +94,7 @@ create index if not exists sessions_open_by_character_idx
 --
 --   select indexname from pg_indexes where tablename = 'players';
 --
--- If `players_character_name_key` is missing, apply the 07-25 file (it is
--- idempotent, and it is what stops a race forking a viking into two rows).
--- Either way, write the answer into the top of that file so the next reader does
--- not have to guess.
+-- It is present as of 2026-09-06 and the answer is written into the top of the 07-25
+-- file. If a future check ever finds it missing, apply that file (it is idempotent, and
+-- it is what stops a race forking a viking into two rows) — after the wipe is the free
+-- moment to do it, because the table is empty and the dedupe prereq is trivially met.

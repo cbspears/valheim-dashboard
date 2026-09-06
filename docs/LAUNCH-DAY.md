@@ -35,12 +35,37 @@ The Thunderstore listing index lags an upload by **40 to 80 minutes** and no scr
 shorten it. Step 16 starts that clock as early as the day allows, which is why the client
 zips are handed over before the pack is minted rather than with it.
 
+### If 1.0 has not shipped by the morning
+
+Every window above except the last two is measured from "1.0 appears on Steam", while the
+15:00 CT go/no-go and the 17:00 GO post are fixed clock times. Adding the documented
+durations, **step 1 to 20e is six to seven hours** once step 16's index lag is counted. So
+the relative chain and the absolute gates only meet if Steam flips early enough, and there
+is no rule anywhere for what to do when it does not. Decide the cutoffs **now**, not at
+10:30 with the crew watching:
+
+| Steam still shows 0.221.12 at… | Then |
+|---|---|
+| **09:00 CT** | GO-A is already tight. Say so in `#valheim`, keep going, and treat 11:00 as the real gate. |
+| **11:00 CT** | **GO-A is arithmetically impossible** — the index lag alone runs past 17:00. Declare **vanilla night** now rather than at 15:00, so the crew gets six hours of notice instead of two. The box stays on 0.221.12, the wipe and the world and the Casual tier all still happen, and the pack is not re-minted. |
+| **15:00 CT** | Step 17's normal go/no-go, with vanilla night and slip-to-Thursday both still on the table. |
+
+**Charlie owns these two numbers.** They cost nothing to set today and they are the only
+thing standing between "1.0 is late" and an afternoon that drifts into a decision made at
+17:15.
+
 ---
 
 ## Hold rules — stop at any of these
 
-- Any **FAIL** from `launch-preflight.mjs` for the phase you are in, except the two
-  known-spurious ones named in step 20.
+- Any **FAIL** from `launch-preflight.mjs` for the phase you are in, except the **three**
+  known-spurious ones: *world day zeroed by the wipe* and *unit `eilif-*` stopped* (both
+  named in step 20c) and **port 3000 open** (steps 15 and 20e). Port 3000 is a **known
+  exposure by decision** — Charlie skipped the GTX ticket on 2026-09-05 — and is not a hold.
+  `launch-preflight.mjs` now grades it **WARN** for that reason (changed 2026-09-06, another
+  track's edit); if you are running an older copy it prints `FAIL port 3000 closed` and
+  drags the red **"HOLD. Do not advance the cutover"** banner with it on an otherwise
+  perfect night. Read that banner against this list, not the other way round.
 - The world copy or the Supabase dump did not finish. There is no undo and no backups.
 - `console.log` does not say `DeathPenalty->casual`. Everyone drops their gear on every
   death.
@@ -102,8 +127,10 @@ Facts as of 2026-09-05, verified by execution, that the morning assumes:
 - In the repo, built for the morning: Companion **0.3.3** (carries `[ServerFallback]`),
   Boards 0.2.0, EilifPaths **1.5.0** (carries `[VPlusFallback]`), Client **0.3.3** (bumped
   2026-09-05 evening: the hardening pass changed the DLL, and Thunderstore's 0.3.2 is immutable).
-- On Thunderstore: `Eilif-EilifCompanionClient-0.3.2` is **live** (still works; 0.3.3 only
-  changes the startup health line). `plugins/thunderstore/EilifCompanionClient-0.3.3.zip` and
+- On Thunderstore: `Eilif-EilifCompanionClient-0.3.2` is **live** (still works; 0.3.3 adds a
+  startup health line **and** wraps `Update()` in a rate-limited try/catch — see step 16,
+  where the pin-0.3.2-or-upload-0.3.3 decision is written out).
+  `plugins/thunderstore/EilifCompanionClient-0.3.3.zip` and
   `plugins/thunderstore/EilifPaths-1.5.0.zip` are staged and ready for Charlie to upload.
   `Eilif-EilifPaths-1.5.0` is **not uploaded** — the package API 404s it. Until Charlie
   uploads it, `--paths 1.5.0` cannot be minted, and `--fallback on` is refused without
@@ -318,15 +345,52 @@ node scripts/launch-wipe.mjs                  # dry run is the default; reads on
 are about to lose. Passing the launch world name here fetches nothing: `Eilif` is not on
 the box yet.
 
-The third copy is the one no script takes: **the whole server directory**, over SFTP,
-before the panel Steam Update at step 8. `pull-world.sh` takes the `.db`/`.fwl` pair and
-`db-snapshot.mjs` takes the database, but neither preserves `BepInEx/` (every plugin and
-cfg, including the V+ install and the working 0.221.12 builds), `WebMap/map_data/`,
-`vplus-data/`, or the panel's own `Backups/`. The Steam Update is one way.
+The third copy is the one no script takes: **the nest**, over SFTP, before the panel Steam
+Update at step 8. `pull-world.sh` takes the `.db`/`.fwl` pair and `db-snapshot.mjs` takes
+the database, but neither preserves `BepInEx/` (every plugin and cfg, including the V+
+install and the working 0.221.12 builds, and `vplus-data/` — the T-3 audit's read-only
+listing found that one **under** `BepInEx/`, which the recursive `get` below covers either
+way), `BepInEx/plugins/WebMap/map_data/`, or the panel's own `Backups/`. The Steam Update is one
+way, and the rollbacks at steps 9, 10, 12 and 14 all name "the step 6 nest copy".
+
+**There is no script for this one, so here is the command.** Same credential pattern as
+`pull-world.sh` (the password is read out of the poller `.env` and never echoed):
+
+```bash
+NEST=~/valheim-nest-backups/$(date +%Y%m%d-%H%M); mkdir -p "$NEST"
+export SSHPASS="$(sed -n 's/^SFTP_PASSWORD=//p' services/log-poller/.env | sed 's/^["'"'"']//; s/["'"'"']$//')"
+sshpass -e sftp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -P 8822 \
+  charless3@191.101.30.229 <<EOF
+ls -la 191.101.30.229_6028/
+ls -la 191.101.30.229_6028/Backups/
+get -r 191.101.30.229_6028/BepInEx      $NEST/BepInEx
+get -r 191.101.30.229_6028/worlds_local $NEST/worlds_local
+EOF
+du -sh "$NEST"/*
+```
+
+The heredoc is **unquoted** on purpose so the shell expands `$NEST` before sftp sees it —
+sftp's batch mode does no variable expansion of its own. This is the same shape
+`scripts/pull-world.sh` uses. Add
+`get -r 191.101.30.229_6028/Backups $NEST/Backups` if the first `ls` shows the panel's
+`.7z` archives are worth the minutes.
+
+**Size and time, measured rather than guessed.** `worlds_local` alone was **78 MB** on
+2026-09-05 (sum the sizes in the listing `verify-restart.sh` already prints: two `Dedicated`
+worlds at ~18.5 MB each plus six `EilifRehearsal` copies at 4.4 MB). `BepInEx/` adds roughly
+25 MB — the V+ DLL 4.6 MB, `plugins/MMHOOK/` about 6.5 MB, and a 4.5 MB `map.png` per world
+under `WebMap/map_data/`. `Backups/` is the unknown; size it with the `ls` above before
+committing to it. The link runs about **0.8 MB/s** (the 6-hourly world backup moves 4.4 MB
+in ~5.5 s including the handshake), so roughly **100 MB in two to three minutes** — easily
+inside the +90 minute window. **Do not `get -r` the whole nest**: that pulls the Valheim
+server install itself, hundreds of megabytes that the Steam Update replaces anyway and that
+Steam can re-download, and it would put this step into the tens of minutes.
 
 **Look for:** a new pair under `~/valheim-world-backups/`, a new dump under
-`~/valheim-db-backups/` with a `manifest.json`, an off-box copy of
-`191.101.30.229_6028/` whose `BepInEx/plugins/` listing you have actually looked at, and
+`~/valheim-db-backups/` with a `manifest.json`, and in the nest copy specifically
+**both `BepInEx/plugins/ValheimPlus.dll` and `BepInEx/config/valheim_plus.cfg` present**
+(that is the pair step 10's rollback restores, and looking for it now is also how you learn
+before the point of no return that V+ is a loose file and not a folder — see step 10). Then
 the preview's row counts pasted into the tracker.
 
 **If it fails:** hold here. Supabase is on the Free plan with no backups and no PITR. The
@@ -413,22 +477,32 @@ a 1.0 server, so in practice this rollback only exists as part of the Thursday b
 
 ## Step 10 — Remove ValheimPlus · **CHARLIE ONLY**
 
-If V+ still has no 1.0 build: delete `BepInEx/plugins/ValheimPlus/` and leave
-`valheim_plus.cfg` out. **Not optional once the pack drops V+** — `enforceMod = true`
-makes the two a matched pair, and a box still running V+ refuses every client the new pack
-produces.
+If V+ still has no 1.0 build: delete the **file** `BepInEx/plugins/ValheimPlus.dll` and
+leave `BepInEx/config/valheim_plus.cfg` out. **Not optional once the pack drops V+** —
+`enforceMod = true` makes the two a matched pair, and a box still running V+ refuses every
+client the new pack produces.
 
-**Look for:** the plugins folder no longer contains ValheimPlus, and step 13's first
-`Loading [...]` list does not mention it.
+> **It is a loose DLL, not a directory.** There is no `BepInEx/plugins/ValheimPlus/` on the
+> box and never has been; V+ prints its own install path on every boot and it reads
+> `…\BepInEx\plugins\ValheimPlus.dll` (captured 2026-09-01 in the boot log
+> `verify-restart.sh` pulls, re-read 2026-09-06). Its config is a loose file too:
+> `…\BepInEx\config\valheim_plus.cfg`. `docs/PACK.md` rule 6 said "directory" as well and
+> was corrected in the same pass; **`scripts/mint-pack.mjs:800` still prints the folder form
+> in its checklist banner** and is another track's file to fix.
+
+**Look for:** `BepInEx/plugins/` no longer holds a `ValheimPlus.dll` (the other entries
+there are directories — Advize-PlantEverything, ArgusMagnus-ServersideQoL, AzuCraftyBoxes,
+EilifBoards, EilifCompanion, GsValheimStatsEmitter, MMHOOK, WebMap — and none of them is
+V+), and step 13's first `Loading [...]` list does not mention `Valheim Plus`.
 
 **If it fails, i.e. V+ ships a 1.0 build after all:** keep V+, and drop `--no-vplus` and
 `--fallback on` from every mint command at step 18 — use them together or neither. Skip
 step 11 as well: V+ keeps the cap, and the Companion refuses to apply `[ServerFallback]`
 while V+ is present.
 
-**Rollback:** restore the folder from the step 6 nest copy. The V+ DLL that comes back is
-a 0.221.10-targeted build that will not load on 1.0, so this too is really the Thursday
-branch.
+**Rollback:** restore `ValheimPlus.dll` (and `valheim_plus.cfg`) from the step 6 nest copy.
+The V+ DLL that comes back is a 0.221.10-targeted build that will not load on 1.0, so this
+too is really the Thursday branch.
 
 > **V+ `[Chat]`:** while V+ is installed, `[Chat] enabled = true` must stay on — it is the
 > server-wide `/s` shout feature (shoutDistance 1e6). **Never disable it.** On a
@@ -499,7 +573,11 @@ Delete, in `worlds_local/`:
 and elsewhere on the host:
 
 - `BepInEx/plugins/WebMap/map_data/EilifRehearsal/` (and `…/Dedicated/`)
-- `vplus-data/EilifRehearsal_mapSync.dat`
+- `vplus-data/EilifRehearsal_mapSync.dat` — **look under `BepInEx/` for this one.** The T-3
+  audit's read-only SFTP listing found it at `BepInEx/vplus-data/EilifRehearsal_mapSync.dat`
+  (92 KB) and found no `vplus-data` at the nest root, so the bare relative path this list
+  used to give sends you to a directory that is not there. `docs/LAUNCH-WIPE.md` (step 5's
+  sweep list) and `scripts/launch-wipe.mjs`'s printed checklist carry the same bare path.
 
 Then, in the same window:
 
@@ -552,14 +630,56 @@ third-party and none are recompiled by us. Any of them can be the one that throw
 plugin that throws during load can take the world load with it, so removing it beats
 debugging it today.
 
-**One of them is not free to pull.** **AzuCraftyBoxes is also a pack pin**, and its
-version has to move in lockstep with the server's copy. Pulling it takes the Alt+O unbind
-with it, which is the exact problem pack v11 was minted to fix, and it means editing
-`MODS`, the pack templates and `config/mods.ts` by hand under time pressure — only V+ has
-a drop flag. **If Azu is the mod that will not load, treat that as a vanilla-night
-trigger, not a quick fix.**
+**Three of them are not free to pull.** Know the cost before you delete anything:
+
+| Mod | What pulling it costs |
+|---|---|
+| **AzuCraftyBoxes** | It is also a **pack pin**, and its version has to move in lockstep with the server's copy. Pulling it takes the Alt+O unbind with it — the exact problem pack v11 was minted to fix — and means editing `MODS`, the pack templates and `config/mods.ts` by hand under time pressure. Only V+ has a drop flag. **Treat this as a vanilla-night trigger, not a quick fix.** |
+| **GS Emitter** (`GsValheimStatsEmitter`) | It is the **sole** producer of the authoritative online roster, the world day, and the Valheim global keys that drive boss detection. Pull it and `server_status` is never written again: `/api/status`, the Hall, the online roster, the boss timeline and **every Great Deed** go dark, and step 20e's `--phase post-start` grades "world day ≥ 1" against a row nothing writes, so that gate can never pass. **Also a vanilla-night trigger, not a quick fix.** |
+| **WebMap** | It is the sole producer of `BepInEx/plugins/WebMap/map_data/<World>/`. Pull it and `/map` is dark, and **20d step 3's gate ("only after `map_data/Eilif/` exists … and `/api/status` reports the new world's day") can never be met** — skip 20d step 3 entirely rather than waiting on it, leave `eilif-map-snapshot` stopped, and say in the GO post that there is no map tonight. |
+
+PlantEverything and ServersideQoL are the two that really are free to pull.
 
 **Look for:** a clean `Loading [...]` list and a world that finishes loading.
+
+> ### If there are no `Loading [...]` lines at all
+>
+> One failing plugin shows up as one named failure. **No plugin lines at all** is a
+> different fault: a **preload patcher** that throws aborts the chainloader before any
+> plugin is reached. The box has one — `BepInEx/patchers/BepInEx.MonoMod.HookGenPatcher/`,
+> which ships with the Grantapher ValheimPlus package, so **step 10 leaves it behind as an
+> orphan** — plus its generated output in `BepInEx/plugins/MMHOOK/` (eight generated DLLs, the
+> largest of them `MMHOOK_assembly_valheim.dll`) and the `BepInEx/cache/*.dat` caches.
+> **All of that was generated against the 0.221.12 `assembly_valheim.dll` that step 8
+> replaces**, and the boot log's own line is `HookGenPatcher: Already ran for this version,
+> reusing that file` — it will happily reuse the stale set.
+>
+> The fix, in the same stopped window: delete `BepInEx/plugins/MMHOOK/` and
+> `BepInEx/cache/*.dat` (both regenerate on the next boot, which takes longer than usual —
+> that is expected), and on a `--no-vplus` night delete
+> `BepInEx/patchers/BepInEx.MonoMod.HookGenPatcher/` along with V+, since nothing else on
+> the box needs MMHOOK. Cheap to read now, expensive to work out at 12:30.
+
+> ### If BepInEx itself moved
+>
+> `BepInExPack_Valheim` is pinned at **5.4.2333** (published 2025-08-29, over a year old at
+> launch) in **nine** places (plus the Mac list on `/get-started`), and no script and no
+> other doc mentions the `--bepinex` flag that `mint-pack.mjs` exposes. If denikson ships a 1.0 pack, bump them in this order:
+>
+> 1. `plugins/*/refresh-libs.sh` — `BEPINEX_VER="5.4.2333"`, **four copies**, one per plugin.
+> 2. Re-run step 2 (`rebuild-plugins.sh`) so the plugins compile against the new
+>    `BepInEx.dll` / `0Harmony.dll`.
+> 3. `plugins/thunderstore/EilifPaths-1.5.0/manifest.json` and
+>    `plugins/thunderstore/EilifCompanionClient-<ver>/manifest.json` — the `dependencies`
+>    pin — **before** Charlie zips at step 16.
+> 4. `scripts/mint-pack.mjs` `MODS` baseline, `scripts/launch-preflight.mjs`
+>    `PACK_V12_PINS`, and `config/mods.ts` — **before** the mint at step 18. The Mac
+>    "install these seven" list in `app/get-started/page.tsx` names the loader version too;
+>    step 19's grep catches it.
+>
+> `mint-pack.mjs --bepinex <ver>` covers the pack side; the other eight are by hand. A
+> client whose package manifest pins the **old** loader while the pack pins the **new** one
+> installs both, which is its own mess — which is why item 3 has to happen before the zip.
 
 **If it fails:** repeat, or take the vanilla-night branch.
 
@@ -579,8 +699,16 @@ bash scripts/verify-restart.sh Eilif
 world name and the script runs anyway against the live box.)
 
 **Look for:** the game version line, one `Loading [...]` line per surviving plugin with its
-version, `panel tier: casual`, `[EILIF_KEY]`, `ingest status: 200`, and the port-3000
-check.
+version, `panel tier: casual`, `ingest status: 200`, the port-3000 check, and — the one
+worth spelling out — the `[EILIF_KEY] runtime world keys (N): … deathkeepequip …` line.
+
+**`plugin enforcement: not seen this boot` is the healthy reading, not a failure.** The
+Companion only logs `[EILIF_KEY] enforced world key: deathkeepequip` when the key was
+**missing** (`if (GetGlobalKeyExact(key)) continue;` — `EilifCompanionPlugin.cs:428`). With
+the panel tier on Casual the game already grants it, so that line correctly never appears,
+on the 9th or any other day. What proves keep-gear is armed is `deathkeepequip` showing up
+in the **runtime world keys** list. That is the durable state the 2026-09-05 tier change
+bought; the enforced line was the fragile one.
 
 **Write the surviving plugin list down.** It is the input to step 18. The count was **8**
 through the rehearsal; on 2026-09-09 it is **7** if ValheimPlus comes off and fewer if a
@@ -612,7 +740,15 @@ and none of them can be built:
 2. `CHANGELOG.md` — same
 3. the manifest **description** and **dependencies**
 
-Fix all three, then zip:
+**Fourth, and it is the last chance:** `EilifPaths-1.5.0/README.md` carries **two em
+dashes** (lines 5 and 27, both inherited verbatim from the published 1.4.0 page), and the
+copy doctrine says player-facing copy carries no em or en dashes. Both are two commas'
+worth of work. `EilifCompanionClient-0.3.3/README.md` and both CHANGELOGs are already
+clean. A published Thunderstore version cannot be replaced, only deprecated — so the
+manifest description, the dashes and the re-zip all happen in one sitting, before the
+upload.
+
+Fix all of it, then zip:
 
 ```bash
 (cd plugins/thunderstore/EilifPaths-1.5.0 && zip -qr ../EilifPaths-1.5.0.zip . -x '*.zip' 'UPLOAD.md')
@@ -624,23 +760,34 @@ evening against 0.221.12), alongside `EilifPaths`, `-1.1.0`, `-1.3.0`, `-1.4.0` 
 re-stages the directory, and only if the 1.0 rebuild changes the DLL — until step 4 has run
 on the 9th, that zip is the **pre-1.0** build.
 
-**One of the three items above is done; the other two are not** (checked 2026-09-06):
+**Two of the three items above are done; one is not** (re-checked 2026-09-06):
 
 | # | Item | State |
 |---|---|---|
-| 1 | `README.md` | **Outstanding.** `diff plugins/thunderstore/EilifPaths-1.4.0/README.md plugins/thunderstore/EilifPaths-1.5.0/README.md` is **empty**: it is still 1.4.0's page, word for word, and it never says `VPlusFallback`. |
+| 1 | `README.md` | **Done** (rewritten 2026-09-05 22:49). It now carries an "If ValheimPlus ever goes missing" section naming `[VPlusFallback]` in player-facing language, and `EilifPaths-1.5.0.zip` was re-zipped at 22:49 from the edited file — the README inside the zip and on disk are the same bytes. Nothing to redo. |
 | 2 | `CHANGELOG.md` | **Done.** It documents `[VPlusFallback]` in full — every setting, and that they all stand down while V+ is loaded. |
-| 3 | manifest **description** | **Outstanding.** The only difference from 1.4.0's `manifest.json` is `version_number`. The description is the unchanged paths/stamina blurb. |
+| 3 | manifest **description** | **Outstanding.** The only difference from `EilifPaths-1.4.0/manifest.json` is `version_number`; the description is still the unchanged paths/stamina blurb and never says `VPlusFallback`. This is the string mod managers show under the package name. |
 
-Thunderstore renders the **README** as the package page, not the CHANGELOG, so as things
-stand the page Charlie publishes says nothing about the fallback at all. Fix items 1 and 3
-**before** the `zip` line — `EilifPaths-1.5.0.zip` was built at 20:08 on 2026-09-05 from
-these exact files and already carries the stale pair, so re-zip after editing. The one-line
-check before you zip:
+Thunderstore renders the **README** as the package page, not the CHANGELOG. The README is
+now right; the **description is not**, and a published version cannot be replaced. Fix item
+3 **before** the `zip` line, then re-zip.
+
+The old one-line gate (`diff` the two READMEs) now passes and no longer covers the gap that
+is still open. Check all three at once instead:
 
 ```bash
-diff plugins/thunderstore/EilifPaths-{1.4.0,1.5.0}/README.md   # must NOT be empty
+diff plugins/thunderstore/EilifPaths-{1.4.0,1.5.0}/README.md      # must NOT be empty (passes today)
+diff <(python3 -c "import json;print(json.load(open('plugins/thunderstore/EilifPaths-1.4.0/manifest.json'))['description'])") \
+     <(python3 -c "import json;print(json.load(open('plugins/thunderstore/EilifPaths-1.5.0/manifest.json'))['description'])")
+                                                                  # must NOT be empty (FAILS today)
+unzip -o plugins/thunderstore/EilifPaths-1.5.0.zip -d /tmp/p150 >/dev/null && \
+  diff -r /tmp/p150 plugins/thunderstore/EilifPaths-1.5.0 -x '*.zip'   # zip matches the directory
 ```
+
+`rebuild-plugins.sh --stage` refreshes the staging **directory** and never re-zips, and
+nothing compares the two — so after step 4 runs on the 9th the directory holds the
+1.0-compiled DLL while the same-named zip still holds the 2026-09-05 pre-1.0 build. The
+third command above is what catches that.
 
 To stage the directory on its own without a full rebuild pass:
 
@@ -651,9 +798,35 @@ bash scripts/rebuild-plugins.sh --only eilif-paths --stage
 An EilifPaths 1.5.0 page that says nothing about `[VPlusFallback]` while the pack ships
 `Enabled = true` is a disclosure gap, not a cosmetic one.
 
-**EilifPaths 1.5.0 is not on Thunderstore today** (verified 2026-09-05: the package API
-404s that version; latest published is 1.4.0). `EilifCompanionClient 0.3.2` **is** live,
-so if the Client DLL did not change in the 1.0 rebuild there is nothing to upload for it.
+### Two uploads, not one — and neither version is published
+
+Re-checked against the Thunderstore package API on **2026-09-06**:
+
+| Package | Published latest | Staged in the repo | Upload needed? |
+|---|---|---|---|
+| `Eilif/EilifPaths` | **1.4.0** (2026-08-24) | **1.5.0** (`plugins/thunderstore/EilifPaths-1.5.0.zip`, 39,072 B) | **REQUIRED.** `--fallback on` is refused without `--paths 1.5.0` or newer, so a `--no-vplus` pack cannot mint at all until this is up. This is the longest pole in the day. |
+| `Eilif/EilifCompanionClient` | **0.3.2** (2026-09-05 22:11 UTC) | **0.3.3** (`plugins/thunderstore/EilifCompanionClient-0.3.3.zip`, 29,676 B) | **Optional — Charlie's call, made before the 9th.** |
+
+**The client decision, stated once.** The repo is at 0.3.3 because the 2026-09-05 hardening
+pass changed the DLL, and 0.3.2 on Thunderstore is immutable. Two workable branches:
+
+- **Pin 0.3.2** (published). `--companion-client 0.3.2` mints today. But
+  `launch-preflight.mjs`'s built-in `PACK_V12_PINS` derives the client pin from the csproj,
+  so it computes **0.3.3** and grades a pin the pack does not contain — **pass `--pins` at
+  20c and 20e** or those gates FAIL on a phantom. You are already passing `--pins` on a
+  `--no-vplus` night for the ValheimPlus entry, so this costs nothing extra.
+- **Upload 0.3.3.** Then `$M` uses 0.3.3 and the gates grade what the pack holds. The two
+  uploads **share one index window**, so putting both up together costs no extra clock —
+  whereas discovering the second upload at 20c costs the full 40 to 80 minutes again with
+  no way to shorten it.
+
+The line that used to sit here — *"0.3.2 is live, so if the Client DLL did not change in
+the 1.0 rebuild there is nothing to upload for it"* — is misleading and was removed: the
+DLL **already** changed, before the 1.0 rebuild. What the 0.3.3 bump actually carries is
+also more than the "startup health line" the facts block claims: it wraps `Update()` in a
+rate-limited try/catch, and under 0.3.2 a throw there lands in Unity's loop, logs every
+frame in the player's log and stops that player's map reports permanently. On a
+recompile day that is the argument **for** uploading 0.3.3, not against it.
 
 > ### If EilifPaths 1.5.0 was already published before the 9th
 >
@@ -818,11 +991,32 @@ Then the site config:
   only an edit if the cap changed).
 - `config/mods.ts` — every version that moved, **and delete the rows for mods this pack no
   longer ships**, or `/mods` advertises a mod nobody has.
-- `app/get-started/page.tsx` — **two** edits, not one: `CONFIG_BUNDLE_URL` at the new
-  bundle file, **and** the Mac path's hard-coded "install these seven" mod list a dozen
-  lines above it. That list names ValheimPlus by hand, so a Mac player who follows the page
-  installs V+ and is then refused by the box — `enforceMod` working exactly as designed, on
-  the one night nobody will read it that way. Drop the name and the word "seven" with it.
+- `app/get-started/page.tsx` — **three** edits, not two. Do not trust this count either:
+  **grep the file for every pinned version number before you deploy.**
+
+  ```bash
+  grep -n "CONFIG_BUNDLE_URL\|Eilif Paths 1\.\|GsValheimStatsClient 0\.\|ValheimPlus (Grantapher)" app/get-started/page.tsx
+  ```
+
+  1. `CONFIG_BUNDLE_URL` (line 66) at the new bundle file.
+  2. The Mac path's hard-coded "install these seven" mod list (lines 427-432, under the
+     `CUTOVER ANCHOR` comment at line 409). That list names ValheimPlus by hand, so a Mac
+     player who follows the page installs V+ and is then refused by the box — `enforceMod`
+     working exactly as designed, on the one night nobody will read it that way. Drop the
+     name and the word "seven" with it.
+  3. **The update card's self-check sentence, ~180 lines below the anchor** (lines 609-610,
+     paragraph 605-611): *"Installed: Eilif Paths 1.4.0 and GsValheimStatsClient 0.2.12
+     means you are on {MODPACK_VERSION_LABEL}."* `MODPACK_VERSION_LABEL` moves at this step
+     and those two numbers do not, so the moment the label reads `Pack v12 · Sep 9` the page
+     tells a viking still on **v11** that they are current — on the one night an old pack
+     gets them kicked by the `enforceMod` version check. **Eilif Paths becomes 1.5.0 in v12;
+     GsValheimStatsClient stays 0.2.12.** Either update the number or, better, drop both
+     numbers and point at `/mods`, which is config-driven and updates itself.
+
+  The `CUTOVER ANCHOR` comment in the file lists only the first two, and so do
+  `docs/PACK.md` step 3b and `mint-pack.mjs`'s printed checklist. Three procedural sources,
+  one blind spot; the grep above is the only check that survives the next added pin.
+
   Leave the old zip in place until the new build is live so no link 404s mid-deploy.
 - **Vercel** — `GS_EXPECTED_WORLD` = `Eilif`.
 
@@ -942,6 +1136,12 @@ a wipe that happens *before* the panel Start, and its own banner says so
 | `world day zeroed by the wipe` | the wipe zeroes `server_status.world_day`, but the Emitter re-reports the live day within about a minute. Run this within 60 s of 20a to see it PASS; after that, read it as expected. |
 | unit `eilif-*` stopped | still correct at this point — the services start in 20d. If you run post-wipe *after* 20d, all three flip to FAIL for the same reason. |
 
+**Port 3000 is the third expected FAIL** and is not in that table because it FAILs in every
+phase, not just this one. It is a known exposure by decision (see the Hold rules at the top);
+`launch-preflight.mjs` grades it WARN since 2026-09-06, but an older copy prints
+`FAIL port 3000 closed` and the red HOLD banner with it. Three expected complaints on a
+perfect night, then, not two.
+
 Everything else is a real gate: zero rows, local state files gone, the launch world in
 `worlds_local`, the poller's `MAP_REMOTE_DIR` and the bot `.env` reverted, and the pack
 pins live on Thunderstore.
@@ -989,8 +1189,32 @@ Add `--posture GO-B` on a vanilla night and `--pins` whenever the pack dropped a
 
 Then open `/admin/ops`.
 
-**Look for:** all PASS except the known port-3000 exposure, and fresh heartbeats in the
-cockpit for the poller, the bot, the map snapshot and both plugins.
+**Look for:** all PASS except the known port-3000 exposure (a WARN, not a hold — see the
+Hold rules at the top), and fresh heartbeats in the cockpit for **the poller, the bot and
+the map snapshot**.
+
+**Do not wait for both plugin heartbeats here — one of them cannot report yet.**
+`companion-voice` has **never** reported a heartbeat in its life (every watchdog run says
+`"neverReported":["companion-voice"]`, state `unknown`, and `lib/ops/watchdog.ts` sets
+`alertsOnSilence: false` on that target deliberately, under the quiet-hall rule). The reason
+is structural: the Companion's `PumpVoicePoll` returns early unless the server is ready
+**and** at least one peer is connected, so the poll that records the heartbeat only happens
+while somebody is in the world — and 20e runs **before** the GO post, with nobody on. So at
+20e the honest expectation is:
+
+| Cockpit component | Expected at 20e |
+|---|---|
+| `log-poller`, `discord-bot`, `map-snapshot` | **healthy**, fresh |
+| `boards-plugin` ("Boards signs") | **healthy.** It polls `/api/boards` on a timer whether or not anyone is playing, so silence here IS a real signal. |
+| `game-server` | **healthy** once the Emitter has posted (`[gs] ingest status: 200` at step 15) |
+| `companion-voice` ("In-game voice") | **`unknown` — correct, not a fault.** It polls `/api/voice` only while players are online, so it turns healthy within a minute of the first join and not before. |
+
+**Move the real voice check into step 22**, where a player is actually online. The
+consequence of not doing that is worth naming: if the 1.0 recompile broke the voice half,
+the cockpit shows the same `unknown` it shows tonight and the watchdog is designed never to
+page about it. Also worth remembering while reading it — `VOICE_API_TOKEN` lives in **three**
+places (the box cfg, Vercel, `.voice-token`), and rotating two of the three produces exactly
+this silent-and-unalerted shape.
 
 **Also expect one watchdog all-clear, and read the duration in it as fiction.** `ops_alerts`
 is on the wipe's deliberate do-not-touch list next to `discord_events` and `ops_heartbeats`
@@ -1004,7 +1228,37 @@ GitHub Actions tab, and confirm the next scheduled run is green before anyone go
 
 ---
 
-**Prerendered pages after the wipe.** `/world`, `/events`, `/gallery`, `/oath`, `/map` and `/boss/<slug>` are ISR pages (revalidate 60 s) since the 2026-09-05 perf pass, and the deploy in step 19 prerenders them against the PRE-wipe database. The first request after the 60 s window is served the **stale** copy and only triggers the regeneration behind it — the **second** request is the fresh one, which is why the procedure here opens each page twice. So before the launch post: open `/world` and `/map` once, wait a minute, open them again, and read the SECOND render; confirm no boss is marked felled and the map shows the new world. If a page still shows the old world after two minutes, redeploy (`vercel deploy --prod --yes --scope charlie-9292s-projects`) rather than waiting.
+**Prerendered pages after the wipe.** `/world`, `/events`, `/gallery`, `/oath`, `/map` and
+the eight `/boss/<slug>` pages are ISR pages (revalidate 60 s) since the 2026-09-05 perf
+pass, and the deploy at step 19 prerenders them against the **pre-wipe** database. Nothing
+in this repo invalidates them, so they have to be walked until they turn.
+
+**Do not count requests.** The first request past the 60 s window is served the stale copy
+and only kicks off the rebuild behind it, but how many more it takes is a property of the
+machine, not of the code. Both measurements, so nobody over-waits or under-waits from one
+anecdote (`lib/data.ts` carries them too): on **production** one stale answer then fresh;
+on a **cold local `next start`** two stale answers and only the third request carried the
+new number. So reload until the page itself says the world is new. Budget three requests
+past the window before you start worrying, and redeploy
+(`vercel deploy --prod --yes --scope charlie-9292s-projects`) rather than waiting if it
+will not turn after two minutes.
+
+**Read it in a tab that was never opened before the wipe, or with `curl`.** Making a page
+static also turns on Next's client Router Cache: production answers every one of these
+routes with `x-nextjs-stale-time: 30` (measured again 2026-09-06; it was Next's default 300
+until `next.config.ts` set `experimental.staleTimes.static = 30`). A tab that has already
+been to `/world` is served the RSC payload it already holds for up to 30 s without asking
+the server, so an already-open tab can read "the page did not turn" while the server is
+fine. A hard reload, a fresh tab or `curl` beats it.
+
+**Grade `/world` on its Great Deeds numbers, not on its boss row.** `/world` lags longest
+because it sits behind **two** independent 60 s caches — the page's own ISR window and
+`getMilestoneAggregates`' `unstable_cache` — so the ledger can trail the wipe by about two
+minutes after the boss timeline has already turned over. The boss row is the surface that
+turns **first**, which makes it the wrong thing to judge the wipe on. Look for the Earned
+Deeds card reading **"Nothing earned yet"** with "The first deed is still ahead" under it,
+and all **38** deeds sitting at zero in the upcoming list. Only then read `/map` for the new
+world.
 
 ## Step 21 — Charlie's own last look · **CHARLIE ONLY**
 
@@ -1038,8 +1292,12 @@ the oath ceremony (**oaths must be shouted**: `/s /oath <your words>` — an unk
 `/command` is swallowed client-side), then the first tree.
 
 **Look for:** someone other than you has connected; `/admin/ops` shows fresh heartbeats for
-the poller, the bot, the map snapshot and both plugins; armor and held weapon survive the
-test death; and the oath reaches `/oath` and `#valheim` within a minute.
+the poller, the bot and the map snapshot; **the cockpit's In-game voice component turns
+healthy within a minute of the first join** (it reads `unknown` until then and that is
+correct — see 20e); armor and held weapon survive the test death; and the oath reaches
+`/oath` and `#valheim` within a minute. The oath test exercises the same plugin as the
+voice, so if the oath lands and the voice component stays `unknown`, the voice half is the
+thing to look at.
 
 **If the test death drops gear:** the tier is not Casual. **Stop before anyone builds** and
 go back to step 13.
@@ -1100,6 +1358,32 @@ Five more were found on the review pass and settled the same way:
 | 25 | **The watchdog is not mentioned anywhere in the sequence** | A carried the finding, no sequence carried the fix | Pings every 15 min from GitHub through a planned outage that runs from step 5 to 20d. Named at step 5 (what alerts, how often, why not to mute it) and at 20e (`ops_alerts` survives the wipe, so the all-clear's duration is measured from before the cutover). |
 | 26 | **`EilifPaths 1.5.0` cannot be re-uploaded once published** | none of them | The csproj is pinned at 1.5.0 and SourceLink restamps on every HEAD move, so an early upload and the morning's rebuild are different DLLs under one immutable version. Branch added at step 16: bump to **1.5.1** and pin `--paths 1.5.1`. |
 | 27 | **`docs/OPS-COCKPIT.md`'s launch-revert remediation** | one of the six sources, never reconciled | Listed only `RECAP_CHANNEL`, `MILESTONE_CHANNEL` and `RECAPS_START`, missed `OATH_CHANNEL`, `BOSS_CHANNEL` and `TITLE_CHANNEL` entirely, and pointed at the superseded vault outline. Now points at `cutover-env.sh --apply` and step 20b. |
+
+### Corrected again on the T-3 re-audit (2026-09-06)
+
+Ten more, all found by re-executing the steps rather than re-reading them. Each is fixed in
+place above; this table is only the index.
+
+| # | What this file said | Corrected to |
+|---|---|---|
+| 28 | Step 19: **"two edits, not one"** to `app/get-started/page.tsx` | **Three.** The update card's self-check sentence (lines 609-610) pins Eilif Paths 1.4.0 and tells a stale-pack player they are current. Step 19 now carries a grep instead of a count. |
+| 29 | Step 20's page check: open each page **twice** and grade `/world` on its boss row | Do not count requests (production: one stale answer; a cold local build: two). Grade `/world` on its **Great Deeds** numbers, which sit behind a second 60 s cache and turn last. Read it in a never-opened tab or with `curl` — the client Router Cache is **30 s**, not the 300 s the old note assumed. |
+| 30 | Step 10: delete the **directory** `BepInEx/plugins/ValheimPlus/` | It is a loose **file**, `BepInEx/plugins/ValheimPlus.dll`, and V+ prints that path itself on every boot. `docs/PACK.md` rule 6 fixed in the same pass; `scripts/mint-pack.mjs:800` still prints the folder form. |
+| 31 | Step 16 table: the EilifPaths 1.5.0 README is outstanding, and one `diff` is the gate | The README was rewritten and re-zipped 2026-09-05 22:49. The **manifest description** is what is still outstanding, and the old `diff` gate now passes without covering it. Three checks replace it. |
+| 32 | Step 16: "0.3.2 is live, so … there is nothing to upload" for the client | **Two uploads, not one.** EilifPaths 1.5.0 is required; EilifCompanionClient 0.3.3 is optional but the client DLL already changed. Pin 0.3.2 **and pass `--pins`**, or upload both together in one index window. |
+| 33 | Step 14: only AzuCraftyBoxes is costly to pull | Three are. Pulling the **GS Emitter** stops the roster, the world day, boss detection and every Great Deed, and makes post-start preflight unpassable; pulling **WebMap** makes 20d step 3's gate unsatisfiable. Both are vanilla-night class, not quick fixes. |
+| 34 | Nothing anywhere about HookGenPatcher, MMHOOK or the BepInEx cache | All three survive the Steam Update built against 0.221.12, and a thrown preload patcher presents as **no plugins at all**. Branch added at step 14, with the BepInEx-version-moved branch beside it. |
+| 35 | Step 6's third backup: prose, no command, no size | A pasteable SFTP batch, a measured size (worlds_local 78 MB, BepInEx ~25 MB, `Backups/` to be sized on the day) and a rate (~0.8 MB/s), plus "do not `get -r` the whole nest". |
+| 36 | No rule for **1.0 being late** | Two cutoffs in the shape-of-the-day table: 09:00 CT is tight, **11:00 CT makes GO-A arithmetically impossible** and vanilla night should be called then rather than at 15:00. Charlie owns both numbers. |
+| 37 | 20e: "fresh heartbeats … for both plugins" | `companion-voice` has **never** reported one and cannot before a player joins (`alertsOnSilence: false`, and the poll needs a connected peer). It reads `unknown` at 20e and that is correct; the real check moved to step 22. |
+
+Also corrected in place, from the same pass: the Hold rules said **two** known-spurious
+preflight FAILs where there are **three** (port 3000 is the third, a known exposure since
+the GTX ticket was skipped on 2026-09-05); step 12's `vplus-data/…_mapSync.dat` sits under
+`BepInEx/`; and step 15's `[EILIF_KEY]` Look-for now names the **runtime world keys** line,
+because `enforced world key` correctly never prints while the panel tier is Casual.
+
+---
 
 **Still unverifiable from this PC, for Charlie:** the panel itself, the SFTP writes in
 steps 9 to 12, the Thunderstore upload in step 16, and the `sudo` in step 5. Every command

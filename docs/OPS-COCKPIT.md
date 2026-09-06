@@ -402,7 +402,24 @@ Check it: `systemctl list-timers 'eilif-*'`,
 
 1. Create/repair the project, then apply `db/0000_initial_schema.sql` followed
    by the dated `db/*.sql` files **in filename order** (there is no migration
-   runner — they are hand-applied in the SQL editor, as always).
+   runner — they are hand-applied in the SQL editor, as always). Two things that
+   replay does NOT get right, both found 2026-09-06:
+
+   - **The eighth boss comes back with the wrong name.** The base schema seeds
+     `('The Bog Witch', 'Deep North', 8)`; production runs **`Forsaken VIII`**, which
+     is what `lib/gs-client.ts`, `/api/gs-ingest` and the boss tests key on. The first
+     seven rows are correct. Fix it immediately after the replay:
+     `update public.bosses set name = 'Forsaken VIII' where sort_order = 8 and name = 'The Bog Witch';`
+   - **Not every dated file is meant to run.** `db/2026-08-24_loa_zero_baseline.sql`
+     is headed `NOT APPLIED. Charlie's call.` and is a hand-targeted UPDATE against one
+     player's baseline; `db/2026-09-06_death_ceiling.sql` is headed `STATUS: UNAPPLIED`
+     and is Charlie's decision. A filename-order replay runs both. Today they are
+     harmless on a rebuilt database (the row the first targets does not exist), but read
+     each file's first line and skip the ones marked unapplied.
+
+   Also: nothing in `db/` creates the **`map`** Storage bucket (only `gallery`, at the
+   end of `db/2026-06-25_gallery_photos.sql`). Create `map` by hand before starting
+   `eilif-map-snapshot`, or its uploads fail.
 2. Insert the JSON back per table with the **service role** (RLS blocks anon
    writes; a `POST /rest/v1/<table>` with the file's array as the body works,
    or `insert … select * from json_populate_recordset` in the SQL editor).

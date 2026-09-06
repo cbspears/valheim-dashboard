@@ -11,6 +11,7 @@ import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { HeartbeatRow } from './health';
 import { extractBotFlags, type BotPilotFlags } from './consistency';
+import { steamIdFingerprint } from '../webhook/identity';
 import { FUTURE_EVENT_TOLERANCE_MS } from '../event-time';
 
 const REQUIRED_TABLES = ['identity_claims', 'chat_lines', 'player_positions', 'ops_heartbeats'];
@@ -40,10 +41,23 @@ export function dashboardVersion(): string | null {
  */
 export interface IdentityMismatchEvent {
   characterName: string;
-  /** players.steam_id at the time: the account that owns the name. */
+  /**
+   * players.steam_id read HERE, under the service role: the account that owns
+   * the name right now. Null once an admin has released the binding.
+   *
+   * It is no longer taken from the event row. `events` is anon-readable in full,
+   * so the row carries fingerprints rather than ids (T-3 audit, data-2); the
+   * cockpit is the one reader that can see the real thing, so it reads the real
+   * thing from the table that is closed to anon.
+   */
   boundSteamId: string | null;
-  /** The account that actually joined under it. */
-  seenSteamId: string | null;
+  /** 12-hex fingerprint of the account that actually joined, off the event row. */
+  seenSteamIdHash: string | null;
+  /**
+   * Fingerprint of the bound account AT THE TIME of the mismatch. Differs from
+   * `boundSteamId`'s fingerprint only when the binding moved since.
+   */
+  boundSteamIdHash: string | null;
   at: string;
 }
 
@@ -300,9 +314,10 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
   }
 
   // Steam-identity mismatches, last 7 days. The webhook writes the evidence onto
-  // the event row itself (metadata.identity = 'steam_mismatch' plus both ids), so
-  // this is a straight read of that annotation — the cockpit never re-derives who
-  // owns a name, it only shows what was recorded at the time.
+  // the event row itself (metadata.identity = 'steam_mismatch' plus a FINGERPRINT
+  // of each account — the row is anon-readable, so it holds no Steam64 id), so
+  // this is a straight read of that annotation plus one service-role lookup of
+  // the account that owns the name today.
   //
   // Filtered in the database on the JSON key so a quiet week reads a handful of
   // rows, not every join of the week. A failed read yields an empty list (the
@@ -346,16 +361,38 @@ export async function loadOpsData(nowMs: number = Date.now()): Promise<OpsData> 
       // the page that the table it is drawing is not the whole window.
       .limit(IDENTITY_MISMATCH_LIMIT + 1);
     if (error) return [];
-    return (rows ?? []).map((r) => {
+    const id = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    const parsed = (rows ?? []).map((r) => {
       const meta = (r.metadata ?? {}) as Record<string, unknown>;
-      const id = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+      // Rows written before the fingerprint change carry the raw ids; hash them
+      // on the way out so the table reads the same either way. (Prod had none —
+      // verified with the anon key on 2026-09-06 — but a restored snapshot or a
+      // local stack can.)
+      const fingerprint = (hashed: unknown, legacyRaw: unknown) =>
+        id(hashed) ?? steamIdFingerprint(id(legacyRaw));
       return {
         characterName: (r.character_name as string | null) ?? 'unknown',
-        boundSteamId: id(meta.boundSteamId),
-        seenSteamId: id(meta.seenSteamId),
+        boundSteamId: null as string | null, // filled from `players` below
+        seenSteamIdHash: fingerprint(meta.seenSteamIdHash, meta.seenSteamId),
+        boundSteamIdHash: fingerprint(meta.boundSteamIdHash, meta.boundSteamId),
         at: r.created_at as string,
       };
     });
+
+    // The owning account, from the table anon cannot read. One `in` query for
+    // the whole page; a failure here only costs the column, never the table.
+    const names = [...new Set(parsed.map((p) => p.characterName))];
+    if (names.length > 0) {
+      const { data: owners } = await client
+        .from('players')
+        .select('character_name, steam_id')
+        .in('character_name', names);
+      const bound = new Map(
+        (owners ?? []).map((o) => [o.character_name as string, id(o.steam_id)]),
+      );
+      for (const row of parsed) row.boundSteamId = bound.get(row.characterName) ?? null;
+    }
+    return parsed;
   }, [] as IdentityMismatchEvent[]);
   data.identityMismatchesTruncated = mismatchRows.length > IDENTITY_MISMATCH_LIMIT;
   data.identityMismatches = mismatchRows.slice(0, IDENTITY_MISMATCH_LIMIT);
