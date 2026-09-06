@@ -39,6 +39,27 @@ export function createEventsSync({ client, guildId, webhookUrl, webhookSecret, l
 
     const events = await guild.scheduledEvents.fetch();
     const out = [];
+    // The host is shown on the site as "hosted by <name>", and the name people
+    // go by in THIS server is the guild nickname, not the Discord handle
+    // (User.displayName is the global display name, which for the owner is the
+    // handle). Resolve the GuildMember once per creator per sync; on any
+    // failure fall back down the chain so a deleted account still has a name.
+    const hostCache = new Map();
+    async function hostName(ev) {
+      const id = ev.creatorId ?? ev.creator?.id ?? null;
+      if (!id) return ev.creator?.displayName ?? ev.creator?.username ?? null;
+      if (hostCache.has(id)) return hostCache.get(id);
+      let name = null;
+      try {
+        const member = guild.members.cache.get(id) ?? (await guild.members.fetch(id));
+        name = member?.displayName ?? null;
+      } catch {
+        name = null;
+      }
+      name = name ?? ev.creator?.globalName ?? ev.creator?.displayName ?? ev.creator?.username ?? null;
+      hostCache.set(id, name);
+      return name;
+    }
     for (const ev of events.values()) {
       const status = STATUS[ev.status] ?? 'scheduled';
       if (status === 'completed' || status === 'canceled') continue;
@@ -49,7 +70,7 @@ export function createEventsSync({ client, guildId, webhookUrl, webhookSecret, l
         discord_event_id: ev.id,
         name: ev.name,
         description: ev.description ?? null,
-        host: ev.creator?.displayName ?? ev.creator?.username ?? null,
+        host: await hostName(ev),
         location: ev.channel?.name ?? ev.entityMetadata?.location ?? null,
         starts_at: ev.scheduledStartAt.toISOString(),
         ends_at: ev.scheduledEndAt ? ev.scheduledEndAt.toISOString() : null,
