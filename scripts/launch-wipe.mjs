@@ -723,9 +723,17 @@ async function main() {
 function printPostWipeChecklist() {
   banner('POST-WIPE CHECKLIST (manual — not automated by this script)');
   console.log(`
-  Rewritten 2026-09-04 from the T-6 launch audit. Full cutover sequence with
-  owners: docs/LAUNCH-WIPE.md. Order matters — every constraint below was
-  learned the hard way in the 2026-08-23 rehearsal.
+  Reconciled 2026-09-06 with docs/LAUNCH-DAY.md, which is the SEQUENCE OF RECORD
+  for 2026-09-09 and owns the step numbers, the owners, the "if it fails"
+  branches and the rollbacks. This block is only the wipe's own neighbours, and
+  it is written for an ordinary wipe day. Order matters — every constraint below
+  was learned the hard way in the 2026-08-23 rehearsal.
+
+  ON 2026-09-09, READ docs/LAUNCH-DAY.md AND NOT THIS. Launch day front-loads all
+  the panel work (steps 12 to 14) so the stopped window is short, so by the time
+  this prints — at step 6 as a preview, and again after --execute at step 20a —
+  the panel half below has already been done, hours earlier and in a different
+  order.
 
   BEFORE the wipe
   ---------------
@@ -737,12 +745,19 @@ function printPostWipeChecklist() {
      'inactive' or 'unknown' above; if it reads 'active', someone re-enabled it.
 
   1. Backups, and they are the ONLY copies:
-       bash scripts/pull-world.sh <World>     (off-box world pair, keeps 14)
+       bash scripts/pull-world.sh              <- NO argument. It defaults to the
+                                                  world that is on the box RIGHT
+                                                  NOW, which is the one worth
+                                                  copying. Naming the world you
+                                                  are about to create fetches
+                                                  nothing at all.
        + a full Supabase dump (project is on the Free plan — no backups at all)
      There is no undo once rows and storage objects are gone.
 
-  AFTER the wipe, before any service is restarted
-  ----------------------------------------------
+  THE PANEL WORK
+  (ordinary wipe day: after the wipe. 2026-09-09: steps 12 to 14, BEFORE the
+   wipe at step 20, so it is already done by the time you read this.)
+  ----------------------------------------------------------------------------
   2. GTX panel, while STOPPED (loaded DLLs are file-locked on Windows):
      - Sweep worlds_local of the old world's leftovers — Dedicated.*, *.old,
        *_backup_auto-* (ALL worlds), map_data/<old world>/,
@@ -750,11 +765,16 @@ function printPostWipeChecklist() {
        from a leftover .old / backup_auto pair and resurrects the old world.
        <world>.json also carries the SEED in plaintext.
      - Upload the launch world's .fwl and .db TOGETHER; set Start.bat World=.
-     - Death penalty = Casual (the tier that actually grants deathkeepequip —
-       'easy'/'veryeasy' do not; today only the Companion plugin injects it).
-     - Combat = per the launch decision. leave V+ cfg [Chat] ENABLED (server-wide /s shouts; the Companion 0.3.x chat/oath hook no longer depends on it)
-       is what kills the [EILIF_CHAT] hook). WebMap always_map=false unless the
-       GTX firewall ticket for TCP 3000 has closed.
+     - Death penalty = Casual (the tier that actually grants deathkeepequip;
+       'easy' and 'veryeasy' do not). The live panel tier has read 'casual' since
+       2026-09-05, so keep-gear is granted by the game and no longer depends on
+       the Companion injecting it after every boot — but the tier is a property
+       of the world, so SET IT AGAIN on the new world's Start form.
+     - Combat = per the launch decision. Leave the V+ cfg [Chat] section ENABLED:
+       it is what carries server-wide /s shouts, and the oath and pin capture
+       rides on those. (The Companion 0.3.x hook no longer depends on [Chat]
+       itself, but the shouts it reads do.) WebMap always_map=false unless the
+       GTX firewall ticket for TCP 3000 has closed — it has not; see item 11.
      - Only now swap any rebuilt plugin DLLs. Then Stop -> Start (never Restart).
 
   3. Plugin configs on the box (SFTP): the Emitter cfg
@@ -775,11 +795,25 @@ function printPostWipeChecklist() {
                             RECAPS_START line so .env actually owns it)
      - RECAP_CHANNEL     -> remove the 'server' override (back to 'valheim')
      - MILESTONE_CHANNEL -> remove the 'server' override
-     - TITLE_CHANNEL / any other *_CHANNEL=server line -> remove
+     - OATH_CHANNEL / BOSS_CHANNEL / any other *_CHANNEL=server -> remove
+     - TITLE_CHANNEL     -> SET it to 'valheim'. Do NOT remove this one.
+                            services/discord-bot/src/index.js reads
+                            TITLE_CHANNEL === 'valheim' ? 'valheim' : 'server',
+                            so an ABSENT TITLE_CHANNEL sends launch night's
+                            crownings to #server — the opposite of the intent.
      then 'sudo systemctl daemon-reload'.
 
-  7. Re-mint the modpack (World=<W>, Companion Client 0.3.0 if it shipped) and
-     verify the round trip before posting the code.
+     All of the above is exactly what this does, daemon-reload included:
+       bash scripts/cutover-env.sh <World>            # dry run, read the diff
+       bash scripts/cutover-env.sh <World> --apply
+     Run it rather than hand-editing; hand-editing is how TITLE_CHANNEL got
+     written down wrong here in the first place.
+
+  7. Re-mint the modpack and verify the round trip before posting the code. The
+     pin set is not guessable from here and changes with every plugin rebuild:
+     docs/LAUNCH-DAY.md step 16 defines $M and step 18 reuses it on all three of
+     its lines. (EilifCompanionClient 0.3.2 is published; 0.3.3 is staged in
+     plugins/thunderstore/ and needs uploading before it can be pinned.)
 
   RESTART ORDER (this is the part that bites)
   -------------------------------------------
@@ -787,8 +821,9 @@ function printPostWipeChecklist() {
   9. eilif-discord-bot second, and ONLY after:
        - 'select name, is_killed from bosses' is all false, and
        - services/discord-bot/state.json is ABSENT.
-     Read its startup log: it must not list any announced boss and must show the
-     new RECAPS_START with no channel overrides. Manual boss marking, if ever
+     Read its startup log: it must not list any announced boss, and must show the
+     new RECAPS_START, no *_CHANNEL=server override left, and titles routed to
+     #valheim (not #server). Manual boss marking, if ever
      needed, is:  cd services/discord-bot && node scripts/mark-boss.js "<Boss>"
      (that file lives under services/discord-bot/scripts/, NOT repo-root scripts/).
   10. eilif-map-snapshot LAST, and only after all three are true:
@@ -801,9 +836,13 @@ function printPostWipeChecklist() {
 
   VERIFY
   ------
-  11. bash scripts/verify-restart.sh <World> — Valheim version unchanged, all 8
-      plugins loaded, panel tier Casual, Emitter ingest 200, Boards scan,
-      [EILIF_KEY], port 3000 closed.
+  11. bash scripts/verify-restart.sh <World> — Valheim version unchanged, the
+      plugin count you WROTE DOWN before the restart (8 through the rehearsal;
+      fewer on 2026-09-09 if ValheimPlus or a third-party mod comes off), panel
+      tier Casual, Emitter ingest 200, Boards scan, [EILIF_KEY].
+      Port 3000 will read OPEN. The GTX firewall ticket was skipped by decision:
+      it is a known exposure (WebMap serves the un-fogged map, /config and live
+      player positions to anyone), NOT a hold.
   12. /admin/ops cockpit shows fresh heartbeats; milestones unachieved; bosses
       not killed; the Crowning Log (title_history) is empty; players list starts
       empty and repopulates from real joins.

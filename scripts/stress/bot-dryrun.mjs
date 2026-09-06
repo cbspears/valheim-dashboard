@@ -175,10 +175,50 @@ const milestones = createMilestonesAnnouncer({
 });
 
 let stopped = false;
+// THE SILENCE THIS PRINTS, and why the threshold is 3 and not 1.
+//
+// A tick that never SETTLES — not one that throws — leaves `running` true for
+// good, and the loop is then dead with no error line anywhere. The real bot's
+// makeSafe() (services/discord-bot/src/index.js:77) prints on every such tick;
+// the rehearsal harness has to say something too, or a rehearsal cannot see a
+// wedged loop at all.
+//
+// But at BOT_COMPRESSION=30 the relay loop ticks every 500 ms and a tick against
+// the local stack routinely takes longer than that, so a perfectly HEALTHY loop
+// skips constantly. Printing on the first skip (the 2026-09-06 first attempt at
+// this) put 643 identical lines into a 772-line rehearsal log, every one reading
+// "(1 skipped in a row)", because the counter reset on each settled tick: a slow
+// loop printed the same line a wedged one would, forever, and the 10th/100th
+// branches could never fire. That buries the evening the log exists to show —
+// the boss embed, the Great Deeds and the deaths were 30 lines inside 50 KB of
+// repetition — and it destroys the distinction the message was added to make.
+//
+// So: two counters. `sinceSettle` resets when a tick completes and is the one
+// that says "wedged"; `total` never resets and is reported once at the end.
+// Nothing is printed for one or two skips in a row, which is ordinary overlap.
+const skipStats = new Map(); // label -> { total, longest }
 const safe = (label, fn) => {
   let running = false;
+  let sinceSettle = 0;
+  const stats = { total: 0, longest: 0 };
+  skipStats.set(label, stats);
   return async () => {
-    if (stopped || running) return;
+    if (stopped) return;
+    if (running) {
+      sinceSettle++;
+      stats.total++;
+      if (sinceSettle > stats.longest) stats.longest = sinceSettle;
+      // Three in a row is past ordinary overlap; then a widening curve, so a
+      // wedged loop keeps rising out of the log for the whole run.
+      if (sinceSettle === 3 || sinceSettle === 10 || sinceSettle % 100 === 0) {
+        console.error(
+          `[${label}] previous tick still running, skipping this one (${sinceSettle} in a row, ${stats.total} total). ` +
+            'A run of these that never breaks is a wedged loop, not a slow one.',
+        );
+      }
+      return;
+    }
+    sinceSettle = 0;
     running = true;
     try {
       await fn();
@@ -189,6 +229,20 @@ const safe = (label, fn) => {
     }
   };
 };
+
+// One line per loop when the run ends, so "slow" and "wedged" are separable
+// after the fact from a log nobody watched live: a loop whose longest run of
+// skips is small was busy, a loop whose longest run is unbounded was dead.
+function reportSkips() {
+  const rows = [...skipStats.entries()].filter(([, s]) => s.total > 0);
+  if (!rows.length) return;
+  for (const [label, s] of rows) {
+    console.log(
+      `[bot-dryrun] ${label}: ${s.total} tick(s) skipped, longest run ${s.longest}` +
+        `${s.longest >= 10 ? ' — READ THIS, a long run means the loop stopped settling' : ' (slow, never wedged)'}`,
+    );
+  }
+}
 
 await bosses.init();
 voice.attach();
@@ -241,6 +295,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     stopped = true;
     for (const t of timers) clearInterval(t);
+    reportSkips();
     console.log(`[bot-dryrun] ${sig} — stopped`);
     process.exit(0);
   });

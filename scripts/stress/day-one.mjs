@@ -59,6 +59,10 @@ const cfg = {
   world: flag('world', process.env.GS_EXPECTED_WORLD || 'Eilif'),
   state: flag('state', process.env.DAY_ONE_STATE || '/tmp/eilif-day-one-state.json'),
   stage: flag('stage', 'boot'),
+  // The dry-run announcer's captured output. `verify` compares what the relay
+  // actually POSTED against the rows the database HOLDS — see checkRelayCoverage
+  // below for the night this was missing.
+  botLog: flag('bot-log', process.env.BOT_LOG || null),
 };
 
 if (!cfg.serviceKey) {
@@ -497,6 +501,13 @@ const checks = [];
 function check(name, ok, evidence) {
   checks.push({ name, ok: ok ? 'PASS' : 'FAIL', evidence });
 }
+// A check that could not be made is NOT a check that passed. It gets its own
+// verdict so it can never be counted in the "N/N passed" line, which is the
+// whole reason two rehearsals looked clean while the feed was missing 43% of
+// the evening.
+function skip(name, why) {
+  checks.push({ name, ok: 'SKIP', evidence: why });
+}
 
 // The six stages that must have run, and what they must have left behind, for
 // any of the checks below to mean anything.
@@ -648,17 +659,113 @@ async function verify() {
   check('seeding wrote no Crowning Log rows', history.length === 0,
     `${history.length} title_history rows after seeding ${titled.length} titles`);
 
+  checkRelayCoverage(events, mine);
+
   report();
+}
+
+// ── DID THE ANNOUNCER ACTUALLY SAY IT? ───────────────────────────────────────
+//
+// Added 2026-09-06, and it is the check whose absence let two full rehearsals
+// grade clean while TWENTY of the evening's forty-six event rows never reached
+// #server. Every other check in verify() is a database assertion: it reads the
+// rows and says they are right. None of them asks whether the bot posted them,
+// so a relay that consumed rows and rendered nothing looked exactly like a
+// relay that had nothing to do.
+//
+// THE MECHANISM, because it is not a harness quirk. The relay's cursor IS
+// `events.created_at` (services/discord-bot/src/relay.js:192-247) and it is
+// advanced onto EVERY consumed row, including rows formatFeedEvent renders
+// nothing for. This rehearsal anchors the evening three hours in the past while
+// the bot's own milestone rows land at real `now`, so one milestone row parked
+// the cursor two hours past the close stage and every `left the realm` after it
+// stopped matching `.gt(created_at, cursor)` — permanently, with no error line
+// anywhere, while the same process's boss, title and voice loops kept running.
+//
+// On launch night the same shape arrives from a different direction:
+// `events.created_at` is producer-supplied and clamped only at now+5min
+// (lib/event-time.ts:42), deliberately, because "a clock a few minutes ahead is
+// an ordinary skewed PC". So one player PC three minutes fast posts a death
+// through the unauthenticated gs-ingest path, the cursor jumps three minutes,
+// and every join, leave and death written in that window is deleted from the
+// feed while the loop reports success. The product fix belongs to the bot
+// (relay.js must not cursor on a producer-supplied column); this check is how a
+// rehearsal SEES it.
+//
+// Markers are exactly what services/discord-bot/src/format.js:486-505 renders.
+// Only join/leave/death/raid reach the feed at all; chat, boss and sync return
+// null there and are excluded here for the same reason.
+//
+// Death is matched by its EMOJI plus the bolded name anywhere on the line, not
+// by a name-first prefix: buildDeathMessage() fills a template, and several of
+// them put the name in the middle or at the end ("Gravity finally caught up with
+// {name}.", "The deep claimed {name}."). A `💀 **${name}**` marker would have
+// missed those and invented a failure, which in a gate is worse than no gate.
+//
+// Caveat worth knowing if the roster ever changes: names go through nameMd(), so
+// a character name containing markdown would be escaped here and not there. The
+// twenty in NAMES are all plain.
+const FEED_MARKERS = {
+  join: (line, n) => line.includes(`**${n}** entered the realm`),
+  leave: (line, n) => line.includes(`**${n}** left the realm`),
+  death: (line, n) => line.includes('💀') && line.includes(`**${n}**`),
+};
+
+function checkRelayCoverage(events, mine) {
+  const name = 'the relay posted the whole evening';
+  if (!cfg.botLog) {
+    skip(name, 'no --bot-log: pass the dry-run announcer\'s captured log to grade the feed');
+    return;
+  }
+  let log;
+  try {
+    log = readFileSync(resolve(cfg.botLog), 'utf8');
+  } catch (e) {
+    check(name, false, `cannot read --bot-log ${cfg.botLog}: ${e?.message ?? e}`);
+    return;
+  }
+
+  // Per type, over OUR roster only, so another writer on this stack cannot move
+  // either number. A death the relay deliberately collapsed as a duplicate, and
+  // a row Discord permanently rejected, are both accounted for rather than
+  // counted as losses — the relay logs each one.
+  const collapsed = (log.match(/\[relay\] collapsed a duplicate death/g) || []).length;
+  const rejected = (log.match(/\[relay\] Discord rejected event/g) || []).length;
+  const lines = log.split('\n');
+  const detail = [];
+  let missing = 0;
+  let expected = 0;
+  for (const [type, matches] of Object.entries(FEED_MARKERS)) {
+    const rows = events.filter((e) => e.type === type && mine.has(e.character_name)).length;
+    let posted = 0;
+    for (const line of lines) {
+      for (const n of mine) {
+        if (matches(line, n)) { posted++; break; }
+      }
+    }
+    expected += rows;
+    if (rows > posted) missing += rows - posted;
+    detail.push(`${type} ${posted}/${rows}`);
+  }
+  const accounted = Math.max(0, missing - collapsed - rejected);
+  check(name, accounted === 0,
+    `${detail.join(' · ')}${collapsed ? ` (${collapsed} collapsed)` : ''}${rejected ? ` (${rejected} rejected)` : ''}` +
+      `${accounted ? ` — ${accounted} of ${expected} feed rows NEVER POSTED, silently` : ''}`);
 }
 
 function report() {
   console.log(`\n── day-one invariants ${'─'.repeat(46)}`);
   let failed = 0;
+  let skipped = 0;
   for (const c of checks) {
     if (c.ok === 'FAIL') failed++;
-    console.log(`  ${c.ok}  ${c.name.padEnd(44)} ${c.evidence}`);
+    else if (c.ok === 'SKIP') skipped++;
+    console.log(`  ${c.ok.padEnd(4)}  ${c.name.padEnd(44)} ${c.evidence}`);
   }
-  console.log(`  ${checks.length - failed}/${checks.length} passed`);
+  console.log(`  ${checks.length - failed - skipped}/${checks.length} passed`);
+  // A skipped check is reported apart from the passes on purpose. "21/21" over a
+  // check that never ran is the false green this whole file exists to refuse.
+  if (skipped) console.log(`  ${skipped} check(s) SKIPPED — not graded, and NOT evidence.`);
   if (failed) process.exitCode = 1;
 }
 

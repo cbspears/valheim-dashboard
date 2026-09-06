@@ -320,7 +320,12 @@ S=/tmp/eilif-stress
 tar cf - --exclude=node_modules --exclude=.git --exclude='.next/cache' \
   --exclude='.next/dev' --exclude='.env' --exclude='services/*/.env' \
   --exclude='.vercel' -C ~/Projects/valheim-dashboard . | (mkdir -p $S/site && cd $S/site && tar xf -)
-ln -s ~/Projects/valheim-dashboard/node_modules $S/site/node_modules
+# A REAL directory, not a symlink: Turbopack refuses one that leaves the project
+# root ("Symlink [project]/node_modules is invalid, it points out of the filesystem
+# root") and the build dies before it starts. `cp -al` hardlinks 700 MB in about a
+# second and costs no disk. On a scratch dir on another filesystem, use `cp -a`.
+# This is what scripts/smoke/run.mjs does; the old `ln -s` line here contradicted it.
+cp -al ~/Projects/valheim-dashboard/node_modules $S/site/node_modules
 # replace the inlined prod URL and anon key inside $S/site/.next with the local ones,
 # and write a local-only $S/site/.env.local
 grep -rl "<prod-supabase-ref>" $S/site/.next | wc -l   # must print 0
@@ -346,6 +351,47 @@ That last call must answer from the **empty** local database:
 `{"online":false,"players":0,"maxPlayers":15,"worldDay":0,...}`. If it reports a
 world day or players you recognise, the build is still pointed at production.
 Stop and fix it before going further.
+
+#### Six of these pages are ISR, and a page you fetch is not a page that rendered
+
+Since the 2026-09-05 perf pass, `/world`, `/events`, `/gallery`, `/oath`, `/map`
+and `/boss/[slug]` carry `export const revalidate = 60`. `next start` answers
+them out of the prerendered cache, and even the request that crosses the 60 s
+window is served the **stale** copy while the regeneration runs behind it. Any
+harness that reads a page once and grades what came back is therefore grading the
+build-time render, not the database — which is exactly how the 2026-09-06
+rehearsal reported "6/6 pages clean" for pages that had never rendered a row of
+the evening it had just produced.
+
+Two ways to tell, and one way to fix. The response's `x-nextjs-cache` header says
+`HIT` or `STALE` for a cached answer and `MISS`/`REVALIDATED` for a real render;
+and byte-identical page dumps taken minutes apart are the symptom. The fix is the
+header Next.js uses on itself:
+
+```bash
+ID=$(python3 -c "import json;print(json.load(open('$S/site/.next/prerender-manifest.json'))['preview']['previewModeId'])")
+curl -s -D - -o /dev/null -H "x-prerender-revalidate: $ID" http://localhost:3400/events | grep -i x-nextjs-cache
+# x-nextjs-cache: REVALIDATED
+```
+
+`scripts/stress/page-check.mjs --site-dir <the built copy>` (or `SITE_DIR=`) does
+this per read; without it, it reports the cached pages as **STALE, never PASS**.
+Because that token is a Next.js revalidation bypass secret, the script refuses a
+non-loopback `--base` outright rather than sending it off this machine.
+
+**`/viking/<slug>` is the page with the most generated copy on the site and it is
+not in the fixed list**, because it 404s until somebody has joined. Pass it with
+`--also`:
+
+```bash
+node scripts/stress/page-check.mjs --base http://localhost:3400 \
+  --site-dir $S/site --also /viking/alvis --dump $S/pages
+```
+
+It is `force-dynamic`, so no ISR handling is needed for it — and it is where the
+copy-doctrine checks earn their keep: three of the five `BIO_LINES` variants in
+`lib/epithets.ts` carry an em dash, and every uncaught fish in Feats of Arms
+renders one as a placeholder where a `0` belongs.
 
 ### 3. The dry-run bot
 

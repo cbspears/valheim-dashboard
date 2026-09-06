@@ -12,7 +12,7 @@
 #              three state files relocated to a scratch copy, then verify every
 #              table, bucket, reset and state file it claimed, then the
 #              announcer back up against the wiped database
-#   3. DAY ONE — the first evening stage by stage, with the six player-facing
+#   3. DAY ONE — the first evening stage by stage, with the eight player-facing
 #              pages read BETWEEN every stage rather than only at the end
 #   4. verify — the day-one invariants, and the dry-run bot's recap
 #
@@ -29,7 +29,16 @@
 #   BASE_URL                    site under test, e.g. http://localhost:3405
 #   SUPABASE_URL                e.g. http://127.0.0.1:55321
 #   SUPABASE_SERVICE_ROLE_KEY   that stack's service key
-# Optional:
+# Optional, but SITE_DIR only in the sense that the run tells you it is missing:
+#   SITE_DIR   the built copy $BASE_URL is serving (the directory holding .next).
+#              Since the 2026-09-05 perf pass, /world, /events, /gallery, /oath,
+#              /map and /boss/[slug] are ISR pages with a 60 s window, and the whole
+#              day-one section below runs in about twenty seconds — so without this
+#              every one of them answers with the same build-time HTML at all six
+#              checkpoints and page-check grades a render that never saw the evening.
+#              With it, page-check forces a real regeneration per read. Without it,
+#              those pages report STALE instead of PASS and the run fails, which is
+#              the honest outcome: an inconclusive check must not look clean.
 #   WORLD (default Eilif) · WORK (default $TMPDIR/eilif-rehearsal) · WEBHOOK_SECRET ·
 #   GS_EMITTER_TOKEN · SEED_SIM_MINUTES (default 90) · SEED_TICK_MS (default 2000)
 
@@ -46,6 +55,7 @@ WORLD=${WORLD:-Eilif}
 # services' state.json into the working tree four days before launch, where the
 # next `git add -A` would sweep them into a commit.
 WORK=${WORK:-${TMPDIR:-/tmp}/eilif-rehearsal}
+SITE_DIR=${SITE_DIR:-}
 WEBHOOK_SECRET=${WEBHOOK_SECRET:-stress-secret}
 GS_EMITTER_TOKEN=${GS_EMITTER_TOKEN:-stress-emitter}
 SEED_SIM_MINUTES=${SEED_SIM_MINUTES:-90}
@@ -112,6 +122,21 @@ require_count() { # require_count <table>  -> the number, or exit 2 with the rea
   printf '%s' "$n"
 }
 
+# TOP LEVEL ONLY, and it is a count of entries, not of objects: the storage list
+# API returns one folder pseudo-entry per prefix, so `map/frames-by-day/x.webp`
+# shows up as the single entry `frames-by-day`. Everything this script uses the
+# number for is an empty/non-empty decision, which is exact either way.
+#
+# It also used to be wrong a second way: the API answers on ONE line, so
+# `grep -c '"name"'` returned 1 for a bucket holding three entries (measured:
+# grep -c = 1, grep -o | wc -l = 3). The note it printed was a fabricated number.
+bucket_top_count() { # bucket_top_count <bucket> -> entries at the TOP level
+  curl -s -X POST "$SUPABASE_URL/storage/v1/object/list/$1" \
+    -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
+    -H 'Content-Type: application/json' -d '{"prefix":"","limit":100}' \
+    | grep -o '"name"' | wc -l | tr -d ' '
+}
+
 # The rehearsal's announcer, matched the way scripts/smoke/run.mjs matches it:
 # by script path, then narrowed to the processes whose own environment names
 # THIS database. A dry-run bot on another stack is somebody else's rehearsal,
@@ -124,6 +149,66 @@ bots_on_this_db() {
       printf '%s\n' "$pid"
     fi
   done
+}
+
+# THE ONE DESTRUCTIVE PATH A REHEARSAL NEVER PROVED (added 2026-09-06). The
+# wipe recurses into the storage buckets and deletes the map frames and the
+# gallery, and that is how the 2026-08-23 wipe went wrong: a leftover frame of
+# the OLD world. But scripts/stress/run.mjs writes no objects, so on a fresh
+# stack both buckets are already empty, the wipe prints "already empty", and the
+# recursion into the folder pseudo-entries is never executed at all — a green
+# rehearsal that says nothing about the code path it is supposed to be proving.
+#
+# So: if (and only if) both buckets are empty, plant the snapshotter's real
+# layout first, nested prefixes included. The verification below already asserts
+# both buckets end at zero, so seeding here turns that assertion into evidence.
+#
+# AND IT MUST CHECK ITS OWN WORK. The first version of this piped every upload
+# through `curl -s -o /dev/null` with no status check and then announced
+# "planted 7 objects" unconditionally — so pointed at a bucket that does not
+# exist (an ordinary state right after a `supabase db reset` that did not
+# re-create them) it printed the claim, returned 0 and planted nothing, the wipe
+# then printed "already empty", and the verification's `objects = 0` passed
+# vacuously. That is the same false green this seeding was added to remove, with
+# a log line asserting the opposite.
+SEEDED_BUCKETS=0
+seed_buckets_for_the_wipe() {
+  local n_map n_gal obj code ok=0 want=0
+  n_map=$(bucket_top_count map); n_gal=$(bucket_top_count gallery)
+  if [ "$n_map" != 0 ] || [ "$n_gal" != 0 ]; then
+    note "buckets already hold objects (top-level entries: map=$n_map gallery=$n_gal) — not seeding, the wipe has real work"
+    SEEDED_BUCKETS=1
+    return 0
+  fi
+  for obj in \
+    "map/current.webp" \
+    "map/frames-by-day/day-0001.webp" \
+    "map/frames-by-day/day-0064.webp" \
+    "map/frames-fog/day-0064.png" \
+    "map/frames-manifest.json" \
+    "gallery/2026/07/rehearsal-photo.webp" \
+    "gallery/2026/07/thumbs/rehearsal-photo.webp"
+  do
+    want=$((want+1))
+    code=$(printf 'rehearsal placeholder, not an image\n' | curl -s -o /dev/null -w '%{http_code}' \
+      -X POST "$SUPABASE_URL/storage/v1/object/${obj}" \
+      -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
+      -H 'Content-Type: application/octet-stream' --data-binary @-)
+    case "$code" in
+      2*) ok=$((ok+1)) ;;
+      *)  note "  upload $obj -> HTTP $code" ;;
+    esac
+  done
+  if [ "$ok" = "$want" ]; then
+    SEEDED_BUCKETS=1
+    note "planted $ok objects across map/ and gallery/ (current.webp, frames-by-day/, frames-fog/, frames-manifest.json, gallery/2026/07/ + thumbs/) so the wipe's storage recursion actually runs"
+  else
+    FAILURES=$((FAILURES+1))
+    note "FAIL planted only $ok of $want storage objects — the wipe's storage recursion will NOT be exercised,"
+    note "     and the 'bucket objects: 0' check below will pass on an empty bucket that was never filled."
+    note "     Most likely the 'map' and 'gallery' buckets do not exist on this stack (a db reset drops them):"
+    note "     re-create them, see docs/STRESS-TEST.md."
+  fi
 }
 
 # Stop them the way launch day stops the real bot: FIRST, before the wipe, and
@@ -173,6 +258,23 @@ export BASE_URL SUPABASE_URL WEBHOOK_SECRET GS_EMITTER_TOKEN
 export SUPABASE_SERVICE_ROLE_KEY=$SERVICE_KEY
 export GS_EXPECTED_WORLD=$WORLD
 export DAY_ONE_STATE=$WORK/day-one-state.json
+
+# WHAT CODE DID THIS RUN ACTUALLY REHEARSE. The site under test is a built copy
+# pinned at whatever was on disk when it was built, but bot-dryrun.mjs imports
+# services/discord-bot/src/* out of THIS working tree, live, so the bot half runs
+# whatever is uncommitted at this instant. Three runs on 2026-09-06 each
+# rehearsed a slightly different bot and none of them was reproducible from a
+# commit, because nothing wrote that down. Now it does.
+say "log of record"
+note "HEAD: $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo 'not a git tree')  $(git -C "$REPO" log -1 --format=%s 2>/dev/null | cut -c1-72)"
+dirty=$(git -C "$REPO" status --porcelain -- services/ scripts/stress/ 2>/dev/null)
+if [ -n "$dirty" ]; then
+  note "WORKING TREE IS DIRTY — this run is not reproducible from a commit:"
+  printf '%s\n' "$dirty" | sed 's/^/      /' | tee -a "$LOG"
+  note "  (the bot half imports services/discord-bot/src/* from the tree, not from the built site copy)"
+else
+  note "working tree clean under services/ and scripts/stress/"
+fi
 
 say "0 · cutover-env.sh $WORLD (DRY RUN — never --apply from here)"
 run bash scripts/cutover-env.sh "$WORLD"
@@ -235,6 +337,7 @@ if [ "$NO_WIPE" = 0 ]; then
   # has nothing left to do.
   trap 'start_local_bots' EXIT
   stop_local_bots
+  seed_buckets_for_the_wipe
 
   before_events=$(require_count events) || exit 2
   before_players=$(require_count players) || exit 2
@@ -271,8 +374,21 @@ print(','.join(b['name'] for b in rows if (b.get('players_present') or []) or b.
   note "server_status:             $sst"
   case "$sst" in *'"world_day":0'*'"player_count":0'*'"is_online":false'*) ;; *) bad=1; note "   ^^ NOT RESET" ;; esac
   for b in map gallery; do
-    n=$(curl -s -X POST "$SUPABASE_URL/storage/v1/object/list/$b" -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" -H 'Content-Type: application/json' -d '{"prefix":"","limit":100}' | grep -c '"name"')
-    note "bucket $b objects: $n (want 0)"; [ "$n" = 0 ] || bad=1
+    n=$(bucket_top_count "$b")
+    note "bucket $b top-level entries: $n (want 0)"; [ "$n" = 0 ] || bad=1
+    # AND THE ZERO HAS TO MEAN SOMETHING. An empty bucket that was never filled
+    # reads identically to one the wipe emptied, so when the seeding above did
+    # its job, the wipe's own summary must show it deleting objects out of this
+    # bucket. Without this the whole storage half of the verification can pass
+    # while the recursion never ran — which is what it did until 2026-09-06.
+    if [ "$SEEDED_BUCKETS" = 1 ]; then
+      if grep -qE "^ +$b +deleted [1-9][0-9]* object" "$LOG"; then
+        note "  ^ and the wipe reported deleting objects from $b, so the recursion really ran"
+      else
+        bad=1
+        note "  ^^ VACUOUS: $b was seeded but the wipe never reported deleting anything from it"
+      fi
+    fi
   done
   for pair in "services/discord-bot/state.json" "services/log-poller/state.json" "scripts/.map-snapshot-state.json"; do
     if [ -f "$WORK/state/$pair" ]; then bad=1; note "state file NOT deleted: $WORK/state/$pair"; fi
@@ -300,20 +416,34 @@ print(','.join(b['name'] for b in rows if (b.get('players_present') or []) or b.
   trap - EXIT
 
   step "post-wipe pages" node scripts/stress/page-check.mjs --base "$BASE_URL" \
+    ${SITE_DIR:+--site-dir "$SITE_DIR"} \
     --label 1-postwipe --dump "$WORK/pages" --stale 'Astrid,Bjorn,Þóra,Ulf,Sigrid,Magnus'
 fi
 
 say "3 · DAY ONE on world '$WORLD'"
 STALE='Astrid,Bjorn,Þóra,Ulf,Sigrid,Magnus'
+# /viking/<slug> only exists once somebody has joined, so it joins the read from
+# the first-join stage onward and never at the post-wipe checkpoint (where the
+# roster is empty by design and a 404 would be a false failure). It is the page
+# with the most generated copy on the whole site and nothing was reading it.
 for s in boot first-join day1 day2 day3 close; do
   step "stage $s" node scripts/stress/day-one.mjs --stage "$s" --world "$WORLD"
   sleep 2
+  ALSO=''
+  [ "$s" = boot ] || ALSO='--also /viking/alvis'
+  # shellcheck disable=SC2086
   step "pages after $s" node scripts/stress/page-check.mjs --base "$BASE_URL" \
+    ${SITE_DIR:+--site-dir "$SITE_DIR"} $ALSO \
     --label "2-$s" --dump "$WORK/pages" --stale "$STALE"
 done
 
 say "4 · day-one invariants"
-step "verify" node scripts/stress/day-one.mjs --stage verify --world "$WORLD"
+# --bot-log is what makes the LAST invariant possible: every other check reads
+# the database, and that is how the 2026-09-06 runs graded clean while the relay
+# had silently stopped 21 rows into a 43-row evening. verify() compares what the
+# announcer POSTED against what the rows say.
+step "verify" node scripts/stress/day-one.mjs --stage verify --world "$WORLD" \
+  --bot-log "$WORK/bot-dryrun.log"
 
 say "result"
 note "page text for reading by hand: $WORK/pages/*.txt"

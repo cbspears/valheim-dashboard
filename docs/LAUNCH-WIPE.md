@@ -249,17 +249,46 @@ between every step. One command re-runs it:
 ```bash
 export BASE_URL=http://localhost:3405 \
        SUPABASE_URL=http://127.0.0.1:55321 \
-       SUPABASE_SERVICE_ROLE_KEY=<that stack's service key>
+       SUPABASE_SERVICE_ROLE_KEY=<that stack's service key> \
+       SITE_DIR=<the built copy serving $BASE_URL, the dir holding .next>
 scripts/stress/rehearse-launch.sh
 ```
+
+**`SITE_DIR` is not decoration, and a rehearsal without it proves less than it
+looks like it does.** The 2026-09-05 perf pass put `/world`, `/events`,
+`/gallery`, `/oath`, `/map` and `/boss/[slug]` behind `revalidate = 60`. The
+day-one section of this rehearsal runs in about **twenty seconds**, so all six of
+them answer every checkpoint with the same build-time HTML, and the run reports
+them clean without ever rendering a row of the evening. Caught on 2026-09-06 by
+diffing the page dumps: `1-postwipe-Events.txt` and `2-close-Events.txt` were
+byte-identical at 579 characters across a night that ended with Eikthyr felled,
+where the same rehearsal before the perf pass had grown that page 579 → 1707 →
+2152 → 2195 → 3110. With `SITE_DIR`, `page-check.mjs` reads `previewModeId` out of
+`.next/prerender-manifest.json` and sends it as `x-prerender-revalidate`, which
+forces a synchronous regeneration (`x-nextjs-cache: REVALIDATED`). Without it,
+every cached page reports **STALE instead of PASS** and the run exits non-zero.
 
 New tools, all local-only and all refusing any non-loopback URL:
 
 | File | What it does |
 |---|---|
 | `scripts/stress/rehearse-launch.sh` | chains the whole rehearsal and diffs `cutover-env.sh` against the real files |
-| `scripts/stress/day-one.mjs` | the first evening in stages (`boot`, `first-join`, `day1`, `day2`, `day3`, `close`, `verify`) so the pages can be read between them |
-| `scripts/stress/page-check.mjs` | reads the six player-facing pages as text and fails on `undefined`, `NaN`, `Invalid Date`, `Day 0`, plural disagreement at exactly one, and names from the previous world |
+| `scripts/stress/day-one.mjs` | the first evening in stages (`boot`, `first-join`, `day1`, `day2`, `day3`, `close`, `verify`) so the pages can be read between them. `verify` also takes `--bot-log <the dry-run announcer's log>` and compares what the relay POSTED against what the rows HOLD — added 2026-09-06, because every other invariant here is a database assertion, and that is how two whole rehearsals graded clean while twenty of the evening's forty-six event rows never reached `#server`. A check it cannot make reports **SKIP**, never PASS |
+| `scripts/stress/page-check.mjs` | reads the eight player-facing pages (Hall, Vikings, World, Map, Boss, Events, Gallery, Oath) as text, plus anything given to `--also` (the rehearsal passes `/viking/alvis` from the first join onward), and fails on `undefined`, `NaN`, `null`, `Invalid Date`, `Day 0`, plural disagreement at exactly one, names from the previous world, and the copy doctrine: an em or en dash, `Milestones` where the site says Great Deeds, and the old world's name. Gallery and Boss were added 2026-09-06; both are ISR pages `docs/LAUNCH-DAY.md` names in its post-wipe check, and neither was being read. Reports a cached ISR render as STALE rather than grading it |
+
+`page-check.mjs`'s refusal is the newest of the three (2026-09-06) and it is not
+tidiness: with `--site-dir` it attaches the built site's `previewModeId` to every
+request as `x-prerender-revalidate`, which is a Next.js on-demand-revalidation
+bypass token. A mistyped `--base` used to send a stray GET; it would now hand a
+build secret to a stranger, so a non-loopback host exits 2 before the first
+request.
+
+The rehearsal also **stamps the commit it ran against** into the top of its log,
+and says plainly when the working tree is dirty under `services/`. The bot half
+of the rehearsal imports `services/discord-bot/src/*` out of the working tree,
+not out of the built site copy, so a rehearsal run while another change is in
+flight is not reproducible from any commit. For the final pre-launch run, run it
+from a clean tree so the log of record names one sha.
 
 `scripts/launch-wipe.mjs` grew three flags for this (`--supabase-url`,
 `--service-key`, `--state-dir`, plus env equivalents) and **three** refusals:
@@ -406,7 +435,7 @@ reads `RECAP_CHANNEL` / `MILESTONE_CHANNEL` / `TITLE_CHANNEL` exactly as
 `services/discord-bot/src/index.js` does, and prints the routing at startup next
 to the clock.
 
-Five more found by reviewing the harness itself, all of the same shape: a check
+Eight more found by reviewing the harness itself, all of the same shape: a check
 that could not fail, or a default that made a bad state look like a good one.
 
 - **`day-one.mjs --stage verify` could report a majority PASS against an empty
@@ -441,6 +470,32 @@ that could not fail, or a default that made a bad state look like a good one.
   before the wipe and started again after the verification, matched on its own
   `SUPABASE_URL`, and `launch-wipe` refuses a loopback `--execute` while one is
   up.
+- **Nothing compared what the announcer POSTED against what the rows HOLD**, so
+  two full rehearsals graded clean while the relay had silently stopped 21 rows
+  into a 43-row evening: every `left the realm` line was missing from `#server`
+  and no check could see it, because all 21 invariants are database assertions.
+  `day-one.mjs --stage verify --bot-log <log>` now counts join, leave and death
+  rows for the roster and compares them with the relay's own output, accounting
+  for the duplicate deaths it collapses and the rows Discord permanently rejects.
+  It fails the final rehearsal on purpose: the cause is in
+  `services/discord-bot/src/relay.js`, which cursors on the producer-supplied
+  `events.created_at` and advances onto every consumed row, so a row stamped
+  later than one written after it is lost for good. **On launch night the same
+  shape arrives from a player's PC with a fast clock** (`lib/event-time.ts`
+  deliberately trusts anything up to now+5min), which silently deletes up to five
+  minutes of everyone else's joins, leaves and deaths from the feed.
+- **The storage seeding announced work it had not done.** The loop that plants
+  the snapshotter's nested layout before the wipe piped every upload through
+  `curl -s -o /dev/null` with no status check and then printed "planted 7
+  objects" unconditionally, so aimed at buckets that do not exist (an ordinary
+  state after a `db reset`) it planted nothing, the wipe printed "already empty",
+  and the `objects = 0` assertion passed vacuously. It counts the 2xx responses
+  now, fails loudly when the number is short, and afterwards asserts the wipe's
+  own summary really reported deleting objects out of each bucket.
+- **`bucket_count` returned 1 for a bucket holding three objects.** The storage
+  list API answers on one line and the function was `grep -c`, which counts
+  lines. Renamed `bucket_top_count`, counts occurrences, and its comment now says
+  what it actually measures: top-level entries, not objects at any depth.
 
 `cutover-env.sh` was diffed line by line against the real files and every value
 it writes is correct, including the non-obvious one: `TITLE_CHANNEL` defaults to

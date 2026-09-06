@@ -336,23 +336,26 @@ world that has booted on 1.0 cannot be opened by 0.221.12 again.
 
 **Rollback:** free. This is the last step that is.
 
-> **Ignore most of what the dry run prints under `POST-WIPE CHECKLIST`.** The block
-> `scripts/launch-wipe.mjs` prints (once here, once again after `--execute` at 20a) was
-> written 2026-09-04 for an ordinary wipe day and has not been reconciled with this file —
-> it belongs to the rehearsal track, so it is still on screen. Six of its lines are wrong
-> for 2026-09-09:
+> **The `POST-WIPE CHECKLIST` the dry run prints was reconciled with this file on
+> 2026-09-06.** That block (printed once here, once again after `--execute` at 20a) had been
+> written 2026-09-04 for an ordinary wipe day and disagreed with this file eight ways. All
+> eight were fixed in `scripts/launch-wipe.mjs` itself rather than annotated here, so what is
+> on your screen and what is in this file now say the same thing. For the record, what
+> changed:
 >
-> | It prints | On 2026-09-09 |
+> | It used to print | It now prints |
 > |---|---|
-> | "Full cutover sequence with owners: `docs/LAUNCH-WIPE.md`" | This file. |
-> | Item 1, `bash scripts/pull-world.sh <World>` | No argument. Naming the launch world fetches nothing — see above. |
-> | Item 2, the sweep, the world upload and the Start form as things done **after** the wipe | They are steps 12 and 13, **before** it. The wipe is step 20. |
-> | Item 2, "today only the Companion plugin injects" keep-gear | Stale. The panel tier is `casual` and grants it directly. |
-> | Item 6, "`TITLE_CHANNEL` / any other `*_CHANNEL=server` line → **remove**" | **Wrong and it matters.** `services/discord-bot/src/index.js:229` and `:627` read `TITLE_CHANNEL === 'valheim' ? 'valheim' : 'server'`, so an **absent** `TITLE_CHANNEL` routes launch-night titles to `#server`. `cutover-env.sh:66` **sets** it to `valheim`. Deleting it does the opposite of what the line intends. |
-> | Item 7, "Companion Client 0.3.0 if it shipped", no other pins | Client **0.3.2** is live. The flag set of record is `$M` in step 16. |
+> | "Full cutover sequence with owners: `docs/LAUNCH-WIPE.md`" | This file, named as the sequence of record. |
+> | Item 1, `bash scripts/pull-world.sh <World>` | No argument, with the reason: it defaults to the world on the box, and naming the world you are about to *create* fetches nothing. |
+> | The panel work headed "AFTER the wipe" | Headed as steps 12 to 14, **before** the wipe at step 20, already done by the time the block prints. |
+> | Item 2, "today only the Companion plugin injects" keep-gear | The panel tier has read `casual` since 2026-09-05 and the game grants it — but the tier belongs to the world, so re-set it on the new Start form. |
+> | Item 2's V+ `[Chat]` line, a half-sentence with unbalanced parens | One instruction: leave `[Chat]` enabled, because server-wide `/s` shouts need it, and oath and pin capture read those shouts. |
+> | Item 6, "`TITLE_CHANNEL` / any other `*_CHANNEL=server` line → **remove**" | **The one that would have cost something.** `services/discord-bot/src/index.js:229` and `:627` read `TITLE_CHANNEL === 'valheim' ? 'valheim' : 'server'`, so an **absent** `TITLE_CHANNEL` routes launch-night titles to `#server`. It now says SET it to `valheim`, and points at `cutover-env.sh --apply`, which does. |
+> | Item 7, "Companion Client 0.3.0 if it shipped", no other pins | Points at `$M` in step 16 as the pin set of record; records that Client 0.3.2 is published and 0.3.3 staged. |
+> | Item 11, "port 3000 closed" | Port 3000 will read **OPEN**: the ticket was skipped by decision, a known exposure and not a hold. Also: the plugin count is the one you wrote down, not a hard-coded 8. |
 >
-> Its restart-order half (items 8 to 10) and its "adjacent tables NOT touched" note **are**
-> right and are reproduced at 20d and 20e.
+> Its restart-order half (items 8 to 10) and its "adjacent tables NOT touched" note were
+> right all along and are reproduced at 20d and 20e.
 
 > ### GO / NO-GO 1 — the point of no return
 >
@@ -615,12 +618,31 @@ Fix all three, then zip:
 (cd plugins/thunderstore/EilifPaths-1.5.0 && zip -qr ../EilifPaths-1.5.0.zip . -x '*.zip' 'UPLOAD.md')
 ```
 
-**That directory does not exist until step 4 has run.** `plugins/thunderstore/` holds
-`EilifPaths`, `-1.1.0`, `-1.3.0` and `-1.4.0` today (checked 2026-09-05) — `-1.5.0` is
-created by `rebuild-plugins.sh --stage`, along with the `README.md`, `CHANGELOG.md` and
-`manifest.json` the three items above tell you to fix. Running the `zip` line before step 4
-fails with `No such file or directory`. To do the paperwork ahead of the day, stage it on
-its own first:
+**`plugins/thunderstore/EilifPaths-1.5.0/` and its zip now exist** (staged 2026-09-05
+evening against 0.221.12), alongside `EilifPaths`, `-1.1.0`, `-1.3.0`, `-1.4.0` and
+`EilifCompanionClient-0.3.3/`, so the `zip` line above runs today. It is step 4 that
+re-stages the directory, and only if the 1.0 rebuild changes the DLL — until step 4 has run
+on the 9th, that zip is the **pre-1.0** build.
+
+**One of the three items above is done; the other two are not** (checked 2026-09-06):
+
+| # | Item | State |
+|---|---|---|
+| 1 | `README.md` | **Outstanding.** `diff plugins/thunderstore/EilifPaths-1.4.0/README.md plugins/thunderstore/EilifPaths-1.5.0/README.md` is **empty**: it is still 1.4.0's page, word for word, and it never says `VPlusFallback`. |
+| 2 | `CHANGELOG.md` | **Done.** It documents `[VPlusFallback]` in full — every setting, and that they all stand down while V+ is loaded. |
+| 3 | manifest **description** | **Outstanding.** The only difference from 1.4.0's `manifest.json` is `version_number`. The description is the unchanged paths/stamina blurb. |
+
+Thunderstore renders the **README** as the package page, not the CHANGELOG, so as things
+stand the page Charlie publishes says nothing about the fallback at all. Fix items 1 and 3
+**before** the `zip` line — `EilifPaths-1.5.0.zip` was built at 20:08 on 2026-09-05 from
+these exact files and already carries the stale pair, so re-zip after editing. The one-line
+check before you zip:
+
+```bash
+diff plugins/thunderstore/EilifPaths-{1.4.0,1.5.0}/README.md   # must NOT be empty
+```
+
+To stage the directory on its own without a full rebuild pass:
 
 ```bash
 bash scripts/rebuild-plugins.sh --only eilif-paths --stage
@@ -862,11 +884,11 @@ step 6 Supabase dump is the only copy.
 > their session and player rows would be wiped with the rest, and the poller is not running
 > to re-derive them. **Hold the GO post until 20d is done.**
 
-> **The `POST-WIPE CHECKLIST` prints again here.** Same block, same six wrong lines, listed
-> in full at step 6. The one that will actually cost you something if you follow it is item
-> 6, "`TITLE_CHANNEL` … → remove": an absent `TITLE_CHANNEL` sends launch night's titles to
-> `#server`. 20b sets it. Everything else in items 1, 2 and 7 was already done at steps 6,
-> 12 to 13 and 18.
+> **The `POST-WIPE CHECKLIST` prints again here.** Same block as at step 6, reconciled with
+> this file on 2026-09-06 and safe to read now. Two things about it are still worth knowing
+> at 20a: its panel half (item 2) describes steps 12 to 14, which you finished hours ago, and
+> its item 6 is `cutover-env.sh --apply`, which is 20b below — so do not hand-edit the `.env`
+> files off the printed list. Items 1 and 7 were already done at steps 6 and 18.
 
 ### 20b — revert the pilot overrides
 
@@ -982,7 +1004,7 @@ GitHub Actions tab, and confirm the next scheduled run is green before anyone go
 
 ---
 
-**Prerendered pages after the wipe.** `/world`, `/events`, `/gallery`, `/oath`, `/map` and `/boss/<slug>` are ISR pages (revalidate 60 s) since the 2026-09-05 perf pass, and the deploy in step 19 prerenders them against the PRE-wipe database. They refresh on the first request more than 60 s after the wipe, so before the launch post: open `/world` and `/map` once, wait a minute, open them again, and confirm no boss is marked felled and the map shows the new world. If a page still shows the old world after two minutes, redeploy (`vercel deploy --prod --yes --scope charlie-9292s-projects`) rather than waiting.
+**Prerendered pages after the wipe.** `/world`, `/events`, `/gallery`, `/oath`, `/map` and `/boss/<slug>` are ISR pages (revalidate 60 s) since the 2026-09-05 perf pass, and the deploy in step 19 prerenders them against the PRE-wipe database. The first request after the 60 s window is served the **stale** copy and only triggers the regeneration behind it — the **second** request is the fresh one, which is why the procedure here opens each page twice. So before the launch post: open `/world` and `/map` once, wait a minute, open them again, and read the SECOND render; confirm no boss is marked felled and the map shows the new world. If a page still shows the old world after two minutes, redeploy (`vercel deploy --prod --yes --scope charlie-9292s-projects`) rather than waiting.
 
 ## Step 21 — Charlie's own last look · **CHARLIE ONLY**
 
@@ -1074,7 +1096,7 @@ Five more were found on the review pass and settled the same way:
 | # | Contradiction | Source | Resolution |
 |---|---|---|---|
 | 23 | **Nobody owned generating the launch world** | none of them | It appeared as an upload in A and here, and as an open Charlie to-do in E, and in no sequence at all. **Step 0**, due 2026-09-08, with the 0.221.12-vs-1.0 tradeoff named. Without it the stopped window stalls after the point of no return. |
-| 24 | **`launch-wipe.mjs`'s own `POST-WIPE CHECKLIST`** | H | Prints at step 6 **and** 20a and disagrees with this file six ways, including telling the operator to **remove** `TITLE_CHANNEL` when an absent one routes titles to `#server` and `cutover-env.sh` sets it. Tabulated at step 6, flagged again at 20a. The script text belongs to the rehearsal track. |
+| 24 | **`launch-wipe.mjs`'s own `POST-WIPE CHECKLIST`** | H | Prints at step 6 **and** 20a and disagreed with this file eight ways, including telling the operator to **remove** `TITLE_CHANNEL` when an absent one routes titles to `#server` and `cutover-env.sh` sets it. **Fixed in the script itself on 2026-09-06** (the rehearsal track owned it): the printed block and this file now agree. What changed is tabulated at step 6. |
 | 25 | **The watchdog is not mentioned anywhere in the sequence** | A carried the finding, no sequence carried the fix | Pings every 15 min from GitHub through a planned outage that runs from step 5 to 20d. Named at step 5 (what alerts, how often, why not to mute it) and at 20e (`ops_alerts` survives the wipe, so the all-clear's duration is measured from before the cutover). |
 | 26 | **`EilifPaths 1.5.0` cannot be re-uploaded once published** | none of them | The csproj is pinned at 1.5.0 and SourceLink restamps on every HEAD move, so an early upload and the morning's rebuild are different DLLs under one immutable version. Branch added at step 16: bump to **1.5.1** and pin `--paths 1.5.1`. |
 | 27 | **`docs/OPS-COCKPIT.md`'s launch-revert remediation** | one of the six sources, never reconciled | Listed only `RECAP_CHANNEL`, `MILESTONE_CHANNEL` and `RECAPS_START`, missed `OATH_CHANNEL`, `BOSS_CHANNEL` and `TITLE_CHANNEL` entirely, and pointed at the superseded vault outline. Now points at `cutover-env.sh --apply` and step 20b. |
