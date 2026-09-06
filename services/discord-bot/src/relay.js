@@ -18,24 +18,68 @@ const DEATH_MEMORY_MS = 3600_000;
 // which is exactly what the time-based prune would have done anyway.
 const DEATH_MEMORY_MAX = 200;
 
+// How many rows one tick will consume. The query asks for this PLUS the tie
+// list below, so rows already relayed can never eat into the window.
+const BATCH = 50;
+
 // How far ahead of now an event row may be dated and still be relayed. Kept in
 // step with lib/event-time.ts FUTURE_EVENT_TOLERANCE_MS on the site side (this
 // service is a separate npm project and cannot import the TypeScript).
 const FUTURE_EVENT_TOLERANCE_MS = 5 * 60_000;
 
-// THE BUG THIS GUARDS (red-team, 2026-09-05). The cursor below IS
-// events.created_at and only ever moves forward. Two of the ingest paths on
-// /api/gs-ingest are unauthenticated by design, and until the clamp in
-// lib/event-time.ts they accepted any tsUtc — so one anonymous POST naming any
-// online viking, dated 2999-01-01, parked the cursor in the year 2999 and the
-// `.gt(created_at, cursor)` query never matched again. #server went silent
-// permanently, and silently: a tick that posts nothing is a success, so the ops
-// heartbeat and the watchdog both stayed green.
+// ─────────────────────────────────────────────────────────────────────────────
+// THE CURSOR, AND THE TWO BUGS IT HAS HAD
 //
-// The clamp at ingest is the real fix. This is the second lock on the same door:
-// a future-dated row already in the table (or written by some future producer we
-// do not control) stops the batch instead of consuming it, so the cursor stays
-// where the last honest event left it and the feed keeps running.
+// 1. THE SILENT EVENT LOSS (found by the launch rehearsal, 2026-09-06:
+//    `join 20/20 · leave 0/20 · death 2/3 — 21 of 43 feed rows NEVER POSTED`).
+//    The cursor used to BE `events.created_at`, which is PRODUCER-supplied and
+//    is not insertion order. The log poller stamps a join/leave with the LOG
+//    LINE's time and ships it on its next 20 s SFTP poll, so its rows land
+//    20-30 s after the instant they claim; gs-ingest and the bot's own rows
+//    land at real now. A client death at 12:00:00 relayed at 12:00:05 parked
+//    the cursor at 12:00:00, the poller then wrote a leave stamped 11:59:50 at
+//    12:00:08, and `.gt('created_at', '12:00:00')` never matched it again. The
+//    row was lost from #server forever, silently: a tick that posts nothing is
+//    a success, so the ops heartbeat and the watchdog both stayed green.
+//
+//    The fix is db/2026-09-06_events_inserted_at.sql: cursor on `inserted_at`
+//    (server-side `now()` at INSERT, which no producer can supply) and use
+//    created_at only for ordering ties and for rendering. `events.id` is a UUID,
+//    so that column is the only insertion-order key there is.
+//
+// 2. THE FROZEN FEED (red-team, 2026-09-05). Two ingest paths on /api/gs-ingest
+//    are unauthenticated by design, and until the clamp in lib/event-time.ts
+//    they accepted any tsUtc — so one anonymous POST naming any online viking,
+//    dated 2999-01-01, parked the created_at cursor in the year 2999 and the
+//    feed went permanently, silently quiet. The clamp at ingest is the real fix.
+//
+//    Bug 2's guard used to STOP the batch on a future-dated row. Under an
+//    insertion-order cursor that would now cause bug 1: rows no longer arrive
+//    sorted by created_at, so a future-dated row is not "last" — it sits
+//    wherever it was inserted, with honest rows behind it, and stopping there
+//    holds the cursor in front of all of them for as long as the row exists.
+//    Stalling would be strictly worse than the hole it was written to prevent.
+//    So the guard now SKIPS the row (one error line per row per process) and
+//    lets the cursor advance past it. It is safe to do that because
+//    `inserted_at` is the DB's own clock: a forged created_at can no longer
+//    move the cursor at all, only cost its own row a feed line. The legacy
+//    fallback path below still stalls, because there the cursor IS created_at.
+//
+// TIES. `inserted_at` has microsecond resolution, but `now()` is fixed for a
+// whole transaction, so two rows written by one statement share a value and a
+// plain `.gt` on it would skip the second one — the same class of silent loss.
+// So the query is `.gte(cursor)` and the ids already relayed AT EXACTLY that
+// timestamp are carried in state.relay.lastInsertedIds and skipped by id. The
+// query asks for BATCH + that list's length so the re-read rows cannot starve
+// real ones out of the window.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// How many already-relayed ids are remembered for the current lastInsertedAt.
+// One statement writing >200 events rows in a single transaction is the only
+// way to exceed it, and nothing in this repo does that. If it ever happened the
+// oldest ids are dropped, which risks a REPEATED line rather than a lost one —
+// the trade this whole file is built around.
+const INSERTED_IDS_MAX = 200;
 
 // discord.js throws a DiscordAPIError carrying the HTTP status.
 //
@@ -61,6 +105,20 @@ function isPermanentPostError(e) {
   return status === 400 || status === 413;
 }
 
+// PostgREST's answer when db/2026-09-06_events_inserted_at.sql has not been
+// applied yet: SQLSTATE 42703, "column events.inserted_at does not exist".
+function isMissingInsertedAt(error) {
+  if (!error) return false;
+  if (String(error.code ?? '') === '42703') return true;
+  const m = `${error.message ?? ''} ${error.details ?? ''}`;
+  return /inserted_at/.test(m) && /does not exist/i.test(m);
+}
+
+// How long the relay stays on the legacy cursor before probing for the column
+// again, so applying the migration under a running bot heals it without a
+// restart, and a genuinely un-migrated database is not asked every 15 s.
+const MIGRATION_RECHECK_MS = 5 * 60_000;
+
 export function createRelay({ db, post, state, saveState, log = console }) {
   if (!state.relay) state.relay = { lastEventAt: new Date().toISOString() };
 
@@ -83,8 +141,57 @@ export function createRelay({ db, post, state, saveState, log = console }) {
     }
   }
 
+  // THE TRANSITION. A bot upgraded in place has a created_at cursor and no
+  // insertion-order one. The migration backfills inserted_at = created_at for
+  // every row that already existed, so for history the two columns are the same
+  // clock and lastEventAt is a usable starting point.
+  //
+  // The seeded cursor is used with `.gte` and an EMPTY id list, so the single
+  // row the old cursor last landed on is re-read and may post one duplicate line
+  // at the moment of the switch (a death self-collapses; a join or leave would
+  // show twice). That is deliberate: the alternative — "skip anything dated at
+  // or before the seed" — is the exact rule that lost twenty leaves.
+  if (!Array.isArray(state.relay.lastInsertedIds)) state.relay.lastInsertedIds = [];
+  {
+    const cur = Date.parse(state.relay.lastInsertedAt);
+    const limit = Date.now() + FUTURE_EVENT_TOLERANCE_MS;
+    if (typeof state.relay.lastInsertedAt !== 'string' || !Number.isFinite(cur)) {
+      const was = state.relay.lastInsertedAt;
+      state.relay.lastInsertedAt = state.relay.lastEventAt;
+      state.relay.lastInsertedIds = [];
+      if (was === undefined || was === null) {
+        log.info?.(
+          `[relay] first run on the insertion-order cursor: seeded lastInsertedAt from lastEventAt ` +
+            `(${state.relay.lastInsertedAt}). db/2026-09-06_events_inserted_at.sql backfills inserted_at ` +
+            `from created_at, so history keeps its order.`,
+        );
+      } else {
+        log.error?.(
+          `[relay] the saved insertion cursor was ${JSON.stringify(was)}, which is not a usable time — ` +
+            `re-seeded from lastEventAt (${state.relay.lastInsertedAt}).`,
+        );
+      }
+    } else if (cur > limit) {
+      // inserted_at is the database's own now(), so this means a bad server
+      // clock or a hand-edited state.json. Either way the feed is frozen until
+      // it is pulled back.
+      const was = state.relay.lastInsertedAt;
+      state.relay.lastInsertedAt = new Date().toISOString();
+      state.relay.lastInsertedIds = [];
+      log.error?.(
+        `[relay] the saved insertion cursor was ${was}, which is in the future — reset to ` +
+          `${state.relay.lastInsertedAt}. Events between the last relayed row and now are not posted. ` +
+          `inserted_at is written by the database, so check the Postgres clock.`,
+      );
+    }
+  }
+
   // Future-dated rows already reported, so one warning per row per process.
   const warnedFuture = new Set();
+
+  // Set once PostgREST says the column is missing, cleared once it appears.
+  let pendingMigration = false;
+  let nextMigrationProbe = 0;
 
   // THE OUTAGE THE JOURNAL COULD NOT NAME (round 3, 2026-09-05). A stall
   // rethrows, index.js safe() catches it, and the journal gets one bare
@@ -115,7 +222,7 @@ export function createRelay({ db, post, state, saveState, log = console }) {
   function noteStall(status, message) {
     if (stalledSince) return;
     stalledSince = Date.now();
-    const held = state.relay.lastEventAt;
+    const held = state.relay.lastInsertedAt;
     if (ENVIRONMENT_STATUSES.has(status)) {
       log.error?.(
         `[relay] #server is refusing our posts (${status}: ${message}). The feed is STALLED, ` +
@@ -188,63 +295,176 @@ export function createRelay({ db, post, state, saveState, log = console }) {
     }
   }
 
-  async function tick() {
-    const cursor = state.relay.lastEventAt;
-    const { data, error } = await db
+  // Remember an id as already relayed at the CURRENT lastInsertedAt.
+  function rememberInserted(id) {
+    if (!id) return;
+    const ids = state.relay.lastInsertedIds;
+    if (ids.includes(id)) return;
+    ids.push(id);
+    if (ids.length > INSERTED_IDS_MAX) ids.splice(0, ids.length - INSERTED_IDS_MAX);
+  }
+
+  // Move the insertion-order cursor onto a consumed row. Never backwards: the
+  // query is ordered, but a fake/replaying source (or a row with no
+  // inserted_at at all) must not be able to rewind the feed into a replay.
+  function advanceInsertion(ev) {
+    const id = ev.id === undefined || ev.id === null ? '' : String(ev.id);
+    const ins = typeof ev.inserted_at === 'string' && ev.inserted_at ? ev.inserted_at : null;
+    if (!ins) {
+      rememberInserted(id);
+      return;
+    }
+    if (ins === state.relay.lastInsertedAt) {
+      rememberInserted(id);
+      return;
+    }
+    const next = Date.parse(ins);
+    const cur = Date.parse(state.relay.lastInsertedAt);
+    if (Number.isFinite(next) && Number.isFinite(cur) && next < cur) {
+      rememberInserted(id);
+      return;
+    }
+    state.relay.lastInsertedAt = ins;
+    state.relay.lastInsertedIds = id ? [id] : [];
+  }
+
+  // The cursor of record: insertion order, which no producer supplies.
+  function fetchByInsertion() {
+    return db
       .from('events')
       .select('*')
-      .gt('created_at', cursor)
+      .gte('inserted_at', state.relay.lastInsertedAt)
+      .order('inserted_at', { ascending: true })
       .order('created_at', { ascending: true })
-      .limit(50);
+      .limit(BATCH + state.relay.lastInsertedIds.length);
+  }
+
+  // Pre-migration only. Keeps the bot working if it restarts before
+  // db/2026-09-06_events_inserted_at.sql is applied — and this is the path with
+  // the event-loss bug, so it is a bridge, not a mode anyone should sit in.
+  function fetchByCreatedAt() {
+    return db
+      .from('events')
+      .select('*')
+      .gt('created_at', state.relay.lastEventAt)
+      .order('created_at', { ascending: true })
+      .limit(BATCH);
+  }
+
+  async function tick() {
+    let byInsertion = !pendingMigration || Date.now() >= nextMigrationProbe;
+    let data;
+    let error;
+
+    if (byInsertion) {
+      ({ data, error } = await fetchByInsertion());
+      if (isMissingInsertedAt(error)) {
+        if (!pendingMigration) {
+          pendingMigration = true;
+          log.error?.(
+            `[relay] events.inserted_at does not exist — db/2026-09-06_events_inserted_at.sql is UNAPPLIED. ` +
+              `Falling back to the old created_at cursor, which SILENTLY LOSES any row written with an ` +
+              `earlier timestamp than one already relayed (the log poller's joins and leaves, every time). ` +
+              `Apply the migration; the relay picks the new cursor up by itself within ` +
+              `${Math.round(MIGRATION_RECHECK_MS / 60000)} minutes, no restart needed.`,
+          );
+        }
+        nextMigrationProbe = Date.now() + MIGRATION_RECHECK_MS;
+        byInsertion = false;
+        ({ data, error } = await fetchByCreatedAt());
+      } else if (!error && pendingMigration) {
+        pendingMigration = false;
+        log.error?.('[relay] events.inserted_at is present now — back on the insertion-order cursor.');
+      }
+    } else {
+      ({ data, error } = await fetchByCreatedAt());
+    }
+
     if (error) throw new Error(`events query: ${error.message}`);
     if (!data || data.length === 0) return 0;
+
+    // Ids relayed at exactly lastInsertedAt. The list only ever holds ids at the
+    // cursor's own timestamp, and ids are UUIDs, so matching on id alone cannot
+    // skip an unrelated row.
+    const alreadyRelayed = byInsertion ? new Set(state.relay.lastInsertedIds) : null;
 
     let posted = 0;
     const futureLimit = Date.now() + FUTURE_EVENT_TOLERANCE_MS;
     for (const ev of data) {
-      // Rows arrive strictly ascending by created_at, so the first future-dated
-      // one means every row after it is future-dated too: stop the batch here
-      // WITHOUT advancing the cursor onto it. The row is re-read each tick (and
-      // sorts last, so it never starves a real event out of the 50-row window)
-      // until someone deletes it.
+      const rowId = ev.id === undefined || ev.id === null ? '' : String(ev.id);
+      if (alreadyRelayed && rowId && alreadyRelayed.has(rowId)) continue;
+
       const at = Date.parse(ev.created_at);
-      if (Number.isFinite(at) && at > futureLimit) {
-        const id = String(ev.id ?? ev.created_at);
+      const isFuture = Number.isFinite(at) && at > futureLimit;
+      if (isFuture) {
+        const id = rowId || String(ev.created_at);
         if (!warnedFuture.has(id)) {
           warnedFuture.add(id);
           log.error?.(
-            `[relay] event ${id} is dated ${ev.created_at}, which is in the future — not relayed, and the ` +
-              `cursor stays put. Delete the row: it is either a producer with a broken clock or a forged ` +
-              `report on one of the unauthenticated ingest paths.`,
+            `[relay] event ${id} is dated ${ev.created_at}, which is in the future — not relayed. ` +
+              (byInsertion
+                ? `The insertion cursor steps past it, so the rest of the feed keeps moving. Delete the ` +
+                  `row: it is either a producer with a broken clock or a forged report on one of the ` +
+                  `unauthenticated ingest paths.`
+                : `The cursor stays put (the inserted_at migration is not applied, so the cursor is still ` +
+                  `created_at and stepping over this row would burn every event behind it). Delete the row.`),
           );
         }
-        break;
-      }
-
-      const payload = formatFeedEvent(ev);
-      if (payload && isDuplicateDeath(ev)) {
-        log.info?.(`[relay] collapsed a duplicate death for ${ev.character_name}`);
-      } else if (payload) {
-        try {
-          await post('server', payload);
-          noteRecovered();
-          posted++;
-          if (ev.type === 'death') rememberDeath(ev);
-        } catch (e) {
-          if (!isPermanentPostError(e)) {
-            noteStall(Number(e?.status ?? e?.httpStatus) || null, e?.message ?? String(e));
-            throw e; // retry this row next tick
+        // Pre-migration the cursor IS created_at, so stepping over a
+        // future-dated row would consume everything behind it. Hold instead.
+        if (!byInsertion) break;
+      } else {
+        const payload = formatFeedEvent(ev);
+        if (payload && isDuplicateDeath(ev)) {
+          log.info?.(`[relay] collapsed a duplicate death for ${ev.character_name}`);
+        } else if (payload) {
+          try {
+            await post('server', payload);
+            noteRecovered();
+            posted++;
+            if (ev.type === 'death') rememberDeath(ev);
+          } catch (e) {
+            if (!isPermanentPostError(e)) {
+              noteStall(Number(e?.status ?? e?.httpStatus) || null, e?.message ?? String(e));
+              throw e; // retry this row next tick
+            }
+            // A poison row must never stall the feed: log it, walk past it (the
+            // cursor advances below), keep the rest of the batch moving.
+            log.error?.(`[relay] Discord rejected event ${ev.id ?? ev.created_at}: ${e.message}. Skipping it.`);
           }
-          // A poison row must never stall the feed: log it, walk past it (the
-          // cursor advances below), keep the rest of the batch moving.
-          log.error?.(`[relay] Discord rejected event ${ev.id ?? ev.created_at}: ${e.message}. Skipping it.`);
         }
       }
+
       // Advance + persist the cursor after EVERY row (posted or skipped), not
       // just at the end of the batch. If the process dies mid-batch, the next
       // tick resumes strictly after the last row it actually posted — so a
       // crash can never cause the same death (or any event) to go out twice.
-      state.relay.lastEventAt = ev.created_at;
+      if (byInsertion) {
+        advanceInsertion(ev);
+      } else if (!isFuture) {
+        // Pre-migration, keep the insertion cursor in step with the legacy one.
+        // The migration backfills inserted_at = created_at for every row that
+        // already existed — which is exactly the rows this branch is relaying —
+        // so this is the value the insertion cursor will need the moment the
+        // column appears. Without it, the flip back would re-read the whole
+        // legacy window and post all of it a second time. The id goes with it so
+        // the boundary row itself is skipped rather than duplicated.
+        state.relay.lastInsertedAt = ev.created_at;
+        state.relay.lastInsertedIds = rowId ? [rowId] : [];
+      }
+      // lastEventAt is now only the legacy/pre-migration cursor and the seed for
+      // lastInsertedAt, so on the insertion path it is kept MONOTONE: a
+      // back-dated row (the whole point of the insertion cursor) must not rewind
+      // it, and a future-dated one must not poison it. On the legacy path it is
+      // the cursor itself and moves exactly as it always did.
+      if (!isFuture) {
+        if (!byInsertion) {
+          state.relay.lastEventAt = ev.created_at;
+        } else if (Number.isFinite(at)) {
+          const prev = Date.parse(state.relay.lastEventAt);
+          if (!Number.isFinite(prev) || at >= prev) state.relay.lastEventAt = ev.created_at;
+        }
+      }
       await saveState();
     }
     return posted;

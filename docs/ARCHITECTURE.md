@@ -203,7 +203,7 @@ only component holding a Supabase key directly. Loops, with their intervals:
 
 | Loop | Cadence | What it does |
 |---|---|---|
-| `relay` | `POLL_INTERVAL_MS`, default 15 s | new `events` rows to `#server` |
+| `relay` | `POLL_INTERVAL_MS`, default 15 s | new `events` rows to `#server`, cursored on `events.inserted_at` (see below) |
 | `bosses` | 30 s | first boss kill to `#valheim` with `@everyone`, plus the skald retelling |
 | `events` (Discord scheduled-events sync) | `EVENTS_INTERVAL_MS`, default 10 m | posts `type:'events_sync'` to `/api/webhook` |
 | `identity-confirm` | 30 s | confirms `/oath CODE` Discord links |
@@ -218,6 +218,29 @@ only component holding a Supabase key directly. Loops, with their intervals:
 
 Recaps are gated by `RECAPS_START`. Gallery ingest, oath ingest and identity linking are
 Discord event handlers rather than loops, each behind its own env flag.
+
+**The relay cursors on insertion order, not on producer time.** `events.created_at` is
+supplied by whoever wrote the row: the log poller stamps a join or leave with the LOG
+LINE's time and only ships it on its next 20 s SFTP poll, so its rows routinely land 20 to
+30 s after the instant they claim, while gs-ingest and the bot's own rows land at real
+now. A relay cursored on `created_at` therefore loses rows silently — a client death at
+12:00:00 relayed at 12:00:05 parks the cursor at 12:00:00, the poller writes a leave
+stamped 11:59:50 at 12:00:08, and `.gt('created_at', …)` never matches it again. The
+2026-09-06 launch rehearsal graded that: `join 20/20 · leave 0/20 · death 2/3 — 21 of 43
+feed rows NEVER POSTED, silently`, and every other check in the run was green, because a
+tick that posts nothing is a success. `events.id` is a UUID, so `db/2026-09-06_events_inserted_at.sql`
+adds `inserted_at timestamptz not null default now()` (backfilled from `created_at`, so
+history keeps its order) and the relay reads
+`.gte('inserted_at', cursor).order('inserted_at').order('created_at').limit(50 + n)`.
+`now()` is fixed for a whole transaction, so two rows written by one statement share an
+`inserted_at`: the cursor is therefore the pair `(lastInsertedAt, lastInsertedIds)` — the
+`.gte` re-reads that timestamp and the ids already relayed at it are skipped by id, which
+is why `.gt` alone would drop the second row of every pair. `lastEventAt` survives as the
+pre-migration fallback (PostgREST 42703) and as the seed for the new cursor on first run.
+One consequence: a future-dated `created_at` can no longer freeze the feed, so the relay
+now SKIPS such a row and advances instead of stalling on it — under insertion order the
+forged row is not last in the scan, and stalling would hold the cursor in front of every
+honest row behind it.
 
 Persistent local state is `services/discord-bot/state.json` (announced bosses, among
 other things). This file is why the launch wipe stops the bot first: its voice tick ends

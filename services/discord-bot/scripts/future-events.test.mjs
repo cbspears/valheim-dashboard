@@ -17,8 +17,14 @@
 //
 // The real fix is the clamp at ingest (lib/event-time.ts, lib/event-time.test.mjs).
 // These are the second locks on the same door, in the two loops that consumed
-// the row: the relay refuses to step onto it (and repairs a cursor already
-// poisoned by one), and the recap bounds its window at both ends.
+// the row: the relay never posts it and repairs a cursor already poisoned by
+// one, and the recap bounds its window at both ends.
+//
+// SUPERSEDED IN PART, 2026-09-06. The relay no longer cursors on created_at at
+// all (db/2026-09-06_events_inserted_at.sql, scripts/relay-cursor.test.mjs), so
+// a forged created_at cannot freeze the feed even without this guard. What is
+// left here is that the row is not RELAYED and does not poison the legacy
+// cursor — see case 1 for why the guard's mechanics had to change with it.
 //
 // Run:
 //   node scripts/future-events.test.mjs   (from services/discord-bot)
@@ -34,25 +40,36 @@ const ago = (ms) => new Date(Date.now() - ms).toISOString();
 const ahead = (ms) => new Date(Date.now() + ms).toISOString();
 const FORGED = '2999-01-01T00:00:00+00:00';
 
-// A fake events table that actually APPLIES the created_at filters, so a missing
-// bound is a failing test rather than a stub that answers the same either way.
+// A fake events table that actually APPLIES the filters and the ordering, so a
+// missing bound is a failing test rather than a stub that answers the same
+// either way. It orders by whatever `.order()` was called with (the relay now
+// orders by inserted_at then created_at), falling back to created_at.
 function eventsDb(rows) {
   return {
     from(table) {
       const filters = [];
+      const orders = [];
       const q = {};
       const pass = () => (...args) => { void args; return q; };
-      for (const m of ['select', 'eq', 'is', 'not', 'or', 'order', 'limit']) q[m] = pass();
-      q.gt = (col, v) => { filters.push((r) => r[col] > v); return q; };
-      q.gte = (col, v) => { filters.push((r) => r[col] >= v); return q; };
-      q.lte = (col, v) => { filters.push((r) => r[col] <= v); return q; };
-      q.lt = (col, v) => { filters.push((r) => r[col] < v); return q; };
+      for (const m of ['select', 'eq', 'is', 'not', 'or', 'limit']) q[m] = pass();
+      q.order = (col, opts) => { orders.push([col, opts?.ascending !== false]); return q; };
+      q.gt = (col, v) => { filters.push((r) => String(r[col] ?? '') > String(v)); return q; };
+      q.gte = (col, v) => { filters.push((r) => String(r[col] ?? '') >= String(v)); return q; };
+      q.lte = (col, v) => { filters.push((r) => String(r[col] ?? '') <= String(v)); return q; };
+      q.lt = (col, v) => { filters.push((r) => String(r[col] ?? '') < String(v)); return q; };
       q.maybeSingle = () => Promise.resolve({ data: (rows[table] ?? [])[0] ?? null, error: null });
       q.single = q.maybeSingle;
       q.then = (onOk, onErr) => {
+        const keys = orders.length ? orders : [['created_at', true]];
         const data = (rows[table] ?? [])
           .filter((r) => filters.every((f) => f(r)))
-          .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
+          .sort((a, b) => {
+            for (const [col, asc] of keys) {
+              const c = String(a[col] ?? '').localeCompare(String(b[col] ?? ''));
+              if (c) return asc ? c : -c;
+            }
+            return 0;
+          });
         return Promise.resolve({ data, error: null }).then(onOk, onErr);
       };
       return q;
@@ -60,43 +77,61 @@ function eventsDb(rows) {
   };
 }
 
-const joinEvent = (name, created_at, id) => ({
-  id, type: 'join', character_name: name, created_at, metadata: {},
+// The relay cursors on inserted_at (db/2026-09-06_events_inserted_at.sql), so
+// every fixture carries one. Rows written by the migration's backfill have
+// inserted_at = created_at; rows written since have the real insert time.
+const joinEvent = (name, created_at, id, inserted_at = created_at) => ({
+  id, type: 'join', character_name: name, created_at, inserted_at, metadata: {},
 });
 
-// ── 1. the relay steps over a future-dated row instead of onto it ────────────
+// ── 1. the forged row is skipped, and it poisons neither cursor ─────────────
+//
+// CHANGED 2026-09-06 with the insertion-order cursor. This guard used to STOP
+// the batch on a future-dated row, which was right while the cursor was
+// created_at (rows arrived sorted by it, so the forged one was always last).
+// It is wrong now: rows arrive in INSERTION order, so a forged row sits
+// wherever it was written with honest rows behind it, and holding the cursor in
+// front of it would delete those from the feed for as long as the row exists —
+// the exact silent loss the new cursor was introduced to end. So the row is
+// skipped, loudly, and the cursor steps past it. It can no longer move the
+// cursor at all, because the cursor is the database's own insert clock.
 {
   const posts = [];
   const joinAt = ago(600_000);
+  const insJoin = ago(590_000);
+  const insPoison = ago(580_000);
   const state = { relay: { lastEventAt: ago(3600_000), lastDeathByName: {} } };
-  const db = eventsDb({
+  const errors = [];
+  const rows = {
     events: [
-      joinEvent('Bren', joinAt, 'e1'),
-      { id: 'poison', type: 'death', character_name: 'TrollX', created_at: FORGED, metadata: {} },
+      joinEvent('Bren', joinAt, 'e1', insJoin),
+      { id: 'poison', type: 'death', character_name: 'TrollX', created_at: FORGED, inserted_at: insPoison, metadata: {} },
     ],
-  });
+  };
+  const db = eventsDb(rows);
   const relay = createRelay({
     db,
     post: async (ch, payload) => { posts.push({ ch, payload }); },
     state,
     saveState: async () => {},
-    log: { info: () => {}, warn: () => {}, error: () => {} },
+    log: { info: () => {}, warn: () => {}, error: (m) => errors.push(m) },
   });
 
-  eq(await relay.tick(), 1, 'the honest event before the forged one still posts');
-  ok(state.relay.lastEventAt < FORGED, 'and the cursor did NOT jump to the year 2999');
+  eq(await relay.tick(), 1, 'the honest event posts and the forged one does not');
+  ok(state.relay.lastEventAt < FORGED, 'the created_at cursor did NOT jump to the year 2999');
   eq(state.relay.lastEventAt, joinAt, 'it sits on the last real event');
+  eq(state.relay.lastInsertedAt, insPoison, 'the insertion cursor stepped PAST the forged row');
+  eq(errors.filter((m) => m.includes('in the future')).length, 1, 'and said so exactly once');
 
   // The whole point: a genuinely new death AFTER the forged row still reaches
-  // #server. Before the guard this returned 0 and the feed was dead for good.
-  db.from = eventsDb({
-    events: [
-      joinEvent('Bren', joinAt, 'e1'),
-      { id: 'real', type: 'death', character_name: 'Loa', created_at: ago(60_000), metadata: {} },
-      { id: 'poison', type: 'death', character_name: 'TrollX', created_at: FORGED, metadata: {} },
-    ],
-  }).from;
+  // #server, and the forged row is never re-read.
+  rows.events.push({
+    id: 'real', type: 'death', character_name: 'Loa',
+    created_at: ago(60_000), inserted_at: ago(50_000), metadata: {},
+  });
   eq(await relay.tick(), 1, 'the next real death still posts — the feed is alive');
+  eq(errors.filter((m) => m.includes('in the future')).length, 1, 'the forged row is not warned about twice');
+  eq(posts.length, 2, 'and nothing was posted twice');
 }
 
 // ── 2. a cursor already poisoned repairs itself on construction ──────────────

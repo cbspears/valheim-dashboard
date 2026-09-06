@@ -65,7 +65,7 @@ async function main() {
 // One tick at a time, per loop. setInterval fires on the clock, not on
 // completion: without this guard a slow Discord or Supabase call lets the
 // next tick start on the SAME cursor and post the same events twice (the
-// relay reads `> lastEventAt` and only advances it after each post).
+// relay reads `>= lastInsertedAt` and only advances it after each post).
 //
 // Shared by runLive and runDryRun so a rehearsal wraps its loops exactly the
 // way production does, including recording each tick for the ops cockpit.
@@ -530,7 +530,14 @@ async function runDryRun({ loop = false } = {}) {
 
   const state = {
     // Replay a year of history so feed formatting is visible against real rows.
-    relay: { lastEventAt: new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString() },
+    // Both cursors, because the relay cursors on `events.inserted_at` since
+    // db/2026-09-06_events_inserted_at.sql; lastEventAt is only the legacy
+    // pre-migration fallback (relay.js).
+    relay: {
+      lastEventAt: new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString(),
+      lastInsertedAt: new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString(),
+      lastInsertedIds: [],
+    },
     // Force boss announcements to print for already-felled bosses.
     announcedBosses: [],
   };

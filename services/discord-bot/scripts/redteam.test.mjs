@@ -192,6 +192,44 @@ const embedSize = (e) =>
   eq(sanitize(`Bjorn${String.fromCharCode(7)} stood.`), 'Bjorn stood.', 'a bell character is still stripped from prose');
 }
 
+// A fake `events` table for the relay, applying the cursor filter, the ordering
+// and the limit the way PostgREST does. The relay cursors on `inserted_at`
+// since db/2026-09-06_events_inserted_at.sql; a fixture without that column
+// stands in created_at for it, which is exactly what the migration's backfill
+// does to every row that already existed.
+const relayCol = (r, c) => r[c] ?? (c === 'inserted_at' ? r.created_at : '');
+function relayEventsDb(rows) {
+  return {
+    from: () => {
+      const filters = [];
+      const orders = [];
+      let lim = Infinity;
+      const q = {
+        select: () => q,
+        gt: (c, v) => { filters.push((r) => String(relayCol(r, c)) > String(v)); return q; },
+        gte: (c, v) => { filters.push((r) => String(relayCol(r, c)) >= String(v)); return q; },
+        order: (c, o) => { orders.push([c, o?.ascending !== false]); return q; },
+        limit: (n) => { lim = n; return q; },
+      };
+      q.then = (onOk, onErr) => {
+        const keys = orders.length ? orders : [['created_at', true]];
+        const data = rows
+          .filter((r) => filters.every((f) => f(r)))
+          .sort((a, b) => {
+            for (const [c, asc] of keys) {
+              const d = String(relayCol(a, c)).localeCompare(String(relayCol(b, c)));
+              if (d) return asc ? d : -d;
+            }
+            return 0;
+          })
+          .slice(0, lim);
+        return Promise.resolve({ data, error: null }).then(onOk, onErr);
+      };
+      return q;
+    },
+  };
+}
+
 // ── 6. A permissions outage stalls the feed, it does not eat it ─────────────
 //
 // The old rule was "any 4xx but 429 is permanent, skip the row". Pulling Send
@@ -202,9 +240,7 @@ const embedSize = (e) =>
     { id: 1, type: 'join', character_name: 'A', created_at: '2026-09-05T00:00:01.000Z' },
     { id: 2, type: 'join', character_name: 'B', created_at: '2026-09-05T00:00:02.000Z' },
   ];
-  const dbOf = (data) => ({
-    from: () => ({ select: () => ({ gt: () => ({ order: () => ({ limit: async () => ({ data, error: null }) }) }) }) }),
-  });
+  const dbOf = (data) => relayEventsDb(data);
   const quiet = { info() {}, warn() {}, error() {} };
 
   for (const [status, label] of [[403, 'Missing Permissions'], [401, 'Unauthorized'], [404, 'Unknown Channel'], [429, 'rate limited'], [500, 'server error']]) {
@@ -252,7 +288,13 @@ const embedSize = (e) =>
   const state = { relay: { lastEventAt: '2026-09-04T00:00:00.000Z' } };
   let cursor = 0;
   const db = {
-    from: () => ({ select: () => ({ gt: () => ({ order: () => ({ limit: async (n) => ({ data: rows.slice(cursor, (cursor += n)), error: null }) }) }) }) }),
+    from: () => {
+      const q = {
+        select: () => q, gt: () => q, gte: () => q, order: () => q,
+        limit: async (n) => ({ data: rows.slice(cursor, (cursor += n)), error: null }),
+      };
+      return q;
+    },
   };
   const relay = createRelay({ db, state, saveState: async () => {}, post: async () => {}, log: { info() {}, warn() {}, error() {} } });
   while (cursor < N) await relay.tick();
@@ -272,7 +314,13 @@ const embedSize = (e) =>
   const state = { relay: { lastEventAt: new Date(at - 1000).toISOString() } };
   let done = false;
   const db = {
-    from: () => ({ select: () => ({ gt: () => ({ order: () => ({ limit: async () => ({ data: done ? [] : ((done = true), rows), error: null }) }) }) }) }),
+    from: () => {
+      const q = {
+        select: () => q, gt: () => q, gte: () => q, order: () => q,
+        limit: async () => ({ data: done ? [] : ((done = true), rows), error: null }),
+      };
+      return q;
+    },
   };
   const posted = [];
   const relay = createRelay({ db, state, saveState: async () => {}, post: async (c, p) => posted.push(p), log: { info() {}, warn() {}, error() {} } });
@@ -878,9 +926,7 @@ const embedSize = (e) =>
     { id: 1, type: 'join', character_name: 'Ivar', created_at: '2026-09-04T00:00:01.000Z' },
     { id: 2, type: 'leave', character_name: 'Ivar', created_at: '2026-09-04T00:00:02.000Z' },
   ];
-  const db = {
-    from: () => ({ select: () => ({ gt: (_c, cur) => ({ order: () => ({ limit: async () => ({ data: rows.filter((r) => r.created_at > cur), error: null }) }) }) }) }),
-  };
+  const db = relayEventsDb(rows);
   const state = { relay: { lastEventAt: '2026-09-04T00:00:00.000Z' } };
   const errors = [];
   let broken = true;
@@ -929,7 +975,7 @@ const embedSize = (e) =>
     const errors = [];
     const state = { relay: { lastEventAt: START } };
     const relay = createRelay({
-      db: { from: () => ({ select: () => ({ gt: (_c, cur) => ({ order: () => ({ limit: async () => ({ data: cur < row.created_at ? [row] : [], error: null }) }) }) }) }) },
+      db: relayEventsDb([row]),
       state, saveState: async () => {},
       post: async () => { throw err; },
       log: { info() {}, warn() {}, error: (m) => errors.push(m) },
@@ -973,7 +1019,7 @@ const embedSize = (e) =>
     let broken = true;
     const state = { relay: { lastEventAt: START } };
     const relay = createRelay({
-      db: { from: () => ({ select: () => ({ gt: (_c, cur) => ({ order: () => ({ limit: async () => ({ data: cur < row.created_at ? [row] : [], error: null }) }) }) }) }) },
+      db: relayEventsDb([row]),
       state, saveState: async () => {},
       post: async () => { if (broken) throw Object.assign(new Error('Missing Permissions'), { status: 403 }); },
       log: { info() {}, warn() {}, error: (m) => errors.push(m) },

@@ -29,10 +29,12 @@
 // producer-supplied time becomes a stored timestamp, so no single path can
 // reintroduce the hole.
 //
-// Belt and braces beyond this module: services/discord-bot/src/relay.js refuses
-// to advance its cursor onto a future-dated row (and repairs a cursor already
-// poisoned by one), services/discord-bot/src/recap.js bounds its window at both
-// ends, and lib/ops/consistency.ts raises a finding when future-dated rows exist.
+// Belt and braces beyond this module: services/discord-bot/src/relay.js never
+// RELAYS a future-dated row (and repairs a cursor already poisoned by one — its
+// cursor is events.inserted_at since 2026-09-06, so a forged created_at can no
+// longer move it at all), services/discord-bot/src/recap.js bounds its window at
+// both ends, and lib/ops/consistency.ts raises a finding when future-dated rows
+// exist.
 
 /**
  * How far ahead of "now" a producer's timestamp may sit and still be taken at
@@ -61,8 +63,17 @@ export function isFutureBeyondTolerance(ms: number, nowMs: number = Date.now()):
  * Accepts an ISO string, a Date or epoch milliseconds. Anything unparseable —
  * and anything further ahead than the tolerance — becomes `now`, with `clamped`
  * set so the caller can log what was refused. Times in the PAST are left alone:
- * a backfill, a replayed log batch and a late report are all legitimate, and a
- * past-dated row can only ever be skipped by a cursor, never freeze one.
+ * a backfill, a replayed log batch and a late report are all legitimate.
+ *
+ * That last sentence used to end "and a past-dated row can only ever be skipped
+ * by a cursor, never freeze one", which treated the skip as the harmless half.
+ * It was not: the #server relay cursored on this very column, so a past-dated
+ * row written after a newer one was skipped SILENTLY AND FOREVER — the 2026-09-06
+ * rehearsal posted 20 of 20 joins and 0 of 20 leaves, and every health signal
+ * stayed green throughout. Past-dating is still legitimate and is still left
+ * alone here; what changed is that no consumer may cursor on a producer's clock.
+ * The relay now cursors on `events.inserted_at`
+ * (db/2026-09-06_events_inserted_at.sql, services/discord-bot/src/relay.js).
  */
 export function clampEventTime(
   value: string | number | Date | null | undefined,
