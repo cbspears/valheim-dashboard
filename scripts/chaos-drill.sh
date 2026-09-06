@@ -34,6 +34,9 @@ while [ $# -gt 0 ]; do case "$1" in
 LOGDIR="${CHAOS_LOG_DIR:-/tmp/claude-1000/-home-cbspears/967a92d4-2a82-4ec6-971d-d60481d38142/scratchpad/chaos}"
 mkdir -p "$LOGDIR"; LOG="$LOGDIR/drill-$(date +%Y%m%d-%H%M%S).log"
 say() { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*" | tee -a "$LOG"; }
+# Inside dispatch() stdout is CAPTURED by the caller ($(...)), so progress must go
+# to stderr and the log, and only the bare action word to stdout.
+note() { printf '%s  %s\n' "$(date '+%H:%M:%S')" "$*" | tee -a "$LOG" >&2; }
 RULE_ON=0
 cleanup() {
   if [ "$GO" = 1 ]; then
@@ -47,20 +50,20 @@ trap cleanup EXIT
 dispatch() {  # $1 = label, expects the workflow response JSON to contain "action"
   local label="$1" before after id tries=0
   before=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  gh workflow run watchdog.yml >/dev/null 2>&1 || { say "$label: gh workflow run FAILED"; return 1; }
+  gh workflow run watchdog.yml >/dev/null 2>&1 || { note "$label: gh workflow run FAILED"; return 1; }
   sleep 8
   while :; do
     id=$(gh run list --workflow=watchdog.yml --limit 5 --json databaseId,createdAt,status,event \
       --jq "[.[] | select(.event==\"workflow_dispatch\" and .createdAt >= \"$before\")] | .[0].databaseId" 2>/dev/null)
     [ -n "$id" ] && [ "$id" != "null" ] && break
-    tries=$((tries+1)); [ $tries -gt 12 ] && { say "$label: no run appeared"; return 1; }; sleep 5
+    tries=$((tries+1)); [ $tries -gt 12 ] && { note "$label: no run appeared"; return 1; }; sleep 5
   done
   gh run watch "$id" --exit-status >/dev/null 2>&1; local rc=$?
   local body; body=$(gh run view "$id" --log 2>/dev/null | grep -o '{.*}' | tail -1)
   local action notified
   action=$(printf '%s' "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('alert') or {}).get('action') or (d.get('decision') or {}).get('action') or d.get('action') or '?')" 2>/dev/null || echo '?')
   notified=$(printf '%s' "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); n=d.get('notified',{}); print('posted' if n.get('ok') else ('not-posted:'+str(n.get('error','')) if n.get('attempted') else 'no-post'))" 2>/dev/null || echo '?')
-  say "$label: run $id exit=$rc action=$action discord=$notified"
+  note "$label: run $id exit=$rc action=$action discord=$notified"
   printf '%s\n' "$body" >> "$LOG"
   echo "$action"
 }
