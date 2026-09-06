@@ -401,7 +401,7 @@ Five findings, in the order they cost the most:
    written, the recap said "Bosses felled: Eikthyr", and **"First of the
    Forsaken" stayed unachieved** because the warband logged off inside the ~120 s
    before the next client snapshot. The Hall then reads
-   `Next deed · First of the Forsaken 99 %` directly above `Bosses slain · 1 of
+   `Next deed · The First Mile` (the boss chain was retired 2026-09-06) directly above `Map explored · 0 of
    1`. Launch night is the one night this is likely: the first boss, then people
    stop playing.
 3. **The Hall's `const worldDay = status?.world_day ?? 0` (in `app/page.tsx`,

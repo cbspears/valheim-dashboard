@@ -63,8 +63,8 @@ export interface AggregateInput {
   /**
    * DISTINCT Forsaken felled — `count(*) from bosses where is_killed`.
    *
-   * The collective deed is "the Forsaken felled, one by one" (boss-half at 4,
-   * boss-all at 8), i.e. a count of the EIGHT bosses. It used to be derived by
+   * The collective count of the EIGHT bosses. The "Bosses slain" deed chain was
+   * retired on 2026-09-06 (redundant with the boss timeline); the metric stays. It used to be derived by
    * summing player_stats.boss_kills, which is GsValheimStatsClient's cumulative
    * per-player `bossKills` counter — a completely different quantity:
    *   • it counts REPEAT kills (re-summoning Eikthyr or The Elder for antlers,
