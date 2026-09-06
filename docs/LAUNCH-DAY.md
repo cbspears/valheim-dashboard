@@ -977,6 +977,8 @@ GitHub Actions tab, and confirm the next scheduled run is green before anyone go
 
 ---
 
+**Prerendered pages after the wipe.** `/world`, `/events`, `/gallery`, `/oath`, `/map` and `/boss/<slug>` are ISR pages (revalidate 60 s) since the 2026-09-05 perf pass, and the deploy in step 19 prerenders them against the PRE-wipe database. They refresh on the first request more than 60 s after the wipe, so before the launch post: open `/world` and `/map` once, wait a minute, open them again, and confirm no boss is marked felled and the map shows the new world. If a page still shows the old world after two minutes, redeploy (`vercel deploy --prod --yes --scope charlie-9292s-projects`) rather than waiting.
+
 ## Step 21 — Charlie's own last look · **CHARLIE ONLY**
 
 Nothing to run. Confirm on the panel that the box reads **Started**, the world is `Eilif`,
