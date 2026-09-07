@@ -190,7 +190,12 @@ namespace EilifPaths
                 "Enabled = true.");
             ShareExplorationRadius = config.Bind(Section, "ShareExplorationRadius", 0f,
                 "Metres of map revealed around each other player. 0 = use the game's own radius, which " +
-                "is 100 in 0.221.12 and identical to what ValheimPlus [Map] exploreRadius was set to.");
+                "is 100 in 0.221.12 and identical to what ValheimPlus [Map] exploreRadius was set to. " +
+                "CHANGED IN 1.6.0: whatever this settles on is then scaled by [Exploration] " +
+                "onFootMultiplier, so a crew mate's circle keeps matching your own instead of staying " +
+                "at 100 m while yours grew. That applies to an explicit number here too, not just to " +
+                "the 0 default: if you set 150 here and leave onFootMultiplier at 1.5 you get 225. " +
+                "Set [Exploration] onFootMultiplier to 1 if you want this number taken literally.");
         }
 
         /// <summary>
@@ -643,6 +648,24 @@ namespace EilifPaths
                 float radius = map.m_exploreRadius;
                 if (ShareExplorationRadius != null && ShareExplorationRadius.Value > 0f)
                     radius = ShareExplorationRadius.Value;
+                // [Exploration] rides along (1.6.0). The circle this pass lifts around a crew mate
+                // is the SAME size as the one you lift around yourself, so shared exploration keeps
+                // matching your own rather than quietly staying at the vanilla 100 m while yours
+                // grew. It multiplies whichever radius the two lines above settled on — the live
+                // field, or an explicit ShareExplorationRadius — so the two knobs compose instead
+                // of one silently winning.
+                //
+                // ALWAYS the on-foot multiplier, never the sailing one: ZNet.PlayerInfo carries a
+                // name, a position and a public-position flag, and nothing that could say whether
+                // the viking at the far end of that Vector3 is on a deck or on a beach. On foot is
+                // both the only knowable answer and the smaller of the two.
+                //
+                // Reading m_exploreRadius here is safe next to Patch_Minimap_UpdateExplore's
+                // temporary multiply: this runs on the plugin's own 0.4s Invoke tick, never nested
+                // inside Minimap.UpdateExplore, so the field is always back at its vanilla value by
+                // the time this line reads it. Multiplying an already-multiplied radius would be
+                // 1.5 x 1.5, which is exactly the double-apply this file exists to avoid elsewhere.
+                radius *= Exploration.SharedMultiplier();
                 if (!(radius > 0f) || float.IsNaN(radius) || float.IsInfinity(radius)) return;
 
                 Vector3 mine = Player.m_localPlayer.transform.position;

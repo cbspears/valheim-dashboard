@@ -67,10 +67,26 @@ export const MODS: Mod[] = [
     url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
   },
   {
+    // VERSION = WHAT THE PACK SHIPS, not what the repo has built, same rule as the
+    // Eilif Companion Client row below. Pack v11 pins **1.4.0**, so that is what this
+    // row says and it stays 1.4.0 until pack v12 is minted and its code is live in
+    // config/server.ts. 1.5.0 is published on Thunderstore; 1.6.0 is built and staged
+    // in this repo (plugins/thunderstore/EilifPaths-1.6.0/) and not yet uploaded.
+    //
+    // THE DESCRIPTION BELOW IS AHEAD OF THE PIN, DELIBERATELY, AND IT IS THE ONE THING
+    // HERE THAT NEEDS A DECISION. It names the 1.6.0 behaviours (the wider map
+    // discovery and stamina in water) because v12 is what pins 1.6.0 and this page is
+    // written for the pack the crew will be on. Until v12 is minted and deployed, a
+    // player reading /resources is promised two things their client does not do. Either
+    // ship this row WITH the v12 mint, or revert the last two sentences to the 1.4.0
+    // copy kept here:
+    //   'Beds also accept a fire 8 metres further off, and crafting upgrades attach 10
+    //    metres further out at every station. Replaces the abandoned Useful Paths, whose
+    //    path detection broke years ago. Ships in the modpack.'
     name: 'Eilif Paths',
     author: 'cbspears (custom-built)',
     description:
-      'Dirt paths, paved roads, and floors you have built move you 40% faster, and running, jumping, swimming and hauling on them cost a quarter of the usual stamina. Tools and weapons are left out: a swing, a block, a drawn bow or a hoe costs normal stamina on a path or road, and nothing at all on a floor you built. Beds also accept a fire 8 metres further off, and crafting upgrades attach 10 metres further out at every station. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
+      'Dirt paths, paved roads, and floors you have built move you 40% faster, and running, jumping, swimming and hauling on them cost a quarter of the usual stamina. Tools and weapons are left out: a swing, a block, a drawn bow or a hoe costs normal stamina on a path or road, and nothing at all on a floor you built. The map now uncovers in a wider circle as you travel, half again as wide on foot and twice as wide while you are on a ship, deck or helm. Stamina also comes back in deep water, at the normal rate while you tread and half rate while you swim, without making the swim itself any cheaper. Beds accept a fire 8 metres further off, and crafting upgrades attach 10 metres further out at every station. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
     version: '1.4.0',
     category: 'QoL',
     clientRequired: true,

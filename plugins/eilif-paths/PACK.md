@@ -152,10 +152,16 @@ detect it. (The old mod's LevelGround config did nothing useful on current Valhe
 ## Sanity check before sharing
 
 Launch Valheim once from the profile, join the server, and watch `LogOutput.log`. On boot you should
-see `[EilifPaths] Eilif Paths v1.5.0 loaded. … Bed fire range: +8m. Workstation attachment range: +10m.
-Core patch classes: 6/6 applied.` and `[EilifPaths] tool/weapon stamina hooks: 9/9 applied.` Anything
-less than `6/6` or `9/9` means a hook went missing — the ERROR line above it names which one, and the
+see `[EilifPaths] Eilif Paths v1.6.0 loaded. … Bed fire range: +8m. Workstation attachment range: +10m.
+Map discovery: x1.5 on foot, x2 sailing. Swim stamina regen: x1 treading, x0.5 swimming.
+Core patch classes: 8/8 applied.` and `[EilifPaths] tool/weapon stamina hooks: 9/9 applied.` Anything
+less than `8/8` or `9/9` means a hook went missing — the ERROR line above it names which one, and the
 stamina split is running degraded until it is fixed.
+
+> **The core count changed in 1.6.0: it is `8/8`, and it was `6/6` up to and including 1.5.0.** If
+> the pack you are checking still pins 1.5.0, `6/6` is the healthy reading for it. Check the version
+> in the same line before you grade the count — a 1.6.0 client printing `8/8` is healthy, and only a
+> stale runbook calls it a failure.
 Then walk onto a hoe path / paved road / wooden floor — each surface change logs exactly once, e.g.:
 
 ```

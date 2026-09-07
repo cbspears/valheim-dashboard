@@ -21,6 +21,11 @@ ValheimPlus is not in the pack — infinite fuel, station build range, the gathe
 bonuses, shared map exploration. It ships **off** and applies no hooks at all until it is switched
 on. See [ValheimPlus fallback](#valheimplus-fallback-150).
 
+Since **1.6.0** it carries two more things that have nothing to do with the ground under your feet:
+a wider map-discovery radius, x1.5 on foot and x2 while on a ship (see
+[Map discovery radius](#map-discovery-radius-160)), and stamina regeneration in deep water, which
+vanilla refuses outright (see [Stamina in water](#stamina-in-water-160)). Both ship **on**.
+
 ## Why the old mod broke
 
 Useful Paths detected dirt/paved terrain with
@@ -64,6 +69,10 @@ no persistent marker, so there's no reliable way to detect it. Dropped intention
 - Nine prefix/finalizer pairs (1.4.0) that mark "a tool or weapon charge is being paid right now",
   applied individually at load so one unresolvable target can't take the plugin down. Full list and
   reasoning in `src/ToolStaminaPatch.cs`. See below.
+- `Minimap.UpdateExplore` prefix/**finalizer** (1.6.0) — multiplies this Minimap's `m_exploreRadius`
+  for the frame and restores it afterwards, so the fog lifts in a wider circle. See below.
+- `Player.UpdateStats(float)` postfix (1.6.0) — re-runs vanilla's own stamina-regen arithmetic with
+  the "you are swimming" clause taken back out, scaled by the `[Swim]` multipliers. See below.
 
 Every one of the attribute-declared classes above is applied on its own at load (`CreateClassProcessor`
 per class, not a bare `PatchAll`), and the tool/weapon hooks are applied after that unconditionally.
@@ -90,9 +99,11 @@ boot line (see "Verifying in-game").
 movement (running, jumping, swimming, dodging, being encumbered). `actionstamina` = stamina-cost
 multiplier for tools and weapons (1 = vanilla, 0 = free).
 
-Plus two non-surface sections: `[Bed] extraFireRange` = `8` and
-`[Workstation] extraAttachmentRange` = `10` (see below), and the dormant
-[`[VPlusFallback]`](#valheimplus-fallback-150) section.
+Plus four non-surface sections, all described below: `[Bed] extraFireRange` = `8`,
+`[Workstation] extraAttachmentRange` = `10`, `[Exploration]` (`enabled` = `true`,
+`onFootMultiplier` = `1.5`, `sailingMultiplier` = `2`) and `[Swim]` (`enabled` = `true`,
+`regenWhileTreading` = `1`, `regenWhileSwimming` = `0.5`, `treadingSpeedThreshold` = `0.5`). Plus
+the dormant [`[VPlusFallback]`](#valheimplus-fallback-150) section.
 
 ## Tool and weapon stamina (1.4.0)
 
@@ -299,6 +310,187 @@ add to the vanilla per-prefab default.
 from a workbench you may build at all. That is the separate "workbench range" knob (V+
 `workbenchRange`), not an attachment's reach.
 
+## Map discovery radius (1.6.0)
+
+The map uncovers in a circle around the local player, and vanilla makes that circle one size for
+every situation. Decompiled from `libs/assembly_valheim.dll` (game 0.221.12; whole-assembly dump
+line numbers, the same ones `src/ToolStaminaPatch.cs` cites):
+
+```csharp
+// 47187
+public float m_exploreRadius = 100f;
+
+// 48509, called once per frame from Minimap.Update at 47541, always with Player.m_localPlayer
+private void UpdateExplore(float dt, Player player)
+{
+    m_exploreTimer += Time.deltaTime;
+    if (m_exploreTimer > m_exploreInterval)   // m_exploreInterval = 2f
+    {
+        m_exploreTimer = 0f;
+        Explore(player.transform.position, m_exploreRadius);
+    }
+}
+```
+
+The hook is a **prefix that multiplies `m_exploreRadius`** and a **finalizer that restores it**.
+`[Exploration] onFootMultiplier` (1.5) applies whenever the player is not on a ship;
+`sailingMultiplier` (2) applies when they are. `enabled = false` restores vanilla.
+
+**It multiplies, it never assigns.** Whatever value is in that field when the frame runs is what
+gets scaled, so a vanilla retune, a hand-edited prefab or another mod that has already written the
+field all compose with this rather than being overwritten by it.
+
+**The knobs move in steps, not smoothly**, because `Explore` rounds metres up to whole fog pixels
+before it walks them:
+
+```csharp
+// 47177
+public float m_pixelSize = 64f;
+
+// 48519
+private void Explore(Vector3 p, float radius)
+{
+    int num = (int)Mathf.Ceil(radius / m_pixelSize);   // 100 -> 2,  150 -> 3,  200 -> 4
+    ...                                               // then a (2*num+1)^2 pixel square
+}
+```
+
+The two defaults happen to land on three clean separate steps, which is worth knowing rather than
+relying on: **every multiplier from 1.0 to 1.28 also yields 2 pixels and is a silent no-op.** Both
+config descriptions say so, because the failure mode is a player setting 1.2, seeing nothing, and
+reporting the feature broken. The same rounding bounds the cost: 5x5 pixels per pass at vanilla,
+9x9 at x2, once every `m_exploreInterval` = 2 s.
+
+**Why `UpdateExplore` and not `Explore(Vector3, float)`.** `Explore` is the wrong seam twice over:
+`Minimap.ExploreAll` also calls it, and it is what `VPlusFallback.Tick` invokes by reflection for
+`ShareExploration` — patching it would multiply that pass a second time on top of the multiplier
+that pass already applies for itself.
+
+**Finalizer, not postfix**, for the same reason `Character.UpdateWalking` uses one: Harmony skips
+postfixes when the original method throws. One throw inside `Minimap.UpdateExplore` with a postfix
+restore would leave the radius inflated for the session, and the next frame would multiply the
+multiplied value again (100 → 150 → 225 → 337), compounding until `Explore`'s pixel loop is walking
+a radius of thousands of metres. The finalizer restores **only** when the prefix actually wrote the
+field, which is narrower than `Patch_UpdateWalking`'s unconditional restore on purpose: another map
+mod could legitimately want to *set* `m_exploreRadius`, and a finalizer runs after every postfix.
+
+### What counts as sailing
+
+Vanilla's own on-a-boat test is a **pair**, and `Character.CalculateLiquidDepth` (line 9889) is
+where it is written down:
+
+```csharp
+if (IsTeleporting() || GetStandingOnShip() != null || IsAttachedToShip())
+```
+
+Both halves are public, and both are needed:
+
+- `Player.IsAttachedToShip()` (21396) is `m_attached && m_attachedToShip`, and `m_attachedToShip` is
+  only ever set by `AttachStart(..., bool onShip, ...)`. That is the helmsman and anyone sat in a
+  ship's chair. **A viking standing on the deck is not attached**, so this call on its own would
+  give the wider radius to the person holding the rudder and nobody else.
+- `Character.GetStandingOnShip()` (9222) resolves the Rigidbody under the player's feet and asks it
+  for a `Ship` component. That is the rest of the crew.
+
+Using vanilla's own pair covers the helm, the chairs and the deck, which is what "while sailing" has
+to mean for a crew that shares one boat.
+
+### Shared exploration follows it
+
+`[VPlusFallback] ShareExploration` reveals map around every other online viking. Since 1.6.0 that
+pass multiplies its radius by `onFootMultiplier` as well, so a crew mate's circle is the same size
+as your own instead of quietly staying at the vanilla 100 m while yours grew. Always the on-foot
+multiplier, never the sailing one: `ZNet.PlayerInfo` carries a name, a position and a
+public-position flag, and nothing that could say whether the viking at the far end of that `Vector3`
+is standing on a deck or on a beach. On foot is both the only knowable answer and the smaller of the
+two. That pass runs on the plugin's own 0.4s tick, never nested inside `UpdateExplore`, so it always
+reads the un-multiplied field: no 1.5 × 1.5.
+
+**Coexistence with ValheimPlus.** V+ patches the same method (`Minimap_Patches.ChangeMapBehavior`),
+and reading its decompile it never touches `m_exploreRadius`: it issues its own extra `Explore` calls
+passing `Configuration.Current.Map.exploreRadius`, and its prefix returns void so vanilla's body
+still runs with the field afterwards. The two never write the same storage, so the multiply lands
+whichever order Harmony picks. (V+'s `[Map] exploreRadius` is a no-op on this server anyway: it is
+set to 100, which *is* the vanilla field value.)
+
+## Stamina in water (1.6.0)
+
+Vanilla refuses to regenerate any stamina while you are in deep water, which turns a long crossing
+into a countdown to drowning damage. 1.6.0 gives it back: the normal rate while treading (in the
+water, not moving) and half the normal rate while actively swimming.
+
+**There is no `Player.UpdateStamina` and no `Character.UpdateStamina`.** The player's regen lives in
+the middle of `Player.UpdateStats(float)`, in one contiguous block (there *is* a
+`Sadle.UpdateStamina(float)` in the same assembly, but that is the mount's bar, a different class):
+
+```csharp
+// 17271  private void UpdateStats(float dt)
+17280  bool flag = IsEncumbered();
+17282  float num = 1f;
+17283  if (IsBlocking()) num *= 0.8f;
+17287  if ((IsSwimming() && !IsOnGround()) || InAttack() || InDodge() || m_wallRunning || flag)
+17289      num = 0f;                                    // <-- the refusal
+17291  float num2 = (m_staminaRegen + (1f - m_stamina / maxStamina) * m_staminaRegen * m_staminaRegenTimeMultiplier) * num;
+17293  m_seman.ModifyStaminaRegen(ref staminaMultiplier);
+17295  m_staminaRegenTimer -= dt;
+17296  if (m_stamina < maxStamina && m_staminaRegenTimer <= 0f)
+17298      m_stamina = Mathf.Min(maxStamina, m_stamina + num2 * dt * Game.m_staminaRegenRate);
+17300  m_nview.GetZDO().Set(ZDOVars.s_stamina, m_stamina);
+```
+
+The hook is a **postfix that re-runs exactly that arithmetic with the swimming clause of 17287 taken
+back out**, then scales the result by the `[Swim]` multiplier and hands it to the public
+`Player.AddStamina(float)` (19535), which clamps at max and does not re-arm the regen delay. Not a
+transpiler: the line the IL would have to be spliced at is a branch inside a five-way boolean, which
+is precisely the shape that breaks silently when an update reorders the condition. Not a prefix
+either: a postfix runs **after** 17295 has already decremented the delay timer, so the delay test is
+literally vanilla's own test on vanilla's own value.
+
+Nothing is swapped, so there is nothing for a finalizer to protect. If `UpdateStats` throws, Harmony
+skips the postfix and the player simply gains nothing that tick, which is vanilla.
+
+Every other clause on 17287 still refuses regen: attacking, dodging and being encumbered are
+untouched. `m_wallRunning` is **not** reflected for, and does not need to be:
+`Character.UpdateMotion` sets it false at the top of every physics tick (7960) and only `ApplySlide`
+sets it true (7940), which is only reached down the ground-movement branch, never from
+`UpdateSwimming` (8072). A character in the water has been through `UpdateSwimming`.
+
+### Treading vs swimming, and the regen delay
+
+`treadingSpeedThreshold` (0.5 m/s) splits the two on **horizontal** speed from
+`Character.GetVelocity()` — buoyancy drives a constant vertical velocity, and bobbing on a swell is
+not swimming. `Character.m_swimSpeed` is 2 m/s, so 0.5 leaves a factor of four either side. (Vanilla's
+own equivalent test, `targetVel.magnitude > 0.1f` at 17803, is on the *intended* velocity, which a
+patch outside the movement code cannot see.)
+
+The delay after spending stamina is handled differently in each half, and this is the one design
+decision here that is worth reading twice:
+
+- **Treading** honours it. Nothing is being spent, so vanilla's timer counts down normally and regen
+  starts after `m_staminaRegenDelay` (1 s), exactly as it does when you stop running on land.
+- **Swimming deliberately bypasses it.** `Player.OnSwimming` charges stamina on every physics tick a
+  movement key is held (17803, 17809), and `RPC_UseStamina` re-arms the timer to the full delay on
+  every non-zero charge (19676). So while you are stroking, the timer is pinned and can never reach
+  zero. "Respect the delay" there does not mean "wait a second"; it means `regenWhileSwimming` is a
+  knob that can never fire once. Against a drain that never stops, the delay is not a delay, it is an
+  off switch. Set `regenWhileSwimming = 0` for vanilla on that half.
+
+### What the defaults buy
+
+On the `Player` class defaults in this build (`m_staminaRegen` 5, `m_staminaRegenTimeMultiplier` 1,
+`m_swimStaminaDrainMinSkill` 5, `m_swimStaminaDrainMaxSkill` 2) vanilla's regen curve runs from 5/s
+at a full bar up to 10/s at an empty one, so half of it is 2.5 to 5/s. Vanilla swim drain is 5/s at
+Swim skill 0 falling to 2/s at skill 100. A new viking therefore still loses ground while stroking;
+a practised one roughly breaks even or gains. If that is too generous, `regenWhileSwimming` is the
+knob. **The drain is not touched at all** — that stays ValheimPlus `[Stamina] swimStaminaDrain`, and
+vanilla's `Player.OnSwimming` is left exactly as it is.
+
+The one cost of being a postfix: vanilla writes the stamina ZDO at 17300, one statement before we
+add, so the ZDO trails the real bar by a single physics tick. That is visible to nobody who matters.
+`Player.HaveStamina` reads the ZDO only for a player this client does **not** own (19682-19685) and
+reads `m_stamina` directly for the local one, and the local bar, every local gate and drowning are
+all on `m_stamina`.
+
 ## ValheimPlus fallback (1.5.0)
 
 ValheimPlus has no 1.0 build. If it is absent from the pack on launch day the crew loses infinite
@@ -356,8 +548,10 @@ all the work.
 ### Three guards against double-applying
 
 1. The config gate. With `Enabled = false` the `Patch_VPF_*` classes are skipped entirely, so no
-   vanilla method carries a hook. The `Core patch classes: 6/6` boot line is deliberately unchanged
-   by this feature — it is still the one-glance health check it always was.
+   vanilla method carries a hook. The `Core patch classes:` boot line is deliberately unchanged by
+   this feature whether it is on or off — it is still the one-glance health check it always was.
+   (That count is `8/8` as of 1.6.0 and was `6/6` through 1.5.0. It moved because two always-on
+   classes joined the core roster, never because of this section.)
 2. A **hard refusal**. If ValheimPlus is present, the whole section refuses to apply even with
    `Enabled = true`, and logs a warning block naming what it found. Presence is decided two ways:
    * **the plugin folder**, matching a *normalised name prefix* rather than the literal
@@ -475,17 +669,28 @@ pack as a local mod and removing the old Useful_Paths before the next pack expor
 
 ## Verifying in-game
 
-On boot: `[EilifPaths] Eilif Paths v1.5.0 loaded. … Bed fire range: +8m. Workstation attachment
-range: +10m. Core patch classes: 6/6 applied.`, followed by
+On boot: `[EilifPaths] Eilif Paths v1.6.0 loaded. … Bed fire range: +8m. Workstation attachment
+range: +10m. Map discovery: x1.5 on foot, x2 sailing. Swim stamina regen: x1 treading, x0.5 swimming.
+Core patch classes: 8/8 applied.`, followed by
 `[EilifPaths] tool/weapon stamina hooks: 9/9 applied.` **Both counts are the line to check after any
-Valheim update** — anything less than `6/6` or `9/9` means a target went missing, and the ERROR line
-above it names which one. Then each surface change logs once at Info:
+Valheim update** — anything less than `8/8` or `9/9` means a target went missing, and the ERROR line
+above it names which one. `8/8` is the 1.6.0 number; it was `6/6` up to 1.5.0, and it grew because
+`Patch_Minimap_UpdateExplore` and `Patch_Player_UpdateStats` joined the core roster. Then each
+surface change logs once at Info:
 
 ```
 [EilifPaths] terrain: PavedRoad (x1.4 speed, x0.25 movement stamina, x1 tool stamina)
 [EilifPaths] terrain: Path (x1.4 speed, x0.25 movement stamina, x1 tool stamina)
 [EilifPaths] terrain: Wood (x1.4 speed, x0.25 movement stamina, x0 tool stamina)
 [EilifPaths] terrain: None (vanilla speed/stamina)
+```
+
+and the map-discovery state logs once per crossing between deck and shore, which is the line that
+settles whether standing on a deck really reads as sailing:
+
+```
+[EilifPaths] map discovery: on foot (100m -> 150m)
+[EilifPaths] map discovery: sailing (100m -> 200m)
 ```
 
 If Path and PavedRoad look swapped (dirt logging as PavedRoad or vice-versa), the R/B channel

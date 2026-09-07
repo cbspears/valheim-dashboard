@@ -844,7 +844,7 @@ grep -nE '\[Eilif\] patch classes applied:|\[Eilif\] ServerFallback patch classe
 | `[Eilif] patch classes applied: 2/2` | **2/2.** `OathCapture` and `Patch_OnNewChatMessage_Pin` — oath, chat and pin capture. | server boot log, always |
 | `[Eilif] ServerFallback patch classes: 2/2 applied.` | **2/2**, and it prints **only when `[ServerFallback] Enabled = true`** (step 11). Its absence on a V+ night is correct. | server boot log, `--no-vplus` night |
 | `[EilifDeath] patch classes applied: 3/3` | **3/3.** Logout map post, death cause, tombstone keep-list. | **a player's own** `LogOutput.log` — step 22 |
-| `[EilifPaths] Core patch classes: 6/6` | **6/6.** Jog, run, stamina, walking, bed, station. | **a player's own** log — step 22 |
+| `[EilifPaths] Core patch classes: 8/8` | **8/8 (8/8 through 1.5.0).** Jog, run, stamina, walking, bed, station. | **a player's own** log — step 22 |
 | `[EilifPaths] VPlusFallback patch classes: N/N applied.` | prints only with `--fallback on`. | **a player's own** log — step 22 |
 | `[EilifPaths] tool/weapon stamina hooks: 9/9 applied` | **9/9**, and no `(DEGRADED …)` suffix. | **a player's own** log — step 22 |
 
@@ -1535,7 +1535,7 @@ grep -E 'MISSING patch class|patch classes applied:|Core patch classes:|stamina 
 ```
 
 Healthy is **zero** `MISSING patch class` lines plus `[EilifDeath] patch classes applied:
-3/3`, `[EilifPaths] Core patch classes: 6/6` and `[EilifPaths] tool/weapon stamina hooks:
+3/3`, `[EilifPaths] Core patch classes: 8/8` and `[EilifPaths] tool/weapon stamina hooks:
 9/9 applied` with no `(DEGRADED …)`. On a `--fallback on` pack there is a
 `[EilifPaths] VPlusFallback patch classes: N/N applied.` line too. A shortfall names the
 feature that died in the same line; write it into the GO post rather than letting people
@@ -1639,7 +1639,7 @@ day rather than only credibility.
 | 40 | Step 2 carried no warning that the versions it builds are already taken | A blockquote at the head of step 2, before the command, with the forward pointer to step 16 and the reason not to bump the csprojs early. |
 | 41 | The noon-CT row called its branch **vanilla night**, the same words step 17 uses for a 1.0 box with the plugins moved aside | Named **HOLD ON 0.221.12**, with a three-row posture table, what still runs, and what happens to the pack. Step 17 now carries the file's only definition of "vanilla night" and says out loud what the noon branch is not. |
 | 42 | The noon row said "the pack is not re-minted" while the world still changes | Pack v11 ships `World = EilifRehearsal` and step 19 sets `GS_EXPECTED_WORLD=Eilif`, so that pairing silently discards every `GsValheimStatsClient` stat merge. The row now re-mints for the world name (`--world Eilif`, v11 pins, zero index wait) or leaves `GS_EXPECTED_WORLD` unset, and says which. |
-| 43 | Step 15 never mentioned `MISSING patch class` or the patch-class counts | **Step 15.1**, run first: zero `MISSING patch class` lines, `[Eilif] patch classes applied: 2/2`, and `2/2` on `ServerFallback` when it is on. The four client-side counts (`3/3`, `6/6`, `9/9`, and the fallback line) are read from a player's own log at step 22, because those plugins do not run on the box. |
+| 43 | Step 15 never mentioned `MISSING patch class` or the patch-class counts | **Step 15.1**, run first: zero `MISSING patch class` lines, `[Eilif] patch classes applied: 2/2`, and `2/2` on `ServerFallback` when it is on. The four client-side counts (`3/3`, `8/8`, `9/9`, and the fallback line) are read from a player's own log at step 22, because those plugins do not run on the box. |
 | 44 | Step 5 and 20e described a single GitHub pinger "every 15 minutes"; the post-wipe check said "all **38** deeds" | Two pingers (`pg_cron` every 5 min, GitHub about every 4 h), silenced and re-armed as a pair, landing in the **ops channel**. The deed check reads **every deed in the upcoming list at zero** — production went from 38 to 36 on 2026-09-06 and a hard-coded count goes stale on the next deed edit. |
 | 45 | Step 4's command was a bare `--stage`, and its "if it fails" said re-run step 2 | **The runbook and the tool now disagreed at the point of no return.** `rebuild-plugins.sh` gained a duplicate-version refusal, and since 10:01 CT both client versions are published — so a bare `--stage` **REFUSES** both client plugins, exits 1 with "Do not stage any of this", and has already copied the two server DLLs. Step 4 now passes `--only eilif-companion,eilif-boards`, and says why the refusal's own two suggestions are both wrong here: `--allow-published` would overwrite the directory whose zip is already live, and bumping the csprojs is step 16's move, not step 4's. |
 

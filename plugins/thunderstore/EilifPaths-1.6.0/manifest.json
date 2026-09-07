@@ -1,0 +1,9 @@
+{
+  "name": "EilifPaths",
+  "version_number": "1.6.0",
+  "website_url": "https://valheim-dashboard.vercel.app/mods",
+  "description": "Eilif community server: +40% speed and a quarter of the movement stamina drain on paths, roads and built floors. Map discovery 1.5x wider on foot, 2x at sea. Stamina recovers in deep water. Longer bed and station reach. Dormant ValheimPlus fallback.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2333"
+  ]
+}

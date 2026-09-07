@@ -52,13 +52,20 @@ namespace EilifPaths
     /// fishing, harpooning — use the new per-surface 'actionstamina': vanilla cost on dirt paths and
     /// paved roads, free on built floors. See src/ToolStaminaPatch.cs for the call-site survey and
     /// how a charge is told apart from a movement charge.
+    ///
+    /// ALSO (since 1.6.0): two things that have nothing to do with the ground under your feet.
+    /// [Exploration] widens the map-discovery circle — half again as far on foot, twice as far on a
+    /// ship — by multiplying Minimap.m_exploreRadius for the frame and restoring it in a finalizer
+    /// (see src/ExplorationPatch.cs). [Swim] gives back the stamina regeneration vanilla refuses in
+    /// deep water: full rate treading, half rate stroking, with the swim DRAIN left entirely alone
+    /// (see src/SwimStaminaPatch.cs).
     /// </summary>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public class EilifPathsPlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.5.0";
+        public const string PluginVersion = "1.6.0";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -125,6 +132,15 @@ namespace EilifPaths
             // crafting station (see StationRangePatch.cs).
             StationRange.Bind(Config);
 
+            // [Exploration] — a wider map-discovery circle, on foot and (wider still) at sea
+            // (see ExplorationPatch.cs).
+            Exploration.Bind(Config);
+
+            // [Swim] — stamina recovery in deep water, which vanilla refuses outright. The swim
+            // DRAIN is untouched; that stays ValheimPlus [Stamina] swimStaminaDrain
+            // (see SwimStaminaPatch.cs).
+            SwimRegen.Bind(Config);
+
             // [VPlusFallback] — the stand-in for the ValheimPlus comforts (infinite fuel, station
             // range, gathering/picking/loot bonuses, shared map exploration) for the day V+ is not
             // in the pack. Ships OFF. Bound BEFORE Harmony runs because Refuse() decides, once,
@@ -158,10 +174,18 @@ namespace EilifPaths
             // ToolStamina.Apply below) makes that unreachable.
             // The [VPlusFallback] classes (named Patch_VPF_*) are counted and applied SEPARATELY,
             // and are not applied at all while that section is off. That keeps two properties worth
-            // having: the "Core patch classes: 6/6" line below stays the same number it has always
-            // been — it is the one-glance post-update health check, and it must not move because a
-            // dormant feature was added — and a disabled fallback leaves absolutely no hook on any
-            // vanilla method, rather than a dozen hooks that early-return.
+            // having: the "Core patch classes: N/N" line below does not move when the FALLBACK is
+            // toggled — it is the one-glance post-update health check, and a dormant feature must
+            // never change it — and a disabled fallback leaves absolutely no hook on any vanilla
+            // method, rather than a dozen hooks that early-return.
+            //
+            // The core number itself DOES move when a genuinely always-on patch class joins the
+            // roster, and it just did: 6/6 through 1.5.0, 8/8 since 1.6.0, because
+            // Patch_Minimap_UpdateExplore and Patch_Player_UpdateStats are core, not dormant —
+            // they apply on every boot and each one owns a feature the crew would notice losing.
+            // A change of this number is a DOCUMENTED EVENT, not a free edit: every runbook that
+            // greps for the old one reads a healthy boot as a failure. When it next moves, grep the
+            // repo for the old number before shipping (BUILD.md's repack step says where).
             //
             // The DENOMINATOR is a fixed roster (ExpectedCoreClasses below), never a count of the
             // classes that happened to enumerate. AccessTools.GetTypesFromAssembly swallows a
@@ -222,12 +246,14 @@ namespace EilifPaths
                         ". Polling every " + GroundCheckRate.ToString("0.0", CultureInfo.InvariantCulture) + "s. " +
                         "Bed fire range: " + BedFire.Describe() + ". " +
                         "Workstation attachment range: " + StationRange.Describe() + ". " +
+                        "Map discovery: " + Exploration.Describe() + ". " +
+                        "Swim stamina regen: " + SwimRegen.Describe() + ". " +
                         "Core patch classes: " + CountApplied(applied, ExpectedCoreClasses) + "/" +
                         ExpectedCoreClasses.Length + " applied.");
             ReportMissing(applied, ExpectedCoreClasses);
         }
 
-        // ---- The patch roster (v1.5.0, audit plugins-1.0) --------------------------------------
+        // ---- The patch roster (v1.6.0) --------------------------------------
         // The list the "Core patch classes: N/M" health line is measured against. M must never be
         // derived from what loaded (see the comment at the apply loop).
         private static readonly string[] ExpectedCoreClasses =
@@ -238,6 +264,8 @@ namespace EilifPaths
             "Patch_UpdateWalking",
             "Patch_Bed_CheckFire",
             "Patch_StationExtension_Awake",
+            "Patch_Minimap_UpdateExplore",
+            "Patch_Player_UpdateStats",
         };
 
         // Applied only while [VPlusFallback] is on; counted separately for the same reason.
@@ -269,6 +297,8 @@ namespace EilifPaths
                 case "Patch_UpdateWalking": return "the walking-speed bonus (jog and run are unaffected)";
                 case "Patch_Bed_CheckFire": return "the widened bed 'needs a fire nearby' reach";
                 case "Patch_StationExtension_Awake": return "the extra crafting-station attachment reach";
+                case "Patch_Minimap_UpdateExplore": return "the wider map-discovery radius on foot and while sailing";
+                case "Patch_Player_UpdateStats": return "stamina recovery while swimming and treading water";
                 case "Patch_VPF_Fireplace_Awake": return "infinite fireplace and torch fuel";
                 case "Patch_VPF_CookingStation_UpdateCooking": return "infinite oven fuel";
                 case "Patch_VPF_Smelter_UpdateSmelter": return "infinite hot tub fuel";

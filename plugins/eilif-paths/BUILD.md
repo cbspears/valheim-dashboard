@@ -128,14 +128,63 @@ convention as `ToolStaminaPatch.ScopeFinalizer` and `eilif-companion-client`'s `
 **If a 1.0 rebuild ever renames one of these back to `Postfix`, the restore silently stops covering
 the throw path** — the class count stays 12/12 either way, so the count will not catch it.
 
+**Fifth 1.0 risk (added 1.6.0):** the two new core patches both hook a *private* method by name,
+and one of them also relies on a *parameter* name.
+
+* `Minimap.UpdateExplore(float, Player)` — private, one overload today, and its whole job is the
+  single line `Explore(player.transform.position, m_exploreRadius)`. The patch takes NO original
+  parameters on purpose (it reads `Player.m_localPlayer`, which is what `Minimap.Update` passes
+  anyway), so the only names it depends on are the type, the method and the public field
+  `Minimap.m_exploreRadius`. Re-verify with
+  `DOTNET_ROLL_FORWARD=Major ilspycmd -t Minimap libs/assembly_valheim.dll | grep -n "UpdateExplore\|m_exploreRadius"`.
+* `Player.UpdateStats(float)` — private, and Player declares **two** `UpdateStats` overloads, so the
+  patch spells out `new Type[] { typeof(float) }`; a name-only patch would be an ambiguous match. It
+  also injects the original's `dt` argument **by name**, which is a name Harmony has to be able to
+  find. A rename there is a Harmony *apply-time* throw, which the loop catches and reports as
+  `MISSING patch class Patch_Player_UpdateStats`. Re-verify with
+  `DOTNET_ROLL_FORWARD=Major ilspycmd -t Player libs/assembly_valheim.dll | grep -n "UpdateStats"`.
+* The swim patch also reaches one private field through `AccessTools`,
+  `Player.m_staminaRegenTimer`. If it cannot be resolved, stamina recovery while **treading** goes
+  inert with a named warning and recovery while actively swimming is unaffected — so a boot log with
+  `8/8` can still have lost half of this feature. Grep `swim stamina:` for that warning.
+* The real 1.0 hazard for the swim half is not a rename but a **re-ordering**: the patch re-runs
+  vanilla's regen arithmetic from `Player.UpdateStats` lines 17280-17298 with the swimming clause
+  removed. If Deep North changes that formula (a new term, a different curve, a status-effect hook),
+  the patch keeps compiling and keeps applying, and quietly regenerates the *old* amount. After a
+  1.0 rebuild, re-read that block and compare it against the one quoted in full in
+  `src/SwimStaminaPatch.cs`. Nothing counts that for you.
+
 **The first grep after a 1.0 rebuild: `MISSING patch class`.** Zero lines is healthy. A plugin
 prints its `Loading [...]` line whether or not its Harmony patches went on, so `Loading` proves the
 DLL was chainloaded and nothing more; each `MISSING patch class` line names the class **and the
-feature that died with it** (`EilifPathsPlugin.cs:306`). Read it in the **player's**
+feature that died with it** (see `ReportMissing` / `FeatureOf` in `EilifPathsPlugin.cs`). Read it in the **player's**
 `BepInEx/LogOutput.log` inside the r2modman profile — EilifPaths is a client plugin and never
 appears in the server's log. Alongside it, two counts that must be exact:
 
-- **`[EilifPaths] Core patch classes: 6/6`** — jog speed, run speed, stamina, walking, bed, station.
+- **`[EilifPaths] Core patch classes: 8/8`** — jog speed, run speed, stamina, walking, bed, station,
+  map discovery radius, swim stamina regen. **This number was `6/6` up to 1.5.0 and is `8/8` from
+  1.6.0**; `Patch_Minimap_UpdateExplore` and `Patch_Player_UpdateStats` joined the core roster
+  because, unlike `[VPlusFallback]`, they ship **on**. A runbook still grepping for `6/6` will read
+  a healthy 1.6.0 boot as a failure and a degraded one as unknown.
+
+  > ### OPEN, FOR CHARLIE: four files outside this plugin still say `6/6`
+  >
+  > This bump was made under a scope that stopped at `plugins/eilif-paths/**`, `config/mods.ts`,
+  > `docs/PACK.md` and one `docs/ARCHITECTURE.md` row, so the launch runbook was **not** edited.
+  > **If pack v12 mints at 1.6.0, these read a healthy client boot as a failure at the go/no-go.**
+  > Every one is a number swap, nothing else:
+  >
+  > | File | Line | Says | Should say |
+  > |---|---|---|---|
+  > | `docs/LAUNCH-DAY.md` | 847 | the readiness-table row `Core patch classes: 6/6`, glossed "**6/6.** Jog, run, stamina, walking, bed, station." | `8/8`, and add **map discovery** and **swim stamina regen** to that gloss |
+  > | `docs/LAUNCH-DAY.md` | 1538 | ``Healthy is … `[EilifPaths] Core patch classes: 6/6` `` | `8/8` |
+  > | `docs/LAUNCH-DAY.md` | 1642 | ``the four client-side counts (`3/3`, `6/6`, `9/9`, …)`` | `3/3`, `8/8`, `9/9` |
+  > | `CLAUDE.md` | 65 | ``alongside `2/2`, `3/3`, `6/6` `` | `2/2`, `3/3`, `8/8` |
+  >
+  > **Do them at the same moment the pack pins 1.6.0, not before.** While v11 is live the players'
+  > clients really are 1.5.0 and `6/6` really is the healthy reading, so an early edit is just as
+  > wrong in the other direction. The version and the count travel together: grade the count only
+  > after reading the version out of the same boot line.
 - **`[EilifPaths] tool/weapon stamina hooks: 9/9 applied`**, with **no `(DEGRADED - see the errors
   above)`** suffix. These nine are applied one by one on purpose, so a single unresolvable target
   costs one hook rather than the plugin. **8/9 is not "one small feature lost"** — it means a Valheim
@@ -180,11 +229,19 @@ start fighting. Keep it a postfix.
    still Disabled/removed (double-stacking bonus if not — `PACK.md` section B).
 4. Launch once from the profile, join the server, walk onto a path/road/floor, and confirm the
    `[EilifPaths] terrain: …` lines plus the `Bed fire range: +8m` /
-   `Workstation attachment range: +10m` boot lines match expectations.
+   `Workstation attachment range: +10m` boot lines match expectations. From 1.6.0 the same boot line
+   also carries `Map discovery: x1.5 on foot, x2 sailing.` and
+   `Swim stamina regen: x1 treading, x0.5 swimming.`, and two behaviours that only a live session can
+   settle: step onto a moving longship's **deck** (not the helm) and confirm
+   `[EilifPaths] map discovery: sailing (100m -> 200m)`, then swim out until the bar drops and
+   confirm it climbs again while you float.
 5. **Only then** export the pack code, and wait for the Thunderstore listing index if any pinned
    version is newly published. **1.5.0 is already published** (2026-09-06 10:01 CT) and a published
-   Thunderstore version is immutable, so a 1.0 rebuild that changes this DLL goes up as **1.5.1**,
-   never as a re-upload of 1.5.0. Bump `EilifPaths.csproj` **after** the rebuild, not before:
+   Thunderstore version is immutable, so a 1.0 rebuild that changes an already-published DLL goes up
+   as the next number, never as a re-upload. **1.6.0 is staged in this repo and NOT yet published**
+   (`plugins/thunderstore/EilifPaths-1.6.0/`, zipped alongside it), so it is still free to upload; a
+   1.0 rebuild before that upload changes the 1.6.0 bytes in place, and one after it needs
+   **1.6.1**. Bump `EilifPaths.csproj` **after** the rebuild, not before:
    `launch-preflight`'s `PACK_V12_PINS` reads this csproj directly
    (`scripts/launch-preflight.mjs:95`), so a version that is not yet uploaded makes its pin gate
    FAIL on a 404. `mint-pack` pins from its own `MODS` table and the `--paths` flag rather than

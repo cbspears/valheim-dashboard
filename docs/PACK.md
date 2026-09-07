@@ -86,6 +86,18 @@ node scripts/launch-preflight.mjs --world <World> --phase pre-wipe   # "Modpack 
 Published and staged are the same number on both rows, and the listing index has caught up,
 so **`--paths 1.5.0 --fallback on` mints today and nothing waits on an upload.**
 
+**The v12 mint pins EilifPaths `1.6.0`** (built and staged 2026-09-06 as
+`plugins/thunderstore/EilifPaths-1.6.0/` + `EilifPaths-1.6.0.zip`, adding the wider map-discovery
+radius and stamina recovery in water), so `--paths 1.6.0` is the flag to type once that zip is
+uploaded and indexed; until it is, `--paths 1.5.0` is the only number that mints. Two consequences
+worth having in hand before that day. The pack template does not pin the two new sections
+(`[Exploration]`, `[Swim]`) and does not need to, for the same reason it does not pin `[Bed]` or
+`[Workstation]` — BepInEx appends missing keys at their plugin defaults on first launch, and those
+defaults are the intended values. And **the client health line moves with this pin**: a 1.6.0 client
+prints `Core patch classes: 8/8`, not the `6/6` a 1.5.0 client prints and the launch runbook still
+quotes. `plugins/eilif-paths/BUILD.md` lists the four file:line spots that need the number swapped
+at the moment the pin lands.
+
 Pack v11 pins Companion Client **0.2.0**, which is why the tombstone keep-list is dark for
 everyone until v12 is minted. A re-mint that pins an unpublished version is refused until
 that package is uploaded and the index rebuilds; that refusal is the tool working, not a
@@ -198,9 +210,9 @@ methods, so with V+ present their effects stack and the ranges come out roughly 
 minter warns about that pairing, and EilifPaths itself logs a warning at boot if it finds a
 ValheimPlus DLL while `Enabled = true`.
 
-**The pack pins only `Enabled`, on purpose.** EilifPaths 1.5.0 binds thirteen keys in that
+**The pack pins only `Enabled`, on purpose.** EilifPaths binds thirteen keys in that
 section (`InfiniteFireplaceFuel`, `StationBuildRange`, `GatheringBonusPercent`,
-`ShareExploration` and the rest), and their plugin defaults already are the values the V+ cfg
+`ShareExploration` and the rest) and has since 1.5.0, and their plugin defaults already are the values the V+ cfg
 on the box was set to. BepInEx appends the missing twelve at those defaults on first run, so
 shipping only the master switch is both correct and one fewer thing to keep in sync. If any
 of them ever has to differ from its default, that is the point at which the whole section
