@@ -844,7 +844,7 @@ grep -nE '\[Eilif\] patch classes applied:|\[Eilif\] ServerFallback patch classe
 | `[Eilif] patch classes applied: 2/2` | **2/2.** `OathCapture` and `Patch_OnNewChatMessage_Pin` — oath, chat and pin capture. | server boot log, always |
 | `[Eilif] ServerFallback patch classes: 2/2 applied.` | **2/2**, and it prints **only when `[ServerFallback] Enabled = true`** (step 11). Its absence on a V+ night is correct. | server boot log, `--no-vplus` night |
 | `[EilifDeath] patch classes applied: 3/3` | **3/3.** Logout map post, death cause, tombstone keep-list. | **a player's own** `LogOutput.log` — step 22 |
-| `[EilifPaths] Core patch classes: 8/8` | **8/8 (8/8 through 1.5.0).** Jog, run, stamina, walking, bed, station. | **a player's own** log — step 22 |
+| `[EilifPaths] Core patch classes: 8/8` | **8/8 (6/6 through 1.5.0).** Jog, run, stamina, walking, bed, station. | **a player's own** log — step 22 |
 | `[EilifPaths] VPlusFallback patch classes: N/N applied.` | prints only with `--fallback on`. | **a player's own** log — step 22 |
 | `[EilifPaths] tool/weapon stamina hooks: 9/9 applied` | **9/9**, and no `(DEGRADED …)` suffix. | **a player's own** log — step 22 |
 
