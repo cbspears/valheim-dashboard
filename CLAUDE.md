@@ -13,6 +13,8 @@
 3. `git log --oneline -20`
 4. Auto-memory `project-valheim-dashboard` (loads automatically)
 
+**📌 PICK UP HERE (2026-09-06 late, T−3).** Main `7086c76`, all deployed and running. Since the 09-05 audit: tellings + tales LIVE, Storyteller/votes/altar shipped OFF (flags), voice targeting API done (plugin half ships with the 1.0 rebuild, then `VOICE_TARGETING=1` last), cockpit v2, Commands+Mods → `/resources`, Saga → Story, UX pass for first-time players (nav = seven tabs, oath wall at `/players#oaths`), pg_cron watchdog pinger + ops channel proven by a real outage, hourly world backups, death ceiling, relay cursor on `events.inserted_at`, launch wipe covers the new tables, **EilifPaths 1.6.0 staged (Charlie uploads)**, health grep `[EilifPaths] Core patch classes: 8/8`. Vault handoff: `08-Dashboard/11-Handoff-2026-09-06.md`. Charlie's two next actions: upload EilifPaths 1.6.0; generate the launch world by 09-08.
+
 **🔴 STATE AS OF 2026-09-06 (T−3 — launch is Wed 2026-09-09, Valheim 1.0 / Deep North day)**
 
 **Facts of record, verified 2026-09-06. Where anything below this line disagrees, this
