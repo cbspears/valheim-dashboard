@@ -120,18 +120,6 @@ export default async function HomePage() {
   const heroFooter = (
     <div className="border-t border-rune bg-pitch/50 backdrop-blur-sm">
       <div className="space-y-2 px-5 py-3 sm:px-7">
-        {/* What this place is, in the DOM rather than painted into the hero art
-            (the desktop title card carries the tagline, the phone crop does not,
-            and no screen reader or crawler ever gets either). */}
-        {/* The cap is spelled out here and counted twenty-five lines below
-            ("{playerCount} / {MAX_PLAYERS} sailing"), so it is read from the
-            same config value rather than typed twice. Move MAX_PLAYERS and the
-            sentence follows instead of contradicting the row under it. */}
-        <p className="text-sm leading-relaxed text-ash">
-          {SERVER_NAME} is a {MAX_PLAYERS === 20 ? 'twenty' : MAX_PLAYERS}-person modded Valheim
-          server. One shared world, one canon, played cozy.
-        </p>
-
         {/* Quick info — server pulse, world day, who is sailing, how to join */}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
           <Badge tone={isOnline ? 'online' : 'offline'}>
