@@ -39,6 +39,9 @@
 //   --recaps-start <d>   Launch value expected in the bot .env (default 2026-09-09)
 //   --pins <list>        Comma-separated ns-name-version triples the next pack pins.
 //                        Default = the pack v12 candidate set (see PACK_V12_PINS).
+//   --expect-plugins <n> How many server plugins this boot must load (default 8, the
+//                        rehearsal count). 2026-09-09: the 1.0 load test left three
+//                        (Companion, Boards, Emitter), so the night runs --expect-plugins 3.
 //   --deep-listing       Also walk the Thunderstore community listing index chunks
 //                        (~20 MB) to prove r2modman can actually resolve each pin.
 //   --skip-sftp          Skip the GTX leg (offline, or you already ran verify-restart.sh).
@@ -110,6 +113,7 @@ function opt(name, fallback = null) {
 }
 
 const WORLD = opt('world');
+const EXPECT_PLUGINS = Number(opt('expect-plugins', '8')) || 8;
 const PHASE = opt('phase', 'pre-wipe');
 const POSTURE = (opt('posture', 'GO-A') || 'GO-A').toUpperCase();
 const RECAPS_START_LAUNCH = opt('recaps-start', '2026-09-09');
@@ -124,7 +128,7 @@ const PHASES = ['pre-wipe', 'post-wipe', 'post-start'];
 const POSTURES = ['GO-A', 'GO-B'];
 if (!WORLD || !PHASES.includes(PHASE) || !POSTURES.includes(POSTURE)) {
   console.error('usage: node scripts/launch-preflight.mjs --world <World> [--phase pre-wipe|post-wipe|post-start]');
-  console.error('       [--posture GO-A|GO-B] [--recaps-start 2026-09-09] [--pins ns-name-ver,...]');
+  console.error('       [--posture GO-A|GO-B] [--recaps-start 2026-09-09] [--pins ns-name-ver,...] [--expect-plugins N]');
   console.error('       [--deep-listing] [--skip-sftp] [--skip-vercel] [--no-color] [--json]');
   process.exit(2);
 }
@@ -860,8 +864,8 @@ function checkGtx() {
   const plugins = [...logOutput.matchAll(/Loading \[([^\]]+)\]/g)].map((m) => m[1]);
   graded(
     'gtx:plugins',
-    'all 8 server plugins loaded',
-    plugins.length >= 8,
+    `all ${EXPECT_PLUGINS} server plugins loaded`,
+    plugins.length >= EXPECT_PLUGINS,
     (plugins.length ? `${plugins.length}: ${plugins.join(', ')}` : 'no "Loading [" lines in LogOutput.log') +
       (MODDED ? '' : ` · ${GO_B_NOTE}`),
     !MODDED ? null : PHASE === 'post-start' ? true : 'warn',

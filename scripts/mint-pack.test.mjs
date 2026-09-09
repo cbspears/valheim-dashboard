@@ -14,10 +14,11 @@
 // and nothing else, so the tripwire did not get weaker when the option was added.
 //
 // The rest covers the substitution rules (world, version pins, README rule
-// length), minting without ValheimPlus (--no-vplus) including what the Mac
-// README then says, the [VPlusFallback] switch and its version guard, the
-// {{#SECTION}} marker machinery, the zip writer/reader pair, and the argument
-// guards.
+// length), minting without any of the three droppable mods (--no-vplus,
+// --no-plant, --no-azu) including what the Mac README then says, the shape pack
+// v12 mints on Valheim 1.0 with all three gone, the [VPlusFallback] switch and
+// its version guard, the {{#SECTION}} marker machinery, the zip writer/reader
+// pair, and the argument guards.
 //
 // Run: npx tsx scripts/mint-pack.test.mjs
 import assert from 'node:assert';
@@ -317,13 +318,20 @@ assert.equal(
   withVplusR2x.replace(vplusEntry, ''), noVplusR2x,
   'dropping V+ removes exactly its entry and no surrounding whitespace',
 );
-// Only V+ is droppable, and only through its own flag.
-assert.deepEqual(OMITTABLE_MODS.map((m) => m.key), ['vplus'], 'ValheimPlus is the only droppable mod');
+// Three mods are droppable, each only through its own flag. The two added on
+// 2026-09-09 are there because their embedded ServerSync reads
+// ZRoutedRpc.Everybody, which Valheim 1.0 made a constant, so both throw at
+// startup on 1.0 - proved by a load test that launch morning.
+assert.deepEqual(
+  OMITTABLE_MODS.map((m) => m.key), ['vplus', 'plant', 'companionClient', 'azu'],
+  'the droppable set is ValheimPlus, PlantEverything, EilifCompanionClient and AzuCraftyBoxes',
+);
 for (const mod of OMITTABLE_MODS) {
   assert.ok(mod.cfg, `${mod.label} declares the cfg that leaves with it`);
   assert.ok(mod.section, `${mod.label} declares its export.r2x section marker`);
+  assert.ok(CFG_FILES.includes(mod.cfg), `${mod.label}'s cfg is one the pack actually ships`);
 }
-assert.throws(() => renderPack({ world: 'Eilif', omit: ['azu'] }), /cannot be dropped/, 'a non-droppable mod is refused');
+assert.throws(() => renderPack({ world: 'Eilif', omit: ['gs'] }), /cannot be dropped/, 'a non-droppable mod is refused');
 assert.throws(() => renderPack({ world: 'Eilif', omit: ['nope'] }), /unknown mod key/, 'an unknown key is refused');
 
 // The Mac bundle follows the pack, because it reads the rendered file list
@@ -365,6 +373,174 @@ assert.throws(
   () => renderReadme({ packNumber: 12, packDate: 'Sep 9, 2026', cfgs: new Array(11).fill('x.cfg') }),
   /no word for 11 cfg files/,
   'a bundle bigger than the word list is refused rather than rendering "{{CFG_COUNT_WORD}}"',
+);
+
+// ── every drop behaves the same way ─────────────────────────────────────────
+// --no-plant and --no-azu were added on 2026-09-09: both mods embed a ServerSync
+// that reads ZRoutedRpc.Everybody, which Valheim 1.0 turned into a constant, so
+// both throw at startup on 1.0. What the loop below asserts is that they are not
+// special cases of --no-vplus but the same mechanism - one export.r2x entry, one
+// cfg, nothing else touched - because a half-dropped mod (entry without cfg, or
+// cfg without entry) is exactly the failure no round trip and no boot can see.
+const R2X_ENTRIES = {
+  vplus: vplusEntry,
+  plant: `  - name: Advize-PlantEverything
+    version:
+      major: 1
+      minor: 20
+      patch: 0
+    enabled: true
+`,
+  companionClient: `  - name: Eilif-EilifCompanionClient
+    version:
+      major: 0
+      minor: 2
+      patch: 0
+    enabled: true
+`,
+  azu: `  - name: Azumatt-AzuCraftyBoxes
+    version:
+      major: 1
+      minor: 8
+      patch: 15
+    enabled: true
+`,
+};
+for (const mod of OMITTABLE_MODS) {
+  const { files: without } = renderPack({ world: 'EilifRehearsal', omit: [mod.key] });
+  assert.ok(!without.has(`config/${mod.cfg}`), `${mod.omitFlag} drops config/${mod.cfg}`);
+  assert.deepEqual(
+    [...without.keys()].sort(),
+    [...v11.keys()].filter((k) => k !== `config/${mod.cfg}`).sort(),
+    `${mod.omitFlag} drops nothing else`,
+  );
+  const r2xOut = without.get('export.r2x').toString('latin1');
+  assert.ok(!r2xOut.includes(mod.name), `no ${mod.label} entry survives in export.r2x`);
+  // The namespace check only means something when no kept mod shares it:
+  // Eilif-EilifPaths stays when Eilif-EilifCompanionClient is dropped.
+  const nsShared = MODS.some((m) => m.key !== mod.key && m.ns === mod.ns);
+  assert.ok(nsShared || !r2xOut.includes(mod.ns), 'not under its namespace either');
+  assert.ok(!r2xOut.includes(`${mod.ns}-${mod.name}`), 'and not as a full package name');
+  assert.equal(
+    (r2xOut.match(/- name: /g) || []).length, MODS.length - 1,
+    `${mod.omitFlag} leaves every mod but the dropped one in export.r2x`,
+  );
+  assert.doesNotMatch(r2xOut, /\{\{|\}\}/, 'the section markers leave no residue in export.r2x');
+  assert.equal(
+    withVplusR2x.replace(R2X_ENTRIES[mod.key], ''), r2xOut,
+    `dropping ${mod.label} removes exactly its entry and no surrounding whitespace`,
+  );
+  // Every file that stays is the same bytes the full pack shipped: a drop must
+  // not disturb the cfg of any mod that is still in the pack.
+  for (const [rel, data] of without) {
+    if (rel === 'export.r2x') continue;
+    assert.ok(data.equals(v11.get(rel)), `${rel} is untouched by ${mod.omitFlag}: ${firstDiff(v11.get(rel), data)}`);
+  }
+  // ...and the Mac bundle follows, README count included.
+  const dropBundle = buildBundle({
+    world: 'EilifRehearsal', versions: {}, cfgVersions: {}, ingestUrl: undefined,
+    packNumber: 12, packDate: 'Sep 9, 2026', omit: [mod.key], fallback: 'none',
+  });
+  assert.ok(!dropBundle.entries.some((e) => e.name === mod.cfg), `the Mac bundle drops ${mod.cfg} too`);
+  const dropReadme = dropBundle.entries.at(-1).data.toString('latin1');
+  assert.ok(!dropReadme.includes(mod.cfg), `and its README never names ${mod.cfg}`);
+  assert.equal((dropReadme.match(/\bsix\b/g) || []).length, 2, 'the README says six, in both places that count');
+  assert.doesNotMatch(dropReadme, /\bseven\b/, 'and never still says seven');
+  assert.doesNotMatch(dropReadme, /\{\{|\}\}/, 'no marker or placeholder residue survives into the README');
+}
+
+// ── the shape pack v12 mints on 1.0 ─────────────────────────────────────────
+// All three mods that cannot run on Valheim 1.0 gone at once, leaving BepInEx,
+// the stats client and the two Eilif plugins. --fallback on is what puts back the
+// client half of what ValheimPlus was doing, and it needs the 1.6.0 pin.
+const launchOmit = ['vplus', 'plant', 'azu']; // tonight's pack keeps the Companion Client; --no-companion-client is insurance only
+const launchVersions = { paths: '1.6.0', companionClient: '0.3.4' };
+const { files: launch } = renderPack({
+  world: 'Eilif', omit: launchOmit, versions: launchVersions, fallback: 'on',
+});
+const launchR2x = launch.get('export.r2x').toString('latin1');
+assert.deepEqual(
+  [...launchR2x.matchAll(/^ {2}- name: (.+)$/gm)].map((m) => m[1]),
+  [
+    'denikson-BepInExPack_Valheim',
+    'Proudlock_Technology-GsValheimStatsClient',
+    'Eilif-EilifPaths',
+    'Eilif-EilifCompanionClient',
+  ],
+  'four mods survive, in the order export.r2x lists them',
+);
+assert.deepEqual(
+  [...launch.keys()].sort(),
+  [
+    'config/BepInEx.cfg',
+    'config/net.cproudlock.gsvalheimstatsclient.cfg',
+    'config/net.eilif.companionclient.cfg',
+    'config/net.eilif.paths.cfg',
+    'doorstop_config.ini',
+    'export.r2x',
+  ],
+  'four mods leave four cfgs, plus export.r2x and doorstop_config.ini',
+);
+assert.match(
+  launchR2x,
+  /- name: Eilif-EilifPaths\n {4}version:\n {6}major: 1\n {6}minor: 6\n {6}patch: 0\n/,
+  'the 1.6.0 EilifPaths pin lands',
+);
+assert.match(
+  launchR2x,
+  /- name: Eilif-EilifCompanionClient\n {4}version:\n {6}major: 0\n {6}minor: 3\n {6}patch: 4\n/,
+  'and the 0.3.4 companion client pin with it',
+);
+assert.doesNotMatch(launchR2x, /\{\{|\}\}/, 'three stacked drops still leave no marker residue');
+assert.match(
+  launch.get('config/net.eilif.paths.cfg').toString('latin1'), /^Enabled = true$/m,
+  '--fallback on still writes the section when three mods are dropped at once',
+);
+// A dropped mod's cfgVersionVar simply goes unused - it must not become an error.
+for (const key of launchOmit) {
+  const mod = MODS.find((m) => m.key === key);
+  if (mod.cfgVersionVar) {
+    assert.doesNotThrow(
+      () => renderPack({ world: 'Eilif', omit: launchOmit, versions: launchVersions, fallback: 'on' }),
+      `${mod.label} is dropped, so ${mod.cfgVersionVar} is unused rather than fatal`,
+    );
+  }
+}
+
+const launchBundle = buildBundle({
+  world: 'Eilif', versions: launchVersions, cfgVersions: {}, ingestUrl: undefined,
+  packNumber: 12, packDate: 'Sep 9, 2026', omit: launchOmit, fallback: 'on',
+});
+assert.deepEqual(
+  launchBundle.entries.map((e) => e.name),
+  [
+    'BepInEx.cfg',
+    'net.cproudlock.gsvalheimstatsclient.cfg',
+    'net.eilif.companionclient.cfg',
+    'net.eilif.paths.cfg',
+    'README.txt',
+  ],
+  'the Mac bundle is the same four cfgs, README last',
+);
+const launchReadme = launchBundle.entries.at(-1).data.toString('latin1');
+for (const gone of [
+  'valheim_plus', 'ValheimPlus', 'PlantEverything', 'AzuCraftyBoxes', 'Azumatt', 'Advize', 'Alt+O',
+]) {
+  assert.ok(!launchReadme.includes(gone), `the README of the 1.0 bundle never mentions ${gone}`);
+}
+assert.equal((launchReadme.match(/\bfour\b/g) || []).length, 2, 'it says four, in both places that count the files');
+assert.doesNotMatch(launchReadme, /\bseven\b|\bsix\b|\bfive\b/, 'and no stale count survives');
+assert.ok(
+  launchReadme.includes('records will\nnot reach the dashboard.\n\nWhere they go'),
+  'the sentence that named the Alt+O hotkey ends cleanly once AzuCraftyBoxes is gone',
+);
+assert.doesNotMatch(launchReadme, /\{\{|\}\}/, 'no marker or placeholder residue survives into the README');
+assert.equal(
+  bundleArgs({ world: 'Eilif', ingestUrl: DEFAULT_INGEST_URL, cfgVersions: {}, omit: launchOmit, fallback: 'on' },
+    MODS.filter((m) => !launchOmit.includes(m.key))
+      .map((mod) => ({ mod, version: launchVersions[mod.key] ?? mod.baseline }))),
+  "--world 'Eilif' --paths 1.6.0 --companion-client 0.3.4 --no-vplus --no-plant --no-azu --fallback on",
+  'and the printed bundle command carries all three drop flags, in MODS order',
 );
 
 // ── the [VPlusFallback] switch ──────────────────────────────────────────────

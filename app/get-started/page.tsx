@@ -63,12 +63,14 @@ const MACHEIM_APPLE_SILICON_URL =
   'https://github.com/lofcgi/macheim/releases/download/v1.0.1/Macheim_1.0.1_aarch64.dmg';
 const MACHEIM_ALL_URL = 'https://github.com/lofcgi/macheim/releases/latest';
 
-// The pack's seven .cfg files, zipped, for the Mac path: Macheim cannot read an
+// The pack's .cfg files, zipped, for the Mac path: Macheim cannot read an
 // r2modman profile code, so a hand install gets none of the pack's settings.
-// Re-cut this zip out of the pack export whenever the pack code is re-minted.
-const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v11.zip';
+// Re-cut this zip out of the pack export whenever the pack code is re-minted, and
+// point this constant at the new file. The v11 zip stays on disk so no link 404s
+// while the v12 build is going out.
+const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v12.zip';
 
-// The seven mods a Mac player installs one at a time, read out of config/mods.ts
+// The mods a Mac player installs one at a time, read out of config/mods.ts
 // so the page cannot fall behind the pack. See the CUTOVER ANCHOR note below.
 const MAC_MODS = checklistFrom(CLIENT_MODS);
 
@@ -518,32 +520,34 @@ export default function GetStartedPage() {
 
               grep -n "CONFIG_BUNDLE_URL\|Eilif Paths 1\.\|GsValheimStatsClient 0\.\|ValheimPlus (Grantapher)" app/get-started/page.tsx
 
-            What is known to need doing at the v12 mint:
+            DONE at the v12 mint (2026-09-09), kept here as the record of what
+            each edit was, because the next mint needs the same four:
               1. CONFIG_BUNDLE_URL above -> the new bundle filename. This is the
-                 one version-bearing string still typed into this file.
+                 one version-bearing string still typed into this file. It reads
+                 eilif-configs-pack-v12.zip now.
               2. The mod names and versions in the table below are NOT typed
                  here: it is built by `checklistFrom(CLIENT_MODS)` out of
                  config/mods.ts, and the counts on this page are MAC_MODS.length
-                 rather than the word "seven". Edit config/mods.ts to the v12
+                 rather than a spelled-out number. Edit config/mods.ts to the v12
                  export.r2x values and both this table and /resources follow.
               3. Step 19's third edit, the update card's "Installed: Eilif Paths
                  1.4.0 and GsValheimStatsClient 0.2.12" self-check, was DELETED
                  on 2026-09-06 rather than left to be retyped. That paragraph now
                  points at /resources#mods. If anybody puts a version number back
                  into it, step 19 edit 3 is live again.
-              4. On a --no-vplus mint: drop the ValheimPlus row from
-                 config/mods.ts (or clear its clientRequired), which removes it
-                 from this table, AND delete the "The server checks your
-                 ValheimPlus and AzuCraftyBoxes" sentence below, which is false
-                 once the box is not running V+ either. */}
+              4. Pack v12 ships without ValheimPlus, PlantEverything and
+                 AzuCraftyBoxes (V+ has no 1.0 build; the other two die at
+                 startup on 1.0). Their rows are gone from config/mods.ts, which
+                 takes them out of this table, and the sentence below no longer
+                 claims the server version-checks V+ and AzuCraftyBoxes, because
+                 the box runs neither. */}
         <ModChecklist mods={MAC_MODS} />
         <p className="text-xs text-muted">
-          The server checks your ValheimPlus and AzuCraftyBoxes against its own, so a newer copy is
-          turned away at the door. The{' '}
+          The{' '}
           <Link href="/resources#mods" className="prose-link text-gold-light">
             Resources page
           </Link>{' '}
-          always carries the current list.
+          always carries the current list, so check it against yours if a mod looks out of date.
         </p>
         <p>
           Then download the{' '}

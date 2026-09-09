@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { Menu, X } from 'lucide-react';
-import { SERVER_NAME } from '@/config/server';
+import { SERVER_NAME, MAP_ENABLED } from '@/config/server';
 import { NextGatheringPill } from '@/components/events/NextGatheringPill';
 import type { NextGathering } from '@/lib/next-gathering';
 
@@ -48,8 +48,15 @@ const LINKS = [
  * one action rather than the first of eight equal rows. The desktop order is
  * left alone, where rightmost gold is where the eye ends up anyway.
  */
-const DRAWER_CTA = LINKS.find((l) => l.cta);
-const DRAWER_TABS = LINKS.filter((l) => !l.cta);
+/**
+ * What actually renders. The Map tab stays in LINKS (the register tripwire
+ * counts the source list) but is dropped here while MAP_ENABLED is false:
+ * with WebMap off the 1.0 box nothing feeds /map, and a tab over an empty
+ * atlas is a broken promise on the first night. config/server.ts says why.
+ */
+const VISIBLE_LINKS = LINKS.filter((l) => l.href !== '/map' || MAP_ENABLED);
+const DRAWER_CTA = VISIBLE_LINKS.find((l) => l.cta);
+const DRAWER_TABS = VISIBLE_LINKS.filter((l) => !l.cta);
 
 /** The drawer's id, so the toggle's aria-controls can name it. */
 const DRAWER_ID = 'mobile-nav';
@@ -142,7 +149,7 @@ export function NavBar({ nextGathering }: { nextGathering?: NextGathering | null
           ran from 768px to 782px and cleared at 783px.
         */}
         <div className="hidden shrink-0 items-center gap-0.5 md:flex lg:gap-1">
-          {LINKS.map((l) =>
+          {VISIBLE_LINKS.map((l) =>
             l.cta ? (
               <Link
                 key={l.href}

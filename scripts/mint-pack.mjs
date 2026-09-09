@@ -69,10 +69,14 @@ export const MODS = [
   {
     key: 'vplus', flag: '--vplus', label: 'ValheimPlus (Grantapher)',
     ns: 'Grantapher', name: 'ValheimPlus_Grantapher_Temporary', tmpl: 'VPLUS', baseline: '9.17.1',
-    // The only droppable mod. Grantapher 9.17.1 targets 0.221.10 and has no 1.0
-    // build, so pack v12 has to be able to ship without it (see --no-vplus).
-    // `cfg` is the file that leaves the pack with it; `section` is the
-    // {{#NAME}}..{{/NAME}} block in export.r2x.tmpl that holds its entry.
+    // Droppable. Grantapher 9.17.1 targets 0.221.10 and has no 1.0 build, so
+    // pack v12 has to be able to ship without it (see --no-vplus).
+    //
+    // The three fields below are the whole drop mechanism, and any mod that
+    // declares all three can leave the pack the same way. `omitFlag` is the CLI
+    // switch, `cfg` is the file that leaves with it, and `section` is the
+    // {{#NAME}}..{{/NAME}} block in export.r2x.tmpl (and in README.txt.tmpl)
+    // that holds its entry.
     omitFlag: '--no-vplus', cfg: 'valheim_plus.cfg', section: 'VPLUS',
   },
   {
@@ -80,6 +84,11 @@ export const MODS = [
     ns: 'Advize', name: 'PlantEverything', tmpl: 'PLANT', baseline: '1.20.0',
     cfgVersionVar: 'PLANT_CFG_VERSION',
     cfgVersionDefault: '1.20.0', cfgVersionFlag: '--plant-cfg-version',
+    // Droppable since 2026-09-09. 1.20.0's embedded ServerSync reads
+    // ZRoutedRpc.Everybody, which Valheim 1.0 turned from a field into a
+    // constant, so the plugin throws at startup on 1.0 - proved by a local load
+    // test on launch morning. Drop it until Advize ships a 1.0 build.
+    omitFlag: '--no-plant', cfg: 'advize.PlantEverything.cfg', section: 'PLANT',
   },
   {
     key: 'gs', flag: '--gs', label: 'GsValheimStatsClient',
@@ -104,6 +113,11 @@ export const MODS = [
   {
     key: 'companionClient', flag: '--companion-client', label: 'EilifCompanionClient',
     ns: 'Eilif', name: 'EilifCompanionClient', tmpl: 'COMPANION', baseline: '0.2.0',
+    // Droppable since 2026-09-09: Thunderstore rejected the package LISTING on the
+    // 0.3.4 upload (review_status = rejected hides every version from mod managers),
+    // so launch night needed a pack that can ship without it. Costs the tombstone
+    // keep-list, death causes and the explored-map stat; nothing else.
+    omitFlag: '--no-companion-client', cfg: 'net.eilif.companionclient.cfg', section: 'COMPANION',
     cfgVersionVar: 'COMPANION_CFG_VERSION',
     // The clearest example of why cfg headers do not follow pins: the shipped
     // net.eilif.companionclient.cfg was written by the 0.1.0 build and its
@@ -117,6 +131,11 @@ export const MODS = [
     ns: 'Azumatt', name: 'AzuCraftyBoxes', tmpl: 'AZU', baseline: '1.8.15',
     cfgVersionVar: 'AZU_CFG_VERSION',
     cfgVersionDefault: '1.8.15', cfgVersionFlag: '--azu-cfg-version',
+    // Droppable since 2026-09-09, and for the same reason as PlantEverything:
+    // 1.8.15 bundles the same ServerSync build and dies at startup on 1.0. It
+    // still has to move in lockstep with the server's copy, so dropping it here
+    // means pulling it off the box in the same stopped window.
+    omitFlag: '--no-azu', cfg: 'Azumatt.AzuCraftyBoxes.cfg', section: 'AZU',
   },
 ];
 
@@ -160,8 +179,24 @@ export const CFG_FILES = [
 export const FALLBACK_MODES = ['on', 'off', 'none'];
 export const DEFAULT_FALLBACK = 'none';
 
-/** Mod keys this pack can be minted without, e.g. Set{'vplus'}. */
+/** The mods this pack can be minted without, in MODS order. */
 export const OMITTABLE_MODS = MODS.filter((m) => m.omitFlag);
+
+/**
+ * The {{#NAME}} / {{#NONAME}} pair for one drop decision. A template that has to
+ * say something different when a mod is gone (rather than just say less) uses the
+ * NO- block for the replacement wording, so both wordings live next to each other
+ * in the same file instead of in a renderer branch.
+ */
+function omitSections(dropped) {
+  const sections = {};
+  for (const mod of OMITTABLE_MODS) {
+    const keep = !dropped.has(mod.key);
+    sections[mod.section] = keep;
+    sections[`NO${mod.section}`] = !keep;
+  }
+  return sections;
+}
 
 // ── tiny console helpers (same shape as scripts/launch-wipe.mjs) ────────────
 export function banner(title) {
@@ -184,9 +219,10 @@ function readTemplate(rel) {
  * takes its whole body with it, so the result is byte-identical to a template
  * written without that block at all.
  *
- * This exists for exactly one reason: pack v12 may have to ship without
- * ValheimPlus (no 1.0 build), and the difference has to be a rendering option
- * rather than a second copy of export.r2x.tmpl that drifts.
+ * This exists for exactly one reason: pack v12 may have to ship without some of
+ * the mods pack v11 pinned (ValheimPlus has no 1.0 build; PlantEverything and
+ * AzuCraftyBoxes die at startup on 1.0), and the difference has to be a
+ * rendering option rather than a second copy of export.r2x.tmpl that drifts.
  */
 export function applySections(text, sections, where) {
   let out = text;
@@ -306,8 +342,7 @@ export function renderPack({
   // is worse than neither: an r2x entry with no cfg installs a mod nobody
   // configured, and a cfg with no entry is a file r2modman writes into the
   // profile for a mod that is not there.
-  const sections = { FALLBACK: fallback !== 'none' };
-  for (const mod of OMITTABLE_MODS) sections[mod.section] = !dropped.has(mod.key);
+  const sections = { FALLBACK: fallback !== 'none', ...omitSections(dropped) };
   const droppedCfgs = new Set(
     OMITTABLE_MODS.filter((m) => dropped.has(m.key) && m.cfg).map((m) => m.cfg),
   );
@@ -335,7 +370,8 @@ const NUMBER_WORDS = [
  * Mac player gets: a bundle built without ValheimPlus that still says "drop all
  * seven files" and lists valheim_plus.cfg sends them looking for a file that is
  * not there - or, worse, off to install ValheimPlus, which enforceMod then uses
- * to refuse them the server.
+ * to refuse them the server. The same is true of every other droppable mod, so
+ * the sections below are derived from the list rather than named one by one.
  */
 export function renderReadme({ packNumber, packDate, cfgs = CFG_FILES }) {
   // `cfgs` is the bundle's OWN entry list, not a flag to interpret: buildBundle
@@ -344,8 +380,9 @@ export function renderReadme({ packNumber, packDate, cfgs = CFG_FILES }) {
   // functions, is how the count and the file list drift apart.
   const names = [...cfgs];
   if (!NUMBER_WORDS[names.length]) throw new Error(`renderReadme: no word for ${names.length} cfg files`);
-  const sections = {};
-  for (const mod of OMITTABLE_MODS) sections[mod.section] = names.includes(mod.cfg);
+  const sections = omitSections(
+    new Set(OMITTABLE_MODS.filter((m) => !names.includes(m.cfg)).map((m) => m.key)),
+  );
   const title = `Eilif config bundle - Pack v${packNumber} (${packDate})`;
   return fill(applySections(readTemplate('README.txt.tmpl'), sections, 'README.txt'), {
     BUNDLE_TITLE: title,
@@ -832,6 +869,29 @@ function printNoVplusReminder(cap) {
   }
 }
 
+/**
+ * Everything else that left the pack. ValheimPlus gets its own page above because
+ * its absence is a two-way version check with consequences; the rest just have to
+ * leave BOTH halves together, and that is the half people forget. Printed once
+ * before the work and once in the result, same as the V+ page.
+ */
+function printDropReminder(mods) {
+  if (!mods.length) return;
+  banner(`Also NOT in this pack: ${mods.map((m) => m.label).join(', ')}`);
+  for (const mod of mods) {
+    console.log(`  ${mod.ns}/${mod.name}   pack v11 pinned ${mod.baseline}, this pack pins nothing`);
+  }
+  console.log('');
+  console.log('  Whatever took each of these out of the pack takes it off the GTX box too.');
+  console.log('  Pull its DLL from BepInEx/plugins in the same stopped window and leave its');
+  console.log('  cfg out. Half a drop is worse than none: a plugin the pack no longer installs');
+  console.log('  but the server still loads is a mod only the box is running, and its settings');
+  console.log('  stop being anything a player can see.');
+  console.log('');
+  console.log('  config/mods.ts still lists them until someone edits it, and /resources and the');
+  console.log('  Get Started Mac checklist both read that file.');
+}
+
 async function main(argv) {
   let args;
   try {
@@ -875,7 +935,9 @@ async function main(argv) {
     : `Enabled = ${args.fallback === 'on'}`}`);
   console.log(`  out dir      ${outDir}`);
 
+  const otherDrops = OMITTABLE_MODS.filter((m) => m.key !== 'vplus' && args.omit.includes(m.key));
   if (args.omit.includes('vplus')) printNoVplusReminder(args.cap);
+  printDropReminder(otherDrops);
   if (args.fallback === 'on' && !args.omit.includes('vplus')) {
     banner('Check this pairing');
     console.log('  --fallback on while ValheimPlus is still pinned. Both patch the same');
@@ -1064,9 +1126,16 @@ async function main(argv) {
       console.log(`    3b. config/server.ts: MAX_PLAYERS = ${args.cap
         ? args.cap
         : "<the box's real cap: 10, or [ServerFallback] MaxPlayers if it is on>"}`);
-      console.log("    3c. app/get-started/page.tsx: the Mac \"install these seven\" list still");
-      console.log('        names ValheimPlus. A Mac player who follows it installs V+ and is');
-      console.log('        then refused by the box. Drop the name, and the count word with it.');
+    }
+    if (args.omit.length) {
+      const names = args.omit.map((k) => MODS.find((m) => m.key === k).label).join(', ');
+      console.log('    3c. app/get-started/page.tsx: the Mac "install these seven" list still');
+      console.log(`        names ${names}. A Mac player who follows it installs`);
+      console.log('        a mod this pack no longer ships. Drop the name, and the count word');
+      console.log('        with it.');
+      if (args.omit.includes('vplus')) {
+        console.log('        With ValheimPlus that is not just untidy: the box then refuses them.');
+      }
     }
     console.log(`    4. node scripts/build-config-bundle.mjs ${bundleArgs(args, pins)} \\`);
     console.log('         --pack-number <N> --pack-date "<Mon D, YYYY>"');
@@ -1075,6 +1144,7 @@ async function main(argv) {
     console.log('       (launch morning: skip that, the box is already stopped; docs/LAUNCH-DAY.md);');
     console.log('       then tell the crew to re-import');
     if (args.omit.includes('vplus')) printNoVplusReminder(args.cap);
+    printDropReminder(otherDrops);
   } else {
     console.log(`  TEST code: ${key}`);
     console.log('  This is a TEST mint. Nothing on Thunderstore marks it as one - the bytes');

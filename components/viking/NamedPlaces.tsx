@@ -1,6 +1,23 @@
 import Link from 'next/link';
 import { MapPin, Compass } from 'lucide-react';
 import { Card, EmptyState, Badge } from '@/components/ui';
+import { MAP_ENABLED } from '@/config/server';
+
+/** One place row: a link into the atlas while the map runs, a plain row while
+ *  it is paused (config/server.ts MAP_ENABLED). Same layout either way. */
+function PlaceRow({ name, children }: { name: string; children: React.ReactNode }) {
+  const className = 'flex items-baseline gap-3 px-5 py-2.5';
+  if (!MAP_ENABLED) return <div className={className}>{children}</div>;
+  return (
+    <Link
+      href="/map"
+      className={`gold-ring ${className} transition-colors hover:bg-surface-raised/50`}
+      title={`See ${name} on the map`}
+    >
+      {children}
+    </Link>
+  );
+}
 
 // A viking's named places come from the real `pins` table (in-game /pin,
 // captured server-side and credited to the pinner's exact character name).
@@ -34,23 +51,21 @@ export function NamedPlaces({ places, first }: { places: NamedPlace[]; first: st
           title="No places named yet"
           message={`${first} hasn't named any places yet. Shout /s /pin <name> in game to plant a marker.`}
           action={
-            <Link
-              href="/map"
-              className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
-            >
-              The atlas
-            </Link>
+            MAP_ENABLED ? (
+              <Link
+                href="/map"
+                className="gold-ring rounded-md font-display text-sm text-gold-light transition-colors hover:text-gold"
+              >
+                The atlas
+              </Link>
+            ) : undefined
           }
         />
       ) : (
         <ul className="divide-y divide-rune/50">
           {sorted.map((p) => (
             <li key={p.id}>
-              <Link
-                href="/map"
-                className="gold-ring flex items-baseline gap-3 px-5 py-2.5 transition-colors hover:bg-surface-raised/50"
-                title={`See ${p.name} on the map`}
-              >
+              <PlaceRow name={p.name}>
                 <span
                   aria-hidden
                   className="w-4 shrink-0 translate-y-0.5 text-center font-display text-gold"
@@ -62,7 +77,7 @@ export function NamedPlaces({ places, first }: { places: NamedPlace[]; first: st
                 {p.day != null && (
                   <span className="shrink-0 font-display text-xs text-gold">Day {p.day}</span>
                 )}
-              </Link>
+              </PlaceRow>
             </li>
           ))}
         </ul>

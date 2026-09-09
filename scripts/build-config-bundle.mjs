@@ -40,8 +40,9 @@ const bad = (s) => `  FAIL ${s}`;
  *
  * The names come from the rendered file map rather than from CFG_FILES, so a
  * pack minted with --no-vplus produces a bundle with no valheim_plus.cfg in it
- * for free. Reading the constant instead would hand Mac players a config for a
- * mod the pack no longer installs.
+ * for free, and the same goes for every other drop flag as it is added. Reading
+ * the constant instead would hand Mac players a config for a mod the pack no
+ * longer installs.
  */
 export function buildBundle({
   world, versions, cfgVersions, ingestUrl, packNumber, packDate,

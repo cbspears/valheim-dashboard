@@ -40,7 +40,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.3.3";
+        public const string PluginVersion = "0.3.4"; // NOTE: the published 0.3.4 DLL was built with this reading "0.3.3", so its BepInEx load line says 0.3.3; the manifest and assembly version are 0.3.4. Bumped here after the upload so the next build is consistent.
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;

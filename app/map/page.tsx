@@ -9,7 +9,7 @@ import { LiveWorld } from '@/components/map/LiveWorld';
 // rendered here anymore — the real live world + real replay + real /pin markers
 // are the whole story now. The demo files are kept on disk as the launch-day
 // reference (and as the model for this page's look), just no longer imported.
-import { SERVER_NAME } from '@/config/server';
+import { SERVER_NAME, MAP_ENABLED } from '@/config/server';
 import { getLiveMap, getPins, getPhotosByPin } from '@/lib/data';
 
 /**
@@ -77,10 +77,16 @@ export default async function MapPage() {
         <SectionHeader
           as="h1"
           title="The Known World"
-          subtitle="Only the ground the warband has actually walked or sailed. Redrawn from the server every 5 minutes."
+          subtitle={
+            MAP_ENABLED
+              ? 'Only the ground the warband has actually walked or sailed. Redrawn from the server every 5 minutes.'
+              : 'The atlas is paused while the map mod is rebuilt for Valheim 1.0. Nothing new is charted until it returns.'
+          }
           icon={<Map size={22} />}
           action={
-            liveMap ? (
+            !MAP_ENABLED ? (
+              <Badge tone="gold">Map paused</Badge>
+            ) : liveMap ? (
               liveMap.stale ? (
                 <Badge tone="gold">Map paused</Badge>
               ) : (

@@ -14,12 +14,14 @@ mods:
       patch: {{VPLUS_PATCH}}
     enabled: true
 {{/VPLUS}}
+{{#PLANT}}
   - name: Advize-PlantEverything
     version:
       major: {{PLANT_MAJOR}}
       minor: {{PLANT_MINOR}}
       patch: {{PLANT_PATCH}}
     enabled: true
+{{/PLANT}}
   - name: Proudlock_Technology-GsValheimStatsClient
     version:
       major: {{GS_MAJOR}}
@@ -32,15 +34,19 @@ mods:
       minor: {{PATHS_MINOR}}
       patch: {{PATHS_PATCH}}
     enabled: true
+{{#COMPANION}}
   - name: Eilif-EilifCompanionClient
     version:
       major: {{COMPANION_MAJOR}}
       minor: {{COMPANION_MINOR}}
       patch: {{COMPANION_PATCH}}
     enabled: true
+{{/COMPANION}}
+{{#AZU}}
   - name: Azumatt-AzuCraftyBoxes
     version:
       major: {{AZU_MAJOR}}
       minor: {{AZU_MINOR}}
       patch: {{AZU_PATCH}}
     enabled: true
+{{/AZU}}

@@ -160,7 +160,10 @@ The GO post has to name the middle group, so this is the inventory it is written
 
 **Restored by `--fallback on`** (client side): infinite fireplace, oven, hot tub and shield
 generator fuel; station build range 30m, attachment range 20m, no roof check; +30% gathering,
-+30% picking, +30% loot amount; shared map exploration.
++30% picking, +30% loot amount; shared map exploration. **From EilifPaths 1.7.0**, four more:
+no weather damage on buildings, area repair at 7.5m, dropped items float, and the lifted shout
+range. The fallback health line moves with them: `VPlusFallback patch classes: 16/16 applied.`,
+not `12/12`, so a pack pinning 1.7.0 needs the new number at the go/no-go.
 
 One caveat on that list: those patches run on whichever machine **owns** the object, and a
 dedicated server owns the zones around world origin, where it has no EilifPaths. A fire or a
@@ -171,20 +174,20 @@ so say it out loud rather than letting someone report it as a bug.
 **Gone tonight, restored by nothing** (and mostly building-comfort, which is what a launch
 night is made of):
 
-- buildings take **weather damage** again (`noWeatherDamage`)
-- no **area repair** (one hammer click repaired everything within 7.5m)
-- dropped items **sink** instead of floating, and linger for less than the hour V+ gave them
 - **grid snapping** and its LeftAlt / F6 / F7 keys
-- **shouts and pings go back to vanilla range** instead of crossing the map, and whispers with
-  them. Worth a moment: the whole crew is used to `/s` reaching everybody
+- dropped items linger for less than the hour V+ gave them (`droppedItemOnGroundDurationInSeconds`
+  is separate from the floating fix and is not restored)
+- **pings go back to vanilla range**, and **whispers** with them
 - camera **zoom 100 and FOV 75** back to vanilla, comfort radius 20 back to vanilla
 - **full resource refund** on deconstruct, and placement in spots vanilla refuses
 - sleeping in an **unclaimed bed**, carts and boats shown on the map
 
-**Candidates to fold into EilifPaths** if the crew misses them, in the order they are likely
-to be missed: `noWeatherDamage`, area repair, `itemsFloatInWater`. All three are client-owned
-work, so they belong in the same file as the rest of the fallback. That is a decision for
-Charlie before the morning, not during it.
+**Done, 2026-09-09.** The three candidates that used to sit here, `noWeatherDamage`, area repair
+and `itemsFloatInWater`, are in EilifPaths **1.7.0** along with the shout range, all four under
+`[VPlusFallback]` and all four on by default once the section is enabled. They carry the same
+ownership caveat as the rest of the list above: they run on whichever client owns the object, so
+a piece near world origin, owned by the server, keeps vanilla behaviour. `--fallback on` still
+switches the whole section, and `--paths` must pin 1.7.0 or newer for these four to exist at all.
 
 ### The flags
 

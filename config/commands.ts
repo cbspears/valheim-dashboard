@@ -22,16 +22,26 @@
 //     and altar tellings all ship off (WEEKLY_CHRONICLE, BOSS_POLLS,
 //     STORYTELLER, TELLING_VOTES, ALTAR_TELLINGS).
 //
-// WHERE THINGS LAND, AND WHY IT IS #server. Four announcements route by env var
-// (RECAP_CHANNEL, MILESTONE_CHANNEL, OATH_CHANNEL, BOSS_CHANNEL). Their CODE
-// default is `valheim`; the deployed bot overrides all four to `server` for the
-// rehearsal pilot, and `scripts/cutover-env.sh --apply` (docs/LAUNCH-DAY.md step
-// 20b) deletes those four lines at launch, at which point they go back to
-// #valheim. The `channel` field on each entry below is therefore what the
-// DEPLOYED bot does right now, and the tripwire resolves the same var out of
-// index.js and the live .env and fails when the two disagree. When 20b runs,
-// this file has to be re-pointed at #valheim in the same pass, and the test is
-// what will say so.
+// WHERE THINGS LAND. Five announcements route by env var (RECAP_CHANNEL,
+// MILESTONE_CHANNEL, OATH_CHANNEL, BOSS_CHANNEL and TITLE_CHANNEL). Their CODE
+// default is `valheim`; the rehearsal pilot overrode them to `server` in the
+// deployed bot's .env, and `scripts/cutover-env.sh --apply` (docs/LAUNCH-DAY.md
+// step 20b) removes those overrides at launch and sets TITLE_CHANNEL, at which
+// point all five go back to #valheim.
+//
+// **Re-pointed to #valheim on 2026-09-09 as launch-day step 20b's fourth item,
+// the one cutover-env.sh does not print.** Until `--apply` has actually run on
+// the box, this file is deliberately AHEAD of the live .env, so the tripwire
+// fails on exactly those five entries and on nothing else. That failure is the
+// expected state between this edit and the cutover, and it clears itself the
+// moment 20b runs. Do not "fix" it by putting #server back.
+//
+// The four feed notices with no channelVar (the death feed, arrivals, raids and
+// the shout mirror) are NOT part of that move: they ride the relay's own feed
+// channel and CHAT_CHANNEL_ID, and they stay in #server.
+//
+// The tripwire resolves each var out of index.js and the live .env and fails
+// when the two disagree with what is written here.
 //
 // COPY DOCTRINE (CLAUDE.md): titles say plainly what a thing is; the Norse
 // register lives in subtitles and empty states. No em dashes, no en dashes, no
@@ -480,10 +490,10 @@ export const NOTIFICATIONS: Notification[] = [
     kind: 'notification',
     id: 'boss-fall',
     text: 'The first fall of a boss',
-    where: 'Discord, in #server, with everyone called',
+    where: 'Discord, in #valheim, with everyone called',
     trigger: 'One of the Forsaken is felled for the first time',
     cadence: 'Once per boss, checked every thirty seconds',
-    channel: 'server',
+    channel: 'valheim',
     channelVar: 'BOSS_CHANNEL',
     source: 'services/discord-bot/src/bosses.js createBossWatcher; services/discord-bot/src/format.js formatBossKill',
   },
@@ -500,10 +510,10 @@ export const NOTIFICATIONS: Notification[] = [
     kind: 'notification',
     id: 'recap',
     text: 'The daily recap',
-    where: 'Discord, in #server',
+    where: 'Discord, in #valheim',
     trigger: 'The day closes: hours kept, vikings fallen, and the Player of the Day',
     cadence: 'Once a night at 23:00 America/Chicago',
-    channel: 'server',
+    channel: 'valheim',
     channelVar: 'RECAP_CHANNEL',
     source: 'services/discord-bot/src/recap.js schedule, postRecap',
   },
@@ -511,10 +521,10 @@ export const NOTIFICATIONS: Notification[] = [
     kind: 'notification',
     id: 'great-deeds',
     text: 'Great Deeds',
-    where: 'Discord, in #server, and spoken in game',
+    where: 'Discord, in #valheim, and spoken in game',
     trigger: 'The warband crosses a threshold that belongs to all of you at once',
     cadence: 'One deed at a time, with a minute of quiet between them',
-    channel: 'server',
+    channel: 'valheim',
     channelVar: 'MILESTONE_CHANNEL',
     source: 'services/discord-bot/src/milestones.js createMilestonesAnnouncer, DEFAULT_MIN_GAP_MS',
     flag: 'MILESTONES_ANNOUNCE',
@@ -523,10 +533,10 @@ export const NOTIFICATIONS: Notification[] = [
     kind: 'notification',
     id: 'titles',
     text: 'Title proclamations',
-    where: 'Discord, in #server, and spoken in game',
+    where: 'Discord, in #valheim, and spoken in game',
     trigger: 'Your standing against the warband shifts far enough to earn you a new epithet',
     cadence: 'Checked every ten minutes, and rare by design',
-    channel: 'server',
+    channel: 'valheim',
     channelVar: 'TITLE_CHANNEL',
     source: 'services/discord-bot/src/titles.js createTitlesAnnouncer',
     flag: 'TITLES_ANNOUNCE',
@@ -535,10 +545,10 @@ export const NOTIFICATIONS: Notification[] = [
     kind: 'notification',
     id: 'oath-echo',
     text: 'The oath echo',
-    where: 'Spoken in game, and posted to Discord in #server',
+    where: 'Spoken in game, and posted to Discord in #valheim',
     trigger: 'You shout an oath',
     cadence: 'Once per oath, straight away',
-    channel: 'server',
+    channel: 'valheim',
     channelVar: 'OATH_CHANNEL',
     source: 'services/discord-bot/src/voice.js checkOathEchoes, OATH_ECHO_LINES',
     flag: 'VOICE_ENGINE',

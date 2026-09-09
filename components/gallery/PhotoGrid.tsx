@@ -6,6 +6,7 @@ import { Camera, User, Clock, MapPin, X, ChevronLeft, ChevronRight } from 'lucid
 import { EmptyState, VikingLink } from '@/components/ui';
 import { timeAgo } from '@/lib/format';
 import type { GalleryPhoto } from '@/lib/types';
+import { MAP_ENABLED } from '@/config/server';
 
 /** A gallery photo, with its "posted by" credit already resolved (or not) to
  *  a real viking — see `matchVikingName` in lib/slug.ts, applied by the page. */
@@ -14,6 +15,15 @@ type CreditedPhoto = GalleryPhoto & { matchedViking: string | null };
 /** A small "linked to a map place" tag → the map. Rendered when the photo's
  *  caption named a pinned place (gallery ↔ map link). */
 function PlaceTag({ name }: { name: string }) {
+  // Map paused (config/server.ts MAP_ENABLED): keep the place name, drop the link.
+  if (!MAP_ENABLED) {
+    return (
+      <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-gold-dim/50 bg-gold/10 px-2 py-0.5 text-xs font-medium text-gold-light">
+        <MapPin size={11} className="shrink-0" />
+        <span className="truncate">{name}</span>
+      </span>
+    );
+  }
   return (
     <Link
       href="/map"

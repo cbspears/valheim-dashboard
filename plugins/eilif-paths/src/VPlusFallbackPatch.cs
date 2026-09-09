@@ -110,6 +110,9 @@ namespace EilifPaths
         // live server. Vanilla StationExtension prefabs carry 5 m.
         internal const float VanillaAttachmentRange = 5f;
 
+        // ValheimPlus [Chat] defaultShoutDistance on the live box. Vanilla Talker.m_shoutDistance is 70.
+        internal const float ShoutDistance = 100000f;
+
         internal static ConfigEntry<bool> Enabled;
         internal static ConfigEntry<bool> InfiniteFireplaceFuel;
         internal static ConfigEntry<bool> InfiniteOvenFuel;
@@ -123,6 +126,11 @@ namespace EilifPaths
         internal static ConfigEntry<float> LootDropBonusPercent;
         internal static ConfigEntry<bool> ShareExploration;
         internal static ConfigEntry<float> ShareExplorationRadius;
+        internal static ConfigEntry<bool> ServerWideShouts;
+        internal static ConfigEntry<bool> NoWeatherDamage;
+        internal static ConfigEntry<bool> AreaRepair;
+        internal static ConfigEntry<float> AreaRepairRadius;
+        internal static ConfigEntry<bool> ItemsFloat;
 
         internal static bool ValheimPlusPresent { get; private set; }
 
@@ -196,6 +204,35 @@ namespace EilifPaths
                 "at 100 m while yours grew. That applies to an explicit number here too, not just to " +
                 "the 0 default: if you set 150 here and leave onFootMultiplier at 1.5 you get 225. " +
                 "Set [Exploration] onFootMultiplier to 1 if you want this number taken literally.");
+
+            ServerWideShouts = config.Bind(Section, "ServerWideShouts", true,
+                "Shouts carry across the whole world instead of stopping at 70 metres. Mirrors " +
+                "ValheimPlus [Chat] defaultShoutDistance = 100000. READ THIS BEFORE GRADING IT: " +
+                "Valheim 1.0 already sends every /s shout to every player on the server through a " +
+                "routed RPC, so the chat window is server-wide with or without this. What the patch " +
+                "still covers is the older per-character Talker range gate, which anything speaking " +
+                "through Talker.Say is still subject to. Normal and whispered chat are left exactly " +
+                "as vanilla has them. Needs Enabled = true.");
+            NoWeatherDamage = config.Bind(Section, "NoWeatherDamage", true,
+                "Buildings stop taking rain and water erosion damage. Combat damage, structural " +
+                "collapse from missing supports, Deep North snow load and event damage are all " +
+                "untouched. Mirrors ValheimPlus [Building] noWeatherDamage. Runs on whichever client " +
+                "owns the piece, so it protects a building only while somebody who has this on is " +
+                "the nearest viking to it. Needs Enabled = true.");
+            AreaRepair = config.Bind(Section, "AreaRepair", true,
+                "One hammer repair click repairs every damaged piece within AreaRepairRadius instead " +
+                "of only the one under the crosshair. Mirrors ValheimPlus [Building] enableAreaRepair. " +
+                "Each extra piece still pays its own stamina and hammer durability and still passes " +
+                "the same ward and crafting-station checks a single repair does, and the sweep stops " +
+                "the moment you run out of either. Needs Enabled = true.");
+            AreaRepairRadius = config.Bind(Section, "AreaRepairRadius", 7.5f,
+                "Radius in metres for AreaRepair, measured from the piece under the crosshair. " +
+                "Mirrors ValheimPlus [Building] areaRepairRadius = 7.5, the value the crew ran. " +
+                "0 = no area sweep, i.e. vanilla single-piece repair. Needs Enabled = true.");
+            ItemsFloat = config.Bind(Section, "ItemsFloat", true,
+                "Dropped items float on water instead of sinking out of reach. Mirrors ValheimPlus " +
+                "[Items] itemsFloatInWater. Applies to items that spawn while you are the nearest " +
+                "viking; an item already resting on a lake bed stays there. Needs Enabled = true.");
         }
 
         /// <summary>
@@ -495,6 +532,10 @@ namespace EilifPaths
             if (Pct(PickableBonusPercent, out p)) Note("picking +" + F(p) + "%.");
             if (Pct(LootDropBonusPercent, out p)) Note("creature loot amount +" + F(p) + "%.");
             if (On(ShareExploration)) Note("map fills in around every online viking.");
+            if (On(ServerWideShouts)) Note("shout range lifted to " + F(ShoutDistance) + "m (1.0 already routes /s to everyone).");
+            if (On(NoWeatherDamage)) Note("no rain or water erosion damage on buildings.");
+            if (On(AreaRepair) && Metres(AreaRepairRadius, out m)) Note("hammer repairs everything damaged within " + F(m) + "m.");
+            if (On(ItemsFloat)) Note("dropped items float instead of sinking.");
 
             if (Applied.Count == 0)
             {
@@ -1295,6 +1336,337 @@ namespace EilifPaths
                 __instance.m_drops = __state;
             }
             catch { }
+        }
+    }
+
+    // =========================================================================================
+    // [Chat] — shout range (1.7.0)
+    // =========================================================================================
+
+    /// <summary>
+    /// [Chat] defaultShoutDistance. ValheimPlus prefixes Talker.Awake and SETS all three ranges:
+    ///
+    ///   [HarmonyPatch(typeof(Talker), "Awake")]
+    ///   private static bool Prefix(ref Talker __instance) {
+    ///       if (Configuration.Current.Chat.IsEnabled) {
+    ///           __instance.m_visperDistance = ...defaultWhisperDistance;   // 100000 on the box
+    ///           __instance.m_normalDistance = ...defaultNormalDistance;    // 15, i.e. vanilla
+    ///           __instance.m_shoutDistance  = ...defaultShoutDistance;     // 100000 on the box
+    ///       }
+    ///       return true;
+    ///   }
+    ///
+    /// We set the SHOUT range only. Vanilla 1.0 Talker carries 4 / 15 / 70, so V+'s normal distance
+    /// was already vanilla and its whisper distance was a separate feature nobody asked for back.
+    ///
+    /// HONEST SCOPE, VERIFIED AGAINST THE 1.0 SOURCE, because this one is easy to over-claim.
+    /// Chat.SendText in 1.0 does NOT route a shout through Talker at all:
+    ///
+    ///   public void SendText(Talker.Type type, string text) {
+    ///       ...
+    ///       if (type == Talker.Type.Shout) {
+    ///           CheckPermissionsAndSendChatMessageRPCsAsync(delegate(long user, bool filterText) {
+    ///               ZRoutedRpc.instance.InvokeRoutedRPC(user, "ChatMessage", ..., 2, ...); });
+    ///       } else { localPlayer.GetComponent&lt;Talker&gt;().Say(type, text); }
+    ///   }
+    ///
+    /// and CheckPermissionsAndSendChatMessageRPCsAsync walks ZNet.instance.GetPlayerList(), i.e.
+    /// EVERY player on the server. The receiving Chat.OnNewChatMessage then calls AddString with no
+    /// distance test of any kind. So a /s shout is already server-wide in the chat window on stock
+    /// 1.0; the only distance left anywhere on that path is the in-world floating text, and that one
+    /// is gated on the minimap being switched off, not on the shout range.
+    ///
+    /// This patch therefore restores V+ PARITY on the one gate that still exists: Talker.RPC_Say's
+    /// per-character range check, which anything speaking through Talker.Say is still subject to.
+    /// It is a safety net, not tonight's headline. Nothing about normal or whispered chat changes.
+    /// </summary>
+    [HarmonyPatch(typeof(Talker), "Awake")]
+    internal static class Patch_VPF_Talker_Awake
+    {
+        private static void Postfix(Talker __instance)
+        {
+            try
+            {
+                if (!VPlusFallback.On(VPlusFallback.ServerWideShouts)) return;
+                if (__instance == null) return;
+                if (__instance.m_shoutDistance >= VPlusFallback.ShoutDistance) return;
+                __instance.m_shoutDistance = VPlusFallback.ShoutDistance;
+                VPlusFallback.InfoOnce("shout",
+                    "shout range lifted to " + VPlusFallback.F(VPlusFallback.ShoutDistance) + "m.");
+            }
+            catch (Exception ex) { VPlusFallback.Warn("shout range: " + ex.Message); }
+        }
+    }
+
+    // =========================================================================================
+    // [Building] noWeatherDamage (1.7.0)
+    // =========================================================================================
+
+    /// <summary>
+    /// [Building] noWeatherDamage = true on the live box. ValheimPlus:
+    ///
+    ///   [HarmonyPatch(typeof(WearNTear), "UpdateWear")]
+    ///   private static void Prefix(float time, ref float ___m_rainTimer) {
+    ///       if (...IsEnabled &amp;&amp; ...noWeatherDamage) ___m_rainTimer = time;
+    ///   }
+    ///
+    /// VERIFIED AGAINST THE 1.0 SOURCE. WearNTear.UpdateWear(float time) is still public, still takes
+    /// one float, and still holds the rain clause verbatim:
+    ///
+    ///   if (m_noRoofWear &amp;&amp; !flag &amp;&amp; GetHealthPercentage() &gt; 0.5f) {
+    ///       if (IsWet()) {
+    ///           if (m_rainTimer == 0f)          m_rainTimer = time;
+    ///           else if (time - m_rainTimer &gt; 60f) { m_rainTimer = time; num += 5f; }
+    ///       } else m_rainTimer = 0f;
+    ///   }
+    ///
+    /// Parking m_rainTimer at `time` on every entry means `time - m_rainTimer` is always 0, so the
+    /// 60-second erosion tick never fires and `num` never picks up its 5 points of wear. Nothing
+    /// else in UpdateWear is touched, so a piece still collapses when its supports go
+    /// (m_noSupportWear), still takes Deep North snow load, still takes persistent-event damage, and
+    /// still takes every point of combat damage: this is the rain, and only the rain.
+    ///
+    /// OWNERSHIP, same rule as the rest of this file. UpdateWear only does anything inside
+    /// `m_nview.IsOwner()`, and the owner of a building piece is whichever CLIENT is nearest to it,
+    /// never the dedicated server (which does not run this plugin). A piece with no viking near it
+    /// is not simulated at all and takes no weather wear either way; a piece whose nearest viking
+    /// does not have this switched on erodes normally.
+    /// </summary>
+    [HarmonyPatch(typeof(WearNTear), "UpdateWear", new Type[] { typeof(float) })]
+    internal static class Patch_VPF_WearNTear_UpdateWear
+    {
+        private static void Prefix(float time, ref float ___m_rainTimer)
+        {
+            try
+            {
+                if (!VPlusFallback.On(VPlusFallback.NoWeatherDamage)) return;
+                ___m_rainTimer = time;
+                VPlusFallback.InfoOnce("weather", "rain and water erosion no longer damage buildings.");
+            }
+            catch (Exception ex) { VPlusFallback.Warn("no weather damage: " + ex.Message); }
+        }
+    }
+
+    // =========================================================================================
+    // [Building] enableAreaRepair / areaRepairRadius (1.7.0)
+    // =========================================================================================
+
+    /// <summary>
+    /// [Building] enableAreaRepair = true, areaRepairRadius = 7.5 on the live box.
+    ///
+    /// WHAT VALHEIMPLUS DID. Two transpilers. One rewrites the `Repair(...)` call inside
+    /// Player.UpdatePlacement to point at its own RepairNearby, which collects Piece.s_allPieces
+    /// within areaRepairRadius of the hovered piece and then re-enters the REAL Player.Repair once
+    /// per piece by swapping Player.m_hoveringPiece each time; the other rewrites the
+    /// Character.Message calls inside Player.Repair into a counter so the sweep prints one summary
+    /// instead of one line per piece.
+    ///
+    /// WHAT WE DO INSTEAD, AND WHY. A POSTFIX on Player.Repair, not a transpiler on
+    /// Player.UpdatePlacement. The IL of UpdatePlacement is not something to rewrite blind on a
+    /// build nobody has run this against, and this plugin already has a prefix and a finalizer on
+    /// Player.Repair for the tool-stamina context (see ToolStaminaPatch.cs) - two patches on one
+    /// method compose fine, an unverified transpiler on a 3000-line method does not.
+    ///
+    /// The re-entry trick is kept, because it is the honest one: every extra piece goes through the
+    /// SAME vanilla Player.Repair the click went through, so it pays the same
+    /// UseStamina(GetBuildStamina()) and the same hammer durability, plays the same effect, and
+    /// passes the same CheckCanRemovePiece and PrivateArea.CheckAccess gates. There is no separate
+    /// "can I repair this" rule to get wrong, which also answers how V+ gated it: it did not - it
+    /// leaned on vanilla's own checks exactly like this.
+    ///
+    /// VERIFIED AGAINST THE 1.0 SOURCE:
+    ///
+    ///   private void Repair(ItemDrop.ItemData toolItem, Piece repairPiece) {
+    ///       if (!InPlaceMode()) return;
+    ///       Piece hoveringPiece = GetHoveringPiece();
+    ///       if (!hoveringPiece || !CheckCanRemovePiece(hoveringPiece)
+    ///           || !PrivateArea.CheckAccess(hoveringPiece.transform.position)) return;
+    ///       ... WearNTear component = hoveringPiece.GetComponent&lt;WearNTear&gt;();
+    ///       if ((bool)component &amp;&amp; component.Repair()) flag = true; ...
+    ///   }
+    ///
+    ///   private Piece m_hoveringPiece;                  // Player
+    ///   public Piece GetHoveringPiece() { ... return m_hoveringPiece; }
+    ///   private static int s_ghostLayer = 0;            // Piece
+    ///   private static readonly List&lt;Piece&gt; s_allPieces = new List&lt;Piece&gt;();
+    ///   public float GetHealthPercentage() { ... }      // WearNTear, cached field, cheap
+    ///
+    /// m_hoveringPiece, s_ghostLayer and s_allPieces are private, so they go through AccessTools and
+    /// a failure to resolve any of them turns the sweep off with a named warning rather than
+    /// throwing inside a patch.
+    ///
+    /// RE-ENTRY GUARD. The sweep calls Player.Repair, which is the method this postfix is attached
+    /// to, so a static busy flag holds the recursion to exactly one level. It is cleared in a
+    /// finally, so a throw from any single piece cannot wedge the feature off.
+    ///
+    /// PRE-FILTERED to pieces that are actually damaged (GetHealthPercentage &lt; 1) so an intact
+    /// neighbour never prints vanilla's "$msg_doesnotneedrepair", and the sweep breaks the moment
+    /// stamina or hammer durability runs out, exactly as V+ did.
+    /// </summary>
+    [HarmonyPatch(typeof(Player), "Repair", new Type[] { typeof(ItemDrop.ItemData), typeof(Piece) })]
+    internal static class Patch_VPF_Player_Repair
+    {
+        private static void Postfix(Player __instance, ItemDrop.ItemData toolItem, Piece repairPiece)
+        {
+            try
+            {
+                if (!VPlusFallback.On(VPlusFallback.AreaRepair)) return;
+                float radius;
+                if (!VPlusFallback.Metres(VPlusFallback.AreaRepairRadius, out radius)) return;
+                if (__instance == null || toolItem == null) return;
+                if (__instance != Player.m_localPlayer) return;
+                AreaRepairSweep.Run(__instance, toolItem, repairPiece, radius);
+            }
+            catch (Exception ex) { VPlusFallback.Warn("area repair: " + ex.Message); }
+        }
+    }
+
+    /// <summary>The sweep itself, kept out of the patch class so the reflection handles are resolved once.</summary>
+    internal static class AreaRepairSweep
+    {
+        private static bool _busy;
+        private static bool _tried;
+        private static bool _usable;
+
+        private static AccessTools.FieldRef<Player, Piece> _hoveringPiece;
+        private static FieldInfo _allPieces;
+        private static FieldInfo _ghostLayer;
+        private static MethodInfo _repair;
+
+        private static void Resolve()
+        {
+            if (_tried) return;
+            _tried = true;
+            try
+            {
+                _hoveringPiece = AccessTools.FieldRefAccess<Player, Piece>("m_hoveringPiece");
+                _allPieces = AccessTools.Field(typeof(Piece), "s_allPieces");
+                _ghostLayer = AccessTools.Field(typeof(Piece), "s_ghostLayer");
+                _repair = AccessTools.Method(typeof(Player), "Repair",
+                                             new Type[] { typeof(ItemDrop.ItemData), typeof(Piece) });
+                _usable = _hoveringPiece != null && _allPieces != null && _ghostLayer != null && _repair != null;
+                if (!_usable)
+                    VPlusFallback.Warn("area repair: Player.m_hoveringPiece, Piece.s_allPieces, " +
+                                       "Piece.s_ghostLayer or Player.Repair could not be resolved on this " +
+                                       "game build. Repairs are single-piece vanilla again.");
+            }
+            catch (Exception ex)
+            {
+                _usable = false;
+                VPlusFallback.Warn("area repair setup: " + ex.Message);
+            }
+        }
+
+        internal static void Run(Player player, ItemDrop.ItemData toolItem, Piece repairPiece, float radius)
+        {
+            if (_busy) return;
+            Resolve();
+            if (!_usable) return;
+
+            Piece hovered = player.GetHoveringPiece();
+            Vector3 centre = hovered != null ? hovered.transform.position : player.transform.position;
+
+            var all = _allPieces.GetValue(null) as List<Piece>;
+            if (all == null) return;
+            int ghost = (int)_ghostLayer.GetValue(null);
+
+            var targets = new List<Piece>();
+            for (int i = 0; i < all.Count; i++)
+            {
+                Piece piece = all[i];
+                if (piece == null || piece == hovered) continue;
+                if (piece.gameObject.layer == ghost) continue;
+                if (Vector3.Distance(centre, piece.transform.position) >= radius) continue;
+                WearNTear wnt = piece.GetComponent<WearNTear>();
+                // Only damaged pieces: an intact one would just print "$msg_doesnotneedrepair".
+                if (wnt == null || wnt.GetHealthPercentage() >= 1f) continue;
+                targets.Add(piece);
+            }
+            if (targets.Count == 0) return;
+
+            float cost = toolItem.m_shared != null && toolItem.m_shared.m_attack != null
+                       ? toolItem.m_shared.m_attack.m_attackStamina
+                       : 0f;
+            bool useDurability = toolItem.m_shared != null && toolItem.m_shared.m_useDurability;
+
+            Piece restore = _hoveringPiece(player);
+            int repaired = 0;
+            _busy = true;
+            try
+            {
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    if (!player.HaveStamina(cost)) break;
+                    if (useDurability && !(toolItem.m_durability > 0f)) break;
+                    _hoveringPiece(player) = targets[i];
+                    _repair.Invoke(player, new object[] { toolItem, repairPiece });
+                    repaired++;
+                }
+            }
+            finally
+            {
+                _hoveringPiece(player) = restore;
+                _busy = false;
+            }
+
+            if (repaired > 0)
+            {
+                VPlusFallback.InfoOnce("arearepair",
+                    "hammer repairs everything damaged within " + VPlusFallback.F(radius) + "m.");
+                player.Message(MessageHud.MessageType.TopLeft, repaired + " more pieces repaired");
+            }
+        }
+    }
+
+    // =========================================================================================
+    // [Items] itemsFloatInWater (1.7.0)
+    // =========================================================================================
+
+    /// <summary>
+    /// [Items] itemsFloatInWater = true on the live box. ValheimPlus, inside a bigger ItemDrop.Awake
+    /// prefix that also did weight and stack size:
+    ///
+    ///   GameObject gameObject = __instance.gameObject;
+    ///   if (items.itemsFloatInWater &amp;&amp; gameObject.GetComponent&lt;ZNetView&gt;()
+    ///       &amp;&amp; !gameObject.GetComponent&lt;Floating&gt;())
+    ///       gameObject.AddComponent&lt;Floating&gt;().m_waterLevelOffset = 0.5f;
+    ///
+    /// We take that clause and nothing else - weight and stack size are not comforts the crew asked
+    /// back, and both are exactly the kind of change that desynchronises a pack.
+    ///
+    /// PREFIX, NOT POSTFIX, AND THAT IS LOAD-BEARING. 1.0's ItemDrop.Awake caches the component:
+    ///
+    ///   private void Awake() { ... m_floating = GetComponent&lt;Floating&gt;(); m_body = GetComponent&lt;Rigidbody&gt;(); ... }
+    ///
+    /// so a Floating added after Awake would sit on the object with ItemDrop.m_floating still null.
+    /// Adding it first means vanilla caches it on the very next line, the same ordering V+ relied on.
+    ///
+    /// SAFE WITHOUT A RIGIDBODY. Floating.CustomFixedUpdate opens with
+    /// `if (!m_body || !m_nview.IsValid() || !m_nview.IsOwner()) return;`, so an item that has no
+    /// Rigidbody simply does nothing rather than throwing every physics step. The ZNetView test is
+    /// what keeps this off prefabs and non-networked ItemDrops.
+    ///
+    /// OWNERSHIP, again. Awake runs on the machine that instantiates the object, so this applies to
+    /// items that spawn while you are near them. An item that sank to a lake bed before this was
+    /// switched on stays there: the component is added at spawn, not retro-fitted.
+    /// </summary>
+    [HarmonyPatch(typeof(ItemDrop), "Awake")]
+    internal static class Patch_VPF_ItemDrop_Awake
+    {
+        private static void Prefix(ItemDrop __instance)
+        {
+            try
+            {
+                if (!VPlusFallback.On(VPlusFallback.ItemsFloat)) return;
+                if (__instance == null) return;
+                GameObject go = __instance.gameObject;
+                if (go == null) return;
+                if (go.GetComponent<ZNetView>() == null) return;
+                if (go.GetComponent<Floating>() != null) return;
+                go.AddComponent<Floating>().m_waterLevelOffset = 0.5f;
+                VPlusFallback.InfoOnce("float", "dropped items float instead of sinking.");
+            }
+            catch (Exception ex) { VPlusFallback.Warn("floating items: " + ex.Message); }
         }
     }
 }

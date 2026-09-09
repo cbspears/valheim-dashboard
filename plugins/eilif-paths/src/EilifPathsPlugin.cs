@@ -65,7 +65,7 @@ namespace EilifPaths
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.6.0";
+        public const string PluginVersion = "1.7.0";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -253,7 +253,7 @@ namespace EilifPaths
             ReportMissing(applied, ExpectedCoreClasses);
         }
 
-        // ---- The patch roster (v1.6.0) --------------------------------------
+        // ---- The patch roster (v1.7.0) --------------------------------------
         // The list the "Core patch classes: N/M" health line is measured against. M must never be
         // derived from what loaded (see the comment at the apply loop).
         private static readonly string[] ExpectedCoreClasses =
@@ -283,6 +283,10 @@ namespace EilifPaths
             "Patch_VPF_DropTable_GetDropList",
             "Patch_VPF_Pickable_RPC_Pick",
             "Patch_VPF_CharacterDrop_GenerateDropList",
+            "Patch_VPF_Talker_Awake",
+            "Patch_VPF_WearNTear_UpdateWear",
+            "Patch_VPF_Player_Repair",
+            "Patch_VPF_ItemDrop_Awake",
         };
 
         /// <summary>What each roster entry buys, named on the failure line so a boot log says what
@@ -311,6 +315,10 @@ namespace EilifPaths
                 case "Patch_VPF_DropTable_GetDropList": return "the gathering bonus on trees, rocks and ore";
                 case "Patch_VPF_Pickable_RPC_Pick": return "the picking bonus on berries, mushrooms and cores";
                 case "Patch_VPF_CharacterDrop_GenerateDropList": return "the creature loot-amount bonus";
+                case "Patch_VPF_Talker_Awake": return "the lifted shout range (1.0 still routes /s to everyone)";
+                case "Patch_VPF_WearNTear_UpdateWear": return "no rain or water erosion damage on buildings";
+                case "Patch_VPF_Player_Repair": return "area repair (single-piece hammer repair still works)";
+                case "Patch_VPF_ItemDrop_Awake": return "floating dropped items";
                 default: return "an unnamed feature";
             }
         }

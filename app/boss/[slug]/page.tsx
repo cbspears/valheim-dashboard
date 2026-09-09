@@ -19,6 +19,7 @@ import { BossHero } from '@/components/boss/BossHero';
 import { BossTellings } from '@/components/boss/BossTellings';
 import { BossPortrait } from '@/components/art/BossPortrait';
 import { ART_ENABLED } from '@/config/art';
+import { MAP_ENABLED } from '@/config/server';
 import { UpcomingEvents } from '@/components/events/UpcomingEvents';
 import {
   getBosses,
@@ -329,7 +330,7 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
         {/* Only when the altar is really charted. A boss that fell with nobody's
             position fresh enough to place gets no pin and no link, which is the
             honest page: there is nothing on the atlas to go and look at. */}
-        {altarPin && (
+        {altarPin && MAP_ENABLED && (
           <Link
             href="/map"
             className="gold-ring inline-flex w-fit items-center gap-2 text-sm text-gold-light transition-colors hover:text-gold"

@@ -1,0 +1,96 @@
+diff --git a/WebMap/ServerClient.cs b/WebMap/ServerClient.cs
+index b581551..f3a994b 100644
+--- a/WebMap/ServerClient.cs
++++ b/WebMap/ServerClient.cs
+@@ -1,6 +1,5 @@
+ using System;
+ using System.Collections.Generic;
+-using System.Reflection.Emit;
+ using HarmonyLib;
+ using Splatform;
+ using Steamworks;
+@@ -30,37 +29,37 @@ namespace WebMap
+             }
+         }
+ 
+-        [HarmonyPatch(typeof(ZNet), nameof(ZNet.SendPlayerList))]
++        // Valheim 1.0 moved the packet building out of SendPlayerList into the new helper
++        // ZNet.WritePlayerInfo(List<PlayerInfo>). The old transpiler matched the last `ldfld m_players`,
++        // which in 1.0 is the `WritePlayerInfo(m_players)` argument load, and injected `ldloc.0` BEFORE
++        // the ZPackage local was assigned -> AddServer received null -> NullReferenceException on every
++        // SendPlayerList tick and inside RPC_PeerInfo, so joining clients never got a player list.
++        // A postfix on the helper is both simpler and immune to codegen churn.
++        [HarmonyPatch(typeof(ZNet), nameof(ZNet.WritePlayerInfo), new Type[] { typeof(List<ZNet.PlayerInfo>) })]
+         public class AddExtraPlayer
+         {
+-            static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
++            static void Postfix(List<ZNet.PlayerInfo> playerInfoList, ref ZPackage __result)
+             {
+-                return new CodeMatcher(instructions).End().MatchStartBackwards(new CodeMatch(OpCodes.Ldfld, AccessTools.Field(typeof(ZNet), nameof(ZNet.m_players))))
+-                  .Advance(-1)
+-                  .InsertAndAdvance(new CodeInstruction(OpCodes.Ldarg_0))
+-                  .InsertAndAdvance(new CodeInstruction(OpCodes.Ldloc_0))
+-                  .InsertAndAdvance(new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(AddExtraPlayer), nameof(AddServer))))
+-                  .InstructionEnumeration();
+-            }
++                ZPackage pkg = __result;
+ 
+-            static void AddServer(ZNet net, ZPackage pkg)
+-            {
+-                // This is needed in case multiple mods are adding extra players.
+-                var prev = pkg.GetPos();
++                // The helper writes the entry count as a fixed 4-byte int at offset 0, then one blob per
++                // entry. Append our fake "Server" entry and bump that count.
++                int end = pkg.GetPos();
+                 pkg.SetPos(0);
+-                if (IsExtraPlayerAdded(net, pkg.ReadInt()))
+-                {
+-                  pkg.SetPos(prev);
+-                }
+-                else
++                int count = pkg.ReadInt();
++
++                // Needed in case multiple mods are adding extra players.
++                if (count >= playerInfoList.Count + 1)
+                 {
+-                  pkg.SetPos(0);
+-                  pkg.Write(net.m_players.Count + 1);
+-                  Write(pkg);
++                    pkg.SetPos(end);
++                    return;
+                 }
+-            }
+ 
+-            static bool IsExtraPlayerAdded(ZNet net, int count) => count >= net.m_players.Count + 1;
++                pkg.SetPos(0);
++                pkg.Write(playerInfoList.Count + 1);
++                pkg.SetPos(end);
++                Write(pkg);
++            }
+         }
+ 
+         private static ZNet.PlayerInfo CreatePlayerInfo() => new()
+@@ -69,7 +68,11 @@ namespace WebMap
+             // Receiving chat messages requires a valid character ID.
+             m_characterID = new ZDOID(ZDOMan.GetSessionID(), uint.MaxValue),
+             // 1.0 moved m_serverAssignedDisplayName from PlayerInfo onto PlayerInfo.m_userInfo (CrossNetworkUserInfo).
+-            m_userInfo = new() { m_id = new(ZNet.instance.m_steamPlatform, GetId()), m_displayName = "Server", m_serverAssignedDisplayName = "Server" },
++            // m_playfabId MUST be non-null: ZNet.WritePlayerInfo (and Write below) pass it straight to
++            // BinaryWriter.Write(string), which throws ArgumentNullException on null. Vanilla never hits
++            // this because ZNetPeer.m_playfabId defaults to "". "" is the same wire value a Steam-only
++            // peer produces, so the packet stays byte-identical to vanilla.
++            m_userInfo = new() { m_id = new(ZNet.instance.m_steamPlatform, GetId()), m_displayName = "Server", m_serverAssignedDisplayName = "Server", m_playfabId = "" },
+             m_publicPosition = false,
+             m_position = Vector3.zero,
+         };
+@@ -86,6 +89,10 @@ namespace WebMap
+             }
+         }
+ 
++        // Field order MUST match ZNet.WritePlayerInfo (the PlayerList packet), NOT
++        // ZNet.PlayerInfo.Write(BinaryWriter) -- that is a different serializer used elsewhere with a
++        // different order (displayName before id, playfabId before serverAssignedDisplayName) and no
++        // position fields. Using it here would corrupt the packet.
+         public static void Write(ZPackage pkg)
+         {
+             pkg.Write(Client.m_name);

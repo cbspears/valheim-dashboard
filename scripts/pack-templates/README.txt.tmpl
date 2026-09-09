@@ -8,8 +8,13 @@ puts them in place automatically when you import the pack code. Macheim cannot
 read a pack code, so if you installed the mods by hand on a Mac, you need these.
 
 Without them you can still play, but your kills, deaths and weapon records will
+{{#AZU}}
 not reach the dashboard, and Alt+O stays bound to a hotkey that silently turns
 off crafting from nearby chests.
+{{/AZU}}
+{{#NOAZU}}
+not reach the dashboard.
+{{/NOAZU}}
 
 Where they go
 -------------
@@ -28,11 +33,17 @@ What is in here
 ---------------
   net.cproudlock.gsvalheimstatsclient.cfg   points your stats at the Eilif
                                             dashboard and names the world
+{{#COMPANION}}
   net.eilif.companionclient.cfg             explored-map % and death causes
+{{/COMPANION}}
   net.eilif.paths.cfg                       path and road movement values
+{{#AZU}}
   Azumatt.AzuCraftyBoxes.cfg                unbinds the Alt+O chest-pulling
                                             hotkey so it cannot bite you
+{{/AZU}}
+{{#PLANT}}
   advize.PlantEverything.cfg                farming settings, synced by server
+{{/PLANT}}
 {{#VPLUS}}
   valheim_plus.cfg                          the server overrides most of this
 {{/VPLUS}}

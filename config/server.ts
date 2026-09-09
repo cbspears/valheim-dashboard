@@ -5,12 +5,20 @@ export const SERVER_TAGLINE = 'The Cozy Canon Playthrough';
 export const SERVER_DESCRIPTION =
   'A modded Valheim dedicated server. Bosses gate progression. No sailing ahead of the longship, vikings.';
 
-export const MAX_PLAYERS = 20; // matches ValheimPlus [Server] maxPlayers on the box (Charlie, 2026-09-05)
+export const MAX_PLAYERS = 24; // matches Eilif Companion [ServerFallback] on the box; ValheimPlus is out of pack v12 (2026-09-09)
 export const SERVER_HOST = 'GTXGaming';
 export const WORLD_SEED = 'Yggdrasil'; // cosmetic — set to your real seed if you want it shown
 
 // Optional external links shown around the dashboard. Leave '' to hide.
 export const DISCORD_URL = '';
+
+// The explored-world map (/map). Was OFF for a few hours on 2026-09-09: WebMap 2.7.1 broke on
+// Valheim 1.0 (its routed-RPC prefix throws on every raid and global-key send)
+// and came off the box, so no new frames arrive. While false the Map tab is
+// hidden from the nav and the deep links to /map render as plain text; the page
+// itself still answers by URL with a paused notice. Flip to true once WebMap or
+// a replacement renders on 1.0 and eilif-map-snapshot is running again.
+export const MAP_ENABLED = true;
 
 // The bot's @handle in Discord — shown in the Gallery's "how to add" explainer.
 export const DISCORD_BOT_HANDLE = '@Eilif';
@@ -23,12 +31,12 @@ export const SERVER_PASSWORD = 'Leroy';
 // Shared r2modman / Thunderstore Mod Manager profile code. Once you publish the
 // version-pinned modpack, paste its code here and the Get Started page switches
 // to the one-click "import this code" flow. Leave '' until then.
-export const MODPACK_PROFILE_CODE = '01a0440c-b54a-8d15-5882-22f86a4333b4';
+export const MODPACK_PROFILE_CODE = '01a0875b-dd2a-9548-4290-17fd71f8428e';
 
 // Human-readable name for the pack the code above points at. Shown next to
 // every copy of the code so a returning player can tell at a glance whether
 // they are current. BUMP THIS EVERY TIME THE CODE IS RE-MINTED.
-export const MODPACK_VERSION_LABEL = 'Pack v11 · Aug 27';
+export const MODPACK_VERSION_LABEL = 'Pack v12 · Sep 9';
 
 // A short, urgent notice shown as a gold banner at the top of the Hall and Get
 // Started. Leave '' and no banner renders anywhere. Set it for launch week
