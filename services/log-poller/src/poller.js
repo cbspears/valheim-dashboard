@@ -177,7 +177,16 @@ export class Poller {
       const raw = await readFile(this.cfg.statePath, 'utf8');
       const s = JSON.parse(raw);
       this.offset = Number.isFinite(s.offset) ? s.offset : 0;
-      this.parser = new LogParser({ online: s.online || [], connections: s.connections || [], pending: s.pending || [] });
+      this.parser = new LogParser({
+        online: s.online || [],
+        connections: s.connections || [],
+        pending: s.pending || [],
+        // The burst-pairing marks (see parser.js) must survive a restart too,
+        // or every name goes back to "confident" and the identity guard refuses
+        // the crossed ones again (2026-09-09 17:05).
+        ambiguous: s.ambiguous || [],
+        contestedLeft: s.contestedLeft || 0,
+      });
       this.liveness = normalizeLiveness(s.liveness);
       this.log.info?.(
         `[state] resumed at offset ${this.offset}, ${this.parser.online.size} online` +
