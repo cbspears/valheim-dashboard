@@ -169,6 +169,14 @@ export class LogParser {
     for (const [steamId, name] of this.steamToName) this.nameToSteam.set(name, steamId);
     // Authoritative roster of who is currently online (by character name).
     this.online = new Set(Array.isArray(initial.online) ? initial.online : []);
+    // Names whose SteamID pairing was made while MORE THAN ONE handshake was
+    // waiting. FIFO order is not spawn order when several people join in the
+    // same seconds (launch night 2026-09-09: five joins in 40 s crossed two
+    // pairings and the identity guard refused the owner's own oath). Such a
+    // pairing still serves roster/leave bookkeeping, but steamIdFor() reports
+    // null for it, so the webhook allows the write without binding or refusing.
+    this.ambiguous = new Set(Array.isArray(initial.ambiguous) ? initial.ambiguous : []);
+    this.contestedLeft = Number.isInteger(initial.contestedLeft) ? initial.contestedLeft : 0;
     // Last value seen on a "Connections N" heartbeat (null until first seen).
     this.lastConnectionCount = null;
   }
@@ -188,6 +196,7 @@ export class LogParser {
    * reads the same as "no such player", so downstream treats null as "allow".
    */
   steamIdFor(name) {
+    if (this.ambiguous.has(name)) return null;
     return this.nameToSteam.get(name) ?? null;
   }
 
@@ -377,8 +386,20 @@ export class LogParser {
         const alreadyMapped = this.nameToSteam.has(name);
         if (!alreadyOnline || !alreadyMapped) {
           // Correlate to the oldest unresolved connection, if any.
+          // A queue holding more than one handshake is a burst, and EVERY name
+          // drained from it is suspect, including the last one (if two crossed,
+          // both are wrong). contestedLeft counts the tail of such a burst.
+          if (this.pendingConnections.length > 1) {
+            this.contestedLeft = Math.max(this.contestedLeft, this.pendingConnections.length);
+          }
           const steamId = this.pendingConnections.shift();
           if (steamId) {
+            if (this.contestedLeft > 0) {
+              this.ambiguous.add(name);
+              this.contestedLeft -= 1;
+            } else {
+              this.ambiguous.delete(name);
+            }
             const prevName = this.steamToName.get(steamId);
             if (prevName && prevName !== name && this.online.has(prevName)) {
               // Same Steam connection, different character: the player
@@ -425,6 +446,7 @@ export class LogParser {
       if (name) {
         this.steamToName.delete(steamId);
         this.nameToSteam.delete(name);
+        this.ambiguous.delete(name);
         if (this.online.delete(name)) {
           // Same as the relog case: stamp the closing socket's SteamID before
           // processLine can look for a pairing that no longer exists.
@@ -468,6 +490,8 @@ export class LogParser {
   snapshot() {
     return {
       online: this.roster(),
+      ambiguous: [...this.ambiguous],
+      contestedLeft: this.contestedLeft,
       // steamId->characterName correlation + unresolved-connection queue,
       // so a restart mid-session doesn't forget who's connected to what
       // (see the constructor/relog comments for why this matters).
