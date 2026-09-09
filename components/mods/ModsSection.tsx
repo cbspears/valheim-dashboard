@@ -179,10 +179,20 @@ export function ModsSection() {
                   <br />
                   <span className="mt-2 inline-block">
                     Or skip the list entirely: the one-click Eilif modpack installs every mod you
-                    need, pre-configured. r2modman, then Import profile, then From code:{' '}
+                    need, pre-configured. In r2modman click Import / Update, then Import new
+                    profile, then From code:{' '}
                     <span className="inline-flex flex-wrap items-center gap-2 align-middle">
                       <CopyChip value={MODPACK_PROFILE_CODE} describe="the modpack code" />
                       <span className="text-xs text-muted">{MODPACK_VERSION_LABEL}</span>
+                    </span>
+                    <br />
+                    <span className="mt-1 inline-block text-xs text-muted">
+                      Already have the Eilif profile? Use Update existing profile instead, step by
+                      step on{' '}
+                      <Link href="/get-started#update" className="prose-link text-gold-light">
+                        Get Started
+                      </Link>
+                      .
                     </span>
                   </span>
                 </>

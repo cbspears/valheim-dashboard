@@ -192,6 +192,28 @@ function PackCode() {
   );
 }
 
+/**
+ * One line of the update run.
+ *
+ * The number comes from the ordered list itself, never from a typed "1.", and
+ * every line is ONE click. The old four-line version bundled three r2modman
+ * buttons into a single line, which is where the duplicate profiles came from:
+ * a reader skimming "Import / Update, Update existing profile, From code"
+ * clicks the first thing that looks close enough and lands on Import new
+ * profile.
+ *
+ * `note` is the grey half-line under a step: what the screen looks like at that
+ * moment, or the mistake people make there. It is never a second instruction.
+ */
+function UpdateStep({ children, note }: { children: ReactNode; note?: ReactNode }) {
+  return (
+    <li className="pl-1">
+      <span>{children}</span>
+      {note ? <span className="mt-1 block text-xs text-muted">{note}</span> : null}
+    </li>
+  );
+}
+
 function SectionTitle({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
     <h2 className="mb-4 flex items-center gap-2 font-display text-lg tracking-wide text-ash">
@@ -662,6 +684,28 @@ export default function GetStartedPage() {
         </div>
       </section>
 
+      {/* ══════════════ THE RETURNING PLAYER ══════════════ */}
+      {/* Most of the hall already has the profile. The update run is the whole
+          of their visit, and it lives below the finish line where a returning
+          player will not scroll; before this box the only route to it was a
+          line buried inside step 3, which they have no reason to read. It stays
+          two sentences on purpose: a first-timer must not read it as an
+          instruction to skip the spine. */}
+      <section>
+        <div className="flex items-start gap-3 rounded-md border border-rune bg-surface-raised/40 px-4 py-3 sm:px-5">
+          <RefreshCcw size={16} className="mt-0.5 shrink-0 text-gold" />
+          <p className="text-sm leading-relaxed text-ash-dim">
+            <span className="text-ash">
+              Already have the {SERVER_NAME} profile from before? You only need to update it.
+            </span>{' '}
+            <a href="#update" className="prose-link gold-ring rounded font-medium text-gold-light">
+              Jump to Update your mods
+            </a>
+            . First time here? Start at step 1 below and read straight down.
+          </p>
+        </div>
+      </section>
+
       {/* ══════════════ THE SPINE ══════════════ */}
       {/* id: kept because older Discord links point at "#mac-setup". The
           chooser reads the hash on mount and selects the Mac path, so the link
@@ -808,23 +852,34 @@ export default function GetStartedPage() {
           visit and is folded away; troubleshooting is only read when something
           has already gone wrong. */}
 
-      {/* id: step 3 sends a returning player here. Without it the update run is
-          a folded box with no route to it. */}
+      {/* id: step 3, the returning-player box at the top of the page, the Mac
+          step and the two Discord-shaped links all send a returning player
+          here. Keep it. */}
       <section id="update" className="scroll-mt-20">
-        <details className="group rounded-md border border-rune bg-surface/60 open:bg-surface">
+        {/* OPEN BY DEFAULT since launch night (2026-09-09). Most of the hall
+            already has the Eilif profile, so on any night a new code is minted
+            this run is the majority path, not a return visit, and a folded box
+            below the finish line is a box nobody opens. It stays a <details>
+            for two reasons: a first-timer can fold it out of the way, and the
+            <summary> carries the only <h2> this section has, which is what
+            heading navigation lands on. */}
+        <details
+          open
+          className="group rounded-md border border-rune bg-surface/60 open:bg-surface"
+        >
           {/* A summary may hold one heading element, and this one does: without
               it the update run was unreachable by heading navigation. The
               chevron is the other half of the same problem, which was that a
               list-none summary reads as a bordered bar, not as something that
-              opens. */}
+              opens and closes. */}
           <summary className="gold-ring cursor-pointer list-none rounded-md px-5 py-4">
             <h2 className="flex items-center gap-2.5 font-display text-base tracking-wide text-ash">
               <RefreshCcw size={17} className="shrink-0 text-gold" />
               How to update your mods
               <span className="ml-auto flex shrink-0 items-center gap-2.5">
-                <span className="text-xs font-normal text-muted group-open:hidden">
-                  Coming back later
-                </span>
+                {/* Was "Coming back later", which was a hint for a folded box.
+                    Open, the useful thing to say is how long it takes. */}
+                <span className="text-xs font-normal text-muted">Takes about a minute</span>
                 <ChevronDown
                   size={16}
                   aria-hidden
@@ -835,66 +890,76 @@ export default function GetStartedPage() {
           </summary>
           <div className="border-t border-rune px-5 py-4">
             <p className="text-sm leading-relaxed text-ash-dim">
-              Every so often we announce a mod update in Discord. A new code is posted on launch day
-              because the world changes.{' '}
-              <span className="font-semibold text-ash">
-                To update your mods and modpack, do this
-              </span>{' '}
-              (takes about a minute):
+              When the pack changes we announce it in Discord, and the code below changes with it.
+              Updating keeps the one profile you already have and swaps the mods inside it. Open
+              r2modman, then work down this list.
             </p>
-            <ol className="mt-3 space-y-1.5 text-sm leading-relaxed text-ash-dim">
-              <li>
-                <span className="font-mono text-xs text-gold-light">1.</span> Open r2modman. If you
-                land inside a profile, go back to the profile list.
-              </li>
-              <li>
-                <span className="font-mono text-xs text-gold-light">2.</span> Choose{' '}
-                <span className="text-ash">
-                  Import / Update, Update existing profile, From code
+            {/* One click per line. The old version put three r2modman buttons
+                on one line and that is where the duplicate profiles came from:
+                a reader skimming a list of buttons clicks the first one that
+                looks close enough. */}
+            <ol className="mt-4 list-decimal space-y-3 pl-6 text-sm leading-relaxed text-ash-dim marker:font-mono marker:text-gold-light">
+              <UpdateStep note="If r2modman opens straight into a profile, click Change profile in the left sidebar to get back to the list.">
+                On the profile list screen, click{' '}
+                <span className="text-ash">Import / Update</span>.
+              </UpdateStep>
+              <UpdateStep note="Not Import new profile. A second profile is the most common mistake, and it leaves you playing the old mods.">
+                Choose <span className="text-ash">Update existing profile</span>.
+              </UpdateStep>
+              <UpdateStep note="The other option is a file. What we hand out is a code.">
+                Choose <span className="text-ash">From code</span>.
+              </UpdateStep>
+              <UpdateStep note="This is the current code. Copy it from here every time, because it changes when the pack does.">
+                Paste this code into the box:
+                <span className="mt-1.5 block">
+                  <PackCode />
                 </span>
-                .
-              </li>
-              <li>
-                <span className="font-mono text-xs text-gold-light">3.</span> Paste the current
-                code, click <span className="text-ash">Continue</span>, then{' '}
-                <span className="text-ash">Import</span>: <PackCode />
-              </li>
-              <li>
-                <span className="font-mono text-xs text-gold-light">4.</span> Pick{' '}
-                <span className="text-ash">{SERVER_NAME}</span> in the dropdown and click{' '}
-                <span className="text-ash">Update profile: {SERVER_NAME}</span>. Wait for it to
-                finish, then <span className="text-ash">Start modded</span> as usual.
-              </li>
+              </UpdateStep>
+              <UpdateStep note="r2modman lists the mods it is about to install. There is nothing to tick or change: the list is the pack.">
+                Click <span className="text-ash">Continue</span>.
+              </UpdateStep>
+              <UpdateStep>
+                Click <span className="text-ash">Import</span>.
+              </UpdateStep>
+              <UpdateStep note="This is the profile you already have. Any other name in that dropdown updates the wrong profile.">
+                In the profile dropdown, pick <span className="text-ash">{SERVER_NAME}</span>.
+              </UpdateStep>
+              <UpdateStep note="It downloads the pack and swaps the mods in place. Wait for it to finish.">
+                Click <span className="text-ash">Update profile: {SERVER_NAME}</span>.
+              </UpdateStep>
+              <UpdateStep note="Start modded is the button in r2modman, not the Play button in Steam. Your character and the world are untouched by all of this.">
+                Launch with <span className="text-ash">Start modded</span>.
+              </UpdateStep>
             </ol>
             {/* NO VERSION NUMBERS HERE, EVER (docs/LAUNCH-DAY.md step 19, edit 3).
-                This sentence used to name two pinned versions by hand. The pack
-                label moves at the mint and typed numbers do not, so the moment
-                the label read the new pack this told a viking still on the old
-                one that they were current, on the single night an old pack gets
-                them refused by the version check. It now points at /resources,
+                The success condition used to name two pinned versions by hand.
+                The pack label moves at the mint and typed numbers do not, so the
+                moment the label read the new pack this told a viking still on the
+                old one that they were current, on the single night an old pack
+                gets them refused by the version check. It points at /resources,
                 which is built from config/mods.ts and cannot fall behind. */}
+            <div className="mt-4 border-t border-rune pt-3">
+              <DoneWhen>
+                the <span className="text-ash-dim">Installed</span> tab of your {SERVER_NAME}{' '}
+                profile lists exactly the mods on the{' '}
+                <Link href="/resources#mods" className="prose-link text-gold-light">
+                  Resources page
+                </Link>
+                , at the same versions. Any line that differs means running the list again.
+              </DoneWhen>
+            </div>
             <p className="mt-3 text-xs text-muted">
-              Not sure whether you are current? In r2modman open your{' '}
-              <span className="text-ash-dim">{SERVER_NAME}</span> profile, look at{' '}
-              <span className="text-ash-dim">Installed</span>, and compare it against the{' '}
-              <Link href="/resources#mods" className="prose-link text-gold-light">
-                Resources page
-              </Link>
-              , which always carries the versions the server is running. Any line that differs means
-              re-importing the code above.
+              Never update mods one by one from the update badges in r2modman. The pack pins the
+              exact versions the server runs, and a single mod ahead of the pack locks you out
+              until they match again.
             </p>
-            <p className="mt-3 text-xs text-muted">
-              Never update mods one by one from r2modman&apos;s own &quot;update available&quot;
-              badges. The pack pins the exact versions the server runs, and a solo update can lock
-              you out until versions match again.
-            </p>
-            <p className="mt-3 text-xs text-muted">
-              On a Mac there is no code to paste. Re-check the {MAC_MODS.length} versions in step 3
-              against{' '}
+            <p className="mt-2 text-xs text-muted">
+              On a Mac there is no code to paste. Updating means re-checking the {MAC_MODS.length}{' '}
+              versions in step 3 against{' '}
               <Link href="/resources#mods" className="prose-link text-gold-light">
                 Resources
               </Link>{' '}
-              and download the config bundle again.
+              and downloading the config bundle again.
             </p>
           </div>
         </details>

@@ -198,6 +198,33 @@ ok(
 // that opens, and behind it is the button a returning player needs.
 ok('the disclosure shows that it opens', /group-open:rotate-180/.test(src));
 
+/* ── 3d. the update run is the returning player's whole visit ─────────────── */
+
+// LAUNCH NIGHT, 2026-09-09. Whenever a new pack code is minted, most of the
+// hall is updating rather than installing, and the update run sits below the
+// finish line where they will never scroll. Three facts carry them to it and
+// each one was absent at some point:
+//   - the disclosure renders OPEN (it stays a <details> so a first-timer can
+//     fold it away, but a closed box under the finish line is a box nobody
+//     opens),
+//   - the top of the page says so, above the steps,
+//   - and the run inside it is one r2modman click per line. The four-line
+//     version bundled three buttons onto one line, which is how a reader ends
+//     up on "Import new profile" and plays the night on the old mods.
+ok('the update run is open by default', /<details\s+open\b/.test(src));
+const calloutAt = prose.indexOf('You only need to update it.');
+ok('a returning-player callout is on the page', calloutAt > 0);
+ok(
+  'the callout stands above the steps, not below the finish line',
+  calloutAt > 0 && calloutAt < prose.indexOf('<PlatformSwitch'),
+  `callout at ${calloutAt}, chooser at ${prose.indexOf('<PlatformSwitch')}`
+);
+ok(
+  'the update run is one click per line',
+  (src.match(/<UpdateStep[\s>]/g) ?? []).length >= 8,
+  'eight or nine steps, each a single r2modman action'
+);
+
 /* ── 4. anchors other pages link to still exist ───────────────────────────── */
 
 const linked = new Set();
