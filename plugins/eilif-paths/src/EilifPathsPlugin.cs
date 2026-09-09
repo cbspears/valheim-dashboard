@@ -54,8 +54,9 @@ namespace EilifPaths
     /// how a charge is told apart from a movement charge.
     ///
     /// ALSO (since 1.6.0): two things that have nothing to do with the ground under your feet.
-    /// [Exploration] widens the map-discovery circle — half again as far on foot, twice as far on a
-    /// ship — by multiplying Minimap.m_exploreRadius for the frame and restoring it in a finalizer
+    /// [Exploration] widens the map-discovery circle (since 1.7.1: twice as far on foot, five times
+    /// as far on a ship) by multiplying Minimap.m_exploreRadius for the frame and restoring it in a
+    /// finalizer
     /// (see src/ExplorationPatch.cs). [Swim] gives back the stamina regeneration vanilla refuses in
     /// deep water: full rate treading, half rate stroking, with the swim DRAIN left entirely alone
     /// (see src/SwimStaminaPatch.cs).
@@ -65,7 +66,7 @@ namespace EilifPaths
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.7.0";
+        public const string PluginVersion = "1.7.1";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -253,7 +254,7 @@ namespace EilifPaths
             ReportMissing(applied, ExpectedCoreClasses);
         }
 
-        // ---- The patch roster (v1.7.0) --------------------------------------
+        // ---- The patch roster (v1.7.1) --------------------------------------
         // The list the "Core patch classes: N/M" health line is measured against. M must never be
         // derived from what loaded (see the comment at the apply loop).
         private static readonly string[] ExpectedCoreClasses =
@@ -287,6 +288,7 @@ namespace EilifPaths
             "Patch_VPF_WearNTear_UpdateWear",
             "Patch_VPF_Player_Repair",
             "Patch_VPF_ItemDrop_Awake",
+            "Patch_VPF_GameCamera_Awake",
         };
 
         /// <summary>What each roster entry buys, named on the failure line so a boot log says what
@@ -319,6 +321,7 @@ namespace EilifPaths
                 case "Patch_VPF_WearNTear_UpdateWear": return "no rain or water erosion damage on buildings";
                 case "Patch_VPF_Player_Repair": return "area repair (single-piece hammer repair still works)";
                 case "Patch_VPF_ItemDrop_Awake": return "floating dropped items";
+                case "Patch_VPF_GameCamera_Awake": return "the wider camera zoom-out and field of view";
                 default: return "an unnamed feature";
             }
         }

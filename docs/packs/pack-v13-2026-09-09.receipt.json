@@ -1,0 +1,49 @@
+{
+  "mode": "PUBLISH",
+  "mintedAt": "2026-09-09T19:08:37.260Z",
+  "profileCode": "01a08792-6d9b-4d68-7cc1-292154c9abf7",
+  "world": "Eilif",
+  "profileName": "Eilif",
+  "ingestUrl": "https://valheim-dashboard.vercel.app/api/gs-ingest",
+  "versionLabel": "Pack v13 · Sep 9",
+  "pins": {
+    "denikson/BepInExPack_Valheim": "5.4.2333",
+    "Proudlock_Technology/GsValheimStatsClient": "0.2.12",
+    "Eilif/EilifPaths": "1.7.1",
+    "Eilif/EilifCompanionClient": "0.3.4"
+  },
+  "dropped": [
+    "Grantapher/ValheimPlus_Grantapher_Temporary",
+    "Advize/PlantEverything",
+    "Azumatt/AzuCraftyBoxes"
+  ],
+  "fallback": "on",
+  "zipBytes": 4986,
+  "roundTrip": "clean",
+  "verification": [
+    {
+      "package": "denikson/BepInExPack_Valheim",
+      "version": "5.4.2333",
+      "packageApi": "ok",
+      "listingIndex": "ok"
+    },
+    {
+      "package": "Proudlock_Technology/GsValheimStatsClient",
+      "version": "0.2.12",
+      "packageApi": "ok",
+      "listingIndex": "ok"
+    },
+    {
+      "package": "Eilif/EilifPaths",
+      "version": "1.7.1",
+      "packageApi": "ok",
+      "listingIndex": "ok"
+    },
+    {
+      "package": "Eilif/EilifCompanionClient",
+      "version": "0.3.4",
+      "packageApi": "ok",
+      "listingIndex": "ok"
+    }
+  ]
+}

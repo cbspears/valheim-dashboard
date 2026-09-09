@@ -9,9 +9,9 @@ namespace EilifPaths
     /// <summary>
     /// MAP DISCOVERY RADIUS (since 1.6.0).
     ///
-    /// Widens the circle of fog the local player lifts as they travel: half again as much on foot,
-    /// twice as much while on a ship. Client-side, per-frame, configurable, and it never leaves a
-    /// changed value behind.
+    /// Widens the circle of fog the local player lifts as they travel: twice as much on foot, five
+    /// times as much while on a ship (1.5 and 2 through 1.7.0). Client-side, per-frame, configurable,
+    /// and it never leaves a changed value behind.
     ///
     /// VERIFIED BY DECOMPILE (ilspycmd against libs/assembly_valheim.dll, game 0.221.12; the line
     /// numbers below are from the whole-assembly dump, the same one ToolStaminaPatch.cs cites).
@@ -55,10 +55,12 @@ namespace EilifPaths
     ///   48521:      int num = (int)Mathf.Ceil(radius / m_pixelSize);
     ///   48525:      for (int i = py - num; i &lt;= py + num; i++)          // (2*num+1)^2 pixels
     ///
-    /// So vanilla's 100 m is ceil(100/64) = 2, x1.5 is ceil(150/64) = 3, and x2 is ceil(200/64) = 4.
-    /// The two defaults land on clean separate steps, which is luck worth knowing about rather than
+    /// So vanilla's 100 m is ceil(100/64) = 2, x2 is ceil(200/64) = 4, and x5 is ceil(500/64) = 8.
+    /// The two defaults land on clean separate steps, which is worth knowing about rather than
     /// design: every multiplier from 1.0 to 1.28 also yields 2 and is a silent no-op. It also bounds
-    /// the cost — 5x5 pixels a tick at vanilla, 9x9 at x2, once every m_exploreInterval = 2 s.
+    /// the cost: 5x5 pixels a tick at vanilla, 9x9 at x2, 17x17 at x5, once every
+    /// m_exploreInterval = 2 s. Even the x5 case is 289 pixel tests twice a second, which is
+    /// nothing next to what the map already redraws.
     ///
     /// COEXISTENCE WITH VALHEIMPLUS. V+ patches the SAME method with a prefix
     /// (Minimap_Patches.ChangeMapBehavior). Reading its decompile, that prefix does not touch
@@ -101,8 +103,8 @@ namespace EilifPaths
     {
         internal const string Section = "Exploration";
 
-        internal const float DefaultOnFoot = 1.5f;
-        internal const float DefaultSailing = 2f;
+        internal const float DefaultOnFoot = 2f;
+        internal const float DefaultSailing = 5f;
 
         internal static ConfigEntry<bool> Enabled;
         internal static ConfigEntry<float> OnFootMultiplier;
@@ -117,19 +119,19 @@ namespace EilifPaths
 
             OnFootMultiplier = config.Bind(Section, "onFootMultiplier", DefaultOnFoot,
                 "How much wider the discovery circle is while you are NOT on a ship: walking, running, " +
-                "riding, swimming. 1 = vanilla (100 m in this build), 1.5 = the Eilif default, i.e. " +
-                "half again as far. This also sets how much map the [VPlusFallback] ShareExploration " +
+                "riding, swimming. 1 = vanilla (100 m in this build), 2 = the Eilif default, i.e. " +
+                "twice as far. This also sets how much map the [VPlusFallback] ShareExploration " +
                 "pass reveals around each other viking, so a crew mate's circle matches your own. " +
                 "THIS KNOB MOVES IN STEPS, NOT SMOOTHLY: the game uncovers whole 64 m fog pixels " +
-                "(ceil(radius / 64)), so vanilla 100 m is 2 pixels, 1.5 is 3 and 2 is 4. Every value " +
+                "(ceil(radius / 64)), so vanilla 100 m is 2 pixels, 2 is 4 and 5 is 8. Every value " +
                 "from 1 to 1.28 rounds to the same 2 pixels and changes nothing at all. If a small " +
                 "increase looks like it did nothing, it did nothing: go up a whole step.");
 
             SailingMultiplier = config.Bind(Section, "sailingMultiplier", DefaultSailing,
                 "How much wider the discovery circle is while you are on a ship, at the helm or " +
-                "standing on the deck. 1 = vanilla, 2 = the Eilif default, i.e. twice as far, so a " +
-                "coastal run charts twice the water. Set it equal to onFootMultiplier to stop " +
-                "treating sailing specially. Steps in whole 64 m fog pixels, same as onFootMultiplier: " +
+                "standing on the deck. 1 = vanilla, 5 = the Eilif default, i.e. five times as far, " +
+                "so one coastal run charts a wide band of sea. Set it equal to onFootMultiplier to " +
+                "stop treating sailing specially. Steps in whole 64 m fog pixels, same as onFootMultiplier: " +
                 "see the note there before you retune it by a tenth.");
         }
 
@@ -237,8 +239,8 @@ namespace EilifPaths
     /// FINALIZER, NOT POSTFIX, and it is the same lesson Patch_UpdateWalking carries. m_exploreRadius
     /// is real, shared component state that the prefix temporarily inflates, and Harmony SKIPS
     /// postfixes when the original method throws. One throw inside Minimap.UpdateExplore with a
-    /// postfix restore would leave the field at 150 (or 200) for the session, and the next frame
-    /// would multiply the multiplied value again: 100 -&gt; 150 -&gt; 225 -&gt; 337, compounding every
+    /// postfix restore would leave the field at 200 (or 500) for the session, and the next frame
+    /// would multiply the multiplied value again: 100 -&gt; 200 -&gt; 400 -&gt; 800, compounding every
     /// frame until the pixel loop in Explore is walking a radius of thousands of metres. A finalizer
     /// runs on both paths and returns void, so the original exception is rethrown untouched.
     ///

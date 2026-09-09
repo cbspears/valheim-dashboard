@@ -37,6 +37,8 @@ namespace EilifPaths
     ///   [Pickable] every category 30     -> PickableBonusPercent
     ///   [LootDrop] lootDropAmountMultiplier 30 -> LootDropBonusPercent
     ///   [Map] shareMapProgression        -> ShareExploration (see the note on that key)
+    ///   [Camera] cameraMaximumZoomDistance 100 / cameraBoatMaximumZoomDistance 100 / cameraFOV 75
+    ///                                    -> CameraMaxZoom, CameraMaxZoomBoat, CameraFov
     ///
     /// DELIBERATELY NOT MIRRORED, with reasons that are worth keeping:
     ///
@@ -69,8 +71,6 @@ namespace EilifPaths
     ///   * [Building] noInvalidPlacementRestriction = true, maximumPlacementDistance = 12
     ///     (Player.m_maxPlaceDistance is 5 in vanilla), pieceComfortRadius = 20
     ///     (SE_Rested.c_ComfortRadius is 10 in vanilla).
-    ///   * [Camera] cameraMaximumZoomDistance = 100 and cameraBoatMaximumZoomDistance = 100
-    ///     (vanilla 6), cameraFOV = 75 (vanilla 65).
     ///   * [Items] itemsFloatInWater = true. Dropped items float instead of sinking.
     ///   * [GridAlignment] enabled = true. LeftAlt snap-to-grid placement, F7 / F6 to toggle.
     ///
@@ -131,6 +131,9 @@ namespace EilifPaths
         internal static ConfigEntry<bool> AreaRepair;
         internal static ConfigEntry<float> AreaRepairRadius;
         internal static ConfigEntry<bool> ItemsFloat;
+        internal static ConfigEntry<float> CameraMaxZoom;
+        internal static ConfigEntry<float> CameraMaxZoomBoat;
+        internal static ConfigEntry<float> CameraFov;
 
         internal static bool ValheimPlusPresent { get; private set; }
 
@@ -202,7 +205,7 @@ namespace EilifPaths
                 "CHANGED IN 1.6.0: whatever this settles on is then scaled by [Exploration] " +
                 "onFootMultiplier, so a crew mate's circle keeps matching your own instead of staying " +
                 "at 100 m while yours grew. That applies to an explicit number here too, not just to " +
-                "the 0 default: if you set 150 here and leave onFootMultiplier at 1.5 you get 225. " +
+                "the 0 default: if you set 150 here and leave onFootMultiplier at 2 you get 300. " +
                 "Set [Exploration] onFootMultiplier to 1 if you want this number taken literally.");
 
             ServerWideShouts = config.Bind(Section, "ServerWideShouts", true,
@@ -233,6 +236,21 @@ namespace EilifPaths
                 "Dropped items float on water instead of sinking out of reach. Mirrors ValheimPlus " +
                 "[Items] itemsFloatInWater. Applies to items that spawn while you are the nearest " +
                 "viking; an item already resting on a lake bed stays there. Needs Enabled = true.");
+
+            CameraMaxZoom = config.Bind(Section, "CameraMaxZoom", 100f,
+                "How far the third-person camera may be scrolled back on foot, in metres. Vanilla is " +
+                "6. Mirrors ValheimPlus [Camera] cameraMaximumZoomDistance = 100, the value the crew " +
+                "ran. Accepted range 1 to 100, the same window V+ enforced; a number outside it is " +
+                "refused and this one knob stays vanilla. 0 = leave vanilla alone. Needs " +
+                "Enabled = true.");
+            CameraMaxZoomBoat = config.Bind(Section, "CameraMaxZoomBoat", 100f,
+                "The same, for while you are steering a ship. Vanilla is 6. Mirrors ValheimPlus " +
+                "[Camera] cameraBoatMaximumZoomDistance = 100. Accepted range 1 to 100. 0 = leave " +
+                "vanilla alone. Needs Enabled = true.");
+            CameraFov = config.Bind(Section, "CameraFov", 75f,
+                "Field of view in degrees. Vanilla is 65, higher is wider. Mirrors ValheimPlus " +
+                "[Camera] cameraFOV = 75. Accepted range 1 to 140. 0 = leave vanilla alone, which is " +
+                "the setting to use if a wider view makes you queasy. Needs Enabled = true.");
         }
 
         /// <summary>
@@ -489,6 +507,28 @@ namespace EilifPaths
 
         internal static string F(float v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
+        /// <summary>One line for the camera, listing only the knobs that are actually set. Vanilla
+        /// numbers are named alongside so the log says what changed, not merely what it is now.</summary>
+        private static void NoteCamera()
+        {
+            float zoom, boat, fov;
+            bool hasZoom = Metres(CameraMaxZoom, out zoom);
+            bool hasBoat = Metres(CameraMaxZoomBoat, out boat);
+            bool hasFov = Metres(CameraFov, out fov);
+            if (!hasZoom && !hasBoat && !hasFov) return;
+
+            string line = "camera ";
+            if (hasZoom || hasBoat)
+            {
+                line += "zooms out to " + (hasZoom ? F(zoom) + "m on foot" : "vanilla on foot") +
+                        " and " + (hasBoat ? F(boat) + "m on a boat" : "vanilla on a boat") +
+                        " (vanilla 6m)";
+                if (hasFov) line += ", ";
+            }
+            if (hasFov) line += "field of view " + F(fov) + " (vanilla 65)";
+            Note(line + ".");
+        }
+
         /// <summary>Builds the enabled-feature list. Called once, after patching, from Awake.</summary>
         internal static void Report()
         {
@@ -536,6 +576,7 @@ namespace EilifPaths
             if (On(NoWeatherDamage)) Note("no rain or water erosion damage on buildings.");
             if (On(AreaRepair) && Metres(AreaRepairRadius, out m)) Note("hammer repairs everything damaged within " + F(m) + "m.");
             if (On(ItemsFloat)) Note("dropped items float instead of sinking.");
+            NoteCamera();
 
             if (Applied.Count == 0)
             {
@@ -705,7 +746,7 @@ namespace EilifPaths
                 // temporary multiply: this runs on the plugin's own 0.4s Invoke tick, never nested
                 // inside Minimap.UpdateExplore, so the field is always back at its vanilla value by
                 // the time this line reads it. Multiplying an already-multiplied radius would be
-                // 1.5 x 1.5, which is exactly the double-apply this file exists to avoid elsewhere.
+                // 2 x 2, which is exactly the double-apply this file exists to avoid elsewhere.
                 radius *= Exploration.SharedMultiplier();
                 if (!(radius > 0f) || float.IsNaN(radius) || float.IsInfinity(radius)) return;
 
@@ -1667,6 +1708,123 @@ namespace EilifPaths
                 VPlusFallback.InfoOnce("float", "dropped items float instead of sinking.");
             }
             catch (Exception ex) { VPlusFallback.Warn("floating items: " + ex.Message); }
+        }
+    }
+
+    // =========================================================================================
+    // [Camera] cameraMaximumZoomDistance / cameraBoatMaximumZoomDistance / cameraFOV (1.7.1)
+    // =========================================================================================
+
+    /// <summary>
+    /// VERIFIED BY DECOMPILE against the 1.0 client (build 25185596). GameCamera owns all three
+    /// numbers as public fields and reads them again every frame, so one write at Awake is enough:
+    ///
+    ///   GameCamera.cs:27   public float m_maxDistance = 6f;
+    ///   GameCamera.cs:29   public float m_maxDistanceBoat = 6f;
+    ///   GameCamera.cs:51   public float m_fov = 65f;
+    ///
+    ///   GameCamera.cs:139  private void Awake() { m_instance = this; m_camera = GetComponent&lt;Camera&gt;(); ... }
+    ///
+    ///   GameCamera.cs:235  private void UpdateCamera(float dt) {
+    ///   GameCamera.cs:244      m_camera.fieldOfView = m_fov;
+    ///   GameCamera.cs:245      m_skyCamera.fieldOfView = m_fov;
+    ///   ...
+    ///   GameCamera.cs:272      float max = ((localPlayer.GetControlledShip() != null) ? m_maxDistanceBoat : m_maxDistance);
+    ///   GameCamera.cs:273      m_distance = Mathf.Clamp(m_distance, minDistance, max);
+    ///
+    /// The scroll clamp on line 273 re-reads the field on every frame, and line 244 re-pushes m_fov
+    /// into the two cameras on every frame, so nothing here has to be re-applied per frame.
+    ///
+    /// WHY A POSTFIX ON Awake AND NOT V+'s PREFIX ON UpdateCamera. ValheimPlus did it the other way
+    /// (ValheimPlus.GameClasses.BlockCameraScrollInAEM, a GameCamera.UpdateCamera prefix that SETS
+    /// all three every frame) because its AEM admin camera needed to take the fields away again and
+    /// hand them back. We have no AEM, so a per-frame write on a method the game calls from
+    /// LateUpdate buys nothing and costs a Harmony trampoline every frame. Unity deserialises the
+    /// prefab's own field values BEFORE Awake, so an Awake postfix is the first moment our numbers
+    /// can win, and nothing in the 1.0 assembly writes m_maxDistance or m_maxDistanceBoat afterwards
+    /// (grepped the whole decompile: the three declarations, the clamp on 272, and the ship-tilt
+    /// read on 372 are every occurrence).
+    ///
+    /// WE DO NOT TOUCH m_minDistance. V+ set it to 1 unconditionally. That is a first-person-ish
+    /// close-in change nobody asked for, and vanilla's 0 is what the crew has been living with under
+    /// V+'s [Camera] section anyway only because V+ forced it; leaving it alone is the smaller change.
+    ///
+    /// FOV, AND WHY A SET VALUE STICKS. m_fov is not a constant the game re-derives; it is state.
+    /// Three things read or write it and none of them fights this:
+    ///
+    ///   1. UpdateCamera (line 244) pushes it into the cameras every frame. That is what makes the
+    ///      value take effect at all.
+    ///   2. UpdateFOV (line 815), called from LateUpdate before UpdateCamera:
+    ///        if (m_fovTarget != m_fov) { m_fov += (m_fovTarget - m_fov) * m_fovInertia; ... }
+    ///      m_fovTarget and m_fovInertia are PRIVATE and both default to 0, and the only thing that
+    ///      ever writes them is SetTempFOV / ResetTempFOV. So on a boot where nothing has called
+    ///      SetTempFOV, the drift term is (0 - 75) * 0 = 0 and m_fov never moves. Verified: the only
+    ///      caller of SetTempFOV in the whole 1.0 assembly is GrapplingPoint (lines 199, 348, 415).
+    ///   3. SetTempFOV (line 800) captures the resting value the FIRST time it runs:
+    ///        if (m_fovBase == 0f) { m_fovBase = m_fov; }
+    ///      and ResetTempFOV sets m_fovTarget back to m_fovBase. Because our write happens in Awake,
+    ///      long before any grappling hook is fired, m_fovBase captures OUR 75 and the hook returns
+    ///      to 75, not to 65. The game's own FOV handling therefore composes with this rather than
+    ///      undoing it.
+    ///
+    /// There is one more writer, the Shift+C debug camera on line 304, which is gated behind
+    /// Player.m_debugMode and is not reachable in a normal session.
+    ///
+    /// LIMITS. The zoom knobs are accepted between 1 and 100 metres and the FOV between 1 and 140,
+    /// the same windows ValheimPlus enforced, so a fat-fingered config cannot put the camera in
+    /// orbit or collapse the view to a pinhole. Anything outside the window is ignored with a
+    /// warning and that one number stays vanilla; the other two still apply.
+    /// </summary>
+    [HarmonyPatch(typeof(GameCamera), "Awake")]
+    internal static class Patch_VPF_GameCamera_Awake
+    {
+        internal const float MinZoom = 1f;
+        internal const float MaxZoom = 100f;
+        internal const float MinFov = 1f;
+        internal const float MaxFov = 140f;
+
+        private static void Postfix(GameCamera __instance)
+        {
+            try
+            {
+                if (!VPlusFallback.Active) return;
+                if (__instance == null) return;
+
+                float v;
+                if (Take(VPlusFallback.CameraMaxZoom, MinZoom, MaxZoom, "CameraMaxZoom", out v))
+                    __instance.m_maxDistance = v;
+                if (Take(VPlusFallback.CameraMaxZoomBoat, MinZoom, MaxZoom, "CameraMaxZoomBoat", out v))
+                    __instance.m_maxDistanceBoat = v;
+                if (Take(VPlusFallback.CameraFov, MinFov, MaxFov, "CameraFov", out v))
+                    __instance.m_fov = v;
+
+                VPlusFallback.InfoOnce("camera",
+                    "camera max zoom " + VPlusFallback.F(__instance.m_maxDistance) + "m on foot, " +
+                    VPlusFallback.F(__instance.m_maxDistanceBoat) + "m on a boat, field of view " +
+                    VPlusFallback.F(__instance.m_fov) + ".");
+            }
+            catch (Exception ex) { VPlusFallback.Warn("camera: " + ex.Message); }
+        }
+
+        /// <summary>0 means "leave vanilla alone" on every one of the three keys. Anything outside
+        /// the accepted window is refused loudly rather than clamped silently, because a clamped
+        /// 1000 looks identical in game to a working 100 and hides the typo.</summary>
+        private static bool Take(ConfigEntry<float> entry, float min, float max, string key, out float value)
+        {
+            value = 0f;
+            if (entry == null) return false;
+            float v = entry.Value;
+            if (v == 0f || float.IsNaN(v) || float.IsInfinity(v)) return false;
+            if (v < min || v > max)
+            {
+                VPlusFallback.InfoOnce("camera:" + key,
+                    key + " = " + VPlusFallback.F(v) + " is outside the accepted " +
+                    VPlusFallback.F(min) + " to " + VPlusFallback.F(max) + " range; that one value " +
+                    "stays vanilla.");
+                return false;
+            }
+            value = v;
+            return true;
         }
     }
 }
