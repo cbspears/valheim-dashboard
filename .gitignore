@@ -74,3 +74,6 @@ plugins/eilif-boards/bin/
 pilot-staging/
 scripts/.map-snapshot-state.json
 .claude/
+
+# session working files (audit tooling, decompiles) — never committed
+scratchpad/
