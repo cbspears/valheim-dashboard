@@ -108,7 +108,9 @@ namespace WebMap
         {
             string message = $"player _{peer.m_playerName}_ left";
             discordWebHook.SendMessage($"🎮 **{serverInfo["serverName"]}** {message}");
-            MessageHud.instance.MessageAll(MessageHud.MessageType.Center, message);
+            // Eilif 2026-09-09: no centre-screen "player X left" banner in game. The
+            // Discord webhook line and the web map message list keep it; the in-game
+            // raid-style banner was the one thing players asked to lose on launch night.
             mapDataServer.AddMessage(peer.m_uid, (int)Talker.Type.Normal, "Server", message);
         }
 

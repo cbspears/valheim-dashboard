@@ -406,7 +406,12 @@ export class Poller {
     if (text) {
       this.lastNewLineAt = Date.now();
       const combined = this.partial + text;
-      const lines = combined.split('\n');
+      // The GTX box is Windows: LogOutput.log is CRLF. Splitting on \n alone left a
+      // trailing \r on every line; [EILIF_POS] survived it, but [EILIF_OATH] and
+      // [EILIF_CHAT] carry free text whose control-character guard refused the \r,
+      // so on launch night (2026-09-09) no oath and no shout reached the webhook.
+      // The rehearsal stack was Linux (LF) and never saw it.
+      const lines = combined.split('\n').map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
       this.partial = lines.pop() ?? ''; // last (possibly partial) line held over
 
       // Collect the whole batch first so the twin dedupe can prefer the
