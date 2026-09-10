@@ -18,6 +18,12 @@ const config = {
   webhookSecret: required('WEBHOOK_SECRET'),
   intervalMs: parseInt(process.env.POLL_INTERVAL_MS || '20000', 10),
   syncEveryMs: parseInt(process.env.SYNC_EVERY_MS || '120000', 10),
+  // Presence truth: the companion plugin emits one [EILIF_POS] line per peer
+  // that is really in-world every 60 s, so a name with no position for this
+  // long is gone (five missed emits). See parser.js sweepStale — that is what
+  // ends the phantom-roster class of bug the vanilla socket lines produce
+  // under 1.0's join bursts.
+  posStaleMs: parseInt(process.env.POS_STALE_MS || '300000', 10),
   // Emit log-derived `death` events? Default true. Flip to false once
   // GsValheimStatsClient feeds real causes via /api/gs-ingest (avoids double-count).
   emitDeaths: (process.env.EMIT_DEATHS || 'true').toLowerCase() !== 'false',

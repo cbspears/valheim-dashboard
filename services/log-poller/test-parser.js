@@ -253,7 +253,14 @@ if (!oathOk) ok = false;
   console.log('\nMarker anchoring:');
   for (const [label, line, expectType] of anchorCases) {
     const evs = anchorParser.processLine(line);
-    const pass = expectType === null ? evs.length === 0 : evs.length === 1 && evs[0].type === expectType;
+    // A plugin [EILIF_POS] line for a name that is not on the roster ALSO
+    // emits a presence `join` ahead of the pos event (2026-09-10) — the
+    // marker's own event is always the last one.
+    const pass =
+      expectType === null
+        ? evs.length === 0
+        : evs.at(-1)?.type === expectType &&
+          evs.slice(0, -1).every((e) => e.type === 'join' && e.metadata?.source === 'pos');
     console.log(`  ${pass ? '✓' : '✗'} ${label}`);
     if (!pass) anchorOk = false;
   }
@@ -445,6 +452,245 @@ if (!oathOk) ok = false;
   }
   console.log(idOk ? 'STEAMID PAIRING OK' : 'STEAMID PAIRING FAILED');
   if (!idOk) ok = false;
+}
+
+// --- Presence: [EILIF_POS] is the truth (2026-09-10) ----------------------
+// The vanilla lines pair "Got connection SteamID N" with the NEXT "Got
+// character ZDOID from <name>" in FIFO order, and under 1.0's 10-25 player
+// join bursts that pairing is frequently wrong. Two failures followed, both
+// live on launch night: a player marked offline when SOMEBODY ELSE's socket
+// closed (Fjällhnot, still in-world), and — after such a wrong leave — a
+// respawn line re-adding the name with no pairing at all, so no "Closing
+// socket" could ever remove it again (Rosir, Hel, Psifour, phantom forever).
+// The companion plugin emits one position line per peer that is genuinely
+// in-world every 60 s; these cases pin down that presence now follows THAT.
+{
+  const P = (p) => `[Info   : Unity Log] 09/10/2026 12:00:00: ${p}`;
+  const POS = (name, biome = 'Meadows') =>
+    `[Info   :Eilif Companion] [EILIF_POS] ${name} | -184.9 | -2.1 | ${biome}`;
+  const STEAM_A = '76561198000000011';
+  const STEAM_B = '76561198000000022';
+  const STALE = 5 * 60 * 1000;
+  const MIN = 60 * 1000;
+  const presenceChecks = [];
+
+  // (a) A position line for a name we do not have on the roster is a JOIN.
+  //     This is the phantom's way back: no pairing exists, no pending
+  //     handshake is stolen, the webhook simply opens a session.
+  {
+    const p = new LogParser();
+    const evs = p.processLine(POS('Rosir', 'BlackForest'));
+    presenceChecks.push(
+      ['pos for an unknown name emits join then pos', evs.map((e) => e.type).join(',') === 'join,pos'],
+      ['the join is tagged as coming from the position emitter', evs[0].metadata?.source === 'pos'],
+      ['a pos-derived join invents no SteamID', evs[0].steamId === undefined],
+      ['and the name is on the roster afterwards', p.roster().includes('Rosir')],
+      ['the pos event itself is unchanged', evs[1].metadata?.biome === 'BlackForest'],
+      ['the pending queue is untouched', p.snapshot().pending.length === 0]
+    );
+  }
+
+  // (b) A position line for someone already online is just a position.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Astrid : 12345:1'));
+    const evs = p.processLine(POS('Astrid'));
+    presenceChecks.push(
+      ['pos for an online name emits only pos', evs.length === 1 && evs[0].type === 'pos'],
+      ['it still carries the pairing', evs[0].steamId === STEAM_A]
+    );
+  }
+
+  // (c) The sweep: silent for longer than staleMs while SOMEBODY ELSE is
+  //     still emitting -> leave, carrying the SteamID that name held, and the
+  //     pairing torn down exactly as a real "Closing socket" would.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Astrid : 12345:1'));
+    p.processLine(P(`Got connection SteamID ${STEAM_B}`));
+    p.processLine(P('Got character ZDOID from Bjorn : 6789:1'));
+    p.processLine(POS('Bjorn')); // Bjorn is demonstrably in-world; the emitter is alive
+    const now = Date.now();
+    p.posSeen.set('Astrid', now - 10 * MIN); // Astrid has not been seen for 10 min
+    const swept = p.sweepStale(now, STALE);
+    presenceChecks.push(
+      ['the sweep leaves exactly the silent name', swept.length === 1 && swept[0].characterName === 'Astrid'],
+      ['it is a leave tagged pos-stale', swept[0].type === 'leave' && swept[0].metadata.source === 'pos-stale'],
+      ['it carries the SteamID that name held', swept[0].steamId === STEAM_A],
+      ['the pairing is gone both ways', p.steamIdFor('Astrid') === null && !p.snapshot().connections.some(([s]) => s === STEAM_A)],
+      ['the swept name is off the roster', !p.roster().includes('Astrid')],
+      ['the name still emitting is untouched', p.roster().includes('Bjorn') && p.steamIdFor('Bjorn') === STEAM_B]
+    );
+  }
+
+  // (d) Death then respawn inside staleMs is NOT a leave. The plugin skips a
+  //     peer with no character, so a dead player emits nothing — the whole
+  //     reason staleMs is five missed emits and not one.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Rosir : 12345:1'));
+    p.processLine(POS('Rosir'));
+    const deathEvs = p.processLine(P('Got character ZDOID from Rosir : 0:0'));
+    const respawnEvs = p.processLine(P('Got character ZDOID from Rosir : -110561379:22006'));
+    const swept = p.sweepStale(Date.now() + 30 * 1000, STALE);
+    presenceChecks.push(
+      ['the death is still a death', deathEvs.length === 1 && deathEvs[0].type === 'death'],
+      ['a respawn of an online name is not a second join', respawnEvs.length === 0],
+      ['nothing is swept across a death/respawn gap', swept.length === 0],
+      ['and the viking is still online', p.roster().includes('Rosir')]
+    );
+  }
+
+  // (e) THE GUARD. If the plugin is dead (or was never loaded) every name goes
+  //     silent at once — and sweeping then would mark the whole server empty on
+  //     the strength of our own missing input. Silence from EVERYONE means "no
+  //     evidence", never "no players".
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Astrid : 12345:1'));
+    const now = Date.now();
+    p.posSeen.set('Astrid', now - 10 * MIN);
+    const neverAnyPos = p.sweepStale(now, STALE);
+
+    // Same roster, but the emitter WAS alive and then went quiet a while ago:
+    // still no sweep, because the last position is older than staleMs / 2.
+    p.lastAnyPosAt = now - 4 * MIN;
+    const emitterWentQuiet = p.sweepStale(now, STALE);
+
+    presenceChecks.push(
+      ['no [EILIF_POS] has ever been seen -> sweep removes nobody', neverAnyPos.length === 0],
+      ['the emitter falling silent -> sweep removes nobody', emitterWentQuiet.length === 0],
+      ['the roster survives a dead position emitter', p.roster().includes('Astrid')]
+    );
+  }
+
+  // (f) Restart: the stamps round-trip through snapshot(), and a restored
+  //     roster gets a full staleMs of grace instead of being swept on sight.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Astrid : 12345:1'));
+    p.processLine(POS('Astrid'));
+    const now = Date.now();
+    p.posSeen.set('Astrid', now - 10 * MIN); // would be swept, were it not a restart
+    const snap = p.snapshot();
+    const resumed = new LogParser(snap);
+    const swept = resumed.sweepStale(now, STALE);
+    presenceChecks.push(
+      ['snapshot() carries posSeen as [name, ms] pairs',
+        Array.isArray(snap.posSeen) &&
+          snap.posSeen.length === 1 &&
+          snap.posSeen[0][0] === 'Astrid' &&
+          Number.isFinite(snap.posSeen[0][1])],
+      ['snapshot() carries lastAnyPosAt', Number.isFinite(snap.lastAnyPosAt)],
+      ['a resumed parser has a stamp for every restored name', resumed.posSeen.has('Astrid')],
+      ['restored names are not swept immediately', swept.length === 0 && resumed.roster().includes('Astrid')]
+    );
+  }
+
+  // (g) THE LAUNCH-NIGHT BUG, END TO END. Two handshakes in flight, the FIFO
+  //     crosses them, the wrong viking is marked offline when the other one's
+  //     socket closes — and then the position emitter puts them back and the
+  //     sweep takes out the one who really left.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_B}`)); // B's handshake lands first…
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Fjallhnot : 111:1')); // …but A spawns first
+    p.processLine(P('Got character ZDOID from Psifour : 222:1'));
+    const crossed = p.steamIdFor('Fjallhnot') === null; // paired with B's id, and known-doubtful
+
+    // B leaves. The FIFO pairing says that socket belongs to Fjallhnot, so the
+    // vanilla path marks the WRONG viking offline — reproduce it exactly.
+    const wrongLeave = p.processLine(P(`Closing socket ${STEAM_B}`));
+    const wronglyOffline = !p.roster().includes('Fjallhnot');
+
+    // The next position line is the repair: Fjallhnot is plainly in-world.
+    const backEvs = p.processLine(POS('Fjallhnot', 'Swamp'));
+    const now = Date.now();
+    p.posSeen.set('Psifour', now - 10 * MIN); // Psifour really is gone
+    const swept = p.sweepStale(now, STALE);
+
+    presenceChecks.push(
+      ['the burst pairing is marked doubtful, not trusted', crossed],
+      ['reproduced: the wrong viking is marked offline', wronglyOffline && wrongLeave[0]?.characterName === 'Fjallhnot'],
+      ['the next position line brings them back with a join', backEvs[0]?.type === 'join' && backEvs[0].metadata.source === 'pos'],
+      ['a name re-added by a position line CAN be swept later', p.posSeen.has('Fjallhnot')],
+      ['the sweep then removes the one who actually left', swept.length === 1 && swept[0].characterName === 'Psifour'],
+      ['final roster is exactly the viking who is really there', p.roster().join(',') === 'Fjallhnot']
+    );
+  }
+
+  // (h) The call site: one tick with no new bytes must still sweep, dispatch
+  //     the leave through the normal webhook path, and log it as presence.
+  {
+    const { Poller } = await import('./src/poller.js');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const posted = [];
+    const logged = [];
+    const logger = {
+      info: (m) => logged.push(m),
+      warn: (m) => logged.push(m),
+      error: (m) => logged.push(m),
+    };
+    const poller = new Poller(
+      {
+        webhookUrl: 'stub',
+        webhookSecret: 'stub',
+        posStaleMs: STALE,
+        syncEveryMs: 3_600_000,
+        statePath: join(tmpdir(), `eilif-poller-test-${process.pid}.json`),
+      },
+      logger
+    );
+    poller.postEvent = async (payload) => (posted.push(payload), {});
+    poller.parser.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    poller.parser.processLine(P('Got character ZDOID from Hel : 12345:1'));
+    poller.parser.processLine(POS('Rosir')); // somebody is emitting, so the sweep is armed
+    poller.parser.posSeen.set('Hel', Date.now() - 9 * MIN);
+    await poller.tickAfterFetch({ text: '', size: 0, mtimeMs: Date.now() });
+
+    const leave = posted.find((e) => e.type === 'leave');
+    presenceChecks.push(
+      ['a tick with no new lines still sweeps', !!leave && leave.characterName === 'Hel'],
+      ['the swept leave reaches the webhook with its SteamID', leave?.steamId === STEAM_A],
+      ['and is tagged pos-stale for the webhook', leave?.metadata?.source === 'pos-stale'],
+      ['the sweep is logged as presence, in minutes',
+        logged.some((m) => /^\[presence\] Hel silent for 9 min \(no \[EILIF_POS\]\) -> leave$/.test(m))],
+      ['the leave also logs distinctly as an event', logged.some((m) => m === '[event] leave Hel (pos-stale)')],
+      ['the phantom is gone from the roster', !poller.parser.roster().includes('Hel')]
+    );
+
+    // The heartbeat line can no longer print one number and the other's list.
+    const before = logged.length;
+    await poller.dispatch({ type: 'heartbeat', count: 6, metadata: { online: ['a', 'b', 'c'] } });
+    const hb = logged.slice(before);
+    presenceChecks.push(
+      ['the heartbeat names both numbers', hb.some((m) => m === '[heartbeat] server reports 6 connected; roster 3: [a, b, c]')],
+      ['and warns when they disagree by more than one', hb.some((m) => m === '[presence] roster/server mismatch (3 vs 6)')]
+    );
+
+    const before2 = logged.length;
+    await poller.dispatch({ type: 'heartbeat', count: 4, metadata: { online: ['a', 'b', 'c'] } });
+    presenceChecks.push([
+      'a difference of one is normal (dead / at character select) and stays quiet',
+      !logged.slice(before2).some((m) => /roster\/server mismatch/.test(m)),
+    ]);
+  }
+
+  let presenceOk = true;
+  console.log('\nPresence via [EILIF_POS]:');
+  for (const [label, pass] of presenceChecks) {
+    console.log(`  ${pass ? '✓' : '✗'} ${label}`);
+    if (!pass) presenceOk = false;
+  }
+  console.log(presenceOk ? 'PRESENCE OK' : 'PRESENCE FAILED');
+  if (!presenceOk) ok = false;
 }
 
 // --- Dispatch: what actually reaches the webhook (security-3) -------------

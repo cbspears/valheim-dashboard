@@ -4,7 +4,7 @@
 
 import SftpClient from 'ssh2-sftp-client';
 import { readFile, writeFile, stat } from 'node:fs/promises';
-import { LogParser, isArrivalShout } from './parser.js';
+import { LogParser, isArrivalShout, DEFAULT_POS_STALE_MS } from './parser.js';
 import { createHeartbeatSender } from './heartbeat.js';
 import {
 
@@ -186,6 +186,12 @@ export class Poller {
         // the crossed ones again (2026-09-09 17:05).
         ambiguous: s.ambiguous || [],
         contestedLeft: s.contestedLeft || 0,
+        // Presence liveness (parser.sweepStale). Restored online names are
+        // re-stamped with `now` by the parser, so a restart never sweeps the
+        // roster it just inherited; lastAnyPosAt is restored as-is, which keeps
+        // the sweep disarmed until the emitter is heard from again.
+        posSeen: s.posSeen || [],
+        lastAnyPosAt: s.lastAnyPosAt,
       });
       this.liveness = normalizeLiveness(s.liveness);
       this.log.info?.(
@@ -457,6 +463,23 @@ export class Poller {
       }
     }
 
+    // --- Presence sweep: the position emitter is the truth ----------------
+    // Runs every tick, batch or no batch (a phantom produces no lines at all,
+    // which is exactly why it is a phantom). Skipped while the server is known
+    // down: the roster is already being force-emptied by the liveness path, and
+    // a dead server emits no positions, so sweeping would only double up.
+    // Deliberately NOT wrapped in a catch — a failed dispatch must fail the
+    // tick, so the byte cursor AND the parser snapshot rewind together and the
+    // sweep is simply retaken next tick (at-least-once, see tick()).
+    if (!this.liveness.serverDown) {
+      const staleMs = Number.isFinite(this.cfg.posStaleMs) ? this.cfg.posStaleMs : DEFAULT_POS_STALE_MS;
+      for (const ev of this.parser.sweepStale(Date.now(), staleMs)) {
+        const mins = Math.round((ev.metadata?.silentMs ?? staleMs) / 60000);
+        this.log.info?.(`[presence] ${ev.characterName} silent for ${mins} min (no [EILIF_POS]) -> leave`);
+        await this.dispatch(ev);
+      }
+    }
+
     // Periodic roster reconciliation, even with no new lines, to self-heal.
     // While the server is known down this keeps re-asserting offline/0 players
     // rather than re-publishing a roster that can no longer be connected.
@@ -724,7 +747,20 @@ export class Poller {
     }
     if (ev.type === 'heartbeat') {
       // Heartbeat → authoritative roster sync (no feed event).
-      this.log.info?.(`[heartbeat] ${ev.count} online: [${ev.metadata.online.join(', ')}]`);
+      //
+      // TWO NUMBERS, AND THEY ARE NOT THE SAME NUMBER (2026-09-10). This line
+      // used to read "N online: [names]" with the SERVER's count and OUR
+      // roster, so launch night logged "6 online: [9 names]" and read as a
+      // formatting quirk rather than the presence bug it was. Say which is
+      // which, and warn when they disagree by more than one (one is normal: a
+      // player at character select, or dead, is connected but not in-world).
+      const roster = ev.metadata.online;
+      this.log.info?.(
+        `[heartbeat] server reports ${ev.count} connected; roster ${roster.length}: [${roster.join(', ')}]`
+      );
+      if (Math.abs(roster.length - ev.count) > 1) {
+        this.log.warn?.(`[presence] roster/server mismatch (${roster.length} vs ${ev.count})`);
+      }
       await this.postEvent({ type: 'sync', metadata: ev.metadata });
       this.lastSyncAt = Date.now();
       return;
@@ -783,7 +819,12 @@ export class Poller {
       this.log.info?.(`[event] death ${characterName} suppressed (EMIT_DEATHS=false; gs-ingest owns deaths)`);
       return;
     }
-    this.log.info?.(`[event] ${type}${characterName ? ` ${characterName}` : ''}${metadata?.event ? ` (${metadata.event})` : ''}`);
+    // `source` is set only on the presence events the position emitter owns
+    // (join via [EILIF_POS], leave via the stale sweep), so those read
+    // distinctly in the journal — "[event] join Rosir (pos)" — while a real
+    // join line logs exactly as it always did.
+    const src = (type === 'join' || type === 'leave') && metadata?.source ? ` (${metadata.source})` : '';
+    this.log.info?.(`[event] ${type}${characterName ? ` ${characterName}` : ''}${src}${metadata?.event ? ` (${metadata.event})` : ''}`);
     const res = await this.postEvent({ type, characterName, metadata, steamId: ev.steamId });
     // The webhook binds players.steam_id on first sight and flags a join that
     // arrives under a different Steam account than the one already bound. It

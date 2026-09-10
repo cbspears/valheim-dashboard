@@ -147,12 +147,39 @@ export function isPlausibleCharacterName(name) {
   return n.length > 0 && n.length <= 64 && !IMPLAUSIBLE_NAME_RE.test(n);
 }
 
+// How long a name may sit in `online` with no [EILIF_POS] line of its own
+// before the sweep calls it gone: five minutes = five missed 60 s emits.
+//
+// WHY A SWEEP EXISTS AT ALL (2026-09-10). Presence used to be derived purely
+// from the vanilla lines, and under 1.0's 10-25 player join bursts the FIFO
+// pairing of "Got connection SteamID N" to the next "Got character ZDOID from
+// <name>" is frequently WRONG. Two failures followed from that, both seen live
+// on 2026-09-09/10:
+//   (1) a name paired with someone else's SteamID is marked offline when THAT
+//       player's socket closes (Fjällhnot, still in-world, lost 4 h of hours);
+//   (2) the wrongly-removed player's next RESPAWN line re-adds the name with no
+//       pairing at all (the pending queue is empty by then), so no "Closing
+//       socket" can ever remove it again — a permanent phantom (Rosir, Hel,
+//       Psifour), whose phantom hours flipped a Discord title.
+// The "Connections N ZDOS:" heartbeat only self-heals at N = 0, which on a busy
+// server is never. The companion plugin's position emitter, on the other hand,
+// writes one line per peer that is genuinely in-world every 60 s — so that, not
+// the socket bookkeeping, is the presence truth.
+//
+// The trade: a player sitting on the death screen emits no position (the plugin
+// skips a peer with no character), so five minutes dead-and-not-respawning
+// reads as a leave. A death-to-respawn gap is a few seconds; that edge case is
+// the deliberate price of never phantoming again.
+const DEFAULT_POS_STALE_MS = 5 * 60 * 1000;
+
 export class LogParser {
   /**
    * @param {object} [initial] persisted state to resume from
    * @param {string[]} [initial.online] character names known online
    * @param {[string, string][]} [initial.connections] persisted steamId->characterName pairs
    * @param {string[]} [initial.pending] persisted unresolved-connection steamIds, oldest first
+   * @param {[string, number][]} [initial.posSeen] persisted name->last [EILIF_POS] ms
+   * @param {number} [initial.lastAnyPosAt] persisted ms of the last POS line from anyone
    */
   constructor(initial = {}) {
     // SteamIDs that have connected but not yet resolved to a character name,
@@ -179,6 +206,45 @@ export class LogParser {
     this.contestedLeft = Number.isInteger(initial.contestedLeft) ? initial.contestedLeft : 0;
     // Last value seen on a "Connections N" heartbeat (null until first seen).
     this.lastConnectionCount = null;
+    // name -> wall-clock ms of the last liveness evidence for that name: an
+    // [EILIF_POS] line, or the moment the name entered `online` if it has not
+    // been seen in a position emit yet. Only names in `online` are kept.
+    // Wall clock is fine here: the poller drags the log by ~20 s and never
+    // replays it (the byte offset is persisted), so parse time IS log time
+    // within one tick.
+    this.posSeen = new Map(Array.isArray(initial.posSeen) ? initial.posSeen : []);
+    // When ANY player's position last arrived. The sweep below refuses to run
+    // when this is stale: silence from the emitter means the PLUGIN died, not
+    // that the server emptied, and sweeping on that would evict everyone.
+    this.lastAnyPosAt = Number.isFinite(initial.lastAnyPosAt) ? initial.lastAnyPosAt : null;
+    // A restart (or the in-memory snapshot/restore tick() does on a failed
+    // batch) must not evict the roster it just inherited: every restored name
+    // gets a full staleMs of grace, and stamps for anyone no longer online are
+    // dropped so the map can't grow across restarts.
+    const restoredAt = Date.now();
+    for (const name of this.posSeen.keys()) {
+      if (!this.online.has(name)) this.posSeen.delete(name);
+    }
+    for (const name of this.online) this.posSeen.set(name, restoredAt);
+  }
+
+  /**
+   * Put a name on the roster and stamp its liveness clock. Returns true if it
+   * was not already there (i.e. the caller should emit a `join`). Every path
+   * that adds to `online` goes through here so no name can ever be online
+   * without a stamp — an unstamped name would be swept on sight.
+   */
+  markOnline(name, nowMs = Date.now()) {
+    if (this.online.has(name)) return false;
+    this.online.add(name);
+    this.posSeen.set(name, nowMs);
+    return true;
+  }
+
+  /** Take a name off the roster and forget its liveness stamp. */
+  markOffline(name) {
+    this.posSeen.delete(name);
+    return this.online.delete(name);
   }
 
   /** Names currently online, sorted for stable output. */
@@ -344,11 +410,29 @@ export class LogParser {
     // --- Live position + biome (via the Eilif companion plugin, ~60s) ---
     const pos = line.match(RE.pos);
     if (pos) {
-      const [, name, worldX, worldZ, biome] = pos;
-      if (name) {
+      const [, rawName, worldX, worldZ, biome] = pos;
+      if (rawName) {
+        const name = rawName.trim();
+        // THE AUTHORITATIVE LIVENESS SIGNAL. The plugin only emits for a peer
+        // whose character is actually in the world, so this line is proof of
+        // presence in a way no vanilla line is.
+        const now = Date.now();
+        this.lastAnyPosAt = now;
+        this.posSeen.set(name, now);
+        // A name the socket bookkeeping lost (wrongly paired SteamID, missed
+        // ZDOID, poller started mid-session) is put back on the roster HERE,
+        // and the webhook opens a session for it. Deliberately no SteamID
+        // pairing and no touch of the pending queue: a position line says
+        // WHERE someone is, never WHO their Steam account is, and guessing one
+        // is exactly the bug this fixes. The webhook treats a join with no
+        // pairing as allowed, and dedupes if a session is already open.
+        if (!this.online.has(name)) {
+          this.online.add(name);
+          events.push({ type: 'join', characterName: name, metadata: { source: 'pos' } });
+        }
         events.push({
           type: 'pos',
-          characterName: name.trim(),
+          characterName: name,
           metadata: { x: parseFloat(worldX), z: parseFloat(worldZ), biome: biome.trim() },
         });
       }
@@ -409,7 +493,7 @@ export class LogParser {
               // the missing leave for the old character here — otherwise it
               // stays phantom-online forever (real incident: Testman ->
               // Testmantwo, 2026-07-04).
-              this.online.delete(prevName);
+              this.markOffline(prevName);
               this.nameToSteam.delete(prevName);
               // Stamped here, not by processLine: the pairing this leave
               // belongs to has just been torn down above.
@@ -419,8 +503,7 @@ export class LogParser {
             this.nameToSteam.set(name, steamId);
           }
         }
-        if (!alreadyOnline) {
-          this.online.add(name);
+        if (this.markOnline(name)) {
           events.push({ type: 'join', characterName: name, metadata: {} });
         }
       }
@@ -447,7 +530,7 @@ export class LogParser {
         this.steamToName.delete(steamId);
         this.nameToSteam.delete(name);
         this.ambiguous.delete(name);
-        if (this.online.delete(name)) {
+        if (this.markOffline(name)) {
           // Same as the relog case: stamp the closing socket's SteamID before
           // processLine can look for a pairing that no longer exists.
           events.push({ type: 'leave', characterName: name, steamId, metadata: {} });
@@ -466,6 +549,7 @@ export class LogParser {
       // our current roster.
       if (count === 0 && this.online.size > 0) {
         this.online.clear();
+        this.posSeen.clear();
         this.steamToName.clear();
         this.nameToSteam.clear();
         this.pendingConnections = [];
@@ -486,12 +570,70 @@ export class LogParser {
     return events;
   }
 
+  /**
+   * Evict every name that has gone silent — no [EILIF_POS] of its own for
+   * `staleMs` — and return the `leave` events for them. Called once per tick by
+   * the poller; see DEFAULT_POS_STALE_MS above for why this exists.
+   *
+   * THE GUARD: this only runs while the position emitter is demonstrably alive
+   * (SOMEBODY's position within the last staleMs/2). If the plugin crashes, is
+   * unloaded, or the server is rebuilt without it, every name goes silent at
+   * once — and sweeping then would mark the whole server offline on the
+   * strength of our own missing input. Silence from everyone means "no
+   * evidence", not "no players".
+   *
+   * The SteamID pairing of a swept name is torn down with it (both maps and the
+   * ambiguous set), exactly as a real "Closing socket" would, so a later
+   * reconnect under that SteamID pairs cleanly instead of colliding.
+   */
+  sweepStale(nowMs = Date.now(), staleMs = DEFAULT_POS_STALE_MS) {
+    const events = [];
+    if (!Number.isFinite(staleMs) || staleMs <= 0) return events;
+    if (!Number.isFinite(this.lastAnyPosAt) || nowMs - this.lastAnyPosAt > staleMs / 2) {
+      return events; // emitter silent (or never heard from) — no evidence, no sweep
+    }
+    for (const name of [...this.online]) {
+      const seen = this.posSeen.get(name);
+      if (!Number.isFinite(seen)) {
+        // Should not happen (markOnline stamps every entry), but a name with no
+        // stamp must start its clock now rather than be swept on sight.
+        this.posSeen.set(name, nowMs);
+        continue;
+      }
+      const silentMs = nowMs - seen;
+      if (silentMs <= staleMs) continue;
+
+      const steamId = this.nameToSteam.get(name) ?? null;
+      this.markOffline(name);
+      this.ambiguous.delete(name);
+      if (steamId) {
+        this.nameToSteam.delete(name);
+        this.steamToName.delete(steamId);
+      }
+      const ev = {
+        type: 'leave',
+        characterName: name,
+        metadata: { source: 'pos-stale', silentMs },
+      };
+      // Stamped here, like the other two leave paths, because the pairing this
+      // leave belongs to has just been torn down.
+      if (steamId) ev.steamId = steamId;
+      events.push(ev);
+    }
+    return events;
+  }
+
   /** Serializable state to persist across restarts. */
   snapshot() {
     return {
       online: this.roster(),
       ambiguous: [...this.ambiguous],
       contestedLeft: this.contestedLeft,
+      // Presence liveness (see sweepStale). Restored names are re-stamped with
+      // `now` by the constructor, so this round-trips the shape, never a grace
+      // period that has already expired.
+      posSeen: [...this.posSeen.entries()],
+      lastAnyPosAt: this.lastAnyPosAt,
       // steamId->characterName correlation + unresolved-connection queue,
       // so a restart mid-session doesn't forget who's connected to what
       // (see the constructor/relog comments for why this matters).
@@ -501,4 +643,12 @@ export class LogParser {
   }
 }
 
-export { RAID_MESSAGES, RE, ECHO_LINE, MAX_OATH_LEN, MAX_PIN_NAME_LEN, MAX_CHAT_LEN };
+export {
+  RAID_MESSAGES,
+  RE,
+  ECHO_LINE,
+  MAX_OATH_LEN,
+  MAX_PIN_NAME_LEN,
+  MAX_CHAT_LEN,
+  DEFAULT_POS_STALE_MS,
+};
