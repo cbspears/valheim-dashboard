@@ -34,6 +34,8 @@ const firstName = (s) => String(s || '').trim().split(/\s+/)[0] || 'viking';
 // undici has no default timeout, so a stalled dashboard socket would hold this
 // loop open indefinitely and block the next tick.
 const FETCH_TIMEOUT_MS = 20000;
+// How long an EARNED title is held against demotion to a placeholder (see the tick).
+const TITLE_HOLD_MS = Number(process.env.TITLE_HOLD_MS || 60 * 60 * 1000);
 
 // Postgres "column does not exist" (registry not migrated yet).
 function isMissingColumn(error) {
@@ -70,7 +72,7 @@ export function createTitlesAnnouncer({
     for (const p of players) {
       const name = String(p?.name || '').trim();
       const title = String(p?.title || '').trim();
-      if (name && title) map.set(name, title);
+      if (name && title) map.set(name, { title, source: String(p?.source || '') });
     }
     return map;
   }
@@ -131,7 +133,7 @@ export function createTitlesAnnouncer({
 
     const { data, error } = await writeDb
       .from('players')
-      .select('id, character_name, current_title');
+      .select('id, character_name, current_title, title_updated_at');
     if (error) {
       if (isMissingColumn(error)) {
         if (!warnedMissing) {
@@ -159,11 +161,27 @@ export function createTitlesAnnouncer({
       if (!name) continue;
       if (handled.has(name)) continue;
       handled.add(name);
-      const title = computed.get(name);
-      if (!title) continue; // no computed title for this viking this pass
+      const entry = computed.get(name);
+      if (!entry) continue; // no computed title for this viking this pass
+      const title = entry.title;
       const current = row.current_title;
 
       if (title === current) {
+        unchanged++;
+        continue;
+      }
+
+      // EARNED-TITLE HOLD (launch night 2026-09-09): two vikings racing inside the
+      // engine's 15% lead band flipped Charleif between "Bane of Beasts" and a
+      // placeholder every ten-minute pass, each flip proclaimed in #valheim and
+      // spoken in game. A title someone EARNED is not taken back to a placeholder
+      // within TITLE_HOLD_MS of being awarded; a new earned title still goes
+      // through at once, so nobody is blocked from winning one.
+      if (
+        current && entry.source === 'flavor' && row.title_updated_at &&
+        Date.now() - Date.parse(row.title_updated_at) < TITLE_HOLD_MS
+      ) {
+        log.info?.(`[titles] ${name}: holding "${current}" (earned less than ${Math.round(TITLE_HOLD_MS / 60000)} min ago; engine offers placeholder "${title}")`);
         unchanged++;
         continue;
       }
