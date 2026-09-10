@@ -31,7 +31,7 @@ The count is not a check: it moves with every drop, so read the table, not the n
 | ValheimPlus (Grantapher fork) | `Grantapher/ValheimPlus_Grantapher_Temporary` | **10.0.2** | yes, and it is **`org.bepinex.plugins.valheim_plus.cfg`** now, not `valheim_plus.cfg`. See rule 6 |
 | GsValheimStatsClient | `Proudlock_Technology/GsValheimStatsClient` | 0.2.12 | yes (world + ingest URL) |
 | EilifPaths | `Eilif/EilifPaths` | **1.7.1** | yes |
-| EilifCompanionClient | `Eilif/EilifCompanionClient` | **0.4.1** | yes (ingest URL) |
+| EilifCompanionClient | `Eilif/EilifCompanionClient` | **0.4.2** | yes (ingest URL) |
 | Unshamed | `Azumatt/Unshamed` | **1.0.0** | yes (`Azumatt.Unshamed.cfg`), and the pinned values are the point. See rule 7 |
 
 **Gone, and not waiting on anything:** PlantEverything (`Advize/PlantEverything` 1.20.0)
@@ -107,19 +107,19 @@ node scripts/launch-preflight.mjs --world Eilif --phase post-start   # "Modpack 
 |---|---|---|
 | `Grantapher/ValheimPlus_Grantapher_Temporary` | **10.0.2**, published 2026-09-10 by Grantapher. Assembly version 0.10.0.2 | not ours to stage |
 | `Eilif/EilifPaths` | **1.7.1** | **1.7.1**, the same bytes |
-| `Eilif/EilifCompanionClient` | **0.3.4** (what pack v13 pins) | **0.4.1** built and committed (`249e6eb`; 0.4.0 was uploaded then superseded the same morning by the 1.0 map fix), **not uploaded yet** |
+| `Eilif/EilifCompanionClient` | **0.3.4** (what pack v13 pins) | **0.4.2** built and committed (`249e6eb`; 0.4.0 was uploaded then superseded the same morning by the 1.0 map fix), **not uploaded yet** |
 
-So the v14 mint waits on exactly one thing: **EilifCompanionClient 0.4.1 has to be uploaded and
-indexed.** Until it is, `--companion-client 0.4.1` is refused, which is the tool working. The
+So the v14 mint waits on exactly one thing: **EilifCompanionClient 0.4.2 has to be uploaded and
+indexed.** Until it is, `--companion-client 0.4.2` is refused, which is the tool working. The
 dry run below has already been rehearsed against Thunderstore with 0.3.4 in that slot.
 
 ```bash
-node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.1 \
+node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.2 \
   --vplus 10.0.2 --bepinex 5.4.2350 --no-plant --no-azu --fallback off --cap 24 --dry-run
 ```
 
 **Never hard-code a client version in a command you are about to copy.** A published
-Thunderstore version can never be replaced, so if the 0.4.1 build changes again it goes up as
+Thunderstore version can never be replaced, so if the 0.4.2 build changes again it goes up as
 0.4.1 and the pin moves with it.
 
 **3. Whatever the server cannot sync, only the pack can set.** This was AzuCraftyBoxes' rule
@@ -250,7 +250,7 @@ switches the whole section, and `--paths` must pin 1.7.0 or newer for these four
 
 ```bash
 # pack v14, the current shape
-node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.1 \
+node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.2 \
   --vplus 10.0.2 --bepinex 5.4.2350 --no-plant --no-azu --fallback off --cap 24 ...
 # pack v13, the shape to fall back to if V+ has to leave again
 node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --no-vplus --fallback on ...

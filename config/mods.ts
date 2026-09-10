@@ -165,7 +165,7 @@ export const ALL_MODS: Mod[] = [
     // VERSION = WHAT THE PACK SHIPS, not what the repo has built. This page tells a
     // player which mods they are running, and r2modman reinstalls the pinned pack
     // versions on every "Start modded", so the honest answer is the version the pack
-    // pins. Pack v14 pins **0.4.1**, cut 2026-09-10 (0.4.0 plus the 1.0 map-percentage fix): it reads your own Valheim 1.0
+    // pins. Pack v14 pins **0.4.2**, cut 2026-09-10 (0.4.0 plus the 1.0 map-percentage fix; 0.4.2 re-release adds the AI-assistance disclosure): it reads your own Valheim 1.0
     // profile counters (kills, deaths, builds, crafts, distance) and posts them with
     // the rest, which is what refills the kill, death, build and distance boards that
     // went quiet when 1.0 moved those counters. That is the one player-visible thing
@@ -176,7 +176,7 @@ export const ALL_MODS: Mod[] = [
     author: 'cbspears (custom-built)',
     description:
       'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play, with no setup and nothing to upload. It names exactly what killed you the moment you die, the creature or the hazard, so How We Die and the Saga show the real cause instead of a guess. It also carries a keep-list, so the tools and gear a viking cannot afford to lose stay on you through a death that would otherwise scatter them. New in this pack: it reads your own kills, deaths, builds, crafts and distance travelled straight off your character and sends them along, so those boards fill in again. Ships in the modpack.',
-    version: '0.4.1',
+    version: '0.4.2',
     category: 'Content',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Eilif/EilifCompanionClient/',
