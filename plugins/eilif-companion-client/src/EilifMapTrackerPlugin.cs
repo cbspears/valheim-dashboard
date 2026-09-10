@@ -40,7 +40,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.3.4"; // NOTE: the published 0.3.4 DLL was built with this reading "0.3.3", so its BepInEx load line says 0.3.3; the manifest and assembly version are 0.3.4. Bumped here after the upload so the next build is consistent.
+        public const string PluginVersion = "0.4.0"; // Keep this in lockstep with the csproj <Version>. (0.3.4 shipped with this const still reading "0.3.3", so its BepInEx load line said 0.3.3 while the manifest/assembly were 0.3.4 — do not repeat that drift.)
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
@@ -56,6 +56,7 @@ namespace EilifCompanionClient
         private ConfigEntry<string> _token;
         private ConfigEntry<int> _intervalSeconds;
         private ConfigEntry<string> _keepItemTypes;
+        private ConfigEntry<bool> _statsEnabled;
 
         // ---- State (main thread unless noted) ----
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
@@ -91,8 +92,16 @@ namespace EilifCompanionClient
                 "ItemDrop.ItemData.ItemType names). Only active on a world whose deathkeepequip global key " +
                 "is set (i.e. this server); on other servers deaths are pure vanilla. Empty = off.");
 
+            _statsEnabled = Config.Bind("Stats", "Enabled", true,
+                "Post the local player's raw profile counters (kills, deaths, builds, crafts, distance) " +
+                "to the dashboard ingest on the same cadence as the map-% post. This is what makes the " +
+                "kill/death/build/distance/craft boards and the Great Deeds work on Valheim 1.0, where " +
+                "GsValheimStatsClient no longer fills the stats map. Posts source:'client' to the same " +
+                "Url/Token above.");
+
             IngestUrl = _url.Value;
             IngestToken = _token.Value;
+            EilifStatsReporter.Enabled = _statsEnabled.Value;
             TombstoneKeeper.Configure(_keepItemTypes.Value);
 
             try
@@ -163,6 +172,7 @@ namespace EilifCompanionClient
 
             Log.LogInfo($"[EilifMap] {PluginName} v{PluginVersion} loaded. Posting explored-map % to {_url.Value} every {_intervalSeconds.Value}s while on a server.");
             Log.LogInfo($"[EilifDeath] death-cause reporter armed (posts source:'eilif-death' to {_url.Value} when the local player dies on a server).");
+            Log.LogInfo($"[EilifStats] raw profile-stats reporter {(_statsEnabled.Value ? "armed" : "DISABLED")} (posts source:'client' kills/deaths/builds/crafts/distance to {_url.Value} every {_intervalSeconds.Value}s and on logout while on a server).");
         }
 
         // ---- The patch roster (v0.3.3, audit plugins-1.0) --------------------------------------
@@ -250,6 +260,9 @@ namespace EilifCompanionClient
                 {
                     _postTimer = 0f;
                     ComputeAndPost("interval");
+                    // Raw profile stats ride the same ~5-min cadence (v0.4.0). Independent
+                    // try/catch inside Post() — a stats failure never stops the map post.
+                    EilifStatsReporter.Post("interval");
                 }
             }
             else if (_wasConnected)
@@ -502,6 +515,9 @@ namespace EilifCompanionClient
         {
             try { EilifMapTrackerPlugin.Instance?.ComputeAndPost("logout"); }
             catch (Exception ex) { EilifMapTrackerPlugin.Log?.LogWarning($"[EilifMap] logout hook failed: {ex.Message}"); }
+            // A final raw-stats snapshot on a clean quit (profile still alive here).
+            try { EilifStatsReporter.Post("logout"); }
+            catch (Exception ex) { EilifMapTrackerPlugin.Log?.LogWarning($"[EilifStats] logout hook failed: {ex.Message}"); }
         }
     }
 }
