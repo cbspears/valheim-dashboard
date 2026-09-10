@@ -395,7 +395,10 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   // from one source could later be differenced against the other (unlike against
   // unlike). The source is recorded in provenance and the baseline layer refuses
   // to credit itemsCrafted across a source change.
-  const craftsSource: SelfProvenance['craftsSource'] = !profileOnly && isNum(stats.vh_Crafts)
+  // Crafts DO come from the profile-only post (vh_Crafts): GsValheimStatsClient
+  // sends no crafts[] on Valheim 1.0 at all, so this is the only reading there is.
+  // (Kills stay world-scoped via weapons[]; deaths stay with our own death events.)
+  const craftsSource: SelfProvenance['craftsSource'] = isNum(stats.vh_Crafts)
     ? 'vh_Crafts'
     : Array.isArray(self.crafts)
       ? 'crafts'

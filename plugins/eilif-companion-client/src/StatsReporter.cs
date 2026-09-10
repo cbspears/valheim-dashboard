@@ -110,8 +110,11 @@ namespace EilifCompanionClient
                 // Entry-level kills/deaths — parseSelfSnapshot reads self.kills /
                 // self.deaths, NOT a vh_ key. EnemyKills is the total-kills counter
                 // the dashboard's kill board + the "killsSource:'client'" path want.
-                long killsVal; bool haveKills = TryReadStat(profile, PlayerStatType.EnemyKills, out killsVal);
-                long deathsVal; bool haveDeaths = TryReadStat(profile, PlayerStatType.Deaths, out deathsVal);
+                // 0.4.3: kills and deaths are NO LONGER posted. The dashboard takes kills
+                // from the per-world weapon breakdown and deaths from its own death events;
+                // a lifetime profile counter next to those made the ingest flip its
+                // zero-point every five minutes on 2026-09-10. Builds, crafts and distance
+                // are what this reporter is for.
 
                 // stats:{ "vh_...": n } — only keys we actually read.
                 var statsFrag = new StringBuilder();
@@ -128,8 +131,6 @@ namespace EilifCompanionClient
                 // Build the reporter's single players[] entry.
                 var entry = new StringBuilder();
                 entry.Append("{\"name\":").Append(EilifMapTrackerPlugin.JsonStr(reporter));
-                if (haveKills) { entry.Append(",\"kills\":").Append(killsVal.ToString(CultureInfo.InvariantCulture)); counters++; }
-                if (haveDeaths) { entry.Append(",\"deaths\":").Append(deathsVal.ToString(CultureInfo.InvariantCulture)); counters++; }
                 entry.Append(",\"stats\":{").Append(statsFrag).Append("}}");
 
                 if (counters == 0) return; // nothing usable to report
@@ -163,7 +164,18 @@ namespace EilifCompanionClient
             value = 0;
             try
             {
-                float raw = profile.GetStat(type);
+                // 0.4.3: read the ALL-TIME bucket directly. Valheim 1.0 keeps ten stat
+                // buckets on the profile (PlayerProfile.cs:86 `m_playerStats[10]`); the
+                // game's GetStat() returns bucket 0 only while achievements are blocked and
+                // otherwise the achievement-eligible bucket for the current difficulty
+                // (PlayerProfile.cs:945). The eligible bucket is empty for anyone who played
+                // modded before Unshamed, and it stops counting the moment a character is
+                // flagged, so on 2026-09-10 eight of eleven vikings posted zero builds and
+                // zero distance after an hour of play. Bucket 0 is lifetime and monotonic.
+                float raw;
+                var buckets = profile.m_playerStats;
+                if (buckets != null && buckets.Length > 0 && buckets[0] != null) raw = buckets[0][type];
+                else raw = profile.GetStat(type);
                 if (float.IsNaN(raw) || float.IsInfinity(raw)) return false;
                 value = (long)Math.Round(raw, MidpointRounding.AwayFromZero);
                 return true;
