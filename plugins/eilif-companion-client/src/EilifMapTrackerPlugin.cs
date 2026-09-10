@@ -40,7 +40,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.4.0"; // Keep this in lockstep with the csproj <Version>. (0.3.4 shipped with this const still reading "0.3.3", so its BepInEx load line said 0.3.3 while the manifest/assembly were 0.3.4 — do not repeat that drift.)
+        public const string PluginVersion = "0.4.1"; // Keep this in lockstep with the csproj <Version>. (0.3.4 shipped with this const still reading "0.3.3", so its BepInEx load line said 0.3.3 while the manifest/assembly were 0.3.4 — do not repeat that drift.)
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
@@ -64,10 +64,16 @@ namespace EilifCompanionClient
         private float _postTimer;
         private bool _wasConnected;
         private float _lastPct = -1f; // last computed %, for the hard-disconnect fallback post
+        private static bool _warnedExploredShape;
 
-        // Cached reflection handles for the private Minimap fog array (verified vs decompile:
-        // `private bool[] m_explored` sized `m_textureSize * m_textureSize`, row-major
-        // `m_explored[y * m_textureSize + x]`; `public int m_textureSize = 256`).
+        // Cached reflection handles for the private Minimap fog store. Valheim 0.221.x declared
+        // it `private bool[] m_explored`; Valheim 1.0 (verified against the 1.0.7 client decompile,
+        // Minimap.cs:304) declares it `private BitArray m_explored`, same size
+        // (`m_textureSize * m_textureSize`) and the same row-major indexing
+        // (`m_explored[y * m_textureSize + x]`, Minimap.cs:1857/1864). 0.4.0 and every build
+        // before it cast the value to bool[], which on 1.0 yields null, so ComputeExploredPct
+        // returned null and NOT ONE explored-map post left any client on launch night (every
+        // player_stats.map_explored_pct was null on 2026-09-10). 0.4.1 reads either shape.
         private static readonly FieldInfo ExploredField =
             AccessTools.Field(typeof(Minimap), "m_explored");
         private static readonly FieldInfo TextureSizeField =
@@ -329,10 +335,26 @@ namespace EilifCompanionClient
         private static float? ComputeExploredPct(Minimap mm)
         {
             if (ExploredField == null || TextureSizeField == null) return null;
-            var explored = ExploredField.GetValue(mm) as bool[];
-            if (explored == null || explored.Length == 0) return null;
+            object raw = ExploredField.GetValue(mm);
+            // Either shape, one accessor: bool[] (0.221.x) or BitArray (1.0). Anything else is
+            // a future game change; say so ONCE instead of going quietly dark again.
+            Func<int, bool> at;
+            int length;
+            if (raw is bool[] arr) { at = i => arr[i]; length = arr.Length; }
+            else if (raw is System.Collections.BitArray bits) { at = i => bits[i]; length = bits.Length; }
+            else
+            {
+                if (!_warnedExploredShape)
+                {
+                    _warnedExploredShape = true;
+                    Log?.LogWarning("[EilifMap] Minimap.m_explored is " + (raw == null ? "null" : raw.GetType().FullName) +
+                                    " (expected bool[] or BitArray); explored-map posts are disabled until the plugin is updated.");
+                }
+                return null;
+            }
+            if (length == 0) return null;
             int size = (int)TextureSizeField.GetValue(mm);
-            if (size <= 0 || explored.Length < size * size) return null;
+            if (size <= 0 || length < size * size) return null;
 
             float r = size / 2f;
             float r2 = r * r;
@@ -350,7 +372,7 @@ namespace EilifCompanionClient
                 for (int x = x0; x <= x1; x++)
                 {
                     discPixels++;
-                    if (explored[rowBase + x]) exploredCount++;
+                    if (at(rowBase + x)) exploredCount++;
                 }
             }
             if (discPixels == 0) return null;
