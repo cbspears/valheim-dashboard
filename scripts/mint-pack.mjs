@@ -30,6 +30,13 @@
 // AzuCraftyBoxes stay out - V+ CraftFromChest replaces AzuCraftyBoxes - and both
 // V+ fallbacks go OFF, which for this script means --fallback off.
 //
+// Unshamed (Azumatt, 2026-09-10) is the first OPTIONAL mod here: it is not in the
+// pack at all unless `--unshamed <ver>` is passed, because pack v11 never shipped
+// it and the default render has to keep reproducing v11 byte for byte. It gives a
+// modded client its Steam achievements back and nothing else; the cfg the pack
+// pins deliberately refuses its own defaults, which would wipe the character's
+// cheat flag. See the MODS row and docs/PACK.md.
+//
 // This script never edits config/server.ts and never deploys. It prints the
 // exact lines to change; publishing the code is Charlie's call.
 //
@@ -70,6 +77,13 @@ export const TEMPLATE_DIR = path.join(__dirname, 'pack-templates');
 //
 // `cfg`              the cfg file that mod contributes to the pack, and the file
 //                    that leaves with it when it is dropped.
+// `optional`         the mirror image of `omitFlag`: the mod is ABSENT unless its
+//                    `flag` is passed. Such a mod has `baseline: null`, because
+//                    pack v11 never shipped it and there is no version to fall
+//                    back to - passing no pin is the whole "leave it out"
+//                    instruction. Unshamed is the only user; everything else
+//                    about it (its {{#SECTION}} block, its cfg) works exactly
+//                    like a droppable mod's, just decided the other way round.
 // `cfgByVersion`     for a mod that RENAMED its cfg between builds. Each rule is
 //                    { minVersion, cfg, tmpl }: the newest rule whose minVersion
 //                    the pin satisfies wins, otherwise `cfg` above. ValheimPlus
@@ -164,6 +178,29 @@ export const MODS = [
     // means pulling it off the box in the same stopped window.
     omitFlag: '--no-azu', cfg: 'Azumatt.AzuCraftyBoxes.cfg', section: 'AZU',
   },
+  {
+    // OPTIONAL, and the first mod in this table that is off by default (2026-09-10).
+    // Valheim 1.0 refuses Steam achievements to any modded client -
+    // Achievements.IsCheatedAtAll() ORs Game.isModded, which BepInEx sets for
+    // every modded install - and Unshamed postfixes that one check to ignore the
+    // modded flag. Real cheating still disqualifies exactly as in vanilla.
+    //
+    // It is `optional: true` rather than another `omitFlag` because pack v11 never
+    // shipped it: there is no baseline to reproduce, so an "absent" default is the
+    // only shape that keeps the v11 byte-for-byte tripwire in mint-pack.test.mjs
+    // green. Pass `--unshamed <ver>` and it appears - export.r2x entry and cfg
+    // together, like every other mod here.
+    //
+    // The pinned cfg is the point, not a detail: Unshamed's OWN defaults turn on
+    // four "Clear ..." switches that wipe the character's cheat flag on load, on
+    // save, after a dev command, and zero the Cheats stat with it. That is
+    // cheat-flag washing, and Eilif does not want it - a viking who typed a cheat
+    // command stays disqualified. scripts/pack-templates/config/Azumatt.Unshamed.cfg.tmpl
+    // pins all four Off and leaves only "Ignore Modded Flag" on.
+    key: 'unshamed', flag: '--unshamed', label: 'Unshamed (achievements while modded)',
+    ns: 'Azumatt', name: 'Unshamed', tmpl: 'UNSHAMED', baseline: null,
+    optional: true, cfg: 'Azumatt.Unshamed.cfg', section: 'UNSHAMED',
+  },
 ];
 
 export const DEFAULT_PROFILE_NAME = 'Eilif';
@@ -214,6 +251,29 @@ export const DEFAULT_FALLBACK = 'none';
 /** The mods this pack can be minted without, in MODS order. */
 export const OMITTABLE_MODS = MODS.filter((m) => m.omitFlag);
 
+/** The mods this pack is minted WITHOUT unless asked, in MODS order. */
+export const OPTIONAL_MODS = MODS.filter((m) => m.optional);
+
+/**
+ * Every mod whose presence is a decision rather than a given, in MODS order:
+ * the droppable ones (in unless told otherwise) and the optional ones (out unless
+ * told otherwise). Both kinds carry a {{#SECTION}} block and a cfg, and both are
+ * resolved through the same `dropped` set, so nothing downstream has to know
+ * which way round a particular mod's default runs.
+ */
+export const SECTIONED_MODS = MODS.filter((m) => m.section);
+
+/**
+ * The keys that are NOT in a pack rendered with these pins: whatever the caller
+ * dropped, plus every optional mod nobody pinned. The second half is what makes
+ * "absent by default" work without a second code path.
+ */
+function absentKeys(omit, versions = {}) {
+  const dropped = new Set(omit);
+  for (const mod of OPTIONAL_MODS) if (versions[mod.key] == null) dropped.add(mod.key);
+  return dropped;
+}
+
 /**
  * The {{#NAME}} / {{#NONAME}} pair for one drop decision. A template that has to
  * say something different when a mod is gone (rather than just say less) uses the
@@ -222,7 +282,7 @@ export const OMITTABLE_MODS = MODS.filter((m) => m.omitFlag);
  */
 function omitSections(dropped) {
   const sections = {};
-  for (const mod of OMITTABLE_MODS) {
+  for (const mod of SECTIONED_MODS) {
     const keep = !dropped.has(mod.key);
     sections[mod.section] = keep;
     sections[`NO${mod.section}`] = !keep;
@@ -312,6 +372,9 @@ export function compareSemver(a, b) {
  */
 export function cfgFor(mod, version = mod.baseline) {
   if (!mod.cfg) return null;
+  // An optional mod has no baseline, so "which cfg at no version" is its only
+  // name - there is nothing to compare a cfgByVersion rule against.
+  if (version == null) return mod.cfg;
   let out = mod.cfg;
   for (const rule of mod.cfgByVersion || []) {
     if (compareSemver(version, rule.minVersion) >= 0) out = rule.cfg;
@@ -327,16 +390,26 @@ export function cfgNamesFor(mod) {
 
 /**
  * CFG_FILES with each renamed cfg swapped in place, so the zip's entry ORDER is
- * unchanged by a rename (a byte-diff against a published pack depends on it).
+ * unchanged by a rename (a byte-diff against a published pack depends on it),
+ * plus the cfg of every OPTIONAL mod these pins actually ask for.
+ *
+ * The optional ones are appended rather than slotted in: they were not in v11, so
+ * they have no slot in r2modman's v11 write order, and appending keeps the first
+ * seven entries exactly where a byte-diff against a published pack expects them.
+ * Pin nothing optional and this returns CFG_FILES unchanged, which is what keeps
+ * the v11 tripwire green.
  */
 export function cfgFilesFor(versions = {}) {
   const swaps = new Map();
   for (const mod of MODS) {
-    if (!mod.cfg) continue;
+    if (!mod.cfg || mod.optional) continue;
     const resolved = cfgFor(mod, versions[mod.key] ?? mod.baseline);
     if (resolved !== mod.cfg) swaps.set(mod.cfg, resolved);
   }
-  return CFG_FILES.map((name) => swaps.get(name) ?? name);
+  const extra = OPTIONAL_MODS
+    .filter((m) => m.cfg && versions[m.key] != null)
+    .map((m) => cfgFor(m, versions[m.key]));
+  return [...CFG_FILES.map((name) => swaps.get(name) ?? name), ...extra];
 }
 
 /**
@@ -357,12 +430,15 @@ export function renderPack({
   if (!FALLBACK_MODES.includes(fallback)) {
     throw new Error(`renderPack: fallback must be one of ${FALLBACK_MODES.join(', ')}, got "${fallback}"`);
   }
-  const dropped = new Set(omit);
-  for (const key of dropped) {
+  for (const key of omit) {
     const mod = MODS.find((m) => m.key === key);
     if (!mod) throw new Error(`renderPack: unknown mod key "${key}"`);
     if (!mod.omitFlag) throw new Error(`renderPack: ${mod.label} cannot be dropped from the pack`);
   }
+  // Everything the pack does not contain, however it came to be absent: an
+  // optional mod nobody pinned is out for the same reason and by the same path
+  // as one that was explicitly dropped.
+  const dropped = absentKeys(omit, versions);
 
   // [VPlusFallback] is the CLIENT half of what ValheimPlus was doing, so with V+
   // in the pack the two patch the same methods and their effects stack: ranges
@@ -391,6 +467,10 @@ export function renderPack({
   };
   for (const mod of MODS) {
     const v = versions[mod.key] ?? mod.baseline;
+    // An optional mod nobody pinned has no version at all, and needs none: its
+    // {{#SECTION}} block goes with it, taking every {{UNSHAMED_*}} placeholder
+    // inside it, so `fill` never sees one left over.
+    if (v == null) continue;
     const { major, minor, patch } = parseSemver(v, mod.flag);
     vars[`${mod.tmpl}_MAJOR`] = major;
     vars[`${mod.tmpl}_MINOR`] = minor;
@@ -436,7 +516,7 @@ export function renderPack({
   // drop org.bepinex.plugins.valheim_plus.cfg, not the legacy name it no longer
   // ships.
   const droppedCfgs = new Set(
-    OMITTABLE_MODS.filter((m) => dropped.has(m.key) && m.cfg)
+    SECTIONED_MODS.filter((m) => dropped.has(m.key) && m.cfg)
       .map((m) => cfgFor(m, versions[m.key] ?? m.baseline)),
   );
 
@@ -448,7 +528,9 @@ export function renderPack({
     if (droppedCfgs.has(cfg)) continue;
     files.set(`config/${cfg}`, render(readTemplate(path.join('config', `${cfg}.tmpl`)), cfg));
   }
-  return { files, vars, omitted: [...dropped], fallback };
+  // `omitted` is what was TAKEN OUT, not everything that happens to be absent: an
+  // optional mod nobody asked for was never in the pack to omit.
+  return { files, vars, omitted: [...new Set(omit)], fallback };
 }
 
 const NUMBER_WORDS = [
@@ -476,7 +558,7 @@ export function renderReadme({ packNumber, packDate, cfgs = CFG_FILES }) {
   // A mod is "in this bundle" if ANY of the names it has shipped under is in the
   // list, because a pin can rename its cfg (ValheimPlus 10 did).
   const sections = omitSections(
-    new Set(OMITTABLE_MODS.filter((m) => !cfgNamesFor(m).some((n) => names.includes(n))).map((m) => m.key)),
+    new Set(SECTIONED_MODS.filter((m) => !cfgNamesFor(m).some((n) => names.includes(n))).map((m) => m.key)),
   );
   const vplus = MODS.find((m) => m.key === 'vplus');
   const title = `Eilif config bundle - Pack v${packNumber} (${packDate})`;
@@ -823,7 +905,12 @@ Required
                               MUST match the server's world exactly.
 
 Version pins (default to pack v11's)
-${MODS.map((m) => `  ${m.flag} <x.y.z>`.padEnd(30) + `${m.label} (v11: ${m.baseline})`).join('\n')}
+${MODS.map((m) => `  ${m.flag} <x.y.z>`.padEnd(30)
+    + (m.baseline
+      ? `${m.label} (v11: ${m.baseline})`
+      : `${m.label}.\n${' '.repeat(30)}OPTIONAL: not in v11, and NOT in the pack at all\n`
+        + `${' '.repeat(30)}unless this flag is passed. Adds its export.r2x entry\n`
+        + `${' '.repeat(30)}AND config/${m.cfg}.`)).join('\n')}
 
 Pack contents
 ${OMITTABLE_MODS.map((m) => `  ${m.omitFlag}`.padEnd(30) + `Mint without ${m.label}.\n`
@@ -1084,7 +1171,10 @@ async function main(argv) {
   // Omitted mods are not pinned, so they are not verified either: asking
   // Thunderstore whether ValheimPlus 9.17.1 exists is a true answer to a
   // question this pack no longer asks.
-  const kept = MODS.filter((mod) => !args.omit.includes(mod.key));
+  // An optional mod nobody pinned is in the same position: not in this pack, so
+  // not a question to ask Thunderstore.
+  const kept = MODS.filter((mod) => !args.omit.includes(mod.key)
+    && (!mod.optional || args.versions[mod.key] != null));
   const pins = kept.map((mod) => ({ mod, version: args.versions[mod.key] ?? mod.baseline }));
 
   banner(`Eilif pack minter - ${mode}`);
@@ -1094,6 +1184,11 @@ async function main(argv) {
   console.log(`  contents     ${pins.length} mods${args.omit.length
     ? `, dropped: ${args.omit.map((k) => MODS.find((m) => m.key === k).label).join(', ')}`
     : ''}`);
+  if (OPTIONAL_MODS.length) {
+    console.log(`  optional     ${OPTIONAL_MODS.map((m) => `${m.label}: ${args.versions[m.key]
+      ? `pinned ${args.versions[m.key]}`
+      : `not in this pack (pass ${m.flag} <x.y.z> to add it)`}`).join('; ')}`);
+  }
   console.log(`  fallback     EilifPaths [VPlusFallback] ${args.fallback === 'none'
     ? 'section omitted (pack v11 / EilifPaths 1.4.0 shape)'
     : `Enabled = ${args.fallback === 'on'}`}`);
@@ -1151,20 +1246,28 @@ async function main(argv) {
   console.log('');
   console.log(`  ${'mod'.padEnd(24)} ${'pinned'.padEnd(10)} ${'v11'.padEnd(10)} ${'package'.padEnd(9)} listing index`);
   for (const row of verification.rows) {
-    const changed = row.version !== row.mod.baseline;
+    // An optional mod has no v11 pin to compare against, so it reports what it is
+    // rather than an empty cell that reads like "unchanged".
+    const v11Cell = row.mod.baseline
+      ? (row.version === row.mod.baseline ? '=' : row.mod.baseline)
+      : 'not in v11';
     const apiCell = row.api.ok ? 'ok' : String(row.api.status);
     const listCell = row.listed === null
       ? (args.skipIndexCheck ? 'skipped' : 'UNKNOWN')
       : row.listed ? 'ok' : 'NOT LISTED';
     if (!row.api.ok || row.listed === false || (row.listed === null && !args.skipIndexCheck)) verifyFailed = true;
     console.log(
-      `  ${row.mod.label.padEnd(24)} ${row.version.padEnd(10)} ${(changed ? row.mod.baseline : '=').padEnd(10)} ` +
+      `  ${row.mod.label.padEnd(24)} ${row.version.padEnd(10)} ${v11Cell.padEnd(10)} ` +
       `${apiCell.padEnd(9)} ${listCell}`,
     );
   }
   for (const key of args.omit) {
     const mod = MODS.find((m) => m.key === key);
     console.log(`  ${mod.label.padEnd(24)} ${'DROPPED'.padEnd(10)} ${mod.baseline.padEnd(10)} ${'-'.padEnd(9)} not in this pack`);
+  }
+  for (const mod of OPTIONAL_MODS) {
+    if (args.versions[mod.key] != null) continue;
+    console.log(`  ${mod.label.padEnd(24)} ${'not asked'.padEnd(10)} ${'not in v11'.padEnd(10)} ${'-'.padEnd(9)} not in this pack`);
   }
   for (const row of verification.rows) {
     if (row.listed === false) {

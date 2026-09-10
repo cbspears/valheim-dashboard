@@ -105,6 +105,10 @@ const PACK_V14_PINS = [
   'Proudlock_Technology-GsValheimStatsClient-0.2.12',
   `Eilif-EilifPaths-${csprojVersion('plugins/eilif-paths/EilifPaths.csproj', '1.7.1')}`,
   `Eilif-EilifCompanionClient-${csprojVersion('plugins/eilif-companion-client/EilifCompanionClient.csproj', '0.4.0')}`,
+  // Optional in the minter (`--unshamed 1.0.0`, absent unless asked), but a pack
+  // that DOES ship it has to resolve it like any other pin, so it is checked here
+  // whenever v14 is the candidate set. Client-only: nothing on the box runs it.
+  'Azumatt-Unshamed-1.0.0',
 ];
 
 const UA = 'eilif-launch-preflight/1.0';

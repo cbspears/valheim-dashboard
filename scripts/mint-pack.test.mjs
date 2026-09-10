@@ -28,12 +28,20 @@ import crypto from 'node:crypto';
 
 import {
   MODS, CFG_FILES, DEFAULT_INGEST_URL, DEFAULT_FALLBACK, FALLBACK_MODES, OMITTABLE_MODS,
+  OPTIONAL_MODS, SECTIONED_MODS,
   renderPack, renderReadme, parseSemver, compareSemver, zipSync, unzipSync, crc32, firstDiff,
   bundleArgs, applySections, cfgFor, cfgFilesFor, cfgNamesFor,
 } from './mint-pack.mjs';
 import { buildBundle } from './build-config-bundle.mjs';
 
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
+// How many mods a render gets WITHOUT being asked for anything optional - which
+// is what every count below is really about. MODS.length stopped being that
+// number on 2026-09-10, when Unshamed arrived as the first `optional: true` row:
+// it is absent unless --unshamed pins it, precisely so the v11 tripwire above
+// stays a tripwire.
+const DEFAULT_MOD_COUNT = MODS.length - OPTIONAL_MODS.length;
 
 // ── pack v11, as published on 2026-08-27 ────────────────────────────────────
 const V11 = {
@@ -178,7 +186,10 @@ assert.match(
   /- name: Azumatt-AzuCraftyBoxes\n {4}version:\n {6}major: 1\n {6}minor: 9\n {6}patch: 0\n/,
   'AzuCraftyBoxes is pinnable (it has to move in lockstep with the server copy)',
 );
-assert.equal((r2x.match(/- name: /g) || []).length, MODS.length, 'every mod in MODS is in export.r2x');
+assert.equal(
+  (r2x.match(/- name: /g) || []).length, DEFAULT_MOD_COUNT,
+  'every non-optional mod in MODS is in export.r2x',
+);
 for (const buf of custom.values()) {
   assert.doesNotMatch(buf.toString('latin1'), /\{\{[A-Z0-9_]+\}\}/, 'no unfilled placeholder survives');
 }
@@ -301,7 +312,7 @@ const noVplusR2x = noVplus.get('export.r2x').toString('latin1');
 assert.doesNotMatch(noVplusR2x, /ValheimPlus/, 'no ValheimPlus entry survives in export.r2x');
 assert.doesNotMatch(noVplusR2x, /Grantapher/, 'not under its namespace either');
 assert.equal(
-  (noVplusR2x.match(/- name: /g) || []).length, MODS.length - 1,
+  (noVplusR2x.match(/- name: /g) || []).length, DEFAULT_MOD_COUNT - 1,
   'export.r2x lists every mod but the dropped one',
 );
 assert.doesNotMatch(noVplusR2x, /\{\{|\}\}/, 'the section markers leave no residue in export.r2x');
@@ -424,7 +435,7 @@ for (const mod of OMITTABLE_MODS) {
   assert.ok(nsShared || !r2xOut.includes(mod.ns), 'not under its namespace either');
   assert.ok(!r2xOut.includes(`${mod.ns}-${mod.name}`), 'and not as a full package name');
   assert.equal(
-    (r2xOut.match(/- name: /g) || []).length, MODS.length - 1,
+    (r2xOut.match(/- name: /g) || []).length, DEFAULT_MOD_COUNT - 1,
     `${mod.omitFlag} leaves every mod but the dropped one in export.r2x`,
   );
   assert.doesNotMatch(r2xOut, /\{\{|\}\}/, 'the section markers leave no residue in export.r2x');
@@ -837,5 +848,191 @@ assert.doesNotThrow(
   () => renderPack({ world: 'Eilif', versions: { paths: '1.7.1' }, omit: ['vplus'], fallback: 'on' }),
   'while --no-vplus --fallback on stays exactly as it was on launch night',
 );
+
+// ── Unshamed: the first OPTIONAL mod ────────────────────────────────────────
+// Valheim 1.0 refuses Steam achievements to any modded client (IsCheatedAtAll()
+// ORs Game.isModded), and Unshamed postfixes that one check. It was not in pack
+// v11, so unlike every droppable mod it defaults to ABSENT: the v11 tripwire at
+// the top of this file is only a tripwire while a bare `--world X` render still
+// produces exactly v11's file list, and an eighth mod appearing by default would
+// have quietly re-baselined it.
+const unshamedMod = MODS.find((m) => m.key === 'unshamed');
+assert.deepEqual(OPTIONAL_MODS.map((m) => m.key), ['unshamed'], 'Unshamed is the only optional mod');
+assert.equal(unshamedMod.baseline, null, 'an optional mod has no baseline: there is no v11 pin to fall back to');
+assert.ok(!unshamedMod.omitFlag, 'and no --no- flag, because absent is already its default');
+assert.ok(unshamedMod.section, 'it declares its export.r2x section marker like every other decided mod');
+assert.equal(unshamedMod.cfg, 'Azumatt.Unshamed.cfg', 'and the cfg that arrives with it');
+assert.ok(!CFG_FILES.includes(unshamedMod.cfg), 'which is NOT in the v11 cfg list, because v11 never shipped it');
+assert.deepEqual(
+  SECTIONED_MODS.map((m) => m.key),
+  [...OMITTABLE_MODS.map((m) => m.key), 'unshamed'],
+  'droppable and optional mods are the same mechanism, resolved through one set',
+);
+
+// Absent by default, in every artifact.
+assert.ok(!v11.has(`config/${unshamedMod.cfg}`), 'a default render ships no Unshamed cfg');
+assert.doesNotMatch(v11.get('export.r2x').toString('latin1'), /Unshamed/, 'and no export.r2x entry');
+assert.deepEqual(cfgFilesFor(), CFG_FILES, 'cfgFilesFor still returns exactly the v11 list when nothing optional is pinned');
+assert.deepEqual(
+  cfgFilesFor({ unshamed: '1.0.0' }),
+  [...CFG_FILES, 'Azumatt.Unshamed.cfg'],
+  'a pin APPENDS its cfg, so the seven v11 entries keep their positions in the zip',
+);
+assert.ok(
+  !renderReadme({ packNumber: 11, packDate: 'Aug 27, 2026' }).toString('latin1').includes('Unshamed'),
+  'and the v11 Mac README never mentions it',
+);
+
+// Present the moment it is pinned, entry and cfg together.
+const { files: withUnshamed } = renderPack({ world: 'EilifRehearsal', versions: { unshamed: '1.0.0' } });
+assert.deepEqual(
+  [...withUnshamed.keys()].sort(),
+  [...v11.keys(), 'config/Azumatt.Unshamed.cfg'].sort(),
+  '--unshamed 1.0.0 adds exactly one file to the v11 set',
+);
+const unshamedR2x = withUnshamed.get('export.r2x').toString('latin1');
+assert.match(
+  unshamedR2x,
+  /- name: Azumatt-Unshamed\n {4}version:\n {6}major: 1\n {6}minor: 0\n {6}patch: 0\n/,
+  'the 1.0.0 pin lands in export.r2x as Azumatt-Unshamed',
+);
+assert.equal(
+  (unshamedR2x.match(/- name: /g) || []).length, DEFAULT_MOD_COUNT + 1,
+  'and it is an addition, not a replacement',
+);
+assert.doesNotMatch(unshamedR2x, /\{\{|\}\}/, 'no marker residue when an optional block is kept');
+// Everything else is untouched: an optional mod arriving must not disturb a
+// single byte of what the pack already shipped.
+for (const [rel, data] of withUnshamed) {
+  if (rel === 'export.r2x' || rel === 'config/Azumatt.Unshamed.cfg') continue;
+  assert.ok(data.equals(v11.get(rel)), `${rel} is untouched by --unshamed: ${firstDiff(v11.get(rel), data)}`);
+}
+
+// ── the pinned cfg is the whole point ───────────────────────────────────────
+// Unshamed's OWN defaults wipe the character's cheat flag on load, on save and
+// after a dev command, and zero the Cheats stat with it. That is cheat-flag
+// washing, and Eilif wants none of it: a viking who typed a cheat command stays
+// disqualified exactly as in vanilla. Only "Ignore Modded Flag" is on, which is
+// the one thing this mod is here to do. If this ever renders On, the pack is
+// laundering saves and nothing downstream would say so.
+const unshamedCfg = withUnshamed.get('config/Azumatt.Unshamed.cfg').toString('latin1');
+assert.match(
+  unshamedCfg, /^## Settings file was created by plugin Unshamed v1\.0\.0$/m,
+  'the cfg carries the writer header of the build that wrote it',
+);
+assert.match(unshamedCfg, /^## Plugin GUID: Azumatt\.Unshamed$/m, 'and the plugin GUID BepInEx writes under it');
+const unshamedValues = Object.fromEntries(
+  [...unshamedCfg.matchAll(/^([A-Z][A-Za-z ]*[a-z]) = (.*)$/gm)].map((m) => [m[1], m[2]]),
+);
+assert.deepEqual(
+  unshamedValues,
+  {
+    Enabled: 'On',
+    'Clear On Load': 'Off',
+    'Clear On Save': 'Off',
+    'Clear After Command': 'Off',
+    'Clear Cheat Stat': 'Off',
+    'Ignore Modded Flag': 'On',
+    'Show Popups': 'Off',
+    'Force True Methods': '',
+    'Force False Methods': '',
+    'Enable Retroactive': 'Off',
+  },
+  'every Clear switch is pinned Off against the mod\'s own On defaults, and the overrides stay empty',
+);
+// BepInEx orders sections alphabetically and writes entries in Bind order, so a
+// hand-edited template in the wrong order would be silently rewritten the first
+// time the game saves the file.
+assert.deepEqual(
+  [...unshamedCfg.matchAll(/^\[(.+)\]$/gm)].map((m) => m[1]),
+  ['1 - General', '2 - Overrides', '3 - Retroactive'],
+  'the three sections sit where BepInEx sorts them',
+);
+
+// ── the v14 shape with Unshamed in it ───────────────────────────────────────
+const V14U = {
+  versions: {
+    vplus: '10.0.2', bepinex: '5.4.2350', paths: '1.7.1', companionClient: '0.4.1', unshamed: '1.0.0',
+  },
+  omit: ['plant', 'azu'],
+  fallback: 'off',
+};
+const { files: v14u } = renderPack({ world: 'Eilif', ...V14U });
+assert.deepEqual(
+  [...v14u.keys()].sort(),
+  [
+    'config/Azumatt.Unshamed.cfg',
+    'config/BepInEx.cfg',
+    'config/net.cproudlock.gsvalheimstatsclient.cfg',
+    'config/net.eilif.companionclient.cfg',
+    'config/net.eilif.paths.cfg',
+    'config/org.bepinex.plugins.valheim_plus.cfg',
+    'doorstop_config.ini',
+    'export.r2x',
+  ],
+  'six mods, six cfgs, plus export.r2x and doorstop_config.ini',
+);
+assert.deepEqual(
+  [...v14u.get('export.r2x').toString('latin1').matchAll(/^ {2}- name: (.+)$/gm)].map((m) => m[1]),
+  [
+    'denikson-BepInExPack_Valheim',
+    'Grantapher-ValheimPlus_Grantapher_Temporary',
+    'Proudlock_Technology-GsValheimStatsClient',
+    'Eilif-EilifPaths',
+    'Eilif-EilifCompanionClient',
+    'Azumatt-Unshamed',
+  ],
+  'and Unshamed sits last, where its template block was appended',
+);
+assert.match(
+  v14u.get('export.r2x').toString('latin1'),
+  /- name: Eilif-EilifCompanionClient\n {4}version:\n {6}major: 0\n {6}minor: 4\n {6}patch: 1\n/,
+  'the 0.4.1 companion client pin lands alongside it',
+);
+
+const v14uBundle = buildBundle({
+  world: 'Eilif', versions: V14U.versions, cfgVersions: {}, ingestUrl: undefined,
+  packNumber: 14, packDate: 'Sep 10, 2026', omit: V14U.omit, fallback: V14U.fallback,
+});
+assert.deepEqual(
+  v14uBundle.entries.map((e) => e.name),
+  [
+    'Azumatt.Unshamed.cfg',
+    'BepInEx.cfg',
+    'net.cproudlock.gsvalheimstatsclient.cfg',
+    'net.eilif.companionclient.cfg',
+    'net.eilif.paths.cfg',
+    'org.bepinex.plugins.valheim_plus.cfg',
+    'README.txt',
+  ],
+  'the Mac bundle carries the Unshamed cfg too, README last',
+);
+const v14uReadme = v14uBundle.entries.at(-1).data.toString('latin1');
+assert.equal((v14uReadme.match(/\bsix\b/g) || []).length, 2, 'it says six, in both places that count the files');
+assert.doesNotMatch(v14uReadme, /\bseven\b|\bfive\b|\bfour\b/, 'and no stale count survives');
+assert.match(
+  v14uReadme, /^ {2}Azumatt\.Unshamed\.cfg {22}keeps Steam achievements working$/m,
+  'the README names the cfg sitting next to it, aligned at column 44 like the rest',
+);
+assert.doesNotMatch(v14uReadme, /\{\{|\}\}/, 'no marker or placeholder residue survives into the README');
+// ...and the same bundle WITHOUT the pin neither counts nor names it, which is
+// the failure the count/name pair exists to catch.
+assert.ok(!v14Readme.includes('Unshamed'), 'a bundle built without the pin never names Unshamed');
+
+assert.equal(
+  bundleArgs({ world: 'Eilif', ingestUrl: DEFAULT_INGEST_URL, cfgVersions: {}, omit: V14U.omit, fallback: V14U.fallback },
+    MODS.filter((m) => !V14U.omit.includes(m.key) && (!m.optional || V14U.versions[m.key]))
+      .map((mod) => ({ mod, version: V14U.versions[mod.key] ?? mod.baseline }))),
+  "--world 'Eilif' --bepinex 5.4.2350 --vplus 10.0.2 --paths 1.7.1 --companion-client 0.4.1 "
+  + '--unshamed 1.0.0 --no-plant --no-azu --fallback off',
+  'the printed bundle command carries the optional pin, so the Mac bundle cannot lose it',
+);
+// It is not droppable, because it was never there to drop.
+assert.throws(
+  () => renderPack({ world: 'Eilif', omit: ['unshamed'] }),
+  /cannot be dropped/,
+  'omitting an optional mod is refused: leaving out its pin is the way to not have it',
+);
+
 
 console.log('OK — all pack minter assertions passed');

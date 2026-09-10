@@ -82,7 +82,10 @@ Required
 Version pins (default to pack v11's; pass the same ones you gave mint-pack).
 A pin can decide what a cfg SAYS and, for ValheimPlus 10, what it is NAMED, so
 pass the whole set rather than only the ones you think matter.
-${MODS.map((m) => `  ${m.flag} <x.y.z>`.padEnd(30) + `${m.label} (v11: ${m.baseline})`).join('\n')}
+${MODS.map((m) => `  ${m.flag} <x.y.z>`.padEnd(30)
+    + (m.baseline
+      ? `${m.label} (v11: ${m.baseline})`
+      : `${m.label}.\n${' '.repeat(30)}OPTIONAL: no ${m.cfg} unless this is passed.`)).join('\n')}
 
 Cfg writer headers (rarely needed - see mint-pack.mjs --help)
 ${MODS.filter((m) => m.cfgVersionFlag)

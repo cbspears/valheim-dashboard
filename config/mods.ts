@@ -181,6 +181,30 @@ export const ALL_MODS: Mod[] = [
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Eilif/EilifCompanionClient/',
   },
+  {
+    // Added 2026-09-10 (Charlie). Client-only; nothing on the server runs it.
+    //
+    // WHY THE PACK PINS ITS CFG, and do not "tidy" this away: Unshamed's own
+    // defaults switch ON four settings that wipe the character's cheat flag -
+    // `Clear On Load`, `Clear On Save`, `Clear After Command` and `Clear Cheat
+    // Stat`. That is cheat-flag washing: it would let a viking who typed a dev
+    // command claim achievements anyway, and it edits the character file to do it.
+    // Eilif wants none of that, so `scripts/pack-templates/config/Azumatt.Unshamed.cfg.tmpl`
+    // pins all four **Off** and leaves only `Ignore Modded Flag` on, which is the
+    // single thing this mod is here for. The copy below promises exactly that, so
+    // if the cfg ever changes, this row has to change with it.
+    //
+    // Optional in the minter: `--unshamed 1.0.0`, absent from a render that does
+    // not ask for it (it was not in pack v11, so there is no baseline).
+    name: 'Unshamed',
+    author: 'Azumatt',
+    description:
+      'Valheim 1.0 switches Steam achievements off for anyone running mods, whatever the mods actually do. This turns them back on for a modded client, and only that. Real cheating still counts against you exactly as it does in plain Valheim: cheat commands, spawned items and cheated worlds all disqualify you, and the settings the modpack ships keep it that way. If you already earned achievements while they were blocked, type unshamed retro in the console to see the list and claim them. Ships in the modpack.',
+    version: '1.0.0',
+    category: 'QoL',
+    clientRequired: true,
+    url: 'https://thunderstore.io/c/valheim/p/Azumatt/Unshamed/',
+  },
   // ── Hidden since 2026-09-09: not running on the 1.0 box, not in pack v14 ────
   // Each row keeps its last known-good pin and copy. Remove `hidden: true` (and
   // re-add the pack pin in scripts/mint-pack.mjs) when the author ships a 1.0 build.

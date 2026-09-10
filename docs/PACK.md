@@ -20,8 +20,8 @@ node scripts/build-config-bundle.mjs --help
 ## What is in the pack
 
 The zip root holds `export.r2x` (which pins the mods) and `doorstop_config.ini`;
-`config/` holds one `.cfg` per mod that has one. **Pack v14 (2026-09-10) is five mods
-and five cfgs, eight entries in all**, counting the `config/` directory record
+`config/` holds one `.cfg` per mod that has one. **Pack v14 (2026-09-10) is six mods
+and six cfgs, nine entries in all**, counting the `config/` directory record
 (`unzip -l` on the rendered zip, 2026-09-10). Pack v11 was seven mods and ten entries.
 The count is not a check: it moves with every drop, so read the table, not the number.
 
@@ -32,6 +32,7 @@ The count is not a check: it moves with every drop, so read the table, not the n
 | GsValheimStatsClient | `Proudlock_Technology/GsValheimStatsClient` | 0.2.12 | yes (world + ingest URL) |
 | EilifPaths | `Eilif/EilifPaths` | **1.7.1** | yes |
 | EilifCompanionClient | `Eilif/EilifCompanionClient` | **0.4.1** | yes (ingest URL) |
+| Unshamed | `Azumatt/Unshamed` | **1.0.0** | yes (`Azumatt.Unshamed.cfg`), and the pinned values are the point. See rule 7 |
 
 **Gone, and not waiting on anything:** PlantEverything (`Advize/PlantEverything` 1.20.0)
 and AzuCraftyBoxes (`Azumatt/AzuCraftyBoxes` 1.8.15), dropped on launch morning 2026-09-09.
@@ -53,14 +54,20 @@ the five above belong in the pack. **Its ValheimPlus row was deleted on launch n
 to be put back** with the 10.0.2 number, or `/resources#mods` tells a player the pack does
 not ship a mod that it does.
 
-Four of the five are fixed. **ValheimPlus is the one the pack can be minted without**
+**Unshamed is the one mod that is OPTIONAL rather than droppable** (added 2026-09-10):
+it is absent from a render unless `--unshamed 1.0.0` is passed, because pack v11 never
+shipped it and the default render has to keep reproducing v11 byte for byte. Everything
+else about it works like a droppable mod - one `export.r2x` entry and one cfg, together.
+See rule 7.
+
+Four of the other five are fixed. **ValheimPlus is the one the pack can be minted without**
 (`--no-vplus`), and pack v13 was exactly that: launch night ran with no V+ at all, because
 Grantapher 9.17.1 targeted 0.221.10 and there was no 1.0 build until 10.0.2 landed on
 2026-09-10. The flag drops its `export.r2x` entry **and** its cfg together; see rule 6.
 (`--no-companion-client` exists too, as insurance against another Thunderstore listing
 rejection; it costs the tombstone keep-list, death causes and the explored-map stat.)
 
-Three files in this repo hold a version list for those five, and they have to be edited
+Three files in this repo hold a version list for these, and they have to be edited
 together: `MODS` in `scripts/mint-pack.mjs` (the renderer of record), `PACK_V14_PINS` in
 `scripts/launch-preflight.mjs` (which checks the same Thunderstore endpoints from the
 preflight side), and the player-facing list in `config/mods.ts`. If they disagree,
@@ -68,7 +75,7 @@ preflight can green-light a pin the minter refuses, or `/resources#mods` can cla
 is running. Folding preflight's list into an `import { MODS }` is the obvious fix and is
 not done yet.
 
-## Six rules
+## Seven rules
 
 **1. The listing index lags uploads by 40 to 80 minutes.** Thunderstore's package API
 knows about a new version the instant it uploads, but mod managers resolve a profile code
@@ -283,6 +290,38 @@ Related: `--ingest-url` exists but should almost never be used. The dashboard an
 hostnames and the shipped mod configs hard-code `valheim-dashboard.vercel.app`; repointing it
 strands every player still on an older pack, because their cfg keeps posting to the old one.
 
+**7. Unshamed is optional, and its cfg is pinned against the mod's own defaults.**
+Added 2026-09-10. Valheim 1.0 refuses Steam achievements to any modded client:
+`Achievements.IsCheatedAtAll()` ORs `Game.isModded`, and BepInEx sets that flag for every
+modded install, so the whole crew has been locked out since launch. Unshamed postfixes that
+one check to ignore the modded flag and nothing else. Real cheating still disqualifies
+exactly as in vanilla: cheat commands, cheated items and cheated worlds all still count.
+There is also an opt-in console command, `unshamed retro`, that previews the achievements a
+character already earned while blocked and lets a player claim them.
+
+**It is OPTIONAL, not droppable.** Pack v11 never shipped it, so there is no baseline to
+reproduce, and a mod that appeared by default would re-baseline the byte-for-byte v11
+tripwire in `scripts/mint-pack.test.mjs`. In `MODS` it carries `optional: true` and
+`baseline: null`; pass `--unshamed 1.0.0` and it appears, entry and cfg together, and pass
+nothing and it is simply not there. `--no-unshamed` does not exist, because there is nothing
+to say no to.
+
+**The pinned cfg is the reason to read this rule.** Unshamed's OWN defaults turn ON four
+switches that wipe the character's cheat flag: `Clear On Load`, `Clear On Save`,
+`Clear After Command`, and `Clear Cheat Stat` (which zeroes the `PlayerStatType.Cheats`
+counter alongside it). That is cheat-flag washing - it edits the character file so a viking
+who typed a dev command can claim achievements anyway - and Eilif does not want it.
+`scripts/pack-templates/config/Azumatt.Unshamed.cfg.tmpl` therefore pins all four **Off**,
+leaves `Ignore Modded Flag` **On**, keeps `Show Popups` and `Enable Retroactive` **Off**, and
+leaves both `[2 - Overrides]` lists empty. A test asserts every one of those values, because
+nothing downstream - not the mint, not the round trip, not the boot - can see a cfg that
+quietly launders saves. If that template is ever re-captured, the `config/mods.ts` copy
+promising "cheat commands, spawned items and cheated worlds still count against you" has to
+be re-read in the same edit.
+
+Client-only: nothing on the GTX box runs it, and dropping it from the pack costs the server
+nothing.
+
 ## Re-minting: the sequence
 
 **On 2026-09-09 do not run the launch from this section.** The launch morning is
@@ -342,7 +381,7 @@ the flags already in it, which is why copying it beats retyping it.
 
    Then in r2modman: Settings, Import/Export, Import profile, paste the code. It should land
    with **every mod the pack ships** and the cfgs already filled in. Do not check it against a
-   count: v11 shipped seven, v13 four and v14 five. Worth doing once before any pack the crew
+   count: v11 shipped seven, v13 four and v14 six. Worth doing once before any pack the crew
    has not seen before; it is the only link in the chain the script cannot check for itself.
 
 3. **Real mint.**
