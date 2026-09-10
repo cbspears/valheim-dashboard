@@ -122,6 +122,21 @@ export interface SelfProvenance {
   /** kills / deaths present as real numbers on the entry. */
   hasKills: boolean;
   hasDeaths: boolean;
+  /**
+   * WHERE `kills` CAME FROM — the same "like against like" contract craftsSource
+   * carries (see the VALHEIM 1.0 STOPGAP block above parseSelfSnapshot).
+   *
+   *   'client'  — the entry's own `kills` counter, the only source before 1.0.
+   *   'weapons' — sum(weapons[].kills), because the client counter is absent or
+   *               provably broken (0 while the weapon breakdown shows kills).
+   *   'none'    — no usable reading at all (no kills number, no weapons[]).
+   *
+   * The baseline layer refuses to difference one source against a zero-point
+   * taken from the other: it re-takes the zero-point instead (credits 0 for that
+   * one cycle, full growth after), so the day the mod starts reporting LIFETIME
+   * kills again nobody is handed 1,500 foreign kills.
+   */
+  killsSource: 'client' | 'weapons' | 'none';
   /** bossKills present as a real number on the entry. */
   hasBossKills: boolean;
   /** longestLifeSec / bestKillsBeforeDeath present as real numbers. */
@@ -236,15 +251,49 @@ export function identityKey(v: unknown): string {
 function findSelfEntry(body: Obj): { self: Obj | undefined; own: Obj | undefined } {
   const key = identityKey(body.reporter);
   const players = arr(body.players);
-  const own = key
-    ? players.find((p) => identityKey(p.name) === key && (p.stats !== undefined || p.deaths !== undefined))
-    : undefined;
-  // The fallback (first entry carrying stats/deaths) keeps deaths/observed data
-  // flowing when the reporter's own entry is missing — but it is NOT the
+  // ⚠️ VALHEIM 1.0: a self entry is now recognized by `weapons` too. See the
+  // "VALHEIM 1.0 STOPGAP" block below — 1.0 profiles can arrive with no `stats`
+  // map and no `deaths` at all, and on the old predicate such an entry was not
+  // even FOUND: parseSelfSnapshot returned null and the whole payload was
+  // dropped. weapons[] is emitted per world per character, so an entry carrying
+  // it is a real report, not an artefact.
+  const cumulative = (p: Obj) =>
+    p.stats !== undefined || p.deaths !== undefined || Array.isArray(p.weapons);
+  const own = key ? players.find((p) => identityKey(p.name) === key && cumulative(p)) : undefined;
+  // The fallback (first entry carrying cumulative data) keeps deaths/observed
+  // data flowing when the reporter's own entry is missing — but it is NOT the
   // reporter's career, so it is marked as such and can never seed a zero-point.
-  const self = own ?? players.find((p) => p.stats !== undefined || p.deaths !== undefined);
+  const self = own ?? players.find(cumulative);
   return { self, own };
 }
+
+/**
+ * ── VALHEIM 1.0 STOPGAP (2026-09-09, launch night) ──────────────────────────
+ *
+ * CAUSE. Valheim 1.0 changed how the player profile stores its stat counters,
+ * and GsValheimStatsClient 0.2.12 (built against 0.221.x) can no longer read
+ * them. Its payload still carries everything it derives from its OWN per-world
+ * files — weapons[] (per-weapon kills/damage/records), skills[], boss damage,
+ * fish, records — but the profile-derived half arrives empty: no `stats` map,
+ * `creatureKills: []`, and `kills`/`deaths` absent or pinned at 0. The result
+ * on the dashboard was every "Foes slain" / "Deaths" board reading zero and
+ * every kill/death deed dark, on a night the whole clan was online.
+ *
+ * STOPGAP. Two fallbacks, both narrow and both reversible:
+ *   1. kills  ← sum(weapons[].kills) when the client's own counter is unusable
+ *      (absent, or 0 while the weapon breakdown shows kills — a total of 0
+ *      alongside 27 axe kills is not a reading, it is a broken counter).
+ *      Provenance records the source so the baseline layer never differences a
+ *      weapons-derived value against a client-counter zero-point.
+ *   2. deaths ← our own `events` rows (app/api/gs-ingest — we have an
+ *      independent death pipeline; see lib/deaths.ts).
+ *
+ * TAKE IT OUT when GsValheimStatsClient ships a 1.0 build that reads the new
+ * profile storage: delete the killsSource fork here, restore `kills:
+ * num(self.kills)`, and drop the deaths-from-events fallback in the ingest
+ * route. The baseline layer handles the switch back on its own (it re-takes the
+ * kills zero-point the first time the source changes).
+ */
 
 /** Parse the reporter's authoritative per-player snapshot; null if malformed. */
 export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
@@ -307,6 +356,21 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
     .sort((a, b) => b.amount - a.amount);
 
   const damageDealt = Math.round(sumBy(weapons, 'damageDealt'));
+
+  // ── kills: client counter, or the weapon breakdown (VALHEIM 1.0 STOPGAP) ───
+  // Chosen by USABILITY, not truthiness alone: an absent counter is no reading,
+  // and a counter of 0 sitting next to a weapon breakdown that lists kills is a
+  // BROKEN reading — one cannot have 27 axe kills and 0 kills. Anything else
+  // (including a genuine 0 with no weapon kills, the honest zero-point of a
+  // brand-new viking) is the client's number, untouched and never summed.
+  const weaponKills = sumBy(arr(self.weapons), 'kills');
+  const clientKillsUsable = isNum(self.kills) && !(num(self.kills) === 0 && weaponKills > 0);
+  const killsSource: SelfProvenance['killsSource'] = clientKillsUsable
+    ? 'client'
+    : Array.isArray(self.weapons)
+      ? 'weapons'
+      : 'none';
+  const kills = killsSource === 'weapons' ? weaponKills : num(self.kills);
   // Fish are pickups too — counted here same as every other resource, no
   // double-subtract; the fish[] breakdown above is purely additive detail.
   const resourcesHarvested = sumBy(pickups, 'count');
@@ -347,7 +411,7 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   return {
     reporter,
     world: str(body.world),
-    kills: num(self.kills),
+    kills,
     deaths: num(self.deaths),
     bossKills: num(self.bossKills),
     longestLifeSec: num(self.longestLifeSec),
@@ -363,6 +427,7 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
       hasStats,
       hasKills: isNum(self.kills),
       hasDeaths: isNum(self.deaths),
+      killsSource,
       hasBossKills: isNum(self.bossKills),
       hasLongestLifeSec: isNum(self.longestLifeSec),
       hasBestKillsBeforeDeath: isNum(self.bestKillsBeforeDeath),

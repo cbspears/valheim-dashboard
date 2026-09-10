@@ -116,9 +116,15 @@ assert.equal(s.gsStats.fish.length, 1);
 assert.equal(s.gsStats.fish[0].item, 'Fish3');
 assert.equal(s.gsStats.fish[0].count, 4);
 
-// Bystander-only payload (no self entry with stats/deaths) -> null.
-const noSelf = parseSelfSnapshot({ reporter: 'Ghost', players: [{ name: 'Other', weapons: [] }] });
+// A payload with no cumulative entry at all (no stats, no deaths, no weapons) -> null.
+const noSelf = parseSelfSnapshot({ reporter: 'Ghost', players: [{ name: 'Other' }] });
 assert.equal(noSelf, null, 'no authoritative self -> null');
+// A bystander entry DOES parse now (VALHEIM 1.0: weapons[] alone marks a real
+// entry), but it is flagged as not-own so the baseline layer still defers it —
+// same outcome, nothing written.
+const bystander = parseSelfSnapshot({ reporter: 'Ghost', players: [{ name: 'Other', weapons: [] }] });
+assert.ok(bystander, 'a weapons-only entry is parseable');
+assert.equal(bystander.provenance.ownEntry, false, 'but it is not the reporter own entry');
 
 // Missing reporter -> null.
 assert.equal(parseSelfSnapshot({ players: [] }), null);
@@ -331,6 +337,70 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
   assert.deepEqual(partial.raw, { vh_DistanceWalk: 4001 }, 'rounded, and junk modes dropped');
   assert.equal(partial.walk, 4001);
   assert.equal(partial.distanceTraveled, 0, 'no total reported — 0 here, and holed by the baseline layer');
+}
+
+// ── VALHEIM 1.0 STOPGAP: kills derived from weapons[] ────────────────────────
+//
+// The 1.0 shape, verified live on launch night (2026-09-09): the profile half of
+// the payload is gone — no `stats` map, creatureKills:[], kills/deaths absent or
+// pinned at 0 — while weapons[]/skills[]/boss/fish still arrive.
+{
+  const oneOh = (over = {}) => ({
+    schemaVersion: 1,
+    game: 'valheim',
+    source: 'client',
+    reporter: 'Kaetiloy',
+    world: 'Eilif',
+    players: [
+      {
+        name: 'Kaetiloy',
+        platformId: 'Steam_76561198000000001',
+        creatureKills: [],
+        weapons: [
+          { weapon: 'Axes', damageDealt: 3100, kills: 27, hardestHit: 92, biggestSwing: 110 },
+          { weapon: 'Spears', damageDealt: 1400, kills: 15, hardestHit: 61, biggestSwing: 70 },
+        ],
+        skills: [{ skill: 'Axes', level: 12 }],
+        boss: [],
+        ...over,
+      },
+    ],
+  });
+
+  const p10 = parseSelfSnapshot(oneOh());
+  assert.ok(p10, 'a 1.0-shaped payload still parses (it used to be dropped whole)');
+  assert.equal(p10.kills, 42, 'kills derived = 27 + 15');
+  assert.equal(p10.deaths, 0, 'no deaths reading — the ingest route fills the column from events');
+  assert.equal(p10.provenance.killsSource, 'weapons');
+  assert.equal(p10.provenance.hasKills, false, 'the client sent no kills counter');
+  assert.equal(p10.provenance.hasDeaths, false);
+  assert.equal(p10.provenance.hasStats, false);
+  assert.equal(p10.provenance.ownEntry, true, 'weapons[] is enough to recognize the own entry');
+  assert.equal(p10.provenance.hasWeapons, true);
+  assert.equal(p10.provenance.hasCreatureKills, true, 'creatureKills:[] is present-and-empty, a real zero');
+  assert.equal(p10.damageDealt, 4500);
+
+  // A counter of 0 sitting next to a weapon breakdown that lists kills is a
+  // BROKEN reading, not a zero — this is the shape the live 1.0 client sends.
+  const zeroed = parseSelfSnapshot(oneOh({ kills: 0, deaths: 0 }));
+  assert.equal(zeroed.kills, 42, '0 kills alongside 42 weapon kills is derived, not believed');
+  assert.equal(zeroed.provenance.killsSource, 'weapons');
+  assert.equal(zeroed.provenance.hasKills, true, 'the raw presence flag still reports what arrived');
+
+  // A GENUINE zero (no weapon kills either) is a real zero-point and is kept.
+  const rookie = parseSelfSnapshot(oneOh({ kills: 0, weapons: [] }));
+  assert.equal(rookie.kills, 0);
+  assert.equal(rookie.provenance.killsSource, 'client', 'a brand-new viking still baselines at zero');
+
+  // A payload WITH a usable kills counter keeps the client number — never summed.
+  const real = parseSelfSnapshot(oneOh({ kills: 500 }));
+  assert.equal(real.kills, 500, 'the client counter wins whenever it is usable');
+  assert.equal(real.provenance.killsSource, 'client');
+
+  // No counter and no weapons[] = no reading at all.
+  const nothing = parseSelfSnapshot(oneOh({ deaths: 3, weapons: undefined }));
+  assert.equal(nothing.provenance.killsSource, 'none');
+  assert.equal(nothing.kills, 0);
 }
 
 console.log('OK — all parser assertions passed');

@@ -140,13 +140,17 @@ const g = (
   closedKeys = false,
 ): BaselineGroup => ({ path: `${section}.${key}`, section, key, carries, closedKeys });
 
-/** Always true: kills/deaths are the capture gate's own precondition. */
-const ALWAYS = () => true;
-
 export const BASELINE_GROUPS: readonly BaselineGroup[] = [
   // scalar cumulative counters mirrored into player_stats columns
-  g('counters', 'kills', ALWAYS),
-  g('counters', 'deaths', ALWAYS),
+  // kills: carried whenever the parse found ANY usable source — the client's own
+  // counter, or the weapons[] sum (VALHEIM 1.0 STOPGAP). Neither = a hole, not a
+  // zero: baselining kills at 0 because the payload could not speak for it is
+  // exactly the Chærlie incident.
+  g('counters', 'kills', (p) => p.killsSource !== 'none'),
+  // deaths: 1.0 payloads can carry no deaths reading at all. A hole credits
+  // nothing until it first appears; the ingest route fills the COLUMN from our
+  // own `events` death rows meanwhile (GREATEST, so it can only raise it).
+  g('counters', 'deaths', (p) => p.hasDeaths),
   g('counters', 'bossKills', (p) => p.hasBossKills),
   g('counters', 'resourcesHarvested', (p) => p.hasPickups),
   g('counters', 'itemsCrafted', (p) => p.craftsSource !== 'none'),
@@ -243,6 +247,20 @@ export interface GsBaseline {
    * this zero-point, so itemsCrafted credits zero until the source matches again.
    */
   craftsSource?: 'vh_Crafts' | 'crafts';
+  /**
+   * Which parse source `counters.kills` was read from at capture — the client's
+   * own kills counter, or the summed weapons[] breakdown (the VALHEIM 1.0
+   * STOPGAP in lib/gs-client.ts). Same "like against like" contract as
+   * craftsSource, with one difference: a source CHANGE re-takes the kills
+   * zero-point from the snapshot that changed it (credits 0 that cycle, full
+   * growth after) rather than freezing kills, because kills is a headline board
+   * and the source is expected to flip back the day the mod ships a 1.0 build.
+   *
+   * Absent = a zero-point captured before this field existed. It is stamped (not
+   * re-taken) on the next snapshot, so an old zero-point keeps crediting exactly
+   * what it credited before while gaining the protection.
+   */
+  killsSource?: 'client' | 'weapons';
   /**
    * Consecutive-low streak toward a re-baseline (rule 2). Persisted here rather
    * than in a column so the whole reset decision lives in one jsonb value.
@@ -450,13 +468,21 @@ export interface CaptureQualification {
  *
  * Anything less is deferred — it credits nothing and writes nothing, and the
  * next ~120s snapshot heals it.
+ *
+ * ⚠️ DEATHS IS NO LONGER PART OF THE GATE (VALHEIM 1.0 STOPGAP, 2026-09-09).
+ * 1.0 profiles reach us with no deaths counter at all, and gating on it deferred
+ * EVERY payload — which writes nothing, i.e. it mutes the whole server rather
+ * than missing one field. Deaths is a HOLE now (credits nothing until it first
+ * appears) and /api/gs-ingest fills the COLUMN from our own `events` death rows
+ * meanwhile. Kills stays in the gate because it can be DERIVED (client counter
+ * or weapons[] sum, lib/gs-client): 'none' means the payload carried neither,
+ * which is not a report we can account for at all.
  */
 export function captureQualification(s: ParsedSelf): CaptureQualification {
   const p = s.provenance;
   const missing: string[] = [];
   if (!p.ownEntry) missing.push(`players[] entry for "${s.reporter}" (only a bystander entry was present)`);
-  if (!p.hasKills) missing.push('kills');
-  if (!p.hasDeaths) missing.push('deaths');
+  if (p.killsSource === 'none') missing.push('kills (no kills counter and no weapons[] to derive one from)');
   return { ok: missing.length === 0, missing };
 }
 
@@ -485,6 +511,9 @@ export function captureBaseline(s: ParsedSelf, dist: ParsedDistances | null, at:
     // (rule 4). 'none' means neither was carried — itemsCrafted is a hole, and
     // craftsSource is then meaningless, so it is dropped below with the group.
     craftsSource: s.provenance.craftsSource === 'crafts' ? 'crafts' : 'vh_Crafts',
+    // Which side of the client-counter / weapons-sum fork this zero-point was
+    // read from (VALHEIM 1.0 STOPGAP). 'none' is dropped below with the group.
+    killsSource: s.provenance.killsSource === 'weapons' ? 'weapons' : 'client',
     counters: {
       kills: num(s.kills),
       deaths: num(s.deaths),
@@ -531,6 +560,7 @@ export function captureBaseline(s: ParsedSelf, dist: ParsedDistances | null, at:
   }
   if (holes.length > 0) full.holes = holes;
   if (s.provenance.craftsSource === 'none') delete full.craftsSource;
+  if (s.provenance.killsSource === 'none') delete full.killsSource;
   return full;
 }
 
@@ -599,6 +629,7 @@ export function readBaseline(raw: unknown, fallbackAt: string = new Date().toISO
     recordMaps: readMapSection('recordMaps', o.recordMaps),
   };
   if (o.craftsSource === 'vh_Crafts' || o.craftsSource === 'crafts') baseline.craftsSource = o.craftsSource;
+  if (o.killsSource === 'client' || o.killsSource === 'weapons') baseline.killsSource = o.killsSource;
 
   // Holes: only recognized group paths survive, so a hand-edited or future
   // `holes` entry can never freeze a group that this build doesn't know about.
@@ -744,8 +775,14 @@ function reconcileBaseline(base: GsBaseline, fresh: GsBaseline, carried: (path: 
       if (fresh.craftsSource) next.craftsSource = fresh.craftsSource;
       else delete next.craftsSource;
     }
+    // Same for kills: a fill brings the source across with the number.
+    if (grp.path === 'counters.kills') {
+      if (fresh.killsSource) next.killsSource = fresh.killsSource;
+      else delete next.killsSource;
+    }
   };
   const punch = (grp: BaselineGroup) => {
+    if (grp.path === 'counters.kills') delete next.killsSource;
     delete sectionOf(grp.section)[grp.key];
     if (!holes.has(grp.path)) holed.push(grp.path);
     holes.add(grp.path);
@@ -1087,7 +1124,16 @@ export function applyBaseline(
       // ── 3. healthy career: clear any streak, fill holes, repair damage ─────
       const { baseline, filled, repaired, holed } = reconcileBaseline(existing, fresh, carried);
       delete baseline.pendingReset; // the career is back — the streak is void
+      // Like against like for kills (VALHEIM 1.0 STOPGAP): stamp a pre-field
+      // zero-point, or re-take it when the source flipped. Runs BEFORE base is
+      // read so this cycle already differences against the right zero-point.
+      const killsNote = reconcileKillsSource(baseline, fresh, s);
       base = baseline;
+      if (killsNote) {
+        nextBaseline = baseline;
+        change = 'repair';
+        reason = killsNote;
+      }
       if (filled.length > 0 || repaired.length > 0 || holed.length > 0) {
         nextBaseline = baseline;
         change = 'repair';
@@ -1101,6 +1147,7 @@ export function applyBaseline(
             holed.length > 0
               ? `no reading for ${holed.join(', ')} on either side — recorded as holes rather than baselined at zero`
               : null,
+            killsNote,
           ]
             .filter(Boolean)
             .join('; ') + (existing.pendingReset ? ' (and cleared a pending profile-reset streak)' : '');
@@ -1145,6 +1192,58 @@ function craftsComparable(s: ParsedSelf, base: GsBaseline): boolean {
       `comparable, so itemsCrafted credits 0 this cycle rather than a fabricated delta.`,
   );
   return false;
+}
+
+/**
+ * Keep the kills zero-point comparable with the snapshot being differenced
+ * against it (VALHEIM 1.0 STOPGAP — see lib/gs-client parseSelfSnapshot).
+ *
+ * `kills` now has two possible sources: the client's own lifetime counter and
+ * the summed weapons[] breakdown. They are NOT the same quantity — the counter
+ * is lifetime-across-every-world, the weapons file is per world per character —
+ * so differencing one against a zero-point taken from the other invents a delta
+ * out of nothing. That is the Chærlie incident in a new costume: the day
+ * GsValheimStatsClient ships a 1.0 build, a 1,526-kill lifetime counter would
+ * land against a 27-kill weapons zero-point and credit 1,499 foreign kills.
+ *
+ * Two cases, both mutating the (already-copied) reconciled baseline in place:
+ *   • no stored source — a zero-point captured before this field existed. STAMP
+ *     it and leave the number alone: it keeps crediting exactly what it credited
+ *     before, and gains the protection from here on. (Right for launch night:
+ *     the world was wiped today, so every stored zero-point is a fresh ~0 and
+ *     the derived kills flow in full.)
+ *   • source CHANGED — RE-TAKE the zero-point from this snapshot. This post
+ *     credits 0 kills, every kill after it is credited in full, and the column
+ *     keeps what it already earned (GREATEST). Unlike crafts, which freezes on a
+ *     source change, kills is a headline board and the flip back is EXPECTED.
+ */
+function reconcileKillsSource(base: GsBaseline, fresh: GsBaseline, s: ParsedSelf): string | null {
+  const src = s.provenance.killsSource;
+  // No usable reading, or kills is a hole: the hole-fill path stamps the source
+  // when it fills (reconcileBaseline), so there is nothing to do here.
+  if (src === 'none') return null;
+  if ((base.holes ?? []).includes('counters.kills')) return null;
+  if (!base.killsSource) {
+    base.killsSource = src === 'weapons' ? 'weapons' : 'client';
+    return (
+      `stamped the kills source (${src}) onto a zero-point captured before that was recorded — ` +
+      `the zero-point number itself is unchanged, so nothing already earned moves`
+    );
+  }
+  if (base.killsSource === src) return null;
+  const from = base.killsSource;
+  base.killsSource = src === 'weapons' ? 'weapons' : 'client';
+  base.counters.kills = num(fresh.counters.kills);
+  console.warn(
+    `[gs-baseline] kills source changed for "${s.reporter}": zero-point was taken from ${from}, this ` +
+      `snapshot parses ${src}. The two are not comparable, so the kills zero-point was re-taken from ` +
+      `this snapshot (${base.counters.kills}) rather than crediting a fabricated delta.`,
+  );
+  return (
+    `kills source changed ${from} → ${src} (the two are not comparable), so the kills zero-point was ` +
+    `re-taken from this snapshot (${base.counters.kills}) — this post credits no kills, growth from ` +
+    `here is credited in full, and everything already earned is kept`
+  );
 }
 
 /**

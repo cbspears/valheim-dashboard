@@ -432,6 +432,50 @@ async function callIngestDeath(
   return { ok: false, missing: false, message: `unexpected ingest_death result: ${JSON.stringify(data)}` };
 }
 
+/**
+ * How many deaths THIS SERVER has actually recorded for one character.
+ *
+ * ── VALHEIM 1.0 STOPGAP (2026-09-09, launch night) ───────────────────────────
+ * Valheim 1.0 changed the player-profile stat storage and GsValheimStatsClient
+ * 0.2.12 can no longer read it, so its payloads carry no usable `deaths` counter
+ * (absent, or pinned at 0) — every "Deaths" board and every death-keyed deed
+ * read zero. Our OWN death pipeline is unaffected: three producers write one
+ * `events` row per death (see the precedence table at the top of this file), so
+ * counting those rows is a truthful, this-world death count.
+ *
+ * WHY A COUNT AND NOT AN INCREMENT ON INSERT. Incrementing player_stats.deaths
+ * from the write path would have to be exactly right about a write path that is
+ * deliberately not simple: `ingest_death` may INSERT, UPGRADE an existing row,
+ * DROP a duplicate or refuse a report at the per-character ceiling; the legacy
+ * fallback path does the same dedupe in JS; and deleteCauselessPollerTwins
+ * REMOVES rows after the fact. Every one of those is a chance to over- or
+ * under-count a number that can never be walked back (GREATEST only rises).
+ * A count is idempotent and SELF-HEALING: whatever the rows say now is what the
+ * column converges to on the next payload, at a cost of one indexed count query
+ * per player per ~5 minutes.
+ *
+ * Case-insensitive on the name for the same reason the rest of the ingest is
+ * (lib/gs-client identityKey): a case-skewed reporter must not silently count 0.
+ * Returns null when the query fails — the caller then leaves the column alone.
+ *
+ * COMES OUT when GsValheimStatsClient ships a 1.0 build that reads the new
+ * profile storage.
+ */
+export async function countDeathEvents(client: SupabaseClient, name: string): Promise<number | null> {
+  const escaped = name.trim().replace(/[%_]/g, '\\$&');
+  if (!escaped) return null;
+  const { count, error } = await client
+    .from('events')
+    .select('id', { count: 'exact', head: true })
+    .eq('type', 'death')
+    .ilike('character_name', escaped);
+  if (error) {
+    console.error(`[deaths] death-event count for "${name}" failed — ${error.message}`);
+    return null;
+  }
+  return typeof count === 'number' ? count : null;
+}
+
 /** Resolve an EXISTING players row id (never auto-create one from a client payload). */
 async function findPlayerId(client: SupabaseClient, name: string): Promise<string | null> {
   const { data, error } = await client.from('players').select('id').eq('character_name', name).limit(1);

@@ -785,15 +785,37 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
     };
   };
 
-  // Only these two defer.
-  assert.match(drop((s) => delete s.kills).qual.missing.join(), /kills/);
-  assert.match(drop((s) => delete s.deaths).qual.missing.join(), /deaths/);
+  // Only a snapshot with NO usable kills reading at all defers (VALHEIM 1.0
+  // STOPGAP): with weapons[] present the parser derives kills from it, so the
+  // payload still qualifies. Deaths is a hole now, not a defer — see below.
+  assert.match(
+    drop((s) => {
+      delete s.kills;
+      delete s.weapons;
+    }).qual.missing.join(),
+    /kills/,
+  );
+  assert.equal(drop((s) => delete s.kills).qual.ok, true, 'kills derived from weapons[] still qualifies');
+  assert.equal(drop((s) => delete s.deaths).qual.ok, true, 'an absent deaths counter is a hole, not a defer');
   // Junk is not presence: a null/string counter is as absent as a missing key.
-  assert.match(drop((s) => (s.kills = null)).qual.missing.join(), /kills/);
-  assert.equal(drop((s) => (s.kills = null)).result.change, 'defer');
+  assert.match(
+    drop((s) => {
+      s.kills = null;
+      delete s.weapons;
+    }).qual.missing.join(),
+    /kills/,
+  );
+  assert.equal(
+    drop((s) => {
+      s.kills = null;
+      delete s.weapons;
+    }).result.change,
+    'defer',
+  );
 
   // Everything else CAPTURES, with the absent group named as a hole.
   const holeCases = [
+    [(s) => delete s.deaths, 'counters.deaths'],
     [(s) => delete s.stats.vh_Builds, 'counters.structuresBuilt'],
     [(s) => delete s.stats.vh_Crafts, 'counters.itemsCrafted'],
     [(s) => delete s.pickups, 'counters.resourcesHarvested'],
@@ -1740,6 +1762,76 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
     applyBaseline(s, parseSelfDistances(bystander), null, '2026-08-23T12:00:00.000Z').change,
     'defer',
   );
+}
+
+// ── VALHEIM 1.0 STOPGAP: kills derived from weapons[] ────────────────────────
+//
+// The 1.0 client sends no usable kills counter, so the parser derives one from
+// the weapon breakdown. Two things must hold: the derived value is baselined the
+// SAME way the per-weapon kills are (so the boards agree with each other), and
+// the day the real counter comes back its lifetime total is never differenced
+// against a weapons-derived zero-point.
+{
+  /** The 1.0 shape: no `stats`, no kills/deaths, weapons[] and skills[] only. */
+  const oneOh = (weapons, over = {}) => {
+    const body = payload({ reporter: 'Kaetiloy', weapons });
+    const self = body.players[0];
+    delete self.kills;
+    delete self.deaths;
+    delete self.stats;
+    self.creatureKills = [];
+    Object.assign(self, over);
+    return body;
+  };
+  const axes = (kills, dmg) => [{ weapon: 'Axes', damageDealt: dmg, kills, hardestHit: 90, biggestSwing: 90 }];
+
+  // A character first seen 2 hours into the world: 27 kills already on the axe.
+  const first = ingest(oneOh(axes(27, 3100)), null);
+  assert.equal(first.change, 'capture', 'a 1.0 payload captures instead of deferring forever');
+  assert.equal(first.nextBaseline.counters.kills, 27, 'the derived value IS the zero-point');
+  assert.equal(first.nextBaseline.killsSource, 'weapons', 'and the source is recorded with it');
+  assert.equal(first.effective.kills, 0, 'so this post credits nothing, like every other counter');
+  assert.ok((first.nextBaseline.holes ?? []).includes('counters.deaths'), 'deaths is a HOLE, never baselined at 0');
+
+  // Ten kills later the delta flows — and matches the per-weapon board exactly.
+  const later = ingest(oneOh(axes(37, 4200)), first.nextBaseline);
+  assert.equal(later.effective.kills, 10);
+  assert.equal(later.effective.gsStats.weapons[0].kills, 10, 'kills == sum of the effective weapon kills');
+  assert.equal(later.effective.deaths, 0, 'a holed deaths credits nothing — the route fills it from events');
+
+  // TONIGHT: a zero-point captured before killsSource existed (client kills 0,
+  // taken minutes after a world wipe) is STAMPED, not re-taken — so the derived
+  // kills flow in full rather than everyone reading zero again.
+  const preField = { ...first.nextBaseline, counters: { ...first.nextBaseline.counters, kills: 0 } };
+  delete preField.killsSource;
+  const stamped = ingest(oneOh(axes(27, 3100)), preField);
+  assert.equal(stamped.effective.kills, 27, 'the zero-point number is untouched, so nothing already earned moves');
+  assert.equal(stamped.nextBaseline.killsSource, 'weapons', 'and it gains the source protection from here on');
+
+  // THE FLIP BACK: the mod ships a 1.0 build and a LIFETIME counter returns.
+  // Differencing 1,526 against a 37-kill weapons zero-point would credit 1,489
+  // foreign kills (the Chærlie incident in a new costume), so the zero-point is
+  // re-taken instead: this post credits nothing, growth after it is credited.
+  const earned = mergeRow(null, later.effective, { reporter: 'Kaetiloy' });
+  assert.equal(earned.kills, 10, 'the column holds what the stopgap earned');
+  const veteranShape = payload({ reporter: 'Kaetiloy', kills: 1526, deaths: 163, weapons: axes(37, 4200) });
+  // (a healthy cycle writes no new baseline, so the stored one is still first's)
+  assert.equal(later.nextBaseline, null, 'a clean cycle leaves the stored zero-point alone');
+  const flipped = ingest(veteranShape, first.nextBaseline);
+  assert.equal(flipped.effective.kills, 0, 'the lifetime counter credits NOTHING on the cycle it arrives');
+  assert.equal(flipped.nextBaseline.counters.kills, 1526, 'the kills zero-point was re-taken from it');
+  assert.equal(flipped.nextBaseline.killsSource, 'client');
+  assert.match(flipped.reason, /kills source changed/);
+  // GREATEST: the merge keeps the 10 already earned — nothing is double-counted.
+  const afterFlip = mergeRow(earned, flipped.effective, { reporter: 'Kaetiloy' });
+  assert.equal(afterFlip.kills, 10, 'already-earned kills survive the source flip untouched');
+  // …and growth past the new zero-point is credited in full.
+  const grew = ingest(
+    payload({ reporter: 'Kaetiloy', kills: 1530, deaths: 163, weapons: axes(41, 4600) }),
+    flipped.nextBaseline,
+  );
+  assert.equal(grew.effective.kills, 4);
+  assert.equal(mergeRow(afterFlip, grew.effective, { reporter: 'Kaetiloy' }).kills, 10, 'GREATEST, never a sum');
 }
 
 console.log('OK — all world-baseline assertions passed');

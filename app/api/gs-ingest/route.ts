@@ -32,7 +32,7 @@ import {
 import { foldFightStats } from '@/lib/fight-stats-cas';
 import { ALTAR_PIN_KIND, altarPinFor, altarPinName } from '@/lib/altar';
 import { evaluateAndRecord } from '@/lib/milestones';
-import { ingestDeathEvents, ingestEilifDeath } from '@/lib/deaths';
+import { ingestDeathEvents, ingestEilifDeath, countDeathEvents } from '@/lib/deaths';
 import { clampEventTime } from '@/lib/event-time';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import { safeEqual } from '@/lib/ops/auth';
@@ -582,6 +582,48 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
     now,
     nextBaseline,
   });
+
+  // ── VALHEIM 1.0 STOPGAP (2026-09-09) ──────────────────────────────────────
+  //
+  // CAUSE: Valheim 1.0 changed the player-profile stat storage and
+  // GsValheimStatsClient 0.2.12 can no longer read it. Its payloads still carry
+  // weapons[] / skills[] / boss damage / fish (its own per-world files) but the
+  // profile half arrives empty — no `stats` map, creatureKills:[], and
+  // kills/deaths absent or pinned at 0. Untreated, every viking reads 0 foes
+  // slain and 0 deaths and every kill/death deed stays dark.
+  //
+  // Two fallbacks, logged one line per payload so the Vercel log says plainly
+  // that the stopgap is live:
+  //   • kills  — derived in the parser from sum(weapons[].kills), with the
+  //     source recorded so the baseline layer never differences it against a
+  //     client-counter zero-point (lib/gs-client / lib/gs-baseline).
+  //   • deaths — counted from our OWN `events` death rows, which three
+  //     independent producers keep writing correctly (lib/deaths.ts).
+  // GREATEST keeps both safe: the column only ever rises, so when the mod ships
+  // a 1.0 build and real numbers come back, nothing is double-counted — the
+  // re-taken zero-point simply starts crediting growth again from that day.
+  //
+  // BOTH COME OUT when GsValheimStatsClient ships a 1.0 build.
+  if (s.provenance.killsSource === 'weapons') {
+    console.info(
+      `[gs] kills derived from weapons (${s.kills}) for "${s.reporter}" — the 1.0 client sent no usable ` +
+        `kills counter (VALHEIM 1.0 STOPGAP).`,
+    );
+  }
+  // Trigger on the VALUE, not just on presence: the live 1.0 payloads carry
+  // deaths:0, which is indistinguishable from a real "has not died yet" — and
+  // the fallback is GREATEST-guarded, so taking the higher of the two can only
+  // ever correct an undercount, never invent a death.
+  if (!(s.deaths > 0)) {
+    const counted = await countDeathEvents(client, s.reporter);
+    if (counted !== null && counted > num(full.deaths)) {
+      console.info(
+        `[gs] deaths taken from events (${counted}) for "${s.reporter}" — the 1.0 client sent no usable ` +
+          `deaths counter (VALHEIM 1.0 STOPGAP).`,
+      );
+      full.deaths = counted;
+    }
+  }
 
   // Stat poison (DETECT, DON'T BLOCK): an implausible one-cycle leap is the
   // signature of a spoofed or poisoned snapshot. The merge still happens; the
