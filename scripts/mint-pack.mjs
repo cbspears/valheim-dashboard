@@ -4,7 +4,7 @@
 //
 //   Node 20:  export NVM_DIR=~/.config/nvm; . $NVM_DIR/nvm.sh; nvm use 20
 //
-//   Preview:  node scripts/mint-pack.mjs --world Eilif --companion-client 0.4.0 \
+//   Preview:  node scripts/mint-pack.mjs --world Eilif --companion-client 0.4.1 \
 //               --paths 1.7.1 --vplus 10.0.2 --bepinex 5.4.2350 \
 //               --no-plant --no-azu --fallback off --cap 24 --dry-run
 //   Test:     same command without --dry-run
