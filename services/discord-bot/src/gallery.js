@@ -34,7 +34,11 @@ const TRASH_EMOJI = '🗑️';
 // single huge "photo" (the bot buffers the whole file in memory to decode it).
 // This is the *download* guard: it applies to the original attachment, before
 // the resize below shrinks what actually reaches Supabase.
-const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024; // 12 MB
+// 32 MB since launch night 2026-09-09: a Valheim 1.0 screenshot at 4K is a
+// 15 MB PNG and the first two the crew posted were skipped at 12 MB. The decode
+// ceiling below (40 MP) and the 1600 px WebP resize are the real guards; this is
+// only the download budget. Discord's own attachment limit is 25 MB for most.
+const MAX_ATTACHMENT_BYTES = Number(process.env.GALLERY_MAX_ATTACHMENT_BYTES || 32 * 1024 * 1024);
 // Generous for 12 MB over Discord's CDN, short enough that a stalled socket
 // cannot pin a buffer for the rest of the evening.
 const DOWNLOAD_TIMEOUT_MS = 60_000;
