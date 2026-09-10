@@ -2,6 +2,8 @@ import { ImageResponse } from 'next/og';
 import {
   getPlayersWithStats,
   getEventsSince,
+  getSessionsSince,
+  durablePlaytimeMinutesByCharacter,
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
 import { epithetsFor } from '@/lib/epithets';
@@ -14,9 +16,10 @@ export const contentType = 'image/png';
 
 export default async function Image({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const [roster, deaths] = await Promise.all([
+  const [roster, deaths, sessions] = await Promise.all([
     getPlayersWithStats(),
     getEventsSince(70, ['death']),
+    getSessionsSince(70),
   ]);
   const viking = roster.find((p) => slugify(p.character_name) === slug);
 
@@ -33,12 +36,20 @@ export default async function Image({ params }: { params: Promise<{ slug: string
     arr.push(cause);
     causesByName.set(nm, arr);
   }
+  // Rank titles on the DURABLE hours value (closed-session minutes), exactly as
+  // the /viking page, /players and /api/titles do, so the OG card's epithet
+  // matches the site. (The raw roster column reads 0 for real vikings.)
+  const durablePlaytimeByName = durablePlaytimeMinutesByCharacter(sessions);
+  const epithetRoster = roster.map((p) => ({
+    ...p,
+    total_playtime_minutes: durablePlaytimeByName.get(p.character_name) ?? 0,
+  }));
   const epithet = viking
-    ? epithetsFor(roster, { causesByName }).get(name)?.title ?? 'the Unknown'
+    ? epithetsFor(epithetRoster, { causesByName }).get(name)?.title ?? 'the Unknown'
     : 'the Unknown';
 
   const pairs = [
-    ['Hours', formatPlaytime(viking?.total_playtime_minutes ?? 0)],
+    ['Hours', formatPlaytime(durablePlaytimeByName.get(name) ?? viking?.total_playtime_minutes ?? 0)],
     ['Deaths', formatNumber(viking?.stats?.deaths ?? 0)],
     ['Kills', formatNumber(viking?.stats?.kills ?? 0)],
   ];

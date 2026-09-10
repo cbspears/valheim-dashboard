@@ -34,6 +34,7 @@ import {
   getPins,
   getOffices,
   playtimeMinutesByCharacter,
+  durablePlaytimeMinutesByCharacter,
 } from '@/lib/data';
 import { slugify } from '@/lib/slug';
 import { epithetsFor, generatedBioLine } from '@/lib/epithets';
@@ -149,7 +150,16 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
   const first = name.trim().split(/\s+/)[0] || name;
   const stats = viking.stats;
 
-  const epithet = epithetsFor(roster, { causesByName: causesByNameFrom(deaths) }).get(name)!;
+  // Titles rank on the DURABLE hours value (closed-session minutes), the same as
+  // /players and GET /api/titles, so this page's epithet matches the one announced
+  // and shown everywhere else — and "the Ever-Present" doesn't churn with the live
+  // counter. The displayed "Hours" stat below still uses the live playtime.
+  const durablePlaytimeByName = durablePlaytimeMinutesByCharacter(sessions);
+  const epithetRoster = roster.map((p) => ({
+    ...p,
+    total_playtime_minutes: durablePlaytimeByName.get(p.character_name) ?? 0,
+  }));
+  const epithet = epithetsFor(epithetRoster, { causesByName: causesByNameFrom(deaths) }).get(name)!;
 
   // An OFFICE, shown beside the epithet and never folded into it: lib/epithets
   // assigns one unique title per viking from what they did, and a seat in the

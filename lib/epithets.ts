@@ -34,8 +34,13 @@
 //          stat (kills / damage / boss damage) carries an extra nudge, so the #1
 //          killer reliably wears a slayer's title even when they also top a
 //          non-combat board — unless that other board is dramatically more theirs.
-//        • "the Ever-Present" (hours) stays a pure superlative: only the single
-//          hours-leader may claim it.
+//        • "the Ever-Present" (hours) is a superlative — only the hours-leader may
+//          claim it — but a RANK-AWARE one: it is claimed anew only by a decisive
+//          leader (clearing the runner-up by LEADER_MARGIN) and, once held, kept by
+//          its incumbent through any near-tie, so a one-minute swing never flips it.
+//          It also rides a DURABLE hours value (closed-session minutes), not the
+//          live-elapsed counter that jumps while a viking is online, so the crown
+//          doesn't churn as people come and go. (See lib/data.durablePlaytime…)
 //      These per-(viking,dimension) scores become edges; a GREEDY pass assigns the
 //      highest-scoring edges first, and a title/viking already claimed is skipped —
 //      that is what guarantees uniqueness AND lets each dimension go to its truest
@@ -312,18 +317,44 @@ function scoreDim(
   const v = dim.value(player);
   if (v == null || !Number.isFinite(v) || v <= 0) return null;
   // The absolute floor comes first: a crown has to be earned in raw terms before
-  // any relative gate gets a say, so a fresh world crowns nobody.
+  // any relative gate gets a say, so a fresh world crowns nobody. The floor is
+  // never waived — not even for an incumbent (an heir under the floor is no heir
+  // in the fallback pass either).
   if (v < FLOORS[dim.source]) return null;
   if (s.median <= 0 || s.std <= 0) return null;
 
   const lead = v / s.median;
-  if (lead < MIN_LEAD) return null;
-
   const z = (v - s.mean) / s.std;
-  if (z < MIN_Z) return null;
 
-  // "the Ever-Present" belongs to the one who is there more than anyone.
-  if (dim.superlative && v < s.max) return null;
+  // INCUMBENT HOLD — the keystone against churn. A viking who already wears THIS
+  // dimension's title keeps a valid edge through a near-tie: as long as no rival
+  // exceeds them by LEADER_MARGIN (`s.max <= v * LEADER_MARGIN` — trivially true
+  // when they are themselves the leader), the distinctiveness gates below are
+  // waived for them, so the title never evaporates into a placeholder on a
+  // hair's-breadth swing. This is the SAME stickiness `fallbackWinner` applies in
+  // the crown-spread pass, lifted up to the greedy pass — without it, hysteresis
+  // was only a score BONUS and could not fire at all once a gate nulled the edge
+  // (launch night: Charleif lost "Bane of Beasts" to a placeholder for a pass when
+  // a rival's stopgap-derived kills nudged the median and knocked his lead under
+  // MIN_LEAD; and Rosir's "the Ever-Present" flipped whenever another online
+  // viking's live hours edged past his for a render).
+  const isIncumbentDim = incumbentSource != null && dim.source === incumbentSource;
+  const heldThroughTie = isIncumbentDim && s.max <= v * LEADER_MARGIN;
+
+  if (dim.superlative) {
+    // A superlative ("the Ever-Present") now behaves like a crown: it is claimed
+    // anew only by a DECISIVE leader — sole max, clearing the runner-up by
+    // LEADER_MARGIN — and otherwise only held by its incumbent through a near-tie.
+    // A small lead no longer flips it, in either direction.
+    const decisiveLeader =
+      v >= s.max &&
+      s.leaderCount === 1 &&
+      (s.secondMax <= 0 || v >= s.secondMax * LEADER_MARGIN);
+    if (!decisiveLeader && !heldThroughTie) return null;
+  } else if (!heldThroughTie) {
+    if (lead < MIN_LEAD) return null;
+    if (z < MIN_Z) return null;
+  }
 
   // A crown: sole roster leader, clearing the runner-up by a real margin
   // (or the only viking doing it at all).
@@ -333,7 +364,7 @@ function scoreDim(
   let score = z;
   if (crown) score += LEADER_BONUS;
   if (crown && dim.combat) score += COMBAT_BONUS;
-  if (incumbentSource && dim.source === incumbentSource) score += HYSTERESIS_BONUS;
+  if (isIncumbentDim) score += HYSTERESIS_BONUS;
   return score;
 }
 

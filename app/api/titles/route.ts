@@ -2,7 +2,7 @@ import {
   getPlayersWithStats,
   getSessionsSince,
   getEventsSince,
-  playtimeMinutesByCharacter,
+  durablePlaytimeMinutesByCharacter,
 } from '@/lib/data';
 import { epithetsFor } from '@/lib/epithets';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
@@ -65,15 +65,15 @@ export async function GET(request: Request) {
     getEventsSince(70, ['death']),
   ]);
 
-  // The online set comes out of the roster we already fetched, not a second
-  // `is_online = true` read. Route handlers get NONE of the per-request
-  // memoization a page render gets — measured on the scratch build, this route
-  // was issuing the identical `players` query twice — and deriving it here also
-  // means the roster and the online set can never be two different snapshots.
-  const onlineNames = new Set(
-    withStats.filter((p) => p.is_online).map((p) => p.character_name),
-  );
-  const playtimeByName = playtimeMinutesByCharacter(sessions, onlineNames);
+  // Playtime for the "hours" superlative is the DURABLE value (closed-session
+  // minutes) — never the live-elapsed counter that jumps while a viking is online
+  // and resets who leads as people come and go. That jitter was the engine half of
+  // the title churn: "the Ever-Present" was earned, demoted to a placeholder, and
+  // re-earned every pass as the online set changed. Because the durable value is
+  // online-independent, this endpoint and the /players page now rank the crown on
+  // the IDENTICAL number regardless of who is online when each is computed, so the
+  // displayed title and the announced title can't disagree. (lib/data.ts)
+  const playtimeByName = durablePlaytimeMinutesByCharacter(sessions);
   const roster: PlayerWithStats[] = withStats.map((p) => ({
     ...p,
     total_playtime_minutes:

@@ -518,4 +518,75 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
   ok(!/[{}]|undefined/.test(a), `and it renders clean, got: ${a}`);
 }
 
+// ── 22. The hours superlative is RANK-AWARE: a near-tie does NOT flip it ──────
+// Launch night churn: "the Ever-Present" rode a volatile hours value and flipped
+// between an earned crown and a placeholder every pass. The superlative now holds
+// for its incumbent through any near-tie (a rival within LEADER_MARGIN), and a
+// fresh claim needs a decisive lead — so a one-minute swing never moves it.
+{
+  // All hours past the 600-min floor; Borg edges Ari by 10% (< the 15% margin).
+  const roster = [
+    mk('Ari', { hours: 1000, current_title: 'the Ever-Present' }), // incumbent
+    mk('Borg', { hours: 1100 }),                                   // rival, +10% only
+    mk('Cyn', { hours: 700 }),
+    mk('Dag', { hours: 650 }),
+  ];
+  const titles = epithetsFor(roster); // incumbents default from current_title
+  ok(titles.get('Ari').title === 'the Ever-Present' && titles.get('Ari').source === 'hours',
+    `incumbent keeps the superlative through a near-tie, got ${titles.get('Ari').source}:${titles.get('Ari').title}`);
+  ok(titles.get('Borg').source === 'flavor',
+    `a within-margin rival does NOT steal the superlative, got ${titles.get('Borg').source}:${titles.get('Borg').title}`);
+  const all = roster.map((p) => titles.get(p.character_name).title);
+  ok(new Set(all).size === all.length, `near-tie roster still all-unique, got [${all.join(', ')}]`);
+
+  // And with NO incumbent, a within-margin lead crowns NOBODY — the engine does
+  // not hand a superlative out on a hair's-breadth lead (which is exactly what
+  // made it flip back and forth once someone did hold it).
+  const cold = epithetsFor([
+    mk('Ari', { hours: 1000 }),
+    mk('Borg', { hours: 1100 }),
+    mk('Cyn', { hours: 700 }),
+    mk('Dag', { hours: 650 }),
+  ]);
+  ok(['Ari', 'Borg', 'Cyn', 'Dag'].every((n) => cold.get(n).source === 'flavor'),
+    `no incumbent + no decisive lead => the superlative goes unclaimed, got Borg=${cold.get('Borg').source}`);
+}
+
+// ── 23. The superlative DOES change on a decisive (>= LEADER_MARGIN) lead ─────
+// The hold is stickiness, not a lock: a rival who clears the incumbent by the
+// leader margin takes the crown, and the old holder falls to a placeholder.
+{
+  const roster = [
+    mk('Ari', { hours: 1000, current_title: 'the Ever-Present' }), // incumbent
+    mk('Borg', { hours: 1200 }),                                   // rival, +20% (>= 15%)
+    mk('Cyn', { hours: 700 }),
+    mk('Dag', { hours: 650 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.get('Borg').title === 'the Ever-Present' && titles.get('Borg').source === 'hours',
+    `a decisive rival takes the superlative, got ${titles.get('Borg').source}:${titles.get('Borg').title}`);
+  ok(titles.get('Ari').source === 'flavor',
+    `the unseated holder falls to a placeholder, got ${titles.get('Ari').source}:${titles.get('Ari').title}`);
+}
+
+// ── 24. A crown incumbent is not demoted to a placeholder on a near-tie ───────
+// The 19:42 Charleif case: the #1 killer + incumbent of "Bane of Beasts" lost it
+// to a placeholder for a pass when a rival's stopgap-derived kills nudged the
+// median and knocked his relative lead under MIN_LEAD. The incumbent hold now
+// keeps a valid edge through that swing (floor permitting), so no placeholder churn.
+{
+  // Two heavy killers in a near-tie; the rest of the pack has caught up enough
+  // that the leader's ratio-over-median would fail the raw MIN_LEAD gate.
+  const roster = [
+    mk('Char', { kills: 120, current_title: 'Bane of Beasts' }), // incumbent, #1
+    mk('Riv', { kills: 110 }),                                   // within 15%
+    mk('Eld', { kills: 100 }),
+    mk('Fen', { kills: 95 }),
+    mk('Gus', { kills: 90 }),
+  ];
+  const titles = epithetsFor(roster);
+  ok(titles.get('Char').title === 'Bane of Beasts' && titles.get('Char').source === 'kills',
+    `crown incumbent holds through a near-tie instead of dropping to a placeholder, got ${titles.get('Char').source}:${titles.get('Char').title}`);
+}
+
 console.log(`epithets.test: ${passed} assertions passed`);

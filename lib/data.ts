@@ -613,6 +613,40 @@ export function playtimeMinutesByCharacter(
   return totals;
 }
 
+/**
+ * DURABLE total playtime per character, in minutes — the value the title engine
+ * must rank the "hours" superlative ("the Ever-Present") on.
+ *
+ * This is {@link playtimeMinutesByCharacter} with the live-elapsed branch removed:
+ * it sums ONLY sessions that have a recorded `duration_minutes` (i.e. closed ones)
+ * and never credits an open session with `joined_at -> now`. That matters because
+ * the live value JUMPS every second a viking is online and is online-set dependent,
+ * so the same roster renders a different hours-leader depending on WHEN and WHERE
+ * it is computed — the site and GET /api/titles would disagree, and the superlative
+ * crown would churn (earned, demoted to a placeholder, re-earned) every pass as
+ * people come and go. This value is instead:
+ *   • MONOTONIC within a viking's own history — it only ever steps UP, when a
+ *     session closes and its duration lands; it never ticks down at logoff; and
+ *   • ONLINE-INDEPENDENT — it needs no `onlineNames`, so every surface that titles
+ *     the warband gets the identical number regardless of who is online right now.
+ * The live helper is still the right one for the DISPLAY boards ("Hours Logged"),
+ * where a counter that grows while you play is the point; this one is for RANKING.
+ */
+export function durablePlaytimeMinutesByCharacter(
+  sessions: GameSession[]
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  for (const s of sessions) {
+    if (!s.character_name) continue;
+    if (s.duration_minutes == null) continue; // open/unknown session — never guessed at
+    totals.set(
+      s.character_name,
+      (totals.get(s.character_name) ?? 0) + s.duration_minutes
+    );
+  }
+  return totals;
+}
+
 /** Events from the last `days` days, oldest first; optionally filtered by type. */
 export const getEventsSince = cache(async (days = 70, types?: string[]): Promise<GameEvent[]> => {
   const since = windowStartIso(days);

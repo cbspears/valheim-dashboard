@@ -49,6 +49,7 @@ import {
   getEventsSince,
   getServerStatus,
   playtimeMinutesByCharacter,
+  durablePlaytimeMinutesByCharacter,
   statsFreshness,
 } from '@/lib/data';
 import type { PlayerWithStats } from '@/lib/types';
@@ -248,7 +249,20 @@ export default async function PlayersPage() {
   }
   // Roster-global assignment: every viking a UNIQUE title, incumbent current_title
   // as the hysteresis anchor (defaulted inside epithetsFor from the roster rows).
-  const epithets = epithetsFor(withStats, { causesByName });
+  //
+  // The titles rank on the DURABLE hours value (closed-session minutes), NOT the
+  // live-elapsed playtime the boards above display. GET /api/titles does the same,
+  // so the subtitle a viking reads here and the title the bot announces are computed
+  // from the identical, online-independent number and can't disagree — and "the
+  // Ever-Present" no longer churns as people log on and off. The display boards keep
+  // the live counter (a growing "Hours Logged" is the point there).
+  const durablePlaytimeByName = durablePlaytimeMinutesByCharacter(sessions);
+  const epithetRoster = withStats.map((p) => ({
+    ...p,
+    total_playtime_minutes:
+      durablePlaytimeByName.get(p.character_name) ?? 0,
+  }));
+  const epithets = epithetsFor(epithetRoster, { causesByName });
   const epithetByName = new Map<string, string>();
   for (const p of withStats) {
     epithetByName.set(p.character_name, epithets.get(p.character_name)?.title ?? '');

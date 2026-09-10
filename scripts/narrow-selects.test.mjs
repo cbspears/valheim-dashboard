@@ -145,13 +145,18 @@ console.log('\nnarrow-selects — lib/data getPhotosByPin');
   ok(columns.has('pin_id'), 'and pin_id, the key it groups by (absent = every photo grouped under "undefined")');
 }
 
-// ── 6. lib/data PLAYERS_PUBLIC_COLS vs what /api/titles now derives from it ──
+// ── 6. lib/data PLAYERS_PUBLIC_COLS, and what /api/titles ranks on ──────────
 //
-// /api/titles stopped issuing its own `is_online = true` read on 2026-09-06 and
-// filters the roster instead. That only works while the roster select carries
-// is_online — and PLAYERS_PUBLIC_COLS is also what getOnlinePlayers() filters,
-// so losing it takes "who is sailing" off the Hall, the Vikings page and the
-// titles engine at once, all showing an empty hall rather than an error.
+// PLAYERS_PUBLIC_COLS must keep is_online: getOnlinePlayers() filters on it and
+// the Hall and Vikings pages show "who is sailing" from it — losing it would show
+// an empty hall on every surface rather than an error.
+//
+// /api/titles, by contrast, NO LONGER derives an online set at all. It used to
+// rank "the Ever-Present" on a LIVE playtime value that counted a viking's open
+// session as joined_at->now — which jumped while they were online and made the
+// superlative crown churn as people came and went. Since the title-churn fix it
+// ranks on the DURABLE, online-INDEPENDENT value (closed-session minutes only), so
+// the site and the bot compute the identical hours-leader regardless of who is on.
 console.log('\nnarrow-selects — PLAYERS_PUBLIC_COLS');
 {
   const text = src('lib/data.ts');
@@ -163,8 +168,12 @@ console.log('\nnarrow-selects — PLAYERS_PUBLIC_COLS');
   }
   const titles = src('app/api/titles/route.ts');
   ok(
-    /withStats\.filter\(\(p\) => p\.is_online\)/.test(titles),
-    '/api/titles still derives its online set from the roster (if this moved, re-point the check above)',
+    /durablePlaytimeMinutesByCharacter\(sessions\)/.test(titles),
+    '/api/titles ranks the hours superlative on the durable (online-independent) playtime',
+  );
+  ok(
+    !/\.filter\(\(p\) => p\.is_online\)/.test(titles),
+    '/api/titles no longer derives an online set (durable playtime needs none; if this moved, re-point the check)',
   );
   const data = src('lib/data.ts');
   ok(

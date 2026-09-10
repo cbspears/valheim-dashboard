@@ -62,7 +62,7 @@ import {
   getPlayersWithStats,
   getSessionsSince,
   getEventsSince,
-  playtimeMinutesByCharacter,
+  durablePlaytimeMinutesByCharacter,
 } from '@/lib/data';
 import { epithetsFor } from '@/lib/epithets';
 import { sinceIso, WINDOW_7D_MS, WINDOW_24H_MS } from '@/lib/ops/window';
@@ -114,8 +114,11 @@ const loadTitleContests = unstable_cache(
     ]);
     if (roster.length === 0) return [];
 
-    const onlineNames = new Set(roster.filter((p) => p.is_online).map((p) => p.character_name));
-    const playtimeByName = playtimeMinutesByCharacter(sessions, onlineNames);
+    // Rank on the DURABLE hours value (closed-session minutes), exactly as
+    // /api/titles does, so this contest view reflects what the bot actually
+    // announces on — not the live-elapsed counter that jitters while vikings are
+    // online and made "the Ever-Present" churn.
+    const playtimeByName = durablePlaytimeMinutesByCharacter(sessions);
     const withPlaytime: PlayerWithStats[] = roster.map((p) => ({
       ...p,
       total_playtime_minutes: playtimeByName.get(p.character_name) ?? p.total_playtime_minutes,
