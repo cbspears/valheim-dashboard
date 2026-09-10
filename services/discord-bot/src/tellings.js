@@ -804,7 +804,26 @@ export function createTellings({ client, log = console, db: injectedDb, office =
       if (!cmd) return;
 
       const bosses = await fetchBosses();
-      const match = matchBoss(cmd.boss, bosses);
+      let match = matchBoss(cmd.boss, bosses);
+      // NO-COLON RETELL (launch night 2026-09-09). `@Eilif retell Eikthyr "It was a
+      // chaotic party..."` parsed the whole line as the boss name and drew "I do not
+      // know that one". When a retell carries no text and the boss did not match,
+      // try every forsaken's name as a prefix of the line; the rest, minus any
+      // surrounding quotes, is the telling. The colon form still works unchanged.
+      if (cmd.verb === 'retell' && !cmd.text && !match.boss) {
+        const line = String(cmd.boss || '');
+        const hit = bosses
+          .filter((b) => new RegExp(`^${b.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=[\s"“'])`, 'i').test(line))
+          .sort((a, b) => b.name.length - a.name.length)[0];
+        if (hit) {
+          const rest = line.slice(hit.name.length).trim().replace(/^["“”']+|["“”']+$/g, '').trim();
+          if (rest) {
+            cmd.boss = hit.name;
+            cmd.text = rest;
+            match = matchBoss(cmd.boss, bosses);
+          }
+        }
+      }
       if (match.status === 'ambiguous') {
         await reply(
           message,
