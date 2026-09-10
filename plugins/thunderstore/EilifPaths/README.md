@@ -1,5 +1,8 @@
 # Eilif Paths
 
+> **Disclosure: this plugin was written with AI assistance** (Anthropic Claude, directed and reviewed by the Eilif server admin). It is listed under Thunderstore's "AI Generated" category for that reason. Source is public at the link in the manifest.
+
+
 Custom plugin for the **Eilif** community Valheim server ([dashboard](https://valheim-dashboard.vercel.app)).
 
 Roads that matter: while you stand on a recognised surface, movement speed is multiplied and stamina drain is scaled — and it reverts the instant you step off.

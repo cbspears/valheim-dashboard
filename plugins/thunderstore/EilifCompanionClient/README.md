@@ -1,5 +1,8 @@
 # Eilif Companion Client
 
+> **Disclosure: this plugin was written with AI assistance** (Anthropic Claude, directed and reviewed by the Eilif server admin). It is listed under Thunderstore's "AI Generated" category for that reason. Source is public at the link in the manifest.
+
+
 Companion plugin for the **Eilif** community Valheim server, a private friends-and-family server with a public stats dashboard at [valheim-dashboard.vercel.app](https://valheim-dashboard.vercel.app).
 
 ## What it does — full disclosure

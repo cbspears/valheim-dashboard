@@ -80,3 +80,7 @@ That same session is the end-to-end test for both `reporter` fields:
 
 Both Vercel lines print at most once per serverless instance, so read them as "is anyone still on
 an old build", not as a per-request alarm.
+
+## Categories (added 2026-09-10)
+
+On the upload form select **AI Generated** (Thunderstore requires it for a mod written primarily with AI tools; the 2026-09-10 rejection of 0.4.0/0.4.1 is believed to be this) plus **Client-side** and **Utility**. Categories are per listing and can also be edited afterwards from the package page by the Eilif team.
