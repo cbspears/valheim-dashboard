@@ -211,7 +211,7 @@ only component holding a Supabase key directly. Loops, with their intervals:
 | `identity-confirm` | 30 s | confirms `/oath CODE` Discord links |
 | `voice` | 60 s | queues lines into `voice_lines` for the in-game speaker |
 | voice expiry | 5 m | ages out unspoken lines |
-| `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history` |
+| `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history`. Sticky since 2026-09-10: no demotion of an earned title, silent placeholder reshuffles, two-pass confirmation (`TITLE_CONFIRM_MS`), 24 h tenure (`TITLE_MIN_TENURE_MS`), max `TITLES_PER_DAY` (3) a rolling day |
 | `milestones` | `MILESTONES_INTERVAL_MS`, default 2 m | announces Great Deeds |
 | heartbeat | 60 s | POSTs to `/api/ops/heartbeat` with per-sub-loop status |
 | recap | one `node-cron` job, `RECAP_EVENING_HOUR` (default 23) America/Chicago | the evening recap and Player of the Day |
@@ -625,6 +625,7 @@ Also read by `scripts/map-snapshot.mjs`, which loads this file plus `.env.local`
 `BOSS_CHANNEL`, `TITLE_CHANNEL`, `EVENTS_SYNC`, `EVENTS_INTERVAL_MS`, `GALLERY_INGEST`,
 `GALLERY_MAX_EDGE`, `OATH_INGEST`, `IDENTITY_LINK`, `ADMIN_ROLE_IDS`, `VOICE_ENGINE`,
 `VOICE_MIN_GAP_MS`, `TITLES_ANNOUNCE`, `TITLES_API_URL`, `TITLES_INTERVAL_MS`,
+`TITLES_PER_DAY`, `TITLE_CONFIRM_MS`, `TITLE_MIN_TENURE_MS`,
 `TITLES_DRY`, `MILESTONES_ANNOUNCE`, `MILESTONES_INTERVAL_MS`, `MILESTONE_MIN_GAP_MS`,
 `OLLAMA_URL`, `OLLAMA_MODEL`, `OLLAMA_TIMEOUT_MS`, `OPS_HEARTBEAT_URL`,
 `OPS_HEARTBEAT_TOKEN`, `DRY_RUN`, and, for the two loops that ship off,

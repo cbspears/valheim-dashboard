@@ -93,14 +93,16 @@ export async function generateMetadata({
     viking.character_name,
   )!;
   const name = viking.character_name;
-  const description = `${name} · ${epithet.title}. A viking of the Eilif saga, and the deeds recorded in their name.`;
+  // The PROCLAIMED title wins over the engine's live answer — see the page body.
+  const title = (viking.current_title ?? '').trim() || epithet.title;
+  const description = `${name} · ${title}. A viking of the Eilif saga, and the deeds recorded in their name.`;
 
   return {
     // layout template turns this into "{Name} · Eilif"
     title: name,
     description,
-    openGraph: { title: `${name} · ${epithet.title}`, description },
-    twitter: { title: `${name} · ${epithet.title}`, description },
+    openGraph: { title: `${name} · ${title}`, description },
+    twitter: { title: `${name} · ${title}`, description },
   };
 }
 
@@ -159,7 +161,18 @@ export default async function VikingPage({ params }: { params: Promise<{ slug: s
     ...p,
     total_playtime_minutes: durablePlaytimeByName.get(p.character_name) ?? 0,
   }));
-  const epithet = epithetsFor(epithetRoster, { causesByName: causesByNameFrom(deaths) }).get(name)!;
+  const computedEpithet = epithetsFor(epithetRoster, { causesByName: causesByNameFrom(deaths) }).get(name)!;
+  // THE HALL, NOT THE ENGINE (2026-09-10). A viking wears the title that was
+  // actually PROCLAIMED (players.current_title). The announcer holds a lot back
+  // on purpose now — an earned title is never demoted to a placeholder, and a new
+  // one waits for confirmation, tenure and the daily budget
+  // (services/discord-bot/src/titles.js) — so the engine's live answer is not what
+  // the hall calls this viking. It is only the fallback before a title has ever
+  // been recorded.
+  const proclaimedTitle = (viking.current_title ?? '').trim();
+  const epithet = proclaimedTitle
+    ? { ...computedEpithet, title: proclaimedTitle }
+    : computedEpithet;
 
   // An OFFICE, shown beside the epithet and never folded into it: lib/epithets
   // assigns one unique title per viking from what they did, and a seat in the

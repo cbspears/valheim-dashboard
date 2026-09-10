@@ -151,13 +151,13 @@ export const HORIZON_GLOSSARY = {
     id: 'title-contest',
     title: 'Titles about to change hands',
     what:
-      "The living-title engine (lib/epithets) run twice over the same roster: once with each viking's persisted current_title as the hysteresis incumbent, which is what /api/titles returns, and once with every incumbent stripped. Flipping means the engine already disagrees with the incumbent. Contested means hysteresis is the only thing holding the title.",
+      "The living-title engine (lib/epithets) run twice over the same roster: once with each viking's persisted current_title as the hysteresis incumbent, which is what /api/titles returns, and once with every incumbent stripped. Flipping means the engine disagrees with the incumbent and the announcer would be willing to make the change. Held means the viking wears an earned title and the engine now offers a placeholder, which is refused outright. Contested means hysteresis is the only thing holding the title.",
     why:
-      'The bot polls /api/titles every 10 minutes and announces any disagreement, so a flip here is a Discord post that has not happened yet. A contest is a title one good night from moving.',
+      'Titles are deliberately sticky and rare since 2026-09-10: at most 3 proclamations a rolling 24 hours, no demotion of an earned title, silent placeholder reshuffles, and any announced change needs the same offer on two passes 15 minutes apart plus 24 hours of tenure. So a row here is a change the hall may eventually proclaim, not one that is due.',
     healthy:
-      'Nothing flipping between play sessions. Flips clustered after a session are normal, and they clear once the bot announces them.',
+      'A handful of rows that persist. Held rows are permanent by design. Two or three proclamations on a busy night is the target, not zero and not a stream.',
     whenRed:
-      'A flip that has been listed for more than 10 minutes with the bot healthy means the titles loop is not writing: check the title-evaluator sub-loop, and whether TITLES_DRY is set on the host.',
+      'A flip listed for many hours with the budget unspent and the bot healthy means the titles loop is not writing: check the title-evaluator sub-loop, and whether TITLES_DRY is set on the host.',
   },
   'next-boss': {
     id: 'next-boss',

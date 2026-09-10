@@ -1,6 +1,7 @@
 // Unit tests for the rank-aware + hysteresis epithet engine. Run:
 //   npx tsx scripts/epithets.test.mjs
-import { BIO_LINES, epithetFor, epithetsFor, generatedBioLine } from '../lib/epithets.ts';
+import { BIO_LINES, EARNED_TITLES, epithetFor, epithetsFor, generatedBioLine, isEarnedTitle } from '../lib/epithets.ts';
+import { EARNED_TITLES as BOT_EARNED_TITLES } from '../services/discord-bot/src/titles.js';
 import assert from 'node:assert';
 
 // Build a PlayerWithStats with sane zero defaults; override what a test needs.
@@ -587,6 +588,29 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
   const titles = epithetsFor(roster);
   ok(titles.get('Char').title === 'Bane of Beasts' && titles.get('Char').source === 'kills',
     `crown incumbent holds through a near-tie instead of dropping to a placeholder, got ${titles.get('Char').source}:${titles.get('Char').title}`);
+}
+
+// ── The bot's mirror of the earned-title set ──────────────────────────────
+// services/discord-bot/src/titles.js is plain JS and cannot import this engine,
+// so it carries its own copy of the earned-title list. That list decides whether
+// a recorded title may be demoted to a placeholder (it may not), so drift here
+// would resurrect exactly the churn the sticky policy was written to stop.
+{
+  const engine = [...EARNED_TITLES].sort();
+  const bot = [...BOT_EARNED_TITLES].sort();
+  ok(JSON.stringify(engine) === JSON.stringify(bot),
+    `the bot's EARNED_TITLES must mirror the engine's. engine=${JSON.stringify(engine)} bot=${JSON.stringify(bot)}`);
+  ok(isEarnedTitle('Treefoe') && !isEarnedTitle('the Quiet Flame'),
+    'isEarnedTitle separates earned titles from placeholders');
+  // Every placeholder the engine can hand out must fall OUTSIDE the earned set,
+  // or a placeholder would be treated as a crown and never reshuffle silently.
+  const flavors = epithetsFor([
+    mk('Aa'), mk('Bb'), mk('Cc'), mk('Dd'), mk('Ee'),
+  ]);
+  for (const [name, ep] of flavors) {
+    if (ep.source !== 'flavor') continue;
+    ok(!isEarnedTitle(ep.title), `${name}'s placeholder "${ep.title}" is not in the earned set`);
+  }
 }
 
 console.log(`epithets.test: ${passed} assertions passed`);

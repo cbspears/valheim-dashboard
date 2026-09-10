@@ -28,6 +28,7 @@ import {
   metricInfo,
   type Aggregates,
 } from '../milestones';
+import { isEarnedTitle } from '../epithets';
 
 // ── constants that mirror the bot, and where each one comes from ────────────
 //
@@ -719,7 +720,7 @@ export function upcomingDeeds(
 
 // ── titles about to change hands ────────────────────────────────────────────
 
-export type TitleContestKind = 'flipping' | 'contested' | 'seed';
+export type TitleContestKind = 'flipping' | 'held' | 'contested' | 'seed';
 
 export interface TitleContestInput {
   name: string;
@@ -745,7 +746,14 @@ export interface TitleContest extends TitleContestInput {
  * differs from `players.current_title`. So:
  *
  *   flipping  the engine already disagrees with the incumbent even WITH the
- *             hysteresis bonus applied. The bot announces this at its next tick.
+ *             hysteresis bonus applied, and the change is one the announcer is
+ *             willing to make. It still has to clear confirmation, tenure and
+ *             the daily budget, so this is a Discord post that MAY be coming,
+ *             not one that is due this tick.
+ *   held      the viking wears an EARNED title and the engine now offers a
+ *             placeholder. Under the sticky policy (Charlie, 2026-09-10) that is
+ *             never announced and never written, however long it stands. A
+ *             deliberate, permanent disagreement, not a late write.
  *   contested hysteresis is the only thing holding the title: strip the
  *             incumbent bonus and a rival wins. Nothing is announced, but the
  *             title is one good night from moving.
@@ -767,16 +775,20 @@ export function titleContests(rows: TitleContestInput[]): TitleContest[] {
       continue;
     }
     if (incumbent && stable && stable !== incumbent) {
-      out.push({ ...r, kind: 'flipping' });
+      // An earned title the engine wants to trade for a placeholder is HELD, not
+      // flipped: services/discord-bot/src/titles.js refuses that demotion
+      // outright, so no amount of waiting turns this row into a proclamation.
+      out.push({ ...r, kind: isEarnedTitle(incumbent) && !isEarnedTitle(stable) ? 'held' : 'flipping' });
       continue;
     }
     if (incumbent && stable === incumbent && raw && raw !== incumbent) {
       out.push({ ...r, kind: 'contested' });
     }
   }
-  // Flips first (they are about to be announced), then contests, then seeds;
-  // alphabetical inside each so two renders a second apart do not reshuffle.
-  const rank: Record<TitleContestKind, number> = { flipping: 0, contested: 1, seed: 2 };
+  // Flips first (a proclamation may be coming), then contests, then the
+  // deliberate holds, then seeds; alphabetical inside each so two renders a
+  // second apart do not reshuffle.
+  const rank: Record<TitleContestKind, number> = { flipping: 0, contested: 1, held: 2, seed: 3 };
   return out.sort((a, b) => rank[a.kind] - rank[b.kind] || a.name.localeCompare(b.name));
 }
 

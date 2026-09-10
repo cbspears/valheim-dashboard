@@ -203,6 +203,28 @@ const SOURCE_BY_TITLE: ReadonlyMap<string, EpithetSource> = new Map(
   DIMENSIONS.map((d) => [d.epithet, d.source as EpithetSource]),
 );
 
+/**
+ * Every title a viking EARNS — the dimension epithets plus the Treefoe override.
+ * Anything else the engine can produce is a personalized placeholder from
+ * FLAVOR_POOL, and the difference is load-bearing policy, not decoration: the
+ * announcer never demotes an earned title to a placeholder, and the ops horizon
+ * labels that refusal "held" rather than a flip.
+ *
+ * MIRRORED in services/discord-bot/src/titles.js (the bot is plain JS and cannot
+ * import this module); `scripts/epithets.test.mjs` asserts the two agree, so a
+ * new dimension added here fails the root test suite until the bot follows.
+ */
+export const EARNED_TITLES: readonly string[] = Object.freeze([
+  ...DIMENSIONS.map((d) => d.epithet),
+  'Treefoe',
+]);
+const EARNED_TITLE_SET: ReadonlySet<string> = new Set(EARNED_TITLES);
+
+/** Is this recorded title one a viking earned, or a placeholder? */
+export function isEarnedTitle(title: string | null | undefined): boolean {
+  return EARNED_TITLE_SET.has((title ?? '').trim());
+}
+
 // Personalized placeholders for vikings with no standout deed. Kept DECENT-SIZED
 // (24) so even a full 20-strong launch hall of newcomers stays unique — a name-hash
 // picks a starting phrase and we probe forward for the first still-free one. All in

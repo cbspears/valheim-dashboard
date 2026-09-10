@@ -7,8 +7,13 @@
 //
 // The difference between the two runs is the whole point of this panel:
 //   flipping   the engine disagrees with the incumbent even WITH the stickiness
-//              bonus applied, so the bot announces it at its next titles tick.
-//              This is a Discord post that has not happened yet.
+//              bonus applied, and it is a change the announcer is willing to
+//              make. It still has to clear two-pass confirmation, the 24 h
+//              tenure and the 3-a-day budget, so it is a post that MAY be
+//              coming, not one that is overdue.
+//   held       the viking wears an EARNED title and the engine now offers a
+//              placeholder. Since 2026-09-10 that demotion is refused outright,
+//              so this row is deliberate and permanent, not a stuck write.
 //   contested  hysteresis is the only thing holding the title. Nothing will be
 //              announced, and no other surface on the site shows this at all.
 //   seed       no incumbent recorded. The bot writes it silently the first time.
@@ -20,9 +25,16 @@ import { HorizonCard, Chip, Nothing, NotReported, type Tone } from './Panel';
 
 const KIND_COPY: Record<TitleContest['kind'], { label: string; tone: Tone; blurb: string }> = {
   flipping: {
-    label: 'about to change',
+    label: 'may change',
     tone: 'gold',
-    blurb: 'The bot announces this at its next titles tick.',
+    blurb:
+      'The engine offers this. It is announced only after the same offer stands two passes 15 min apart, the current title is a day old, and the hall has proclamations left today.',
+  },
+  held: {
+    label: 'held',
+    tone: 'muted',
+    blurb:
+      'An earned title is never taken back to a placeholder. Nothing is announced and nothing is written, however long this stands.',
   },
   contested: {
     label: 'contested',
@@ -106,10 +118,12 @@ export function TitlesPanel({
             })}
           </ol>
           <p className="mt-3 text-xs text-muted">
-            The bot polls /api/titles {cadence} and announces any disagreement with
-            players.current_title. A flip listed here for longer than that, with the bot healthy,
-            means the titles loop is not writing. The roster behind this card is cached for{' '}
-            {cacheSec} s, so it can read that far behind the database.
+            The bot polls /api/titles {cadence}, but titles are deliberately sticky since
+            2026-09-10: at most 3 proclamations a rolling 24 h, an earned title is never demoted to
+            a placeholder, a placeholder swap is recorded silently, and any announced change waits
+            for the same offer twice 15 min apart plus a day of tenure. So a disagreement listed
+            here is usually the policy working, not a stuck loop. The roster behind this card is
+            cached for {cacheSec} s, so it can read that far behind the database.
           </p>
         </>
       )}

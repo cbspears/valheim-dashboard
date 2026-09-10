@@ -87,9 +87,13 @@ console.log('marker-line injection (EilifCompanion 0.3.2 log safety)');
 
   check('the same shape in a peer name stays that peer, not the victim', () => {
     const ev = parse(`${PREFIX}[EILIF_POS] ${shout} | 1.0 | 2.0 | Meadows`);
-    assert.equal(ev.length, 1);
-    assert.equal(ev[0].type, 'pos');
-    assert.notEqual(ev[0].characterName, 'Bren');
+    // A first-sight position line also admits the peer to the roster (a `join`
+    // with source 'pos', 2026-09-10), so pick the position event by type.
+    const pos = ev.find((e) => e.type === 'pos');
+    assert.ok(pos, 'a pos event is emitted');
+    assert.equal(ev.filter((e) => e.type !== 'join').length, 1);
+    assert.notEqual(pos.characterName, 'Bren');
+    for (const e of ev) assert.notEqual(e.characterName, 'Bren');
   });
 
   check('the [EILIF_IDENT] warning line is inert to the parser', () => {
@@ -121,8 +125,10 @@ console.log('marker-line injection (EilifCompanion 0.3.2 log safety)');
 
   check('a piped peer name cannot shift the position fields', () => {
     const ev = parse(`${PREFIX}[EILIF_POS] Bren / 1.0 / 2.0 / Meadows | -184.9 | -2.1 | BlackForest`);
-    assert.equal(ev[0].characterName, 'Bren / 1.0 / 2.0 / Meadows');
-    assert.equal(ev[0].metadata.x, -184.9);
+    const pos = ev.find((e) => e.type === 'pos');
+    assert.ok(pos, 'a pos event is emitted');
+    assert.equal(pos.characterName, 'Bren / 1.0 / 2.0 / Meadows');
+    assert.equal(pos.metadata.x, -184.9);
   });
 }
 

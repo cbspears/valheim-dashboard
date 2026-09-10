@@ -263,9 +263,21 @@ export default async function PlayersPage() {
       durablePlaytimeByName.get(p.character_name) ?? 0,
   }));
   const epithets = epithetsFor(epithetRoster, { causesByName });
+  // THE HALL, NOT THE ENGINE (2026-09-10). What a viking is shown wearing is
+  // `players.current_title` — the title actually PROCLAIMED — whenever one is
+  // recorded. Under the sticky policy (services/discord-bot/src/titles.js) the
+  // engine's live answer is often deliberately not announced: an earned title is
+  // never demoted to a placeholder, a new one waits for confirmation, tenure and
+  // the daily budget. Rendering the engine here would show a title the hall has
+  // never spoken, and take one away that it did. The engine is the fallback only
+  // for a viking with no registry title yet (pre-seed).
   const epithetByName = new Map<string, string>();
   for (const p of withStats) {
-    epithetByName.set(p.character_name, epithets.get(p.character_name)?.title ?? '');
+    const proclaimed = (p.current_title ?? '').trim();
+    epithetByName.set(
+      p.character_name,
+      proclaimed || epithets.get(p.character_name)?.title || '',
+    );
   }
 
   const boards: Board[] = [

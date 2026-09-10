@@ -44,8 +44,13 @@ export default async function Image({ params }: { params: Promise<{ slug: string
     ...p,
     total_playtime_minutes: durablePlaytimeByName.get(p.character_name) ?? 0,
   }));
+  // The PROCLAIMED title (players.current_title) is what the hall calls this
+  // viking; the engine is only the fallback before one has ever been recorded.
+  // Same rule as the /viking page and /players. (2026-09-10)
   const epithet = viking
-    ? epithetsFor(epithetRoster, { causesByName }).get(name)?.title ?? 'the Unknown'
+    ? (viking.current_title ?? '').trim() ||
+      epithetsFor(epithetRoster, { causesByName }).get(name)?.title ||
+      'the Unknown'
     : 'the Unknown';
 
   const pairs = [
