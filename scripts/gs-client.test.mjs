@@ -403,4 +403,40 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
   assert.equal(nothing.kills, 0);
 }
 
+// ── profile-only post (EilifCompanionClient ≥0.4.0): builds + distances ONLY ──
+// Two posters share source:'client' since pack v14. The Companion's post carries a
+// `stats` map and no weapons[]; it must not touch kills, deaths or crafts, or the
+// baseline layer re-takes zero-points on every alternation (2026-09-10).
+{
+  const profileOnly = parseSelfSnapshot({
+    schemaVersion: 1, game: 'valheim', source: 'client', reporter: 'Kætiløy', world: 'Eilif',
+    players: [{
+      name: 'Kætiløy', kills: 0, deaths: 3,
+      stats: { vh_Builds: 9, vh_Crafts: 4, vh_DistanceTraveled: 274, vh_DistanceWalk: 180, vh_DistanceRun: 38, vh_DistanceSail: 0, vh_DistanceAir: 55 },
+    }],
+  });
+  assert.ok(profileOnly, 'a stats-only self entry still parses');
+  assert.equal(profileOnly.provenance.ownEntry, true);
+  assert.equal(profileOnly.provenance.killsSource, 'none', 'kills are a hole, never the profile counter');
+  assert.equal(profileOnly.kills, 0);
+  assert.equal(profileOnly.provenance.hasKills, false);
+  assert.equal(profileOnly.provenance.hasDeaths, false, 'deaths stay with our own death events');
+  assert.equal(profileOnly.deaths, 0);
+  assert.equal(profileOnly.provenance.craftsSource, 'none', 'crafts stay with the GS crafts[] breakdown');
+  assert.equal(profileOnly.itemsCrafted, 0);
+  assert.equal(profileOnly.provenance.hasBuilds, true, 'builds ARE taken from the profile');
+  assert.equal(profileOnly.structuresBuilt, 9);
+  assert.equal(profileOnly.provenance.hasDistance, true);
+  // The legacy 0.221 GsValheimStatsClient shape (stats AND weapons together) is untouched.
+  const legacy = parseSelfSnapshot({
+    schemaVersion: 1, game: 'valheim', source: 'client', reporter: 'Bren', world: 'Eilif',
+    players: [{ name: 'Bren', kills: 40, deaths: 2, stats: { vh_Builds: 5, vh_Crafts: 7 },
+      weapons: [{ weapon: 'Axes', damageDealt: 100, kills: 40, hardestHit: 9, biggestSwing: 9 }] }],
+  });
+  assert.equal(legacy.provenance.killsSource, 'client');
+  assert.equal(legacy.kills, 40);
+  assert.equal(legacy.provenance.craftsSource, 'vh_Crafts');
+  assert.equal(legacy.deaths, 2);
+}
+
 console.log('OK — all parser assertions passed');

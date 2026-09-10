@@ -364,13 +364,28 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   // (including a genuine 0 with no weapon kills, the honest zero-point of a
   // brand-new viking) is the client's number, untouched and never summed.
   const weaponKills = sumBy(arr(self.weapons), 'kills');
-  const clientKillsUsable = isNum(self.kills) && !(num(self.kills) === 0 && weaponKills > 0);
+  // ── PROFILE-ONLY POST (EilifCompanionClient ≥0.4.0, 2026-09-10) ─────────────
+  // Since pack v14 TWO posters share source:'client' for the same viking, five
+  // minutes apart: GsValheimStatsClient (weapons[], crafts[], skills, boss damage,
+  // per-WORLD files) and our own Companion Client (a `stats` map of PROFILE
+  // counters, no weapons[]). Left alone they alternate, and the baseline layer
+  // re-takes the kills / crafts zero-point on every source change ("kills source
+  // changed weapons → client" twice a cycle on the day V+ came back; Kætiløy's
+  // kills fell 183 → 97). And the profile counters are the wrong scope for kills
+  // and crafts anyway: lifetime across every world, and on 1.0 read from the
+  // achievement-eligible bucket. So the two posters are made DISJOINT here: a
+  // self entry carrying `stats` and NONE of the GS breakdown lists contributes
+  // builds and distances only. Its kills, deaths and crafts are treated as absent (holes),
+  // and the world-scoped GS values plus our own death events stay the record.
+  const GS_LISTS = ['weapons', 'crafts', 'pickups', 'skills', 'materials', 'boss', 'creatureKills'] as const;
+  const profileOnly = hasStats && !GS_LISTS.some((k) => Array.isArray(self[k]));
+  const clientKillsUsable = !profileOnly && isNum(self.kills) && !(num(self.kills) === 0 && weaponKills > 0);
   const killsSource: SelfProvenance['killsSource'] = clientKillsUsable
     ? 'client'
     : Array.isArray(self.weapons)
       ? 'weapons'
       : 'none';
-  const kills = killsSource === 'weapons' ? weaponKills : num(self.kills);
+  const kills = killsSource === 'weapons' ? weaponKills : killsSource === 'client' ? num(self.kills) : 0;
   // Fish are pickups too — counted here same as every other resource, no
   // double-subtract; the fish[] breakdown above is purely additive detail.
   const resourcesHarvested = sumBy(pickups, 'count');
@@ -380,7 +395,7 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   // from one source could later be differenced against the other (unlike against
   // unlike). The source is recorded in provenance and the baseline layer refuses
   // to credit itemsCrafted across a source change.
-  const craftsSource: SelfProvenance['craftsSource'] = isNum(stats.vh_Crafts)
+  const craftsSource: SelfProvenance['craftsSource'] = !profileOnly && isNum(stats.vh_Crafts)
     ? 'vh_Crafts'
     : Array.isArray(self.crafts)
       ? 'crafts'
@@ -412,7 +427,7 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
     reporter,
     world: str(body.world),
     kills,
-    deaths: num(self.deaths),
+    deaths: profileOnly ? 0 : num(self.deaths),
     bossKills: num(self.bossKills),
     longestLifeSec: num(self.longestLifeSec),
     bestKillsBeforeDeath: num(self.bestKillsBeforeDeath),
@@ -425,8 +440,8 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
     provenance: {
       ownEntry: self === own,
       hasStats,
-      hasKills: isNum(self.kills),
-      hasDeaths: isNum(self.deaths),
+      hasKills: !profileOnly && isNum(self.kills),
+      hasDeaths: !profileOnly && isNum(self.deaths),
       killsSource,
       hasBossKills: isNum(self.bossKills),
       hasLongestLifeSec: isNum(self.longestLifeSec),
