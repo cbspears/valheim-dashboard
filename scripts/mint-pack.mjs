@@ -4,11 +4,11 @@
 //
 //   Node 20:  export NVM_DIR=~/.config/nvm; . $NVM_DIR/nvm.sh; nvm use 20
 //
-//   Preview:  node scripts/mint-pack.mjs --world Eilif --companion-client 0.3.1 \
-//               --paths 1.5.0 --dry-run
-//   Test:     node scripts/mint-pack.mjs --world Eilif --companion-client 0.3.1 --paths 1.5.0
-//   Real:     node scripts/mint-pack.mjs --world Eilif --companion-client 0.3.1 \
-//               --paths 1.5.0 --publish --version-label 'Pack v12 · Sep 9'
+//   Preview:  node scripts/mint-pack.mjs --world Eilif --companion-client 0.4.0 \
+//               --paths 1.7.1 --vplus 10.0.2 --bepinex 5.4.2350 \
+//               --no-plant --no-azu --fallback off --cap 24 --dry-run
+//   Test:     same command without --dry-run
+//   Real:     same command with --publish --version-label 'Pack v14 · Sep 10'
 //
 // See docs/PACK.md for the full launch-day cutover. Short version of why this
 // script exists rather than a by-hand r2modman export:
@@ -23,6 +23,12 @@
 //     Mac config bundle on /get-started must match the pack exactly. Both come
 //     off the same rendered templates now (scripts/build-config-bundle.mjs
 //     imports this file), so they cannot drift apart.
+//
+// The pack v14 shape (2026-09-10) is the one to copy: ValheimPlus is BACK, as
+// Grantapher 10.0.2, a real 1.0 build with working CraftFromChest, pinned
+// against BepInExPack 5.4.2350 (the version V+ declares). PlantEverything and
+// AzuCraftyBoxes stay out - V+ CraftFromChest replaces AzuCraftyBoxes - and both
+// V+ fallbacks go OFF, which for this script means --fallback off.
 //
 // This script never edits config/server.ts and never deploys. It prints the
 // exact lines to change; publishing the code is Charlie's call.
@@ -56,11 +62,18 @@ export const TEMPLATE_DIR = path.join(__dirname, 'pack-templates');
 //                    `cfgVersionFlag`, and only when the template is re-captured
 //                    from a real r2modman run of that build.
 //
-// NOTE: scripts/launch-preflight.mjs keeps its own PACK_V12_PINS list and walks
+// NOTE: scripts/launch-preflight.mjs keeps its own PACK_V14_PINS list and walks
 // the same Thunderstore endpoints. It is the twin of this table - if you change
 // a `baseline` here, change that list in the same commit (or better, have it
 // import MODS from this file), or preflight will green-light a pin the minter
 // refuses.
+//
+// `cfg`              the cfg file that mod contributes to the pack, and the file
+//                    that leaves with it when it is dropped.
+// `cfgByVersion`     for a mod that RENAMED its cfg between builds. Each rule is
+//                    { minVersion, cfg, tmpl }: the newest rule whose minVersion
+//                    the pin satisfies wins, otherwise `cfg` above. ValheimPlus
+//                    10 is the only user - see cfgFor().
 export const MODS = [
   {
     key: 'bepinex', flag: '--bepinex', label: 'BepInExPack',
@@ -69,8 +82,11 @@ export const MODS = [
   {
     key: 'vplus', flag: '--vplus', label: 'ValheimPlus (Grantapher)',
     ns: 'Grantapher', name: 'ValheimPlus_Grantapher_Temporary', tmpl: 'VPLUS', baseline: '9.17.1',
-    // Droppable. Grantapher 9.17.1 targets 0.221.10 and has no 1.0 build, so
-    // pack v12 has to be able to ship without it (see --no-vplus).
+    // Droppable, and pack v12/v13 exercised that: 9.17.1 targets 0.221.10 and
+    // died on Valheim 1.0, so launch night (2026-09-09) shipped without it.
+    // Grantapher published 10.0.2 on 2026-09-10 - a real 1.0 build with working
+    // CraftFromChest - so pack v14 pins V+ again and --no-vplus goes back to
+    // being the contingency it was.
     //
     // The three fields below are the whole drop mechanism, and any mod that
     // declares all three can leave the pack the same way. `omitFlag` is the CLI
@@ -78,6 +94,17 @@ export const MODS = [
     // {{#NAME}}..{{/NAME}} block in export.r2x.tmpl (and in README.txt.tmpl)
     // that holds its entry.
     omitFlag: '--no-vplus', cfg: 'valheim_plus.cfg', section: 'VPLUS',
+    // V+ 10 moved its config: it reads BepInEx/config/org.bepinex.plugins.valheim_plus.cfg
+    // (standard BepInEx cfg format, 60 sections, `enabled = true/false` per
+    // section) and imports the old valheim_plus.cfg once on first run, renaming
+    // it .migrated. So the FILENAME the pack ships follows the pin, and a pack
+    // pinning 10.x that shipped the old name would put a file the plugin only
+    // reads once next to the file it actually reads - every setting silently at
+    // its default. The 10.x template is the box's own server config verbatim
+    // (captured 2026-09-10), because V+ syncs server config to clients anyway.
+    cfgByVersion: [
+      { minVersion: '10.0.0', cfg: 'org.bepinex.plugins.valheim_plus.cfg' },
+    ],
   },
   {
     key: 'plant', flag: '--plant', label: 'PlantEverything',
@@ -157,6 +184,11 @@ const PACK_FILES = [
   { out: 'export.r2x', tmpl: 'export.r2x.tmpl' },
   { out: 'doorstop_config.ini', tmpl: 'doorstop_config.ini.tmpl' },
 ];
+// The cfgs a pack on the BASELINE pins ships, in the order r2modman writes them.
+// A pin can rename one of these (ValheimPlus 10 renamed its own), so anything
+// that needs the list for a real render asks cfgFilesFor(versions) instead of
+// reading this constant. It stays the v11 list because v11 is the byte-for-byte
+// tripwire in mint-pack.test.mjs.
 export const CFG_FILES = [
   'net.eilif.paths.cfg',
   'BepInEx.cfg',
@@ -219,10 +251,11 @@ function readTemplate(rel) {
  * takes its whole body with it, so the result is byte-identical to a template
  * written without that block at all.
  *
- * This exists for exactly one reason: pack v12 may have to ship without some of
- * the mods pack v11 pinned (ValheimPlus has no 1.0 build; PlantEverything and
- * AzuCraftyBoxes die at startup on 1.0), and the difference has to be a
- * rendering option rather than a second copy of export.r2x.tmpl that drifts.
+ * This exists for exactly one reason: a pack may have to ship without some of the
+ * mods pack v11 pinned (PlantEverything and AzuCraftyBoxes die at startup on 1.0;
+ * ValheimPlus had no 1.0 build at all until Grantapher 10.0.2 landed on
+ * 2026-09-10), and the difference has to be a rendering option rather than a
+ * second copy of export.r2x.tmpl that drifts.
  */
 export function applySections(text, sections, where) {
   let out = text;
@@ -270,6 +303,43 @@ export function compareSemver(a, b) {
 }
 
 /**
+ * The cfg file `mod` contributes to a pack that pins `version`.
+ *
+ * Almost always just `mod.cfg`. ValheimPlus is the exception: 10.0.0 renamed its
+ * config from valheim_plus.cfg to org.bepinex.plugins.valheim_plus.cfg, and both
+ * names are real files that a real build reads, so which one the pack ships is a
+ * function of the pin and cannot be a constant.
+ */
+export function cfgFor(mod, version = mod.baseline) {
+  if (!mod.cfg) return null;
+  let out = mod.cfg;
+  for (const rule of mod.cfgByVersion || []) {
+    if (compareSemver(version, rule.minVersion) >= 0) out = rule.cfg;
+  }
+  return out;
+}
+
+/** Every cfg name `mod` has ever shipped under, newest last. */
+export function cfgNamesFor(mod) {
+  if (!mod.cfg) return [];
+  return [mod.cfg, ...(mod.cfgByVersion || []).map((r) => r.cfg)];
+}
+
+/**
+ * CFG_FILES with each renamed cfg swapped in place, so the zip's entry ORDER is
+ * unchanged by a rename (a byte-diff against a published pack depends on it).
+ */
+export function cfgFilesFor(versions = {}) {
+  const swaps = new Map();
+  for (const mod of MODS) {
+    if (!mod.cfg) continue;
+    const resolved = cfgFor(mod, versions[mod.key] ?? mod.baseline);
+    if (resolved !== mod.cfg) swaps.set(mod.cfg, resolved);
+  }
+  return CFG_FILES.map((name) => swaps.get(name) ?? name);
+}
+
+/**
  * Render every file that goes into the pack.
  * Returns { files: Map<relPath, Buffer>, vars } - `files` keys are zip paths
  * ('export.r2x', 'config/BepInEx.cfg', ...).
@@ -292,6 +362,25 @@ export function renderPack({
     const mod = MODS.find((m) => m.key === key);
     if (!mod) throw new Error(`renderPack: unknown mod key "${key}"`);
     if (!mod.omitFlag) throw new Error(`renderPack: ${mod.label} cannot be dropped from the pack`);
+  }
+
+  // [VPlusFallback] is the CLIENT half of what ValheimPlus was doing, so with V+
+  // in the pack the two patch the same methods and their effects stack: ranges
+  // and multipliers come out roughly double. EilifPaths 1.5.0+ detects V+ at
+  // runtime and refuses to apply the section, logging a warning nobody reads, so
+  // the pack that asks for both ships a switch that does nothing on a good day
+  // and doubles everything on a bad one. Refuse the pairing here instead. ('off'
+  // and 'none' are both fine with V+ present - off is exactly what pack v14
+  // wants, because the section has to be visibly, deliberately false.)
+  if (fallback === 'on' && !dropped.has('vplus')) {
+    const vplus = MODS.find((m) => m.key === 'vplus');
+    throw new Error(
+      'renderPack: --fallback on writes EilifPaths [VPlusFallback] Enabled = true, but this '
+      + `pack still pins ${vplus.label}. Both patch the same methods, so they stack, and `
+      + 'EilifPaths refuses to apply the section at runtime when it finds a ValheimPlus DLL. '
+      + `Use "${vplus.omitFlag} --fallback on" for a pack without V+, or "--fallback off" for `
+      + 'a pack with it.',
+    );
   }
 
   const vars = {
@@ -343,15 +432,19 @@ export function renderPack({
   // configured, and a cfg with no entry is a file r2modman writes into the
   // profile for a mod that is not there.
   const sections = { FALLBACK: fallback !== 'none', ...omitSections(dropped) };
+  // Resolved against this render's pins, not the baselines: dropping V+ 10 has to
+  // drop org.bepinex.plugins.valheim_plus.cfg, not the legacy name it no longer
+  // ships.
   const droppedCfgs = new Set(
-    OMITTABLE_MODS.filter((m) => dropped.has(m.key) && m.cfg).map((m) => m.cfg),
+    OMITTABLE_MODS.filter((m) => dropped.has(m.key) && m.cfg)
+      .map((m) => cfgFor(m, versions[m.key] ?? m.baseline)),
   );
 
   const render = (text, where) => fill(applySections(text, sections, where), vars, where);
 
   const files = new Map();
   for (const f of PACK_FILES) files.set(f.out, render(readTemplate(f.tmpl), f.tmpl));
-  for (const cfg of CFG_FILES) {
+  for (const cfg of cfgFilesFor(versions)) {
     if (droppedCfgs.has(cfg)) continue;
     files.set(`config/${cfg}`, render(readTemplate(path.join('config', `${cfg}.tmpl`)), cfg));
   }
@@ -380,18 +473,31 @@ export function renderReadme({ packNumber, packDate, cfgs = CFG_FILES }) {
   // functions, is how the count and the file list drift apart.
   const names = [...cfgs];
   if (!NUMBER_WORDS[names.length]) throw new Error(`renderReadme: no word for ${names.length} cfg files`);
+  // A mod is "in this bundle" if ANY of the names it has shipped under is in the
+  // list, because a pin can rename its cfg (ValheimPlus 10 did).
   const sections = omitSections(
-    new Set(OMITTABLE_MODS.filter((m) => !names.includes(m.cfg)).map((m) => m.key)),
+    new Set(OMITTABLE_MODS.filter((m) => !cfgNamesFor(m).some((n) => names.includes(n))).map((m) => m.key)),
   );
+  const vplus = MODS.find((m) => m.key === 'vplus');
   const title = `Eilif config bundle - Pack v${packNumber} (${packDate})`;
   return fill(applySections(readTemplate('README.txt.tmpl'), sections, 'README.txt'), {
     BUNDLE_TITLE: title,
     BUNDLE_TITLE_RULE: '='.repeat(title.length),
     CFG_COUNT_WORD: NUMBER_WORDS[names.length],
+    // The "What is in here" list is a two-column layout with the descriptions at
+    // column 44, and the V+ cfg is the one filename that changes with the pin
+    // (16 chars in v11, 36 in v14), so the padding has to be computed rather than
+    // typed into the template. Read off the bundle's own entry list for the same
+    // reason the count is: the README must name the file sitting next to it.
+    VPLUS_CFG_PADDED: (cfgNamesFor(vplus).find((n) => names.includes(n)) ?? vplus.cfg)
+      .padEnd(README_DESC_COLUMN - README_INDENT),
     PACK_NUMBER: String(packNumber),
     PACK_DATE: packDate,
   }, 'README.txt');
 }
+
+const README_INDENT = 2;
+const README_DESC_COLUMN = 44;
 
 // ── zip (write) ─────────────────────────────────────────────────────────────
 // Deterministic on purpose: a fixed DOS timestamp means the same inputs always
@@ -721,18 +827,22 @@ ${MODS.map((m) => `  ${m.flag} <x.y.z>`.padEnd(30) + `${m.label} (v11: ${m.basel
 
 Pack contents
 ${OMITTABLE_MODS.map((m) => `  ${m.omitFlag}`.padEnd(30) + `Mint without ${m.label}.\n`
-    + ' '.repeat(30) + `Drops its export.r2x entry AND config/${m.cfg}.\n`
+    + ' '.repeat(30) + `Drops its export.r2x entry AND config/${cfgNamesFor(m).join(' or ')}.\n`
     + ' '.repeat(30) + 'The SERVER must then not run it either.').join('\n')}
   --fallback on|off|none      EilifPaths [VPlusFallback] Enabled, in the rendered
                               net.eilif.paths.cfg. Default ${DEFAULT_FALLBACK}: the section is
                               left out, which is what EilifPaths 1.4.0 wrote and what
-                              reproduces pack v11. Turn it 'on' when the pack ships
-                              without ValheimPlus. 'on' and 'off' both WRITE the
+                              reproduces pack v11. 'on' and 'off' both WRITE the
                               section, so both require --paths 1.5.0 or newer and
                               both stamp that cfg's writer header 1.5.0.
+                              'on' is ONLY for a pack that also passes --no-vplus:
+                              with V+ pinned the two stack and EilifPaths refuses the
+                              section at runtime, so that pairing is REFUSED here.
+                              A pack that ships V+ wants --fallback off.
   --cap <n>                   The player cap the box will actually enforce, used only
                               in the printed checklist (config/server.ts MAX_PLAYERS).
-                              Without ValheimPlus that is 10 unless Eilif Companion's
+                              With ValheimPlus that is its [Server] maxPlayers on the
+                              box; without it, 10 unless Eilif Companion's
                               [ServerFallback] is switched on in the box's cfg.
 
 Cfg writer headers (rarely needed - a header records the build that WROTE the
@@ -750,7 +860,7 @@ Modes
                               any version check failed.
 
 Other
-  --version-label <text>      e.g. 'Pack v12 · Sep 9'. Printed in the cutover
+  --version-label <text>      e.g. 'Pack v14 · Sep 10'. Printed in the cutover
                               checklist; required with --publish.
   --profile-name <name>       r2modman profile name (default ${DEFAULT_PROFILE_NAME}).
   --ingest-url <url>          Dashboard ingest endpoint written into both client
@@ -870,6 +980,49 @@ function printNoVplusReminder(cap) {
 }
 
 /**
+ * The other half of rule 6, and the one nobody had to print until 2026-09-10: a
+ * pack that DOES pin ValheimPlus is just as all-or-nothing as one that does not.
+ * `enforceMod = true` runs in both directions, so this pack is refused by every
+ * box that is not running the same V+, and the box is not running it until
+ * somebody uploads two files by hand in a stopped window.
+ *
+ * The two fallbacks are the second half. They exist because V+ was gone; with V+
+ * back they must BOTH be off, and neither turns itself off - the client one is
+ * this pack's --fallback flag, the server one is a cfg on the box.
+ */
+function printVplusReminder(cap, version) {
+  const vplus = MODS.find((m) => m.key === 'vplus');
+  const cfg = cfgFor(vplus, version);
+  banner(`ValheimPlus ${version} IS in this pack`);
+  console.log('  The SERVER must run the same ValheimPlus, or this pack is dead on arrival.');
+  console.log('  V+ enforceMod = true is a version check in both directions: a box without V+');
+  console.log('  refuses every client that has it. In a stopped window, on the GTX box:');
+  console.log('    1. upload ValheimPlus.dll     -> BepInEx/plugins/ValheimPlus.dll');
+  console.log(`       (a loose DLL, not a folder - V+ logs that path itself on every boot)`);
+  console.log(`    2. upload ${cfg}`);
+  console.log('                                  -> BepInEx/config/');
+  console.log('    3. Eilif Companion cfg: [ServerFallback] Enabled = false, in');
+  console.log('       BepInEx/config/media.blockspace.eilif.companion.cfg');
+  console.log('');
+  console.log('  BOTH fallbacks go off when V+ comes back, and they are two separate switches:');
+  console.log('    client  EilifPaths [VPlusFallback] Enabled = false  <- mint with --fallback off');
+  console.log('    server  Eilif Companion [ServerFallback] Enabled = false, by hand on the box');
+  console.log('  Leaving the client one on is refused by this script; leaving the server one on');
+  console.log('  is not, and nothing downstream can see it, so check it while the box is stopped.');
+  console.log('');
+  console.log(`  The player cap now lives in V+ [Server] maxPlayers in ${cfg},`);
+  console.log('  not in [ServerFallback]. The pack ships that file, so the pinned cfg and the');
+  console.log("  box's cfg have to be the same file.");
+  if (cap) {
+    console.log(`  config/server.ts MAX_PLAYERS = ${cap}, matching --cap ${cap}. The box's`);
+    console.log(`  [Server] maxPlayers must read ${cap} too or the site lies.`);
+  } else {
+    console.log("  config/server.ts MAX_PLAYERS must equal the box's [Server] maxPlayers.");
+    console.log('  Re-run with --cap <n> and this line prints the number instead of the rule.');
+  }
+}
+
+/**
  * Everything else that left the pack. ValheimPlus gets its own page above because
  * its absence is a two-way version check with consequences; the rest just have to
  * leave BOTH halves together, and that is the half people forget. Printed once
@@ -904,8 +1057,19 @@ async function main(argv) {
   if (!args.world) { console.error(`--world is required.\n${USAGE}`); process.exit(2); }
   if (args.dryRun && args.publish) { console.error('--dry-run and --publish are mutually exclusive.'); process.exit(2); }
   if (args.publish && !args.versionLabel) {
-    console.error("--publish requires --version-label (e.g. --version-label 'Pack v12 · Sep 9').");
+    console.error("--publish requires --version-label (e.g. --version-label 'Pack v14 · Sep 10').");
     console.error('The label is what tells a returning player whether their pack is current.');
+    process.exit(2);
+  }
+  // Refused here as well as in renderPack, so it costs nothing: renderPack is the
+  // rule of record (build-config-bundle.mjs goes through it too), this is just the
+  // version that fails before the Thunderstore round trip.
+  if (args.fallback === 'on' && !args.omit.includes('vplus')) {
+    console.error('--fallback on with ValheimPlus still pinned is refused.');
+    console.error('  [VPlusFallback] is the CLIENT half of what V+ itself does. With V+ in the pack');
+    console.error('  the two stack - ranges and multipliers come out roughly double - and EilifPaths');
+    console.error('  detects V+ at boot and refuses to apply the section anyway, logging a warning');
+    console.error('  nobody reads. Use --no-vplus --fallback on, or --fallback off.');
     process.exit(2);
   }
   if (args.publish && args.skipIndexCheck) {
@@ -935,15 +1099,11 @@ async function main(argv) {
     : `Enabled = ${args.fallback === 'on'}`}`);
   console.log(`  out dir      ${outDir}`);
 
+  const vplusVersion = args.versions.vplus ?? MODS.find((m) => m.key === 'vplus').baseline;
   const otherDrops = OMITTABLE_MODS.filter((m) => m.key !== 'vplus' && args.omit.includes(m.key));
   if (args.omit.includes('vplus')) printNoVplusReminder(args.cap);
+  else printVplusReminder(args.cap, vplusVersion);
   printDropReminder(otherDrops);
-  if (args.fallback === 'on' && !args.omit.includes('vplus')) {
-    banner('Check this pairing');
-    console.log('  --fallback on while ValheimPlus is still pinned. Both patch the same');
-    console.log('  methods, so their effects stack: ranges and multipliers come out roughly');
-    console.log('  double. Use --fallback on only for a pack that ships without V+.');
-  }
 
   // 1. render ---------------------------------------------------------------
   banner('1. Render templates');
@@ -1126,6 +1286,10 @@ async function main(argv) {
       console.log(`    3b. config/server.ts: MAX_PLAYERS = ${args.cap
         ? args.cap
         : "<the box's real cap: 10, or [ServerFallback] MaxPlayers if it is on>"}`);
+    } else {
+      console.log(`    3b. config/server.ts: MAX_PLAYERS = ${args.cap
+        ? args.cap
+        : "<the box's real cap: ValheimPlus [Server] maxPlayers>"}`);
     }
     if (args.omit.length) {
       const names = args.omit.map((k) => MODS.find((m) => m.key === k).label).join(', ');
@@ -1144,6 +1308,7 @@ async function main(argv) {
     console.log('       (launch morning: skip that, the box is already stopped; docs/LAUNCH-DAY.md);');
     console.log('       then tell the crew to re-import');
     if (args.omit.includes('vplus')) printNoVplusReminder(args.cap);
+    else printVplusReminder(args.cap, vplusVersion);
     printDropReminder(otherDrops);
   } else {
     console.log(`  TEST code: ${key}`);

@@ -7,26 +7,33 @@
 // docs/ARCHITECTURE.md 3.1. Keep `tentative` in sync with what's actually locked vs.
 // still being piloted.
 //
-// VALHEIMPLUS IS RETIRED FOR GOOD (Charlie, 2026-09-09). Its row was DELETED from this
-// file, not hidden: the Grantapher fork has no Valheim 1.0 build, the author has been
-// silent since 2026-02-06, and the server is not going back to it. Everything the crew
-// used it for now lives in our own two plugins, and that is the permanent arrangement:
-// the raised player cap in Eilif Companion `[ServerFallback]`, and the comforts (infinite
-// fuel, station reach, no roof check, the gathering, picking and loot bonuses, no weather
-// damage, area repair, floating items, shout range) in EilifPaths `[VPlusFallback]`.
-// Do not re-add a ValheimPlus row.
+// VALHEIMPLUS IS BACK (Charlie, 2026-09-10). This reverses the 2026-09-09 "retired for
+// good" note that stood here: Grantapher shipped ValheimPlus **10.0.2** that morning
+// (`Grantapher/ValheimPlus_Grantapher_Temporary`), a real Valheim 1.0 build, and its
+// CraftFromChest works, so chest crafting comes back through V+ and AzuCraftyBoxes stays
+// retired. Pack v14 pins it and its row is re-added below, right after BepInExPack.
+// BOTH STAND-INS GO OFF IN v14, because they would stack with V+: EilifPaths
+// `[VPlusFallback]` (infinite fuel, station reach, no roof check, gathering/picking/loot,
+// no weather damage, area repair, floating items, shared map, camera) and Eilif Companion
+// `[ServerFallback]` (the raised player cap). The cap of 24 is now V+ `[Server]
+// maxPlayers = 24` on the box, which is what config/server.ts MAX_PLAYERS points at.
+// EilifPaths KEEPS its own features (paths, bed fire range, station attachment range,
+// exploration radius, deep-water stamina); only its `[VPlusFallback]` section is off.
 //
 // HIDDEN (`hidden: true`, bottom of ALL_MODS) SINCE 2026-09-09, and why. These are not
-// deleted: each comes back by removing its `hidden` line once a 1.0 build exists.
-//   • PlantEverything and AzuCraftyBoxes both die at startup on 1.0, so neither ships
-//     in pack v12. There is no chest-crafting mod on the server tonight.
-//   • WebMap: was out for a few hours; back at 11:42 CT as a locally built 1.0 port.
+// deleted: each comes back by removing its `hidden` line once there is a reason to.
+//   • PlantEverything dies at startup on 1.0, so it does not ship in pack v14.
+//   • AzuCraftyBoxes dies at startup on 1.0 as well, and as of 2026-09-10 it is also
+//     SUPERSEDED: ValheimPlus CraftFromChest does the chest crafting again. It stays
+//     hidden rather than deleted (Charlie's hide-not-delete rule).
+//   • WebMap: was out for a few hours on 2026-09-09; back at 11:42 CT as a locally
+//     built 1.0 port.
 //   • ServersideQoL is not loaded on 1.0 either.
 //
 // Client rows must state the version THE PACK PINS (decoded from the live pack
-// code in config/server.ts), never the newest build in this repo. The v12 rows below
-// were set ahead of the mint on launch morning: `MODPACK_PROFILE_CODE` is still v11's
-// until Charlie pastes the v12 code in, and this file and that code must ship in the
+// code in config/server.ts), never the newest build in this repo. The v14 rows below
+// were set ahead of the mint on 2026-09-10: `MODPACK_PROFILE_CODE` is still v13's
+// until Charlie pastes the v14 code in, and this file and that code must ship in the
 // same deploy. Player-facing copy carries no em or en dashes (CLAUDE.md copy doctrine).
 
 export type ModCategory = 'Core' | 'QoL' | 'Content' | 'Balance';
@@ -59,26 +66,40 @@ export const ALL_MODS: Mod[] = [
     author: 'denikson',
     description:
       'The mod loader everything else runs on. A mod manager installs it for you automatically, so you rarely touch it directly.',
-    version: '5.4.2333',
+    version: '5.4.2350',
     category: 'Core',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/',
   },
   {
+    // Back in the pack 2026-09-10 (Charlie). Grantapher's 10.0.2 is the first real
+    // Valheim 1.0 build of the fork and its CraftFromChest works, which is what
+    // decided it. The server runs the same version with `enforceMod` on, so a client
+    // on any other V+ version is refused: this row's version and the pack pin must
+    // never drift apart. The comforts named here are the SERVER-side settings of
+    // record, and they are why EilifPaths `[VPlusFallback]` is off in v14.
+    name: 'ValheimPlus',
+    author: 'Grantapher (fork of the ValheimPlus team)',
+    description:
+      'The all-round comfort mod, the source of most of the small kindnesses you feel every session. Craft and build straight out of the chests around you, out to 30 metres from the workbench area. Rain no longer wears down what you have built, one hammer swing repairs everything damaged within 7.5 metres, you can place pieces from 12 metres away, taking a piece back down refunds every resource it cost, and pieces can be placed freely rather than only where the game usually allows. Fires and furnishings warm you out to 20 metres. Workbenches and other stations reach 30 metres and need no roof, and upgrades attach from 20 metres out. Fires, ovens and torches burn without fuel. Gathering and picking run 30% richer. Dropped items float instead of sinking and wait an hour before they fade. The map is shared, so exploration and pins spread to everyone, and carts and boats show on it too. The camera pulls back to 100 metres with a wider view. You can sleep in any bed nobody has claimed. Hold LeftAlt to snap building pieces to a grid, F7 turns snapping on and off, F6 sets the default. The server checks the version, so everyone needs exactly this one. Ships in the modpack.',
+    version: '10.0.2',
+    category: 'QoL',
+    clientRequired: true,
+    url: 'https://thunderstore.io/c/valheim/p/Grantapher/ValheimPlus_Grantapher_Temporary/',
+  },
+  {
     // VERSION = WHAT THE PACK SHIPS, not what the repo has built, same rule as the
-    // Eilif Companion Client row below. Pack v12 pins **1.7.0**, uploaded to
-    // Thunderstore 2026-09-09 12:04 CT; the four new [VPlusFallback] comforts named
-    // in the copy below are 1.7.0 code.
+    // Eilif Companion Client row below. Pack v14 pins **1.7.1**, unchanged from v13.
     //
-    // The description is the launch-day text from docs/LAUNCH-DAY.md step 19, which
-    // takes over the two comforts the deleted ValheimPlus row used to carry (the
-    // raised cap is Eilif Companion's half; the fuel, station reach and gathering
-    // bonus are this mod's `[VPlusFallback]`), plus one sentence for what 1.6.0 added:
-    // the wider map discovery and stamina in deep water.
+    // 2026-09-10: `[VPlusFallback]` is OFF in v14 now that ValheimPlus 10.0.2 is back
+    // (the two would stack), so every sentence about the comforts it used to stand in
+    // for is gone from the copy below and lives on the ValheimPlus row instead. What
+    // stays here is this mod's own work: paths, roads and floors, the bed fire range,
+    // the extra station attachment range, the wider map discovery and deep-water stamina.
     name: 'Eilif Paths',
     author: 'cbspears (custom-built)',
     description:
-      'Dirt paths, paved roads, and floors you have built move you 40% faster, and running, jumping, swimming and hauling on them cost a quarter of the usual stamina. Tools and weapons are left out: a swing, a block, a drawn bow or a hoe costs normal stamina on a path or road, and nothing at all on a floor you built. New in this pack: the map uncovers in a wider circle as you travel, twice as wide on foot and five times as wide while you are on a ship, and stamina comes back in deep water, at the normal rate while you tread and half rate while you swim, without making the swim itself any cheaper. Beds also accept a fire 8 metres further off, and crafting upgrades attach 10 metres further out at every station. With ValheimPlus gone this mod also carries the comforts it used to hold: fires, ovens, hot tubs and shield generators burn without fuel, workbenches build out to 30 metres and need no roof, and gathering, picking and loot all run 30% richer. It now carries four more of them as well: rain no longer erodes your buildings, one hammer click repairs everything damaged within 7.5 metres, dropped items float instead of sinking out of reach, and the camera zooms out to 100 metres on foot and at sea with a wider field of view. Those last ones run on whichever machine owns the ground, so a fire or a berry bush close to the world’s first spawn behaves the old way. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
+      'Dirt paths, paved roads, and floors you have built move you 40% faster, and running, jumping, swimming and hauling on them cost a quarter of the usual stamina. Tools and weapons are left out: a swing, a block, a drawn bow or a hoe costs normal stamina on a path or road, and nothing at all on a floor you built. It does two more things: the map uncovers in a wider circle as you travel, twice as wide on foot and five times as wide while you are on a ship, and stamina comes back in deep water, at the normal rate while you tread and half rate while you swim, without making the swim itself any cheaper. Beds also accept a fire 8 metres further off, and crafting upgrades attach 10 metres further out at every station. Replaces the abandoned Useful Paths, whose path detection broke years ago. Ships in the modpack.',
     version: '1.7.1',
     category: 'QoL',
     clientRequired: true,
@@ -96,11 +117,12 @@ export const ALL_MODS: Mod[] = [
     // `deathkeepequip` keeps equipped items, the rest still drops to a tombstone
     // (plugins/eilif-companion/README.md).
     //
-    // 0.3.3 on the box for launch night (the 1.0 rebuild). Its `[ServerFallback]` is
-    // what holds the hall at 24 now that ValheimPlus is gone, which is why the copy
-    // below says so and why config/server.ts MAX_PLAYERS points here.
+    // 0.3.3 on the box since launch night (the 1.0 rebuild), unchanged in v14.
+    // 2026-09-10: its `[ServerFallback]` is PARKED. ValheimPlus 10.0.2 is back and
+    // `[Server] maxPlayers = 24` holds the hall again, so the cap sentence is out of
+    // the copy below and config/server.ts MAX_PLAYERS points at V+, not here.
     description:
-      "The voice of the Hall itself: it carries the in-game /oath swearing and speaks as Eilif. It holds the world's death rule steady, so the gear you are wearing stays with you when you fall and the rest waits in your tombstone. With ValheimPlus gone it is also what keeps the hall's doors wide, holding the server at 24 vikings instead of the ten Valheim allows on its own. Built just for this server; nothing to install.",
+      "The voice of the Hall itself: it carries the in-game /oath swearing and speaks as Eilif. It holds the world's death rule steady, so the gear you are wearing stays with you when you fall and the rest waits in your tombstone. Built just for this server; nothing to install.",
     version: '0.3.3',
     category: 'Core',
     clientRequired: false,
@@ -143,22 +165,23 @@ export const ALL_MODS: Mod[] = [
     // VERSION = WHAT THE PACK SHIPS, not what the repo has built. This page tells a
     // player which mods they are running, and r2modman reinstalls the pinned pack
     // versions on every "Start modded", so the honest answer is the version the pack
-    // pins. Pack v12 pins **0.3.4**, the Valheim 1.0 rebuild cut on 2026-09-09: 1.0
-    // renumbered the game's GlobalKeys enum, so only 0.3.4 reads `deathkeepequip`
-    // correctly and only 0.3.4 actually engages the tombstone keep-list on a 1.0
-    // server. The keep-list is the one player-visible thing this bump buys, which is
-    // why the copy names it and why this row must not go out ahead of the v12 code
-    // in config/server.ts.
+    // pins. Pack v14 pins **0.4.0**, cut 2026-09-10: it reads your own Valheim 1.0
+    // profile counters (kills, deaths, builds, crafts, distance) and posts them with
+    // the rest, which is what refills the kill, death, build and distance boards that
+    // went quiet when 1.0 moved those counters. That is the one player-visible thing
+    // this bump buys, which is why the copy names it and why this row must not go out
+    // ahead of the v14 code in config/server.ts. 0.3.4 (the 1.0 rebuild that made the
+    // tombstone keep-list work) is still the floor underneath it.
     name: 'Eilif Companion Client',
     author: 'cbspears (custom-built)',
     description:
-      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play, with no setup and nothing to upload. It names exactly what killed you the moment you die, the creature or the hazard, so How We Die and the Saga show the real cause instead of a guess. New in this pack: a keep-list, so the tools and gear a viking cannot afford to lose stay on you through a death that would otherwise scatter them. Ships in the modpack.',
-    version: '0.3.4',
+      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play, with no setup and nothing to upload. It names exactly what killed you the moment you die, the creature or the hazard, so How We Die and the Saga show the real cause instead of a guess. It also carries a keep-list, so the tools and gear a viking cannot afford to lose stay on you through a death that would otherwise scatter them. New in this pack: it reads your own kills, deaths, builds, crafts and distance travelled straight off your character and sends them along, so those boards fill in again. Ships in the modpack.',
+    version: '0.4.0',
     category: 'Content',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Eilif/EilifCompanionClient/',
   },
-  // ── Hidden since 2026-09-09: not running on the 1.0 box, not in pack v12 ────
+  // ── Hidden since 2026-09-09: not running on the 1.0 box, not in pack v14 ────
   // Each row keeps its last known-good pin and copy. Remove `hidden: true` (and
   // re-add the pack pin in scripts/mint-pack.mjs) when the author ships a 1.0 build.
   {
@@ -175,6 +198,10 @@ export const ALL_MODS: Mod[] = [
   },
   {
     // Same ServerSync failure as PlantEverything; dead on both server and client.
+    // SUPERSEDED 2026-09-10: ValheimPlus 10.0.2 is back in pack v14 and its
+    // CraftFromChest does the chest crafting (30 metres, checked from the workbench
+    // area), so this mod is not coming back even if Azumatt ships a 1.0 build. It
+    // stays hidden rather than deleted, per the hide-not-delete rule.
     name: 'AzuCraftyBoxes',
     author: 'Azumatt',
     description:

@@ -66,9 +66,9 @@ const MACHEIM_ALL_URL = 'https://github.com/lofcgi/macheim/releases/latest';
 // The pack's .cfg files, zipped, for the Mac path: Macheim cannot read an
 // r2modman profile code, so a hand install gets none of the pack's settings.
 // Re-cut this zip out of the pack export whenever the pack code is re-minted, and
-// point this constant at the new file. The v11 zip stays on disk so no link 404s
-// while the v12 build is going out.
-const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v13.zip';
+// point this constant at the new file. The v13 zip stays on disk so no link 404s
+// while the v14 build is going out.
+const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v14.zip';
 
 // The mods a Mac player installs one at a time, read out of config/mods.ts
 // so the page cannot fall behind the pack. See the CUTOVER ANCHOR note below.
@@ -540,29 +540,33 @@ export default function GetStartedPage() {
             and it is right: run its grep before you deploy, because it is the
             only check that survives the next pin somebody adds.
 
-              grep -n "CONFIG_BUNDLE_URL\|Eilif Paths 1\.\|GsValheimStatsClient 0\.\|ValheimPlus (Grantapher)" app/get-started/page.tsx
+              grep -n "CONFIG_BUNDLE_URL\|Eilif Paths 1\.\|GsValheimStatsClient 0\.\|ValheimPlus" app/get-started/page.tsx config/mods.ts
 
-            DONE at the v12 mint (2026-09-09), kept here as the record of what
-            each edit was, because the next mint needs the same four:
+            DONE at the v12 mint (2026-09-09) and again at v14 (2026-09-10),
+            kept here as the record of what each edit was, because the next mint
+            needs the same four:
               1. CONFIG_BUNDLE_URL above -> the new bundle filename. This is the
                  one version-bearing string still typed into this file. It reads
-                 eilif-configs-pack-v12.zip now.
+                 eilif-configs-pack-v14.zip now.
               2. The mod names and versions in the table below are NOT typed
                  here: it is built by `checklistFrom(CLIENT_MODS)` out of
                  config/mods.ts, and the counts on this page are MAC_MODS.length
-                 rather than a spelled-out number. Edit config/mods.ts to the v12
+                 rather than a spelled-out number. Edit config/mods.ts to the v14
                  export.r2x values and both this table and /resources follow.
               3. Step 19's third edit, the update card's "Installed: Eilif Paths
                  1.4.0 and GsValheimStatsClient 0.2.12" self-check, was DELETED
                  on 2026-09-06 rather than left to be retyped. That paragraph now
                  points at /resources#mods. If anybody puts a version number back
                  into it, step 19 edit 3 is live again.
-              4. Pack v12 ships without ValheimPlus, PlantEverything and
-                 AzuCraftyBoxes (V+ has no 1.0 build; the other two die at
-                 startup on 1.0). Their rows are gone from config/mods.ts, which
-                 takes them out of this table, and the sentence below no longer
-                 claims the server version-checks V+ and AzuCraftyBoxes, because
-                 the box runs neither. */}
+              4. 2026-09-10, pack v14: VALHEIMPLUS IS BACK. Grantapher shipped
+                 10.0.2, a real 1.0 build whose CraftFromChest works, so V+ has
+                 a row in config/mods.ts again and appears in the Mac table on
+                 its own, with no edit here. PlantEverything and AzuCraftyBoxes
+                 are still out (the first dies at startup on 1.0, the second is
+                 superseded by V+ CraftFromChest). And the server DOES
+                 version-check V+ again: enforceMod is on, so a Mac player on
+                 any other V+ version is refused at the door, which is what the
+                 "at the exact versions the pack pins" line above protects. */}
         <ModChecklist mods={MAC_MODS} />
         <p className="text-xs text-muted">
           The{' '}

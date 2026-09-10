@@ -50,13 +50,13 @@ PITR) and **GitHub Actions**, which runs one scheduled job.
 ## 2. Data flow
 
 ```
-                        THE GTX BOX (Windows, Valheim 0.221.12 + BepInEx)
+                        THE GTX BOX (Windows, Valheim 1.0.7 + BepInEx 5.4.2333)
   +---------------------------------------------------------------------------+
   |  Eilif Companion (server)   oath/pin capture, voice, position lines, keys  |
   |  Eilif Boards (server)      polls /api/boards, paints sign ZDOs            |
   |  GsValheimStats Emitter     roster + world day + global keys               |
   |  WebMap                     map.png / fog.png on disk, HTTP on port 3000   |
-  |  ValheimPlus, ServersideQoL, AzuCraftyBoxes                                |
+  |  ValheimPlus 10.0.2 (back 2026-09-10: cap 24, CraftFromChest, comforts)   |
   +---------------------------------------------------------------------------+
         |  BepInEx/LogOutput.log        |  map_data/<World>/    |  HTTPS out
         |  (SFTP pull)                  |  (SFTP pull)          |
@@ -98,7 +98,7 @@ PITR) and **GitHub Actions**, which runs one scheduled job.
   |  EilifCompanionClient   -> POST /api/gs-ingest  source:'client-map'        |
   |                         -> POST /api/gs-ingest  source:'eilif-death'       |
   |  GsValheimStatsClient   -> POST /api/gs-ingest  source:'client'            |
-  |  EilifPaths, ValheimPlus, PlantEverything, AzuCraftyBoxes, BepInExPack     |
+  |  EilifPaths, ValheimPlus 10.0.2, BepInExPack (pack v14, 2026-09-10)        |
   +---------------------------------------------------------------------------+
 
   SUPABASE pg_cron (every 5 min) ->  GET /api/ops/watchdog (Bearer WATCHDOG_TOKEN)
@@ -124,18 +124,18 @@ Two facts the diagram cannot show but that explain most of the design:
 
 | Mod | Version on the box | What it does for us |
 |---|---|---|
-| Eilif Companion | 0.3.2 (repo is at 0.3.3) | `/oath` and `/pin` capture into the log, voice pump, `[EILIF_POS]` position lines, world-key enforcement |
+| Eilif Companion | 0.3.3 (the 1.0 rebuild) | `/oath` and `/pin` capture into the log, voice pump, `[EILIF_POS]` position lines, world-key enforcement; its `[ServerFallback]` cap is parked while ValheimPlus is installed |
 | Eilif Boards | 0.2.0 | polls `/api/boards`, writes leaderboard text onto sign ZDOs |
 | GsValheimStats Emitter | 0.2.4 | POSTs roster, world day and Valheim global keys to `/api/gs-ingest` |
-| WebMap | 2.7.1 | writes `map.png` and `fog.png` under `map_data/<World>/`, and serves an HTTP UI on port 3000 |
-| ValheimPlus (Grantapher fork) | 0.9.17.1 | player cap, shout distance, config sync, dozens of QoL toggles |
-| ServersideQoL, AzuCraftyBoxes | see `config/mods.ts` | quality of life; AzuCraftyBoxes is version-checked against clients |
+| WebMap | 2.7.1 (our 1.0 port, `plugins/webmap-1.0-port/`) | writes `map.png` and `fog.png` under `map_data/<World>/`, and serves an HTTP UI on port 3000 |
+| ValheimPlus (Grantapher fork) | 10.0.2 (assembly 0.10.0.2), returned 2026-09-10 | player cap 24, CraftFromChest (replaces AzuCraftyBoxes), config sync and version check against clients, the building and gathering comforts; config is `BepInEx/config/org.bepinex.plugins.valheim_plus.cfg` since 10.0 |
+| ServersideQoL, AzuCraftyBoxes, PlantEverything | off since 2026-09-09 | no 1.0 builds; rows hidden in `config/mods.ts` |
 
-Versions on the box are a live-host observation, not something the repo can prove. Every
-row above was read off the box with `bash scripts/verify-restart.sh` on 2026-09-05, which
-is also how you re-confirm them after any panel Stop then Start. That same run reported
-game 0.221.12, panel death penalty **casual**, combat **default**, and port 3000 still
-open.
+Versions on the box are a live-host observation, not something the repo can prove. The
+rows above are the 2026-09-09 launch set plus the 2026-09-10 ValheimPlus return; re-confirm
+them after any panel Stop then Start with `bash scripts/verify-restart.sh Eilif`. The launch
+boot reported game 1.0.7 (network 39), panel death penalty **casual**, combat **default**,
+raids **less**, and port 3000 still open.
 
 ### 3.2 eilif-log-poller (systemd, Linux PC)
 

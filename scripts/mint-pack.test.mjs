@@ -16,9 +16,11 @@
 // The rest covers the substitution rules (world, version pins, README rule
 // length), minting without any of the three droppable mods (--no-vplus,
 // --no-plant, --no-azu) including what the Mac README then says, the shape pack
-// v12 mints on Valheim 1.0 with all three gone, the [VPlusFallback] switch and
-// its version guard, the {{#SECTION}} marker machinery, the zip writer/reader
-// pair, and the argument guards.
+// v12 mints on Valheim 1.0 with all three gone, the shape pack v14 mints once
+// ValheimPlus 10.0.2 comes back (including the cfg RENAME that came with it and
+// the refusal to stack --fallback on against a pinned V+), the [VPlusFallback]
+// switch and its version guard, the {{#SECTION}} marker machinery, the zip
+// writer/reader pair, and the argument guards.
 //
 // Run: npx tsx scripts/mint-pack.test.mjs
 import assert from 'node:assert';
@@ -27,7 +29,7 @@ import crypto from 'node:crypto';
 import {
   MODS, CFG_FILES, DEFAULT_INGEST_URL, DEFAULT_FALLBACK, FALLBACK_MODES, OMITTABLE_MODS,
   renderPack, renderReadme, parseSemver, compareSemver, zipSync, unzipSync, crc32, firstDiff,
-  bundleArgs, applySections,
+  bundleArgs, applySections, cfgFor, cfgFilesFor, cfgNamesFor,
 } from './mint-pack.mjs';
 import { buildBundle } from './build-config-bundle.mjs';
 
@@ -546,8 +548,12 @@ assert.equal(
 // ── the [VPlusFallback] switch ──────────────────────────────────────────────
 // Writing the section at all needs the build that has the code behind it, so
 // every render here that is not 'none' pins EilifPaths 1.5.0.
+// Every render here drops ValheimPlus, because since 2026-09-10 `--fallback on`
+// with V+ still pinned is a hard refusal of its own (see the V+ guard below) and
+// would mask the guard these assertions are about. The paths cfg is byte-identical
+// either way: dropping V+ takes its export.r2x entry and its cfg, nothing else.
 const pathsCfg = (fallback) => renderPack({
-  world: 'Eilif', fallback, versions: fallback === 'none' ? {} : { paths: '1.5.0' },
+  world: 'Eilif', fallback, omit: ['vplus'], versions: fallback === 'none' ? {} : { paths: '1.5.0' },
 }).files.get('config/net.eilif.paths.cfg').toString('latin1');
 
 assert.equal(DEFAULT_FALLBACK, 'none', 'the section is absent unless someone asks for it, which is what v11 was');
@@ -564,26 +570,26 @@ assert.equal(pathsCfg(undefined), pathsCfg('none'), 'no flag means none');
 // anywhere erroring. This is the one failure mode the round trip cannot see.
 for (const mode of ['on', 'off']) {
   assert.throws(
-    () => renderPack({ world: 'Eilif', fallback: mode }),
+    () => renderPack({ world: 'Eilif', fallback: mode, omit: ['vplus'] }),
     /has no such section - it arrived in 1\.5\.0/,
     `--fallback ${mode} against the default 1.4.0 pin is refused`,
   );
   assert.throws(
-    () => renderPack({ world: 'Eilif', fallback: mode, versions: { paths: '1.4.9' } }),
+    () => renderPack({ world: 'Eilif', fallback: mode, omit: ['vplus'], versions: { paths: '1.4.9' } }),
     /has no such section/,
     `--fallback ${mode} against any pre-1.5.0 pin is refused`,
   );
   // ...and the writer header follows the section rather than needing
   // --paths-cfg-version passed by hand on every launch-day command.
   assert.match(
-    renderPack({ world: 'Eilif', fallback: mode, versions: { paths: '1.6.0' } })
+    renderPack({ world: 'Eilif', fallback: mode, omit: ['vplus'], versions: { paths: '1.6.0' } })
       .files.get('config/net.eilif.paths.cfg').toString('latin1'),
     /^## Settings file was created by plugin Eilif Paths v1\.5\.0$/m,
     `--fallback ${mode} stamps the cfg header at the build that introduced the section`,
   );
 }
 assert.match(
-  renderPack({ world: 'Eilif', fallback: 'on', versions: { paths: '1.5.0' }, cfgVersions: { paths: '1.6.1' } })
+  renderPack({ world: 'Eilif', fallback: 'on', omit: ['vplus'], versions: { paths: '1.5.0' }, cfgVersions: { paths: '1.6.1' } })
     .files.get('config/net.eilif.paths.cfg').toString('latin1'),
   /^## Settings file was created by plugin Eilif Paths v1\.6\.1$/m,
   'and --paths-cfg-version still wins when a real capture says otherwise',
@@ -602,7 +608,7 @@ assert.deepEqual(
 assert.throws(() => renderPack({ world: 'Eilif', fallback: 'true' }), /fallback must be one of/, 'a bogus mode is refused');
 assert.deepEqual(FALLBACK_MODES, ['on', 'off', 'none'], 'the three modes are the documented ones');
 // Only the paths cfg carries it.
-for (const [rel, data] of renderPack({ world: 'Eilif', fallback: 'on', versions: { paths: '1.5.0' } }).files) {
+for (const [rel, data] of renderPack({ world: 'Eilif', fallback: 'on', omit: ['vplus'], versions: { paths: '1.5.0' } }).files) {
   if (rel === 'config/net.eilif.paths.cfg') continue;
   assert.doesNotMatch(data.toString('latin1'), /VPlusFallback/, `${rel} has no fallback section`);
 }
@@ -632,6 +638,204 @@ assert.equal(
     MODS.map((mod) => ({ mod, version: mod.key === 'paths' ? '1.5.0' : mod.baseline }))),
   "--world 'Eilif' --paths 1.5.0 --fallback off",
   'a non-default fallback travels even when it is only writing Enabled = false',
+);
+
+// ── ValheimPlus 10 renamed its cfg, so the filename follows the pin ─────────
+// V+ 10 reads BepInEx/config/org.bepinex.plugins.valheim_plus.cfg and imports the
+// old valheim_plus.cfg once before renaming it .migrated. A pack pinning 10.x that
+// shipped the old name would therefore drop a file the plugin reads once, next to
+// the file it actually reads, with every setting silently at its default - which is
+// exactly the class of failure no round trip and no boot can see.
+const vplusMod = MODS.find((m) => m.key === 'vplus');
+assert.equal(cfgFor(vplusMod, '9.17.1'), 'valheim_plus.cfg', 'a pre-10 pin ships the legacy name');
+assert.equal(cfgFor(vplusMod, '9.99.99'), 'valheim_plus.cfg', '...right up to the boundary');
+assert.equal(cfgFor(vplusMod, '10.0.0'), 'org.bepinex.plugins.valheim_plus.cfg', '10.0.0 is where it changes');
+assert.equal(cfgFor(vplusMod, '10.0.2'), 'org.bepinex.plugins.valheim_plus.cfg', 'and 10.0.2 is what v14 pins');
+assert.equal(cfgFor(vplusMod), 'valheim_plus.cfg', 'no version means the baseline, which is v11 s');
+assert.deepEqual(
+  cfgNamesFor(vplusMod),
+  ['valheim_plus.cfg', 'org.bepinex.plugins.valheim_plus.cfg'],
+  'both names are declared, newest last, so the README can recognise either',
+);
+for (const mod of MODS.filter((m) => m.cfg && m.key !== 'vplus')) {
+  assert.equal(cfgFor(mod, '99.0.0'), mod.cfg, `${mod.label} has one cfg name at every version`);
+}
+assert.deepEqual(cfgFilesFor(), CFG_FILES, 'the baseline pins render exactly the v11 cfg list');
+assert.deepEqual(
+  cfgFilesFor({ vplus: '10.0.2' }),
+  CFG_FILES.map((n) => (n === 'valheim_plus.cfg' ? 'org.bepinex.plugins.valheim_plus.cfg' : n)),
+  'and a 10.x pin swaps the name IN PLACE, so the zip entry order does not move',
+);
+
+// ── the shape pack v14 mints: ValheimPlus is back ───────────────────────────
+// Grantapher published 10.0.2 on 2026-09-10, a real 1.0 build with a working
+// CraftFromChest, so V+ returns and takes AzuCraftyBoxes' job with it.
+// PlantEverything stays out (still no 1.0 build), and BOTH fallbacks go off.
+const V14 = {
+  versions: { vplus: '10.0.2', bepinex: '5.4.2350', paths: '1.7.1', companionClient: '0.4.0' },
+  omit: ['plant', 'azu'],
+  fallback: 'off',
+};
+const { files: v14 } = renderPack({ world: 'Eilif', ...V14 });
+assert.deepEqual(
+  [...v14.keys()].sort(),
+  [
+    'config/BepInEx.cfg',
+    'config/net.cproudlock.gsvalheimstatsclient.cfg',
+    'config/net.eilif.companionclient.cfg',
+    'config/net.eilif.paths.cfg',
+    'config/org.bepinex.plugins.valheim_plus.cfg',
+    'doorstop_config.ini',
+    'export.r2x',
+  ],
+  'v14 ships the V+ 10 cfg under its new name and four others',
+);
+assert.ok(!v14.has('config/valheim_plus.cfg'), 'and never the legacy name alongside it');
+const v14R2x = v14.get('export.r2x').toString('latin1');
+assert.match(
+  v14R2x,
+  /- name: Grantapher-ValheimPlus_Grantapher_Temporary\n {4}version:\n {6}major: 10\n {6}minor: 0\n {6}patch: 2\n/,
+  'the 10.0.2 ValheimPlus pin lands in export.r2x',
+);
+assert.match(
+  v14R2x,
+  /- name: denikson-BepInExPack_Valheim\n {4}version:\n {6}major: 5\n {6}minor: 4\n {6}patch: 2350\n/,
+  'against BepInExPack 5.4.2350, the version V+ 10.0.2 declares',
+);
+assert.match(
+  v14R2x,
+  /- name: Eilif-EilifPaths\n {4}version:\n {6}major: 1\n {6}minor: 7\n {6}patch: 1\n/,
+  'EilifPaths 1.7.1',
+);
+assert.match(
+  v14R2x,
+  /- name: Eilif-EilifCompanionClient\n {4}version:\n {6}major: 0\n {6}minor: 4\n {6}patch: 0\n/,
+  'and Companion Client 0.4.0',
+);
+assert.doesNotMatch(v14R2x, /PlantEverything|AzuCraftyBoxes/, 'the two 1.0 casualties stay out');
+assert.doesNotMatch(v14R2x, /\{\{|\}\}/, 'no marker residue');
+
+// The client half of the fallback must be visibly, deliberately false rather than
+// absent: EilifPaths 1.7.1 HAS the section, so leaving it out would mean the key
+// arrives at the plugin default on first run instead of at our decision.
+const v14Paths = v14.get('config/net.eilif.paths.cfg').toString('latin1');
+assert.match(v14Paths, /^\[VPlusFallback\]$/m, 'v14 writes the [VPlusFallback] section');
+assert.match(v14Paths, /^Enabled = false$/m, '...with Enabled = false, because V+ is doing that job again');
+
+// The shipped V+ cfg is the box's own file verbatim - V+ syncs server config to
+// clients, so anything else would be a second opinion nobody asked for.
+const v14Vplus = v14.get('config/org.bepinex.plugins.valheim_plus.cfg').toString('latin1');
+assert.match(
+  v14Vplus, /^## Settings file was created by plugin Valheim Plus v0\.10\.0\.2$/m,
+  'the cfg carries the assembly version 10.0.2 ships as',
+);
+assert.match(v14Vplus, /^maxPlayers = 24$/m, 'the cap now lives in V+ [Server] maxPlayers');
+assert.match(v14Vplus, /^enforceMod = true$/m, 'enforceMod stays on, which is what makes the pack all-or-nothing');
+assert.match(v14Vplus, /^serverSyncsConfig = true$/m, 'and the server is the one that decides');
+assert.equal(
+  section(v14Vplus, 'CraftFromChest').enabled, 'true',
+  'CraftFromChest is ON - it is what replaces AzuCraftyBoxes',
+);
+assert.equal(section(v14Vplus, 'CraftFromChest').range, '30', '...at the 30m range the box is set to');
+
+/** The `key = value` pairs of one BepInEx cfg section, comments and blanks dropped. */
+function section(cfg, name) {
+  const body = cfg.split(`\n[${name}]\n`)[1];
+  assert.ok(body !== undefined, `${name} is a section in the shipped cfg`);
+  const out = {};
+  for (const line of body.split('\n')) {
+    if (/^\[/.test(line)) break;
+    const m = /^([A-Za-z][\w.]*) = (.*)$/.exec(line);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+assert.match(v14Vplus, /^workbenchAttachmentRange = 20$/m, 'and the workbench range the crew has been playing');
+
+// The rename must not disturb the zip's entry order: V+ sits where it always sat.
+assert.deepEqual(
+  centralNames(zipSync([...v14].map(([name, data]) => ({ name, data })))),
+  [
+    'export.r2x', 'doorstop_config.ini', 'config/',
+    'config/net.eilif.paths.cfg', 'config/BepInEx.cfg',
+    'config/net.eilif.companionclient.cfg', 'config/net.cproudlock.gsvalheimstatsclient.cfg',
+    'config/org.bepinex.plugins.valheim_plus.cfg',
+  ],
+  'the renamed cfg keeps the ValheimPlus slot in the order r2modman writes',
+);
+
+// ── the v14 Mac bundle ──────────────────────────────────────────────────────
+const v14Bundle = buildBundle({
+  world: 'Eilif', versions: V14.versions, cfgVersions: {}, ingestUrl: undefined,
+  packNumber: 14, packDate: 'Sep 10, 2026', omit: V14.omit, fallback: V14.fallback,
+});
+assert.deepEqual(
+  v14Bundle.entries.map((e) => e.name),
+  [
+    'BepInEx.cfg',
+    'net.cproudlock.gsvalheimstatsclient.cfg',
+    'net.eilif.companionclient.cfg',
+    'net.eilif.paths.cfg',
+    'org.bepinex.plugins.valheim_plus.cfg',
+    'README.txt',
+  ],
+  'the Mac bundle is the same five cfgs, README last',
+);
+const v14Readme = v14Bundle.entries.at(-1).data.toString('latin1');
+assert.match(
+  v14Readme, /^  org\.bepinex\.plugins\.valheim_plus\.cfg {6}the server overrides most of this$/m,
+  'the README names the file that is actually in the zip, still aligned at column 44',
+);
+assert.doesNotMatch(v14Readme, /^ {2}valheim_plus\.cfg /m, 'and never the legacy name on its own');
+assert.equal((v14Readme.match(/\bfive\b/g) || []).length, 2, 'it says five, in both places that count the files');
+assert.doesNotMatch(v14Readme, /\bseven\b|\bsix\b|\bfour\b/, 'and no stale count survives');
+for (const gone of ['PlantEverything', 'AzuCraftyBoxes', 'Azumatt', 'Advize', 'Alt+O']) {
+  assert.ok(!v14Readme.includes(gone), `the v14 README never mentions ${gone}`);
+}
+assert.doesNotMatch(v14Readme, /\{\{|\}\}/, 'no marker or placeholder residue survives into the README');
+// The v11 README is the byte tripwire for the same line, so prove the padding is
+// computed rather than typed: both names land their description at column 44.
+assert.match(
+  renderReadme({ packNumber: 11, packDate: 'Aug 27, 2026' }).toString('latin1'),
+  /^ {2}valheim_plus\.cfg {26}the server overrides most of this$/m,
+  'the legacy name keeps the v11 spacing exactly',
+);
+
+assert.equal(
+  bundleArgs({ world: 'Eilif', ingestUrl: DEFAULT_INGEST_URL, cfgVersions: {}, omit: V14.omit, fallback: V14.fallback },
+    MODS.filter((m) => !V14.omit.includes(m.key))
+      .map((mod) => ({ mod, version: V14.versions[mod.key] ?? mod.baseline }))),
+  "--world 'Eilif' --bepinex 5.4.2350 --vplus 10.0.2 --paths 1.7.1 --companion-client 0.4.0 "
+  + '--no-plant --no-azu --fallback off',
+  'the printed bundle command reproduces the v14 pack exactly',
+);
+
+// ── --fallback on is refused while ValheimPlus is in the pack ───────────────
+// [VPlusFallback] is the CLIENT half of what V+ itself does. With both present
+// they patch the same methods and stack, and EilifPaths detects V+ at boot and
+// refuses to apply the section anyway, logging a warning nobody reads. Either way
+// the pack lies about what it does, so the render refuses instead.
+assert.throws(
+  () => renderPack({ world: 'Eilif', versions: { vplus: '10.0.2', paths: '1.7.1' }, fallback: 'on' }),
+  /still pins ValheimPlus/,
+  '--fallback on with V+ pinned is refused',
+);
+assert.throws(
+  () => renderPack({ world: 'Eilif', versions: { paths: '1.7.1' }, fallback: 'on' }),
+  /still pins ValheimPlus/,
+  '...at the old pin too, so this is about presence, not version',
+);
+assert.doesNotThrow(
+  () => renderPack({ world: 'Eilif', ...V14 }),
+  '--fallback off with V+ pinned is the v14 pairing and is fine',
+);
+assert.doesNotThrow(
+  () => renderPack({ world: 'Eilif', versions: V14.versions, omit: V14.omit, fallback: 'none' }),
+  'and --fallback none is fine too: no section at all is off',
+);
+assert.doesNotThrow(
+  () => renderPack({ world: 'Eilif', versions: { paths: '1.7.1' }, omit: ['vplus'], fallback: 'on' }),
+  'while --no-vplus --fallback on stays exactly as it was on launch night',
 );
 
 console.log('OK — all pack minter assertions passed');

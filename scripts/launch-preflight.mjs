@@ -38,7 +38,7 @@
 //                        downgraded to informational instead of failing the run.
 //   --recaps-start <d>   Launch value expected in the bot .env (default 2026-09-09)
 //   --pins <list>        Comma-separated ns-name-version triples the next pack pins.
-//                        Default = the pack v12 candidate set (see PACK_V12_PINS).
+//                        Default = the pack v14 candidate set (see PACK_V14_PINS).
 //   --expect-plugins <n> How many server plugins this boot must load (default 8, the
 //                        rehearsal count). 2026-09-09: the 1.0 load test left three
 //                        (Companion, Boards, Emitter), so the night runs --expect-plugins 3.
@@ -74,9 +74,18 @@ const SITE_MOD_FACING = 'https://valheim-dashboard.vercel.app';
 
 const VERCEL_SCOPE = 'charlie-9292s-projects';
 
-// The versions pack v12 is expected to pin: pack v11's export.r2x set with the two custom
-// client plugins bumped. Override wholesale with --pins when the ship/drop calls land (e.g.
-// dropping EilifCompanionClient, or a 1.0 rebuild of everything).
+// The versions pack v14 is expected to pin (2026-09-10, Charlie's call). Five packages, not
+// seven: PlantEverything and AzuCraftyBoxes are gone for good — both embed a ServerSync that
+// reads ZRoutedRpc.Everybody, which Valheim 1.0 turned from a field into a constant, so both
+// throw at startup on 1.0, and ValheimPlus CraftFromChest does AzuCraftyBoxes' job anyway.
+//
+// ValheimPlus is BACK, as Grantapher 10.0.2: a real 1.0 build with working CraftFromChest,
+// published 2026-09-10. It declares BepInExPack 5.4.2350, so the PACK pins 5.4.2350 even
+// though the BOX keeps the 5.4.2333 it has been running (V+ 10.0.2 loads clean on 5.4.2333 —
+// proved on the local 1.0 rig). Pack v13, minted on launch night, had no V+ at all.
+//
+// Override wholesale with --pins when a ship/drop call lands (e.g. a night that has to fall
+// back to the v13 shape, which needs --pins without the ValheimPlus entry).
 //
 // The two custom versions are READ OUT OF THE WORKING TREE, never written here: the csproj
 // is the only place that number is decided, and a literal rots silently — this list said
@@ -90,14 +99,12 @@ function csprojVersion(rel, fallback) {
     return fallback;
   }
 }
-const PACK_V12_PINS = [
-  'denikson-BepInExPack_Valheim-5.4.2333',
-  'Grantapher-ValheimPlus_Grantapher_Temporary-9.17.1',
-  'Advize-PlantEverything-1.20.0',
+const PACK_V14_PINS = [
+  'denikson-BepInExPack_Valheim-5.4.2350',
+  'Grantapher-ValheimPlus_Grantapher_Temporary-10.0.2',
   'Proudlock_Technology-GsValheimStatsClient-0.2.12',
-  `Eilif-EilifPaths-${csprojVersion('plugins/eilif-paths/EilifPaths.csproj', '1.4.0')}`,
-  `Eilif-EilifCompanionClient-${csprojVersion('plugins/eilif-companion-client/EilifCompanionClient.csproj', '0.3.2')}`,
-  'Azumatt-AzuCraftyBoxes-1.8.15',
+  `Eilif-EilifPaths-${csprojVersion('plugins/eilif-paths/EilifPaths.csproj', '1.7.1')}`,
+  `Eilif-EilifCompanionClient-${csprojVersion('plugins/eilif-companion-client/EilifCompanionClient.csproj', '0.4.0')}`,
 ];
 
 const UA = 'eilif-launch-preflight/1.0';
@@ -117,7 +124,7 @@ const EXPECT_PLUGINS = Number(opt('expect-plugins', '8')) || 8;
 const PHASE = opt('phase', 'pre-wipe');
 const POSTURE = (opt('posture', 'GO-A') || 'GO-A').toUpperCase();
 const RECAPS_START_LAUNCH = opt('recaps-start', '2026-09-09');
-const PINS = (opt('pins') || PACK_V12_PINS.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+const PINS = (opt('pins') || PACK_V14_PINS.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
 const DEEP_LISTING = flag('deep-listing');
 const SKIP_SFTP = flag('skip-sftp');
 const SKIP_VERCEL = flag('skip-vercel');

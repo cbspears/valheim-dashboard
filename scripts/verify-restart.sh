@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # Eilif ops: what did the last GTX panel Stop->Start actually arm? READ-ONLY over SFTP.
 #
-#   bash scripts/verify-restart.sh                  # defaults to the rehearsal world
-#   bash scripts/verify-restart.sh MyLaunchWorld    # after cutover, pass the launch world name
+#   bash scripts/verify-restart.sh                  # defaults to the live world, Eilif
+#   bash scripts/verify-restart.sh SomeOtherWorld   # pass a world name to check another one
 #   OUT=/some/dir bash scripts/verify-restart.sh
 #
 # Checks, in the order launch night needs them:
-#   0. Valheim version from console.log — the proof no Steam auto-update ran (must stay 0.221.12
-#      through launch week unless the posture decision says otherwise).
-#   1. AzuCraftyBoxes server DLL loaded by this boot's chainloader (BepInEx/LogOutput.log)
-#   2. ValheimPlus [CraftFromChest] enabled=false          (server cfg, fleet-synced)
-#   3. ValheimPlus [Workbench] workbenchAttachmentRange=20  (server cfg, fleet-synced)
+#   0. Valheim version from console.log — the proof no unplanned Steam update ran. The box went
+#      to 1.0 on launch day 2026-09-09 and must now read 1.0.7; a number that is neither 1.0.7
+#      nor a deliberate upgrade means Steam moved the build under us again.
+#   1. ValheimPlus loaded by THIS boot's chainloader, and both fallbacks standing down
+#      (BepInEx/LogOutput.log). V+ 10.0.2 replaced AzuCraftyBoxes on 2026-09-10: its own
+#      CraftFromChest does that job, so Azu is off the box and out of the pack.
+#   2. ValheimPlus [CraftFromChest] enabled=TRUE           (server cfg, fleet-synced)
+#   3. ValheimPlus [Workbench] workbenchAttachmentRange=20 and [Server] maxPlayers=24
+#      (server cfg, fleet-synced — the cap lives here now, not in Companion [ServerFallback])
 #   4. Death penalty, reported as TWO SEPARATE FACTS (audit plugins-2, 2026-09-03):
 #        (a) PANEL TIER   — the latest `Setting world modifier: DeathPenalty->` line in console.log.
 #            Tiers map to keys via Unity scene data (decompile-verified): `veryeasy` grants ONLY
@@ -35,7 +39,7 @@
 # Needs: sshpass, sftp, strings (binutils), curl. The GTX nest dir is IP_PORT-derived: if the box
 # moves, update N=/HOST= below together with the poller's LOG_PATH / MAP_REMOTE_DIR.
 set -u
-WORLD=${1:-EilifRehearsal}
+WORLD=${1:-Eilif}
 ENV=~/Projects/valheim-dashboard/services/log-poller/.env
 export SSHPASS="$(sed -n 's/^SFTP_PASSWORD=//p' "$ENV" | sed 's/^["'"'"']//; s/["'"'"']$//')"
 OUT=${OUT:-${TMPDIR:-/tmp}/eilif-verify-restart}; mkdir -p "$OUT"
@@ -51,7 +55,7 @@ echo "== verify-restart for world '$WORLD' =="
 sshpass -e sftp -q -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -P 8822 charless3@$HOST > "$OUT/sftp-ls.txt" 2>&1 <<EOF || true
 get $N/BepInEx/LogOutput.log $OUT/LogOutput.log
 get $N/console.log $OUT/console.log
-get $N/BepInEx/config/valheim_plus.cfg $OUT/valheim_plus.cfg
+get $N/BepInEx/config/org.bepinex.plugins.valheim_plus.cfg $OUT/valheim_plus.cfg
 get $N/worlds_local/$WORLD.fwl $OUT/$WORLD.fwl
 ls -la $N/BepInEx/config/
 ls -la $N/worlds_local/
@@ -75,11 +79,23 @@ else
 fi
 grep -i -- "$WORLD" "$OUT/sftp-ls.txt" | grep -v "^sftp>" | head -8 || true
 
-echo "== ⓪ Valheim version (console.log — proof no Steam update ran) =="
-grep -a -m1 "Valheim version:" "$OUT/console.log" || echo "  (no 'Valheim version:' line in this console.log)"
+echo "== ⓪ Valheim version (console.log — proof no unplanned Steam update ran; expect 1.0.7) =="
+VER_LINE="$(grep -a -m1 "Valheim version:" "$OUT/console.log" || true)"
+if [ -n "$VER_LINE" ]; then
+  echo "  $VER_LINE"
+  case "$VER_LINE" in
+    *1.0.7*) echo "  → 1.0.7, the build the box was cut over to on 2026-09-09. Good." ;;
+    *) echo "  ⚠️  NOT 1.0.7. Steam moved the build, or this boot is older than the cutover." ;;
+  esac
+else
+  echo "  (no 'Valheim version:' line in this console.log)"
+fi
 
-echo "== AzuCraftyBoxes cfg present on server? (generated at first boot with the DLL) =="
-grep -i "AzuCraftyBoxes" "$OUT/sftp-ls.txt" || echo "no Azumatt.AzuCraftyBoxes.cfg/.yml yet"
+echo "== ValheimPlus cfg present on server? (the file V+ 10 actually reads) =="
+grep -i "valheim_plus" "$OUT/sftp-ls.txt" || echo "no valheim_plus cfg in BepInEx/config"
+echo "  (V+ 10 reads org.bepinex.plugins.valheim_plus.cfg and renames any old valheim_plus.cfg"
+echo "   to .migrated after importing it once. A plain valheim_plus.cfg still sitting there,"
+echo "   unmigrated, means V+ 10 has never booted with it.)"
 
 echo "== boot time / world (console.log) =="
 grep -a -m1 "Get create world" "$OUT/console.log"; grep -a -m1 "Load world" "$OUT/console.log"
@@ -87,15 +103,54 @@ grep -a -m1 "Get create world" "$OUT/console.log"; grep -a -m1 "Load world" "$OU
 echo "== plugins loaded at this boot (LogOutput.log) =="
 grep -a "Loading \[" "$OUT/LogOutput.log" | sed 's/.*Loading //'
 
-echo "== ① AzuCraftyBoxes server DLL loaded? =="
-grep -aq "Loading \[AzuCraftyBoxes" "$OUT/LogOutput.log" \
-  && echo "YES: $(grep -a -m1 'Loading \[AzuCraftyBoxes' "$OUT/LogOutput.log" | sed 's/.*Loading //')" \
-  || echo "NO - AzuCraftyBoxes not in this boot's chainloader"
-grep -a -i "AzuCraftyBoxes" "$OUT/LogOutput.log" | grep -aiv "Loading \[" | head -5
+echo "== ① ValheimPlus loaded by THIS boot, and both fallbacks standing down =="
+FAIL1=no
+if grep -aq "Loading \[Valheim Plus 0.10.0.2\]" "$OUT/LogOutput.log"; then
+  echo "  V+: YES — $(grep -a -m1 'Loading \[Valheim Plus' "$OUT/LogOutput.log" | sed 's/.*Loading //')"
+else
+  FAIL1=yes
+  echo "  ⚠️  V+: NO 'Loading [Valheim Plus 0.10.0.2]' line in this boot's chainloader."
+  grep -a "Loading \[Valheim Plus" "$OUT/LogOutput.log" | tail -2 | sed 's/^/     saw instead: /' || true
+  echo "     enforceMod runs both ways: with V+ off the box, every pack-v14 client is refused."
+fi
+# V+ writes a PatchLog line for every patch it could not apply. Any of them means a
+# method it expected is not in this build of the game, so the setting behind it is a
+# lie in a cfg the server then syncs to every client.
+if grep -aE "PatchLog|Failed to apply" "$OUT/LogOutput.log" | grep -aiq "valheim.?plus"; then
+  FAIL1=yes
+  echo "  ⚠️  V+ reported failed patches — these settings are NOT in effect:"
+  grep -aE "PatchLog|Failed to apply" "$OUT/LogOutput.log" | grep -ai "valheim.?plus" | head -10 | sed 's/^/     /'
+else
+  echo "  V+ patches: no PatchLog / 'Failed to apply' lines this boot."
+fi
+if grep -aq "ServerFallback: disabled (ValheimPlus present)" "$OUT/LogOutput.log"; then
+  echo "  Companion [ServerFallback]: disabled, and it says so because it SAW V+."
+else
+  FAIL1=yes
+  echo "  ⚠️  no 'ServerFallback: disabled (ValheimPlus present)' line. Either the Companion did"
+  echo "     not load, or it did not find V+ — in which case the cap is whatever [ServerFallback]"
+  echo "     says, not V+ [Server] maxPlayers."
+fi
+if grep -aq "\[Eilif\] patch classes applied: 2/2" "$OUT/LogOutput.log"; then
+  echo "  Companion patches: 2/2 applied."
+else
+  FAIL1=yes
+  echo "  ⚠️  no '[Eilif] patch classes applied: 2/2' line this boot."
+  grep -a "\[Eilif\] patch classes applied" "$OUT/LogOutput.log" | tail -2 | sed 's/^/     saw instead: /' || true
+fi
+[ "$FAIL1" = yes ] && echo "  ① FAIL — read the lines above before anyone is told the server is ready."
 
-echo "== ② V+ CraftFromChest OFF / ③ workbenchAttachmentRange=20 (server cfg, fleet-synced) =="
-awk '/^\[CraftFromChest\]/{f=1} f&&/^enabled/{print "CraftFromChest.enabled =", $3; f=0}' "$OUT/valheim_plus.cfg"
-awk '/^\[Workbench\]/{f=1} f&&/^(enabled|workbenchAttachmentRange)/{print "Workbench." $0} f&&/^\[/&&!/Workbench/{f=0}' "$OUT/valheim_plus.cfg"
+echo "== ② V+ CraftFromChest ON / ③ workbenchAttachmentRange=20 + maxPlayers=24 (server cfg, fleet-synced) =="
+if [ ! -s "$OUT/valheim_plus.cfg" ]; then
+  echo "  ⚠️  BepInEx/config/org.bepinex.plugins.valheim_plus.cfg was not fetched — checks ② and ③ cannot run."
+else
+  awk '/^\[CraftFromChest\]/{f=1} f&&/^enabled/{print "  CraftFromChest.enabled =", $3; f=0}' "$OUT/valheim_plus.cfg"
+  awk '/^\[CraftFromChest\]/{f=1} f&&/^range/{print "  CraftFromChest.range =", $3; f=0}' "$OUT/valheim_plus.cfg"
+  echo "  (enabled must be TRUE — it is what replaced AzuCraftyBoxes on 2026-09-10.)"
+  awk '/^\[Workbench\]/{f=1} f&&/^(enabled|workbenchAttachmentRange)/{print "  Workbench." $0} f&&/^\[/&&!/Workbench/{f=0}' "$OUT/valheim_plus.cfg"
+  awk '/^\[Server\]/{f=1} f&&/^(enabled|maxPlayers|enforceMod|serverSyncsConfig)/{print "  Server." $0} f&&/^\[/&&!/Server/{f=0}' "$OUT/valheim_plus.cfg"
+  echo "  (maxPlayers must read 24 and match config/server.ts MAX_PLAYERS, or the site lies.)"
+fi
 
 echo "== ④a PANEL death-penalty tier (latest 'Setting world modifier: DeathPenalty->' in console.log) =="
 PANEL_TIER="$(grep -a "Setting world modifier: DeathPenalty->" "$OUT/console.log" | tail -1 | sed 's/.*DeathPenalty->//' | tr -d '\r')"

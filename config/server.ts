@@ -5,7 +5,7 @@ export const SERVER_TAGLINE = 'The Cozy Canon Playthrough';
 export const SERVER_DESCRIPTION =
   'A modded Valheim dedicated server. Bosses gate progression. No sailing ahead of the longship, vikings.';
 
-export const MAX_PLAYERS = 24; // matches Eilif Companion [ServerFallback] on the box; ValheimPlus is out of pack v12 (2026-09-09)
+export const MAX_PLAYERS = 24; // enforced by ValheimPlus [Server] maxPlayers = 24 on the box (pack v14, 2026-09-10); Eilif Companion [ServerFallback] is parked
 export const SERVER_HOST = 'GTXGaming';
 export const WORLD_SEED = 'Yggdrasil'; // cosmetic — set to your real seed if you want it shown
 

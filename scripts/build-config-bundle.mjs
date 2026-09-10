@@ -6,9 +6,13 @@
 //   Node 20:  export NVM_DIR=~/.config/nvm; . $NVM_DIR/nvm.sh; nvm use 20
 //
 //   Preview:  node scripts/build-config-bundle.mjs --world Eilif \
-//               --pack-number 12 --pack-date 'Sep 9, 2026' --dry-run
-//   Write:    node scripts/build-config-bundle.mjs --world Eilif \
-//               --pack-number 12 --pack-date 'Sep 9, 2026'
+//               --pack-number 14 --pack-date 'Sep 10, 2026' --dry-run
+//   Write:    same command without --dry-run
+//
+// Pack v14 (2026-09-10) is the worked example:
+//   node scripts/build-config-bundle.mjs --world Eilif --paths 1.7.1 \
+//     --companion-client 0.4.0 --vplus 10.0.2 --bepinex 5.4.2350 \
+//     --no-plant --no-azu --fallback off --pack-number 14 --pack-date 'Sep 10, 2026'
 //
 // The whole point: this renders from scripts/pack-templates through the SAME
 // renderer scripts/mint-pack.mjs uses, so the bundle a Mac player unzips and the
@@ -27,7 +31,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   MODS, OMITTABLE_MODS, ROOT, DEFAULT_INGEST_URL, DEFAULT_FALLBACK, FALLBACK_MODES,
-  renderPack, renderReadme, zipSync, unzipSync, banner, firstDiff,
+  cfgNamesFor, renderPack, renderReadme, zipSync, unzipSync, banner, firstDiff,
 } from './mint-pack.mjs';
 
 const DEFAULT_OUT = path.join(ROOT, 'public', 'downloads');
@@ -42,7 +46,8 @@ const bad = (s) => `  FAIL ${s}`;
  * pack minted with --no-vplus produces a bundle with no valheim_plus.cfg in it
  * for free, and the same goes for every other drop flag as it is added. Reading
  * the constant instead would hand Mac players a config for a mod the pack no
- * longer installs.
+ * longer installs - or, since ValheimPlus 10 renamed its cfg, one under a name
+ * the pinned build only reads once before renaming it .migrated.
  */
 export function buildBundle({
   world, versions, cfgVersions, ingestUrl, packNumber, packDate,
@@ -71,11 +76,13 @@ Rebuild the Mac config bundle from the pack templates.
 
 Required
   --world <name>              Same world you minted the pack with.
-  --pack-number <N>           12 for pack v12. Names the file and the README.
-  --pack-date '<Mon D, YYYY>' Publish date shown in the README, e.g. 'Sep 9, 2026'.
+  --pack-number <N>           14 for pack v14. Names the file and the README.
+  --pack-date '<Mon D, YYYY>' Publish date shown in the README, e.g. 'Sep 10, 2026'.
 
-Version pins (default to pack v11's; pass the same ones you gave mint-pack)
-${MODS.filter((m) => m.cfgVersionVar).map((m) => `  ${m.flag} <x.y.z>`.padEnd(30) + `${m.label} (v11: ${m.baseline})`).join('\n')}
+Version pins (default to pack v11's; pass the same ones you gave mint-pack).
+A pin can decide what a cfg SAYS and, for ValheimPlus 10, what it is NAMED, so
+pass the whole set rather than only the ones you think matter.
+${MODS.map((m) => `  ${m.flag} <x.y.z>`.padEnd(30) + `${m.label} (v11: ${m.baseline})`).join('\n')}
 
 Cfg writer headers (rarely needed - see mint-pack.mjs --help)
 ${MODS.filter((m) => m.cfgVersionFlag)
@@ -83,8 +90,9 @@ ${MODS.filter((m) => m.cfgVersionFlag)
     .join('\n')}
 
 Pack contents (pass the same ones you gave mint-pack)
-${OMITTABLE_MODS.map((m) => `  ${m.omitFlag}`.padEnd(30) + `Leave ${m.label} out: no ${m.cfg}.`).join('\n')}
+${OMITTABLE_MODS.map((m) => `  ${m.omitFlag}`.padEnd(30) + `Leave ${m.label} out: no ${cfgNamesFor(m).join(' / ')}.`).join('\n')}
   --fallback on|off|none      EilifPaths [VPlusFallback] Enabled. Default ${DEFAULT_FALLBACK}.
+                              'on' is refused while ValheimPlus is still pinned.
 
 Other
   --ingest-url <url>          Dashboard ingest endpoint (default ${DEFAULT_INGEST_URL}).
