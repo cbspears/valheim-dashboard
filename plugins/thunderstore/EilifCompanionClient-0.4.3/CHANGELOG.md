@@ -2,7 +2,7 @@
 
 ## 0.4.3
 - Profile counters now come from the all-time bucket. Valheim 1.0 keeps ten stat buckets per character and the game's own accessor hands back the achievement-eligible one whenever achievements are allowed; that bucket is empty for anyone who played modded before, and it stops counting the moment a character is flagged, so most vikings posted zero builds and zero distance. 0.4.3 reads bucket 0 directly (lifetime, only ever goes up).
-- Kills and deaths are no longer posted. The dashboard takes kills from the per-world weapon breakdown and deaths from its own death events; a lifetime counter beside those made the dashboard flip its zero-point every few minutes. What this reporter sends is now exactly: builds placed, crafts made, distance travelled (total, walked, run, sailed, flown). The README's disclosure is updated to match.
+- Kills and deaths are no longer posted. The dashboard takes kills from the per-world weapon breakdown and deaths from its own death events; a lifetime counter beside those made the dashboard flip its zero-point every few minutes. What this reporter sends is now exactly: builds placed, crafts made, items picked up, distance travelled (total, walked, run, sailed, flown). Items picked up is new in 0.4.3 and feeds the Resources board. The README's disclosure is updated to match.
 
 ## 0.4.2
 - No code change. Same plugin as 0.4.1, re-released so the README carries the AI-assistance disclosure at the top and the Thunderstore listing can be filed under the AI Generated category, as the Valheim community's rules ask. If you are on 0.4.1 there is nothing new to gain; the pack pins 0.4.2 only so that everyone is on the listed version.

@@ -152,7 +152,7 @@ export const BASELINE_GROUPS: readonly BaselineGroup[] = [
   // own `events` death rows meanwhile (GREATEST, so it can only raise it).
   g('counters', 'deaths', (p) => p.hasDeaths),
   g('counters', 'bossKills', (p) => p.hasBossKills),
-  g('counters', 'resourcesHarvested', (p) => p.hasPickups),
+  g('counters', 'resourcesHarvested', (p) => p.hasPickups || p.hasPickupCount),
   g('counters', 'itemsCrafted', (p) => p.craftsSource !== 'none'),
   g('counters', 'structuresBuilt', (p) => p.hasBuilds),
   g('counters', 'damageDealt', (p) => p.hasWeapons),

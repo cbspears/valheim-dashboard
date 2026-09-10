@@ -20,9 +20,16 @@
 // EilifPaths KEEPS its own features (paths, bed fire range, station attachment range,
 // exploration radius, deep-water stamina); only its `[VPlusFallback]` section is off.
 //
+// PLANTEVERYTHING IS BACK TOO (2026-09-10), under a different owner. Advize has not
+// published a Valheim 1.0 build, but `fedorovdgap/PlantEverything` 1.21.1 is Advize's own
+// master branch republished (commit e4a628c, "Initial update to Valheim 1.0"): same plugin
+// GUID, same cfg file, decompiled and vetted before it went in. Its row is unhidden below
+// with the fedorovdgap author, version and url. It is an INTERIM pin: when Advize publishes
+// an official 1.21.x the row moves back to his namespace. Pack v15 pins it.
+//
 // HIDDEN (`hidden: true`, bottom of ALL_MODS) SINCE 2026-09-09, and why. These are not
 // deleted: each comes back by removing its `hidden` line once there is a reason to.
-//   • PlantEverything dies at startup on 1.0, so it does not ship in pack v14.
+//   • PlantEverything was here until 2026-09-10; see the paragraph above.
 //   • AzuCraftyBoxes dies at startup on 1.0 as well, and as of 2026-09-10 it is also
 //     SUPERSEDED: ValheimPlus CraftFromChest does the chest crafting again. It stays
 //     hidden rather than deleted (Charlie's hide-not-delete rule).
@@ -31,9 +38,9 @@
 //   • ServersideQoL is not loaded on 1.0 either.
 //
 // Client rows must state the version THE PACK PINS (decoded from the live pack
-// code in config/server.ts), never the newest build in this repo. The v14 rows below
-// were set ahead of the mint on 2026-09-10: `MODPACK_PROFILE_CODE` is still v13's
-// until Charlie pastes the v14 code in, and this file and that code must ship in the
+// code in config/server.ts), never the newest build in this repo. The v15 rows below
+// were set ahead of the mint on 2026-09-10: `MODPACK_PROFILE_CODE` is still v14's
+// until Charlie pastes the v15 code in, and this file and that code must ship in the
 // same deploy. Player-facing copy carries no em or en dashes (CLAUDE.md copy doctrine).
 
 export type ModCategory = 'Core' | 'QoL' | 'Content' | 'Balance';
@@ -205,21 +212,27 @@ export const ALL_MODS: Mod[] = [
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Azumatt/Unshamed/',
   },
-  // ── Hidden since 2026-09-09: not running on the 1.0 box, not in pack v14 ────
-  // Each row keeps its last known-good pin and copy. Remove `hidden: true` (and
-  // re-add the pack pin in scripts/mint-pack.mjs) when the author ships a 1.0 build.
   {
-    // Dies at startup on 1.0 (ServerSync reads ZRoutedRpc.Everybody, now a const).
+    // UNHIDDEN 2026-09-10, under a new owner. Advize's 1.20.0 dies at startup on 1.0
+    // (its ServerSync reads ZRoutedRpc.Everybody, now a const) and Advize has published
+    // nothing since. fedorovdgap/PlantEverything 1.21.1 is Advize's OWN master branch
+    // republished (commit e4a628c, "Initial update to Valheim 1.0"): same plugin GUID
+    // advize.PlantEverything, same cfg file, internal version 1.21.0. Decompiled and
+    // vetted before it went in the pack. Pack v15 pins it as `--no-plant --plant-fork
+    // 1.21.1`; when Advize ships an official 1.21.x this row goes back to his namespace
+    // and the minter flags go back to `--plant <ver>`.
     name: 'PlantEverything',
-    author: 'Advize',
+    author: 'fedorovdgap (unofficial 1.0 rebuild of Advize\'s mod)',
     description:
-      'Plant and harvest every flower, sapling, and crop with the cultivator, so you can raise proper farms and managed forests. Yields stay vanilla.',
-    version: '1.20.0',
+      'Plant and harvest every flower, sapling, and crop with the cultivator, so you can raise proper farms and managed forests. Yields stay vanilla. Advize, who wrote it, has not published a Valheim 1.0 build yet, so the modpack ships this rebuild of his code in the meantime and will move back to his release when it arrives. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
+    version: '1.21.1',
     category: 'QoL',
     clientRequired: true,
-    url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
-    hidden: true,
+    url: 'https://thunderstore.io/c/valheim/p/fedorovdgap/PlantEverything/',
   },
+  // ── Hidden since 2026-09-09: not running on the 1.0 box, not in pack v15 ────
+  // Each row keeps its last known-good pin and copy. Remove `hidden: true` (and
+  // re-add the pack pin in scripts/mint-pack.mjs) when the author ships a 1.0 build.
   {
     // Same ServerSync failure as PlantEverything; dead on both server and client.
     // SUPERSEDED 2026-09-10: ValheimPlus 10.0.2 is back in pack v14 and its

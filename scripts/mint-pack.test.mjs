@@ -857,15 +857,18 @@ assert.doesNotThrow(
 // produces exactly v11's file list, and an eighth mod appearing by default would
 // have quietly re-baselined it.
 const unshamedMod = MODS.find((m) => m.key === 'unshamed');
-assert.deepEqual(OPTIONAL_MODS.map((m) => m.key), ['unshamed'], 'Unshamed is the only optional mod');
+assert.deepEqual(
+  OPTIONAL_MODS.map((m) => m.key), ['plantFork', 'unshamed'],
+  'the optional set is the PlantEverything rebuild and Unshamed, in MODS order',
+);
 assert.equal(unshamedMod.baseline, null, 'an optional mod has no baseline: there is no v11 pin to fall back to');
 assert.ok(!unshamedMod.omitFlag, 'and no --no- flag, because absent is already its default');
 assert.ok(unshamedMod.section, 'it declares its export.r2x section marker like every other decided mod');
 assert.equal(unshamedMod.cfg, 'Azumatt.Unshamed.cfg', 'and the cfg that arrives with it');
 assert.ok(!CFG_FILES.includes(unshamedMod.cfg), 'which is NOT in the v11 cfg list, because v11 never shipped it');
 assert.deepEqual(
-  SECTIONED_MODS.map((m) => m.key),
-  [...OMITTABLE_MODS.map((m) => m.key), 'unshamed'],
+  SECTIONED_MODS.map((m) => m.key).slice().sort(),
+  [...OMITTABLE_MODS.map((m) => m.key), ...OPTIONAL_MODS.map((m) => m.key)].sort(),
   'droppable and optional mods are the same mechanism, resolved through one set',
 );
 
@@ -1034,5 +1037,195 @@ assert.throws(
   'omitting an optional mod is refused: leaving out its pin is the way to not have it',
 );
 
+
+// ── the PlantEverything rebuild: one cfg, two possible owners ───────────────
+// fedorovdgap/PlantEverything 1.21.1 (2026-09-10) is Advize's own master branch
+// republished: same plugin GUID, same internal settings schema, same cfg FILE NAME
+// as Advize/PlantEverything. That makes it the first row in MODS whose `cfg` is not
+// unique, and the whole risk lives there. `--no-plant --plant-fork 1.21.1` asks the
+// machinery to drop a cfg (with the Advize package) and to add the same cfg (with
+// the fork) in one render, and either half winning alone is a silent failure: two
+// zip entries with one name, or a farming mod that arrives unconfigured.
+const forkMod = MODS.find((m) => m.key === 'plantFork');
+const plantMod = MODS.find((m) => m.key === 'plant');
+assert.equal(forkMod.baseline, null, 'the fork is optional, so it has no v11 pin');
+assert.ok(forkMod.optional && !forkMod.omitFlag, 'and no --no- flag: absent is already its default');
+assert.equal(forkMod.cfg, plantMod.cfg, 'it contributes the SAME cfg file the Advize package does');
+assert.equal(forkMod.ns, 'fedorovdgap', 'under its own Thunderstore namespace');
+assert.equal(forkMod.name, plantMod.name, 'with the same package name');
+
+// Absent by default: the v11 tripwire at the top of this file already proved the
+// default render is v11, so this only has to prove the fork did not sneak in.
+assert.doesNotMatch(v11.get('export.r2x').toString('latin1'), /fedorovdgap/, 'a default render has no fork entry');
+assert.deepEqual(cfgFilesFor(), CFG_FILES, 'and cfgFilesFor is still exactly the v11 list');
+// The dedupe: asking for the fork does NOT append a second copy of a name the list
+// already carries, and the name keeps its v11 slot rather than moving to the end.
+assert.deepEqual(
+  cfgFilesFor({ plantFork: '1.21.1' }), CFG_FILES,
+  'the fork claims a cfg the list already has, so nothing is appended and nothing moves',
+);
+assert.deepEqual(
+  cfgFilesFor({ plantFork: '1.21.1', unshamed: '1.0.0' }),
+  [...CFG_FILES, 'Azumatt.Unshamed.cfg'],
+  'while a genuinely new optional cfg is still appended',
+);
+
+// ── the v15 shape: the fork replaces Advize ─────────────────────────────────
+const V15 = {
+  versions: {
+    vplus: '10.0.2', bepinex: '5.4.2350', paths: '1.7.1', companionClient: '0.4.2',
+    unshamed: '1.0.0', plantFork: '1.21.1',
+  },
+  omit: ['plant', 'azu'],
+  fallback: 'off',
+};
+const { files: v15 } = renderPack({ world: 'Eilif', ...V15 });
+assert.deepEqual(
+  [...v15.keys()].sort(),
+  [
+    'config/Azumatt.Unshamed.cfg',
+    'config/BepInEx.cfg',
+    'config/advize.PlantEverything.cfg',
+    'config/net.cproudlock.gsvalheimstatsclient.cfg',
+    'config/net.eilif.companionclient.cfg',
+    'config/net.eilif.paths.cfg',
+    'config/org.bepinex.plugins.valheim_plus.cfg',
+    'doorstop_config.ini',
+    'export.r2x',
+  ],
+  'seven mods, seven cfgs: the plant cfg is still there, having changed owner rather than left',
+);
+// The load-bearing one. A Map cannot hold the name twice, so the zip is where a
+// double would show, and the drop/append pair is where a LOSS would.
+assert.deepEqual(
+  centralNames(zipSync([...v15].map(([name, data]) => ({ name, data })))),
+  [
+    'export.r2x', 'doorstop_config.ini', 'config/',
+    'config/net.eilif.paths.cfg', 'config/BepInEx.cfg', 'config/advize.PlantEverything.cfg',
+    'config/net.eilif.companionclient.cfg', 'config/net.cproudlock.gsvalheimstatsclient.cfg',
+    'config/org.bepinex.plugins.valheim_plus.cfg', 'config/Azumatt.Unshamed.cfg',
+  ],
+  'config/advize.PlantEverything.cfg appears exactly once, in the slot v11 gave it',
+);
+// Same template, same bytes: the fork's settings schema has not moved, so a player
+// swapping packages gets the file they already had.
+assert.equal(
+  sha(v15.get('config/advize.PlantEverything.cfg')),
+  V11['config/advize.PlantEverything.cfg'],
+  'and it is byte-identical to the cfg pack v11 shipped',
+);
+
+const v15R2x = v15.get('export.r2x').toString('latin1');
+assert.match(
+  v15R2x,
+  /- name: fedorovdgap-PlantEverything\n {4}version:\n {6}major: 1\n {6}minor: 21\n {6}patch: 1\n/,
+  'the 1.21.1 pin lands in export.r2x under the fedorovdgap namespace',
+);
+assert.doesNotMatch(v15R2x, /Advize/, 'and the Advize entry is gone, so no client installs both');
+assert.equal(
+  (v15R2x.match(/- name: PlantEverything|PlantEverything/g) || []).length, 1,
+  'PlantEverything is named once in export.r2x, not twice',
+);
+assert.deepEqual(
+  [...v15R2x.matchAll(/^ {2}- name: (.+)$/gm)].map((m) => m[1]),
+  [
+    'denikson-BepInExPack_Valheim',
+    'Grantapher-ValheimPlus_Grantapher_Temporary',
+    'fedorovdgap-PlantEverything',
+    'Proudlock_Technology-GsValheimStatsClient',
+    'Eilif-EilifPaths',
+    'Eilif-EilifCompanionClient',
+    'Azumatt-Unshamed',
+  ],
+  'and the fork sits where the Advize entry sat, right after ValheimPlus',
+);
+assert.doesNotMatch(v15R2x, /\{\{|\}\}/, 'no marker residue');
+// Nothing else moved: v15 is v14-with-Unshamed plus exactly one file back, and the
+// file that came back is the one pack v11 shipped. (export.r2x carries the pins, and
+// v14u pinned Companion Client 0.4.1.)
+assert.deepEqual(
+  [...v15.keys()].sort(),
+  [...v14u.keys(), 'config/advize.PlantEverything.cfg'].sort(),
+  'v15 adds exactly one file to the v14 set',
+);
+for (const [rel, data] of v15) {
+  if (rel === 'export.r2x' || rel === 'config/advize.PlantEverything.cfg') continue;
+  assert.ok(data.equals(v14u.get(rel)), `${rel} is the same file v14 shipped: ${firstDiff(v14u.get(rel), data)}`);
+}
+
+// ── pinning both PlantEverythings is refused ────────────────────────────────
+// The fork is not an eighth mod, it is the same plugin GUID under another
+// namespace. r2modman would install two copies and BepInEx would load whichever it
+// saw last - and neither the mint, the round trip nor the boot would say so.
+assert.throws(
+  () => renderPack({ world: 'Eilif', versions: { plantFork: '1.21.1' } }),
+  /pins BOTH PlantEverythings/,
+  '--plant-fork without --no-plant is refused, because plant is in the pack by default',
+);
+assert.throws(
+  () => renderPack({ world: 'Eilif', versions: { plant: '1.20.0', plantFork: '1.21.1' } }),
+  /pins BOTH PlantEverythings/,
+  '...and explicitly pinning both is the same refusal',
+);
+assert.throws(
+  () => renderPack({ world: 'Eilif', versions: { plantFork: '1.21.1' } }),
+  /--no-plant --plant-fork 1\.21\.1/,
+  'and the message names the flag pair that does work',
+);
+assert.doesNotThrow(
+  () => renderPack({ world: 'Eilif', versions: { plantFork: '1.21.1' }, omit: ['plant'] }),
+  '--no-plant --plant-fork is the v15 pairing and is fine',
+);
+assert.doesNotThrow(
+  () => renderPack({ world: 'Eilif' }),
+  'and a pack with only the Advize package is untouched by any of this',
+);
+
+// ── the v15 Mac bundle ──────────────────────────────────────────────────────
+const v15Bundle = buildBundle({
+  world: 'Eilif', versions: V15.versions, cfgVersions: {}, ingestUrl: undefined,
+  packNumber: 15, packDate: 'Sep 10, 2026', omit: V15.omit, fallback: V15.fallback,
+});
+assert.deepEqual(
+  v15Bundle.entries.map((e) => e.name),
+  [
+    'Azumatt.Unshamed.cfg',
+    'BepInEx.cfg',
+    'advize.PlantEverything.cfg',
+    'net.cproudlock.gsvalheimstatsclient.cfg',
+    'net.eilif.companionclient.cfg',
+    'net.eilif.paths.cfg',
+    'org.bepinex.plugins.valheim_plus.cfg',
+    'README.txt',
+  ],
+  'the Mac bundle carries the plant cfg once, README last',
+);
+const v15Readme = v15Bundle.entries.at(-1).data.toString('latin1');
+// The README is derived from the bundle's own entry list, so the {{#PLANT}} line
+// survives the namespace change with no template edit - and must survive it, or a
+// Mac player is handed a file the instructions never mention.
+assert.equal(
+  (v15Readme.match(/^ {2}advize\.PlantEverything\.cfg {16}farming settings, synced by server$/gm) || []).length,
+  1,
+  'the README names the plant cfg exactly once, still aligned at column 44',
+);
+assert.equal((v15Readme.match(/\bseven\b/g) || []).length, 2, 'it says seven, in both places that count the files');
+assert.doesNotMatch(v15Readme, /\bsix\b|\bfive\b|\bfour\b|\beight\b/, 'and no stale count survives');
+assert.doesNotMatch(v15Readme, /\{\{|\}\}/, 'no marker or placeholder residue survives into the README');
+assert.equal(
+  renderReadme({ packNumber: 15, packDate: 'Sep 10, 2026', cfgs: v15Bundle.entries.slice(0, -1).map((e) => e.name) })
+    .toString('latin1'),
+  v15Readme,
+  'the bundle README is exactly renderReadme() over the entries sitting next to it',
+);
+
+assert.equal(
+  bundleArgs({ world: 'Eilif', ingestUrl: DEFAULT_INGEST_URL, cfgVersions: {}, omit: V15.omit, fallback: V15.fallback },
+    MODS.filter((m) => !V15.omit.includes(m.key) && (!m.optional || V15.versions[m.key]))
+      .map((mod) => ({ mod, version: V15.versions[mod.key] ?? mod.baseline }))),
+  "--world 'Eilif' --bepinex 5.4.2350 --vplus 10.0.2 --plant-fork 1.21.1 --paths 1.7.1 "
+  + '--companion-client 0.4.2 --unshamed 1.0.0 --no-plant --no-azu --fallback off',
+  'the printed bundle command carries both halves of the swap, so the Mac bundle cannot lose either',
+);
 
 console.log('OK — all pack minter assertions passed');

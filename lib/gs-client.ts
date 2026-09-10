@@ -152,6 +152,8 @@ export interface SelfProvenance {
   hasDistance: boolean;
   /** pickups[] present (resourcesHarvested + the fish breakdown come from it). */
   hasPickups: boolean;
+  /** `stats.vh_ItemsPickedUp` present (resourcesHarvested from the profile counter, no fish). */
+  hasPickupCount: boolean;
   /** weapons[] present (damageDealt + every per-weapon counter/record). */
   hasWeapons: boolean;
   /** creatureKills[] present (the per-creature kill breakdown). */
@@ -388,7 +390,12 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   const kills = killsSource === 'weapons' ? weaponKills : killsSource === 'client' ? num(self.kills) : 0;
   // Fish are pickups too — counted here same as every other resource, no
   // double-subtract; the fish[] breakdown above is purely additive detail.
-  const resourcesHarvested = sumBy(pickups, 'count');
+  // pickups[] (GsValheimStatsClient, absent on 1.0) or the profile's own lifetime
+  // ItemsPickedUp counter (EilifCompanionClient ≥0.4.3, `vh_ItemsPickedUp`).
+  const hasPickupCount = isNum(stats.vh_ItemsPickedUp);
+  const resourcesHarvested = Array.isArray(self.pickups)
+    ? sumBy(pickups, 'count')
+    : hasPickupCount ? statNum('vh_ItemsPickedUp') : 0;
   // Prefer the authoritative profile counter; fall back to the per-item breakdown.
   // Chosen by PRESENCE, not by truthiness: `vh_Crafts || sumBy(crafts)` silently
   // switched source whenever the profile counter read 0, so a baseline captured
@@ -455,6 +462,7 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
       // none of that yet" (a perfectly good zero-point), while an ABSENT list is
       // no information at all and must become a baseline hole instead of a 0.
       hasPickups: Array.isArray(self.pickups),
+      hasPickupCount,
       hasWeapons: Array.isArray(self.weapons),
       hasCreatureKills: Array.isArray(self.creatureKills),
       hasBoss: Array.isArray(self.boss),

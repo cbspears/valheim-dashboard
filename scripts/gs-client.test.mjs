@@ -412,7 +412,7 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
     schemaVersion: 1, game: 'valheim', source: 'client', reporter: 'Kætiløy', world: 'Eilif',
     players: [{
       name: 'Kætiløy', kills: 0, deaths: 3,
-      stats: { vh_Builds: 9, vh_Crafts: 4, vh_DistanceTraveled: 274, vh_DistanceWalk: 180, vh_DistanceRun: 38, vh_DistanceSail: 0, vh_DistanceAir: 55 },
+      stats: { vh_Builds: 9, vh_Crafts: 4, vh_DistanceTraveled: 274, vh_DistanceWalk: 180, vh_DistanceRun: 38, vh_DistanceSail: 0, vh_DistanceAir: 55, vh_ItemsPickedUp: 120 },
     }],
   });
   assert.ok(profileOnly, 'a stats-only self entry still parses');
@@ -427,6 +427,9 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
   assert.equal(profileOnly.provenance.hasBuilds, true, 'builds ARE taken from the profile');
   assert.equal(profileOnly.structuresBuilt, 9);
   assert.equal(profileOnly.provenance.hasDistance, true);
+  assert.equal(profileOnly.resourcesHarvested, 120, 'resources come from the profile pickup counter when no pickups[] list exists');
+  assert.equal(profileOnly.provenance.hasPickupCount, true);
+  assert.equal(profileOnly.provenance.hasPickups, false, 'no fish breakdown without a pickups[] list');
   // The legacy 0.221 GsValheimStatsClient shape (stats AND weapons together) is untouched.
   const legacy = parseSelfSnapshot({
     schemaVersion: 1, game: 'valheim', source: 'client', reporter: 'Bren', world: 'Eilif',

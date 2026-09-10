@@ -37,6 +37,15 @@
 // pins deliberately refuses its own defaults, which would wipe the character's
 // cheat flag. See the MODS row and docs/PACK.md.
 //
+// PlantEverything came back the same day as the second optional mod, and it is the
+// awkward one: `fedorovdgap/PlantEverything` 1.21.1 is Advize's OWN master branch
+// republished by somebody else, so it is the same plugin GUID and the same cfg file
+// as `Advize/PlantEverything`, only under a different Thunderstore namespace. A v15
+// mint is `--no-plant --plant-fork 1.21.1`: one PlantEverything leaves, the other
+// arrives, and advize.PlantEverything.cfg is rendered exactly once from the one
+// template both rows point at. Pinning both is refused, in renderPack and at the
+// CLI. When Advize ships an official 1.21.x the pin moves back to his namespace.
+//
 // This script never edits config/server.ts and never deploys. It prints the
 // exact lines to change; publishing the code is Charlie's call.
 //
@@ -130,6 +139,33 @@ export const MODS = [
     // constant, so the plugin throws at startup on 1.0 - proved by a local load
     // test on launch morning. Drop it until Advize ships a 1.0 build.
     omitFlag: '--no-plant', cfg: 'advize.PlantEverything.cfg', section: 'PLANT',
+  },
+  {
+    // OPTIONAL, and the reason `cfg` is not a unique key in this table (2026-09-10).
+    // fedorovdgap/PlantEverything 1.21.1 is Advize's OWN master branch, published by
+    // somebody else: commit e4a628c "Initial update to Valheim 1.0" plus 7a2bbc5,
+    // same plugin GUID (advize.PlantEverything), internal version 1.21.0, ServerSync
+    // version check 1.21.0 on both sides, and the SAME cfg file name. Decompiled and
+    // vetted 2026-09-10.
+    //
+    // So this is not a second mod, it is the same mod under a different Thunderstore
+    // namespace, and the pack can carry exactly one of them. `--no-plant --plant-fork
+    // 1.21.1` is the v15 shape: the Advize entry leaves, this one arrives, and
+    // config/advize.PlantEverything.cfg is rendered ONCE from the one template both
+    // rows point at (see cfgFilesFor and the droppedCfgs set in renderPack - a cfg a
+    // PRESENT mod still contributes is never dropped). Pinning both is refused.
+    //
+    // `optional: true` for the same reason as Unshamed: pack v11 pinned Advize, so a
+    // fork appearing by default would re-baseline the byte-for-byte v11 tripwire in
+    // mint-pack.test.mjs. There is no `--no-plant-fork`, because absent is already
+    // its default.
+    //
+    // TEMPORARY BY DESIGN: when Advize publishes an official 1.21.x the pin moves
+    // back to the Advize namespace and this row goes away again (drop --plant-fork,
+    // pass --plant <ver>).
+    key: 'plantFork', flag: '--plant-fork', label: 'PlantEverything (fedorovdgap 1.0 rebuild)',
+    ns: 'fedorovdgap', name: 'PlantEverything', tmpl: 'PLANTFORK', baseline: null,
+    optional: true, cfg: 'advize.PlantEverything.cfg', section: 'PLANTFORK',
   },
   {
     key: 'gs', flag: '--gs', label: 'GsValheimStatsClient',
@@ -398,6 +434,12 @@ export function cfgNamesFor(mod) {
  * seven entries exactly where a byte-diff against a published pack expects them.
  * Pin nothing optional and this returns CFG_FILES unchanged, which is what keeps
  * the v11 tripwire green.
+ *
+ * The list is deduplicated, because a cfg file name is NOT unique to one MODS row:
+ * the fedorovdgap PlantEverything rebuild is the same plugin as the Advize one and
+ * writes the same advize.PlantEverything.cfg, so `--no-plant --plant-fork 1.21.1`
+ * would otherwise ask for that file twice and the zip would carry two entries with
+ * one name. The slot it keeps is v11's, not the appended one.
  */
 export function cfgFilesFor(versions = {}) {
   const swaps = new Map();
@@ -406,10 +448,13 @@ export function cfgFilesFor(versions = {}) {
     const resolved = cfgFor(mod, versions[mod.key] ?? mod.baseline);
     if (resolved !== mod.cfg) swaps.set(mod.cfg, resolved);
   }
-  const extra = OPTIONAL_MODS
-    .filter((m) => m.cfg && versions[m.key] != null)
-    .map((m) => cfgFor(m, versions[m.key]));
-  return [...CFG_FILES.map((name) => swaps.get(name) ?? name), ...extra];
+  const out = CFG_FILES.map((name) => swaps.get(name) ?? name);
+  for (const mod of OPTIONAL_MODS) {
+    if (!mod.cfg || versions[mod.key] == null) continue;
+    const name = cfgFor(mod, versions[mod.key]);
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
 }
 
 /**
@@ -439,6 +484,25 @@ export function renderPack({
   // optional mod nobody pinned is out for the same reason and by the same path
   // as one that was explicitly dropped.
   const dropped = absentKeys(omit, versions);
+
+  // Two PlantEverythings is not a pack. fedorovdgap/PlantEverything is Advize's own
+  // master branch republished, so both packages install the SAME plugin GUID
+  // (advize.PlantEverything) and the same cfg file: r2modman would lay down two
+  // copies of one mod, BepInEx would load whichever it saw last, and the pack would
+  // be lying about which build the crew is running - none of which errors anywhere.
+  // The fork REPLACES the Advize package for as long as Advize has no 1.0 build.
+  if (!dropped.has('plant') && !dropped.has('plantFork')) {
+    const plant = MODS.find((m) => m.key === 'plant');
+    const fork = MODS.find((m) => m.key === 'plantFork');
+    throw new Error(
+      `renderPack: this pack pins BOTH PlantEverythings - ${plant.ns}/${plant.name} `
+      + `${versions.plant ?? plant.baseline} and ${fork.ns}/${fork.name} ${versions.plantFork}. `
+      + 'They are the same plugin (GUID advize.PlantEverything) under two Thunderstore '
+      + 'namespaces, sharing one cfg file, so a pack can carry exactly one of them. The fork '
+      + `replaces the Advize package until Advize publishes a 1.0 build: pass "${plant.omitFlag} `
+      + `${fork.flag} ${versions.plantFork}". To go back to Advize, drop ${fork.flag} instead.`,
+    );
+  }
 
   // [VPlusFallback] is the CLIENT half of what ValheimPlus was doing, so with V+
   // in the pack the two patch the same methods and their effects stack: ranges
@@ -515,9 +579,21 @@ export function renderPack({
   // Resolved against this render's pins, not the baselines: dropping V+ 10 has to
   // drop org.bepinex.plugins.valheim_plus.cfg, not the legacy name it no longer
   // ships.
+  //
+  // A cfg some PRESENT mod still contributes is never dropped, however some absent
+  // mod also claims it. That is not defensive tidiness: `--no-plant --plant-fork
+  // 1.21.1` drops Advize/PlantEverything and adds fedorovdgap/PlantEverything, and
+  // both rows name advize.PlantEverything.cfg, so without this the file the pack
+  // still needs would leave with the package it no longer pins - a pack whose one
+  // farming mod arrives unconfigured, which nothing downstream can see.
+  const keptCfgs = new Set(
+    MODS.filter((m) => m.cfg && !dropped.has(m.key))
+      .map((m) => cfgFor(m, versions[m.key] ?? m.baseline)),
+  );
   const droppedCfgs = new Set(
     SECTIONED_MODS.filter((m) => dropped.has(m.key) && m.cfg)
-      .map((m) => cfgFor(m, versions[m.key] ?? m.baseline)),
+      .map((m) => cfgFor(m, versions[m.key] ?? m.baseline))
+      .filter((cfg) => !keptCfgs.has(cfg)),
   );
 
   const render = (text, where) => fill(applySections(text, sections, where), vars, where);
@@ -557,6 +633,14 @@ export function renderReadme({ packNumber, packDate, cfgs = CFG_FILES }) {
   if (!NUMBER_WORDS[names.length]) throw new Error(`renderReadme: no word for ${names.length} cfg files`);
   // A mod is "in this bundle" if ANY of the names it has shipped under is in the
   // list, because a pin can rename its cfg (ValheimPlus 10 did).
+  //
+  // Deriving it from the FILE LIST rather than from the pins is also what makes the
+  // two PlantEverything rows work here with no template change: {{#PLANT}} holds the
+  // advize.PlantEverything.cfg line, and it is kept whenever that file is in the
+  // bundle - whether it arrived with Advize/PlantEverything or with the fedorovdgap
+  // rebuild. The cfg is the same file under either pin, so the wording is too, and it
+  // is printed once because the file appears once. ({{#PLANTFORK}} resolves as kept
+  // as well; README.txt.tmpl simply has no such block, which applySections allows.)
   const sections = omitSections(
     new Set(SECTIONED_MODS.filter((m) => !cfgNamesFor(m).some((n) => names.includes(n))).map((m) => m.key)),
   );
@@ -912,6 +996,12 @@ ${MODS.map((m) => `  ${m.flag} <x.y.z>`.padEnd(30)
         + `${' '.repeat(30)}unless this flag is passed. Adds its export.r2x entry\n`
         + `${' '.repeat(30)}AND config/${m.cfg}.`)).join('\n')}
 
+  --plant-fork must travel with --no-plant. fedorovdgap/PlantEverything is
+  Advize/PlantEverything's own 1.0 branch republished - same plugin GUID, same cfg
+  file - so the pack carries exactly one of the two, and pinning both is refused.
+  The v15 shape is "--no-plant --plant-fork 1.21.1"; when Advize publishes an
+  official 1.21.x, go back to "--plant <ver>" and drop --plant-fork.
+
 Pack contents
 ${OMITTABLE_MODS.map((m) => `  ${m.omitFlag}`.padEnd(30) + `Mint without ${m.label}.\n`
     + ' '.repeat(30) + `Drops its export.r2x entry AND config/${cfgNamesFor(m).join(' or ')}.\n`
@@ -1115,6 +1205,32 @@ function printVplusReminder(cap, version) {
  * leave BOTH halves together, and that is the half people forget. Printed once
  * before the work and once in the result, same as the V+ page.
  */
+/**
+ * `--no-plant --plant-fork <ver>` is a NAMESPACE SWAP, not a drop, and the two read
+ * identically on the command line. Without this page the run would print "Also NOT
+ * in this pack: PlantEverything" and tell whoever is doing the stopped window to
+ * pull PlantEverything.dll off the box - the exact opposite of what has to happen,
+ * because the fork's ServerSync checks its version in both directions just as the
+ * Advize build did.
+ */
+function printPlantForkNote(version) {
+  const fork = MODS.find((m) => m.key === 'plantFork');
+  const plant = MODS.find((m) => m.key === 'plant');
+  banner(`PlantEverything is the ${fork.ns} rebuild in this pack`);
+  console.log(`  ${plant.ns}/${plant.name} is out and ${fork.ns}/${fork.name} ${version} is in.`);
+  console.log('  This is the same mod under a different Thunderstore namespace, not a drop:');
+  console.log('  the fork is Advize\'s own master branch (commit e4a628c, "Initial update to');
+  console.log('  Valheim 1.0"), plugin GUID advize.PlantEverything, internal version 1.21.0,');
+  console.log(`  and it writes the same ${fork.cfg} the pack has always shipped.`);
+  console.log('');
+  console.log('  So do NOT pull PlantEverything.dll off the box. Upload the REBUILD\'s DLL in the');
+  console.log('  same stopped window: its ServerSync checks version 1.21.0 in both directions, so');
+  console.log('  a box still on 1.20.0 refuses every client from this pack, and the other way too.');
+  console.log('');
+  console.log(`  Temporary by design. When Advize publishes an official 1.21.x, the pin moves back:`);
+  console.log(`  drop ${fork.flag} and pass ${plant.flag} <ver> instead.`);
+}
+
 function printDropReminder(mods) {
   if (!mods.length) return;
   banner(`Also NOT in this pack: ${mods.map((m) => m.label).join(', ')}`);
@@ -1159,6 +1275,17 @@ async function main(argv) {
     console.error('  nobody reads. Use --no-vplus --fallback on, or --fallback off.');
     process.exit(2);
   }
+  // Refused here as well as in renderPack, same reasoning as --fallback on above:
+  // renderPack is the rule of record, this is the version that fails before the
+  // Thunderstore round trip.
+  if (args.versions.plantFork != null && !args.omit.includes('plant')) {
+    console.error('--plant-fork with Advize/PlantEverything still pinned is refused.');
+    console.error('  fedorovdgap/PlantEverything is Advize\'s own master branch republished: same');
+    console.error('  plugin GUID (advize.PlantEverything), same cfg file. A pack pinning both installs');
+    console.error('  two copies of one mod and BepInEx loads whichever it saw last. The fork REPLACES');
+    console.error(`  the Advize package: use --no-plant --plant-fork ${args.versions.plantFork}.`);
+    process.exit(2);
+  }
   if (args.publish && args.skipIndexCheck) {
     console.error('--skip-index-check cannot be combined with --publish. The index check is the whole point.');
     process.exit(2);
@@ -1195,9 +1322,14 @@ async function main(argv) {
   console.log(`  out dir      ${outDir}`);
 
   const vplusVersion = args.versions.vplus ?? MODS.find((m) => m.key === 'vplus').baseline;
-  const otherDrops = OMITTABLE_MODS.filter((m) => m.key !== 'vplus' && args.omit.includes(m.key));
+  // A plant row that was swapped for the fork is not "also not in this pack": the
+  // mod is still here, under another namespace, and it gets its own page below.
+  const plantSwapped = args.omit.includes('plant') && args.versions.plantFork != null;
+  const otherDrops = OMITTABLE_MODS.filter((m) => m.key !== 'vplus' && args.omit.includes(m.key)
+    && !(m.key === 'plant' && plantSwapped));
   if (args.omit.includes('vplus')) printNoVplusReminder(args.cap);
   else printVplusReminder(args.cap, vplusVersion);
+  if (plantSwapped) printPlantForkNote(args.versions.plantFork);
   printDropReminder(otherDrops);
 
   // 1. render ---------------------------------------------------------------
@@ -1394,8 +1526,14 @@ async function main(argv) {
         ? args.cap
         : "<the box's real cap: ValheimPlus [Server] maxPlayers>"}`);
     }
-    if (args.omit.length) {
-      const names = args.omit.map((k) => MODS.find((m) => m.key === k).label).join(', ');
+    if (plantSwapped) {
+      console.log('    3a. config/mods.ts: the PlantEverything row STAYS, but its author, version');
+      console.log(`        and url move to ${MODS.find((m) => m.key === 'plantFork').ns}. It is a namespace swap, not a drop.`);
+    }
+    if (otherDrops.length || args.omit.includes('vplus')) {
+      const names = args.omit
+        .filter((k) => !(k === 'plant' && plantSwapped))
+        .map((k) => MODS.find((m) => m.key === k).label).join(', ');
       console.log('    3c. app/get-started/page.tsx: the Mac "install these seven" list still');
       console.log(`        names ${names}. A Mac player who follows it installs`);
       console.log('        a mod this pack no longer ships. Drop the name, and the count word');
@@ -1412,6 +1550,7 @@ async function main(argv) {
     console.log('       then tell the crew to re-import');
     if (args.omit.includes('vplus')) printNoVplusReminder(args.cap);
     else printVplusReminder(args.cap, vplusVersion);
+    if (plantSwapped) printPlantForkNote(args.versions.plantFork);
     printDropReminder(otherDrops);
   } else {
     console.log(`  TEST code: ${key}`);

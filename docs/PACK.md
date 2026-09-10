@@ -20,27 +20,34 @@ node scripts/build-config-bundle.mjs --help
 ## What is in the pack
 
 The zip root holds `export.r2x` (which pins the mods) and `doorstop_config.ini`;
-`config/` holds one `.cfg` per mod that has one. **Pack v14 (2026-09-10) is six mods
-and six cfgs, nine entries in all**, counting the `config/` directory record
-(`unzip -l` on the rendered zip, 2026-09-10). Pack v11 was seven mods and ten entries.
-The count is not a check: it moves with every drop, so read the table, not the number.
+`config/` holds one `.cfg` per mod that has one. **Pack v15 (2026-09-10) is seven mods
+and seven cfgs, ten entries in all**, counting the `config/` directory record
+(`unzip -l` on the rendered zip, 2026-09-10). Pack v14 was six mods and nine entries;
+pack v11 was seven mods and ten entries. The count is not a check: it moves with every
+drop, so read the table, not the number.
 
-| Mod | Thunderstore | Pinned in v14 | Its cfg in the pack |
+| Mod | Thunderstore | Pinned in v15 | Its cfg in the pack |
 |---|---|---|---|
 | BepInExPack | `denikson/BepInExPack_Valheim` | **5.4.2350** | yes (`BepInEx.cfg`) |
 | ValheimPlus (Grantapher fork) | `Grantapher/ValheimPlus_Grantapher_Temporary` | **10.0.2** | yes, and it is **`org.bepinex.plugins.valheim_plus.cfg`** now, not `valheim_plus.cfg`. See rule 6 |
+| PlantEverything (fedorovdgap 1.0 rebuild) | **`fedorovdgap/PlantEverything`** | **1.21.1** | yes (`advize.PlantEverything.cfg`, the same file and the same bytes as ever). See rule 8 |
 | GsValheimStatsClient | `Proudlock_Technology/GsValheimStatsClient` | 0.2.12 | yes (world + ingest URL) |
 | EilifPaths | `Eilif/EilifPaths` | **1.7.1** | yes |
 | EilifCompanionClient | `Eilif/EilifCompanionClient` | **0.4.2** | yes (ingest URL) |
 | Unshamed | `Azumatt/Unshamed` | **1.0.0** | yes (`Azumatt.Unshamed.cfg`), and the pinned values are the point. See rule 7 |
 
-**Gone, and not waiting on anything:** PlantEverything (`Advize/PlantEverything` 1.20.0)
-and AzuCraftyBoxes (`Azumatt/AzuCraftyBoxes` 1.8.15), dropped on launch morning 2026-09-09.
-Both embed a ServerSync build that reads `ZRoutedRpc.Everybody`, which Valheim 1.0 turned
-from a field into a constant, so both throw at startup on 1.0 (proved by a local load test
-that morning). AzuCraftyBoxes has no successor to wait for, because **V+ 10 has a working
-`[CraftFromChest]`** and that is exactly the job Azu was doing. The mint flags are
-`--no-plant --no-azu`, and the two mods have to be off the box as well as out of the pack.
+**Gone, and not waiting on anything:** AzuCraftyBoxes (`Azumatt/AzuCraftyBoxes` 1.8.15),
+dropped on launch morning 2026-09-09. It embeds a ServerSync build that reads
+`ZRoutedRpc.Everybody`, which Valheim 1.0 turned from a field into a constant, so it throws
+at startup on 1.0 (proved by a local load test that morning). It has no successor to wait
+for, because **V+ 10 has a working `[CraftFromChest]`** and that is exactly the job Azu was
+doing. The mint flag is `--no-azu`, and the mod has to be off the box as well as out of the
+pack.
+
+**`Advize/PlantEverything` 1.20.0 is dropped too (`--no-plant`), but PlantEverything itself
+is back.** It died the same way Azu did, and on 2026-09-10 somebody republished Advize's own
+1.0 branch as `fedorovdgap/PlantEverything` 1.21.1. The pack pins that instead: same mod,
+different namespace, `--no-plant --plant-fork 1.21.1`. See rule 8.
 
 **The pack pins BepInExPack 5.4.2350 while the box keeps 5.4.2333.** 5.4.2350 is the version
 ValheimPlus 10.0.2 declares as its Thunderstore dependency, so r2modman installs it for every
@@ -50,17 +57,20 @@ so the box is left alone.
 
 `config/mods.ts` lists more than this: it also covers server-side mods (Eilif Companion,
 Eilif Boards, ServersideQoL, WebMap, the stats emitter) that players never install. Only
-the five above belong in the pack. **Its ValheimPlus row was deleted on launch night and has
-to be put back** with the 10.0.2 number, or `/resources#mods` tells a player the pack does
-not ship a mod that it does.
+the seven above belong in the pack. Two of its rows have to be re-checked at every mint for
+the same reason: the **ValheimPlus** row (10.0.2, deleted on launch night and put back) and
+the **PlantEverything** row, which now has to read the fedorovdgap author, version and url
+rather than Advize's. Get either wrong and `/resources#mods` names a build nobody is
+running.
 
-**Unshamed is the one mod that is OPTIONAL rather than droppable** (added 2026-09-10):
-it is absent from a render unless `--unshamed 1.0.0` is passed, because pack v11 never
-shipped it and the default render has to keep reproducing v11 byte for byte. Everything
-else about it works like a droppable mod - one `export.r2x` entry and one cfg, together.
-See rule 7.
+**Two mods are OPTIONAL rather than droppable** (both added 2026-09-10): Unshamed
+(`--unshamed 1.0.0`, rule 7) and the PlantEverything rebuild (`--plant-fork 1.21.1`,
+rule 8). Neither is in a render unless its flag is passed, because pack v11 shipped
+neither and the default render has to keep reproducing v11 byte for byte. Everything
+else about them works like a droppable mod - one `export.r2x` entry and one cfg,
+together.
 
-Four of the other five are fixed. **ValheimPlus is the one the pack can be minted without**
+Of the rest, only ValheimPlus is a decision. **It is the one the pack can be minted without**
 (`--no-vplus`), and pack v13 was exactly that: launch night ran with no V+ at all, because
 Grantapher 9.17.1 targeted 0.221.10 and there was no 1.0 build until 10.0.2 landed on
 2026-09-10. The flag drops its `export.r2x` entry **and** its cfg together; see rule 6.
@@ -68,14 +78,14 @@ Grantapher 9.17.1 targeted 0.221.10 and there was no 1.0 build until 10.0.2 land
 rejection; it costs the tombstone keep-list, death causes and the explored-map stat.)
 
 Three files in this repo hold a version list for these, and they have to be edited
-together: `MODS` in `scripts/mint-pack.mjs` (the renderer of record), `PACK_V14_PINS` in
+together: `MODS` in `scripts/mint-pack.mjs` (the renderer of record), `PACK_V15_PINS` in
 `scripts/launch-preflight.mjs` (which checks the same Thunderstore endpoints from the
 preflight side), and the player-facing list in `config/mods.ts`. If they disagree,
 preflight can green-light a pin the minter refuses, or `/resources#mods` can claim a version nobody
 is running. Folding preflight's list into an `import { MODS }` is the obvious fix and is
 not done yet.
 
-## Seven rules
+## Eight rules
 
 **1. The listing index lags uploads by 40 to 80 minutes.** Thunderstore's package API
 knows about a new version the instant it uploads, but mod managers resolve a profile code
@@ -108,14 +118,17 @@ node scripts/launch-preflight.mjs --world Eilif --phase post-start   # "Modpack 
 | `Grantapher/ValheimPlus_Grantapher_Temporary` | **10.0.2**, published 2026-09-10 by Grantapher. Assembly version 0.10.0.2 | not ours to stage |
 | `Eilif/EilifPaths` | **1.7.1** | **1.7.1**, the same bytes |
 | `Eilif/EilifCompanionClient` | **0.3.4** (what pack v13 pins) | **0.4.2** built and committed (`249e6eb`; 0.4.0 was uploaded then superseded the same morning by the 1.0 map fix), **not uploaded yet** |
+| `fedorovdgap/PlantEverything` | **1.21.1**, published 2026-09-10. Not ours to stage, and not Advize's namespace: see rule 8 | not ours to stage |
 
-So the v14 mint waits on exactly one thing: **EilifCompanionClient 0.4.2 has to be uploaded and
-indexed.** Until it is, `--companion-client 0.4.2` is refused, which is the tool working. The
-dry run below has already been rehearsed against Thunderstore with 0.3.4 in that slot.
+So the v15 mint waits on exactly one thing: **EilifCompanionClient 0.4.2 has to be uploaded and
+indexed.** Until it is, `--companion-client 0.4.2` is refused, which is the tool working. Every
+other pin below, the fedorovdgap rebuild included, was verified `ok / ok` against both the
+package API and the listing index on 2026-09-10.
 
 ```bash
 node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.2 \
-  --vplus 10.0.2 --bepinex 5.4.2350 --no-plant --no-azu --fallback off --cap 24 --dry-run
+  --vplus 10.0.2 --bepinex 5.4.2350 --unshamed 1.0.0 --plant-fork 1.21.1 \
+  --no-plant --no-azu --fallback off --cap 24 --dry-run
 ```
 
 **Never hard-code a client version in a command you are about to copy.** A published
@@ -249,9 +262,13 @@ switches the whole section, and `--paths` must pin 1.7.0 or newer for these four
 ### The flags
 
 ```bash
-# pack v14, the current shape
+# pack v15, the current shape
 node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.2 \
-  --vplus 10.0.2 --bepinex 5.4.2350 --no-plant --no-azu --fallback off --cap 24 ...
+  --vplus 10.0.2 --bepinex 5.4.2350 --unshamed 1.0.0 --plant-fork 1.21.1 \
+  --no-plant --no-azu --fallback off --cap 24 ...
+# pack v14, the shape before the PlantEverything rebuild was pinned
+node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.2 \
+  --vplus 10.0.2 --bepinex 5.4.2350 --unshamed 1.0.0 --no-plant --no-azu --fallback off ...
 # pack v13, the shape to fall back to if V+ has to leave again
 node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --no-vplus --fallback on ...
 ```
@@ -322,6 +339,51 @@ be re-read in the same edit.
 Client-only: nothing on the GTX box runs it, and dropping it from the pack costs the server
 nothing.
 
+**8. PlantEverything is pinned under somebody else's namespace, and that is the whole
+trap.** Added 2026-09-10. `Advize/PlantEverything` 1.20.0 died on Valheim 1.0 with
+AzuCraftyBoxes (rule above) and Advize has published nothing since. On 2026-09-10
+`fedorovdgap/PlantEverything` **1.21.1** appeared on Thunderstore, dependency
+`denikson-BepInExPack_Valheim-5.4.2350`. Decompiled the same day: it is **Advize's own
+upstream master**, commit `e4a628c` ("Initial update to Valheim 1.0") plus `7a2bbc5`, plugin
+GUID `advize.PlantEverything`, internal version 1.21.0, ServerSync version check 1.21.0 on
+both sides, and the same `advize.PlantEverything.cfg`.
+
+**So it is the same mod, and the pack carries exactly one of the two.** That is the thing to
+get right:
+
+| | Advize | fedorovdgap |
+|---|---|---|
+| Thunderstore | `Advize/PlantEverything` 1.20.0 | `fedorovdgap/PlantEverything` **1.21.1** |
+| Plugin GUID | `advize.PlantEverything` | the same |
+| Cfg file | `advize.PlantEverything.cfg` | the same file, the same bytes |
+| Runs on 1.0 | no | yes |
+| Mint flags | `--plant <ver>` | `--no-plant --plant-fork 1.21.1` |
+
+Pinning both is a **hard refusal**, in `renderPack` and again as an early CLI exit, because
+r2modman would install two copies of one plugin and BepInEx would load whichever it saw
+last - a pack that mints clean, imports clean, boots clean and is lying about which build
+the crew is running. `--plant-fork` without `--no-plant` hits the same refusal, since the
+Advize package is in the pack by default.
+
+**One cfg, two possible owners.** The renderer resolves the drop and the addition together:
+a cfg some *present* mod still contributes is never dropped, and an optional mod's cfg is
+never appended if the list already has it. The file therefore appears **once**, in the slot
+pack v11 gave it, byte-identical to what v11 shipped - a test asserts all three. The Mac
+README derives its file list and its count word from the bundle's own entries, so the
+`advize.PlantEverything.cfg` line comes back with no template edit.
+
+**The box runs it too, so `--no-plant` here is NOT "pull the DLL".** Its ServerSync checks
+version 1.21.0 in both directions, exactly as 1.20.0 did: a box still on the Advize build
+refuses every client from this pack, and the reverse. Upload the rebuild's DLL in the same
+stopped window. The minter prints a page saying so instead of the usual drop reminder
+whenever it sees `--no-plant --plant-fork <ver>`.
+
+**Temporary by design.** When Advize publishes an official 1.21.x, three edits move back to
+his namespace in one commit: the `plantFork` row goes out of `MODS`, `PACK_V15_PINS` in
+`scripts/launch-preflight.mjs` goes back to `Advize-PlantEverything-<ver>`, and the
+`config/mods.ts` row's author, version and url follow. The mint flags become `--plant <ver>`
+and `--plant-fork` stops existing.
+
 ## Re-minting: the sequence
 
 **On 2026-09-09 do not run the launch from this section.** The launch morning is
@@ -334,12 +396,12 @@ Assume the four plugins have been rebuilt for Valheim 1.0 and the two Eilif clie
 are uploaded to Thunderstore.
 
 The worked examples below leave the client pin as `<ver>`, because a published Thunderstore
-version is immutable and that number moves on its own. **Today's flags are the v14 set** and
+version is immutable and that number moves on its own. **Today's flags are the v15 set** and
 they go on **every** command in this section, including step 6's bundle rebuild:
 
 ```
 --paths 1.7.1 --companion-client <ver> --vplus 10.0.2 --bepinex 5.4.2350 \
-  --no-plant --no-azu --fallback off --cap 24
+  --unshamed 1.0.0 --plant-fork 1.21.1 --no-plant --no-azu --fallback off --cap 24
 ```
 
 Pass them every time or the two artifacts disagree. `--vplus` in particular decides the NAME of
@@ -388,7 +450,7 @@ the flags already in it, which is why copying it beats retyping it.
 
    ```bash
    node scripts/mint-pack.mjs --world <World> --companion-client <ver> \
-     --publish --version-label 'Pack v14 · Sep 10'
+     --publish --version-label 'Pack v15 · Sep 10'
    ```
 
    `--publish` refuses without a version label, and refuses `--skip-index-check` outright.
@@ -425,7 +487,7 @@ the flags already in it, which is why copying it beats retyping it.
 
    ```ts
    export const MODPACK_PROFILE_CODE = '<code from step 3>';
-   export const MODPACK_VERSION_LABEL = 'Pack v14 · Sep 10';
+   export const MODPACK_VERSION_LABEL = 'Pack v15 · Sep 10';
    ```
 
    Bump the label every single time. It is the only way a returning player can tell whether
@@ -438,7 +500,7 @@ the flags already in it, which is why copying it beats retyping it.
 
    ```bash
    node scripts/build-config-bundle.mjs --world <World> --companion-client <ver> \
-     --pack-number 14 --pack-date 'Sep 10, 2026'
+     --pack-number 15 --pack-date 'Sep 10, 2026'
    ```
 
    Copy the exact command the mint printed in step 3 rather than retyping it: it forwards
@@ -448,7 +510,7 @@ the flags already in it, which is why copying it beats retyping it.
    the live bundle zip.
 
    Then point `CONFIG_BUNDLE_URL` in `app/get-started/page.tsx` at
-   `/downloads/eilif-configs-pack-v14.zip`. Leave the old zip in place until the new build
+   `/downloads/eilif-configs-pack-v15.zip`. Leave the old zip in place until the new build
    is live so no link 404s mid-deploy.
 
 7. **Deploy** (Charlie's call, CLI only):
@@ -548,9 +610,9 @@ Match the render to the pack you are comparing against, or every difference is y
 flags. Pack v11 and anything else minted before EilifPaths 1.5.0 needs nothing extra (the
 defaults are v11's); a pack that carries `[VPlusFallback]` needs `--paths 1.5.0` plus
 `--fallback on` or `--fallback off` to match which way its switch was set; a pack minted
-without ValheimPlus needs `--no-vplus`; and pack v14 needs its whole flag set, `--vplus 10.0.2`
-included, or the V+ cfg comes out under the wrong name and every file after it reads as a
-mismatch.
+without ValheimPlus needs `--no-vplus`; and pack v15 needs its whole flag set, `--vplus 10.0.2`
+and `--no-plant --plant-fork 1.21.1` included, or the V+ cfg comes out under the wrong name and
+every file after it reads as a mismatch.
 
 ## What these scripts will not do
 

@@ -38,7 +38,7 @@
 //                        downgraded to informational instead of failing the run.
 //   --recaps-start <d>   Launch value expected in the bot .env (default 2026-09-09)
 //   --pins <list>        Comma-separated ns-name-version triples the next pack pins.
-//                        Default = the pack v14 candidate set (see PACK_V14_PINS).
+//                        Default = the pack v15 candidate set (see PACK_V15_PINS).
 //   --expect-plugins <n> How many server plugins this boot must load (default 8, the
 //                        rehearsal count). 2026-09-09: the 1.0 load test left three
 //                        (Companion, Boards, Emitter), so the night runs --expect-plugins 3.
@@ -74,10 +74,19 @@ const SITE_MOD_FACING = 'https://valheim-dashboard.vercel.app';
 
 const VERCEL_SCOPE = 'charlie-9292s-projects';
 
-// The versions pack v14 is expected to pin (2026-09-10, Charlie's call). Five packages, not
-// seven: PlantEverything and AzuCraftyBoxes are gone for good — both embed a ServerSync that
-// reads ZRoutedRpc.Everybody, which Valheim 1.0 turned from a field into a constant, so both
-// throw at startup on 1.0, and ValheimPlus CraftFromChest does AzuCraftyBoxes' job anyway.
+// The versions pack v15 is expected to pin (2026-09-10, Charlie's call).
+//
+// AzuCraftyBoxes is gone for good: it embeds a ServerSync that reads
+// ZRoutedRpc.Everybody, which Valheim 1.0 turned from a field into a constant, so it throws
+// at startup on 1.0, and ValheimPlus CraftFromChest does its job anyway.
+//
+// PlantEverything died the same way and came BACK on 2026-09-10, under a different owner:
+// `fedorovdgap/PlantEverything` 1.21.1 is Advize's own master branch republished (commit
+// e4a628c, "Initial update to Valheim 1.0"), same plugin GUID advize.PlantEverything, same
+// cfg file. So the pin below is the fedorovdgap namespace, NOT Advize, and a pack carries
+// exactly one of the two — the minter refuses both (`--no-plant --plant-fork 1.21.1` is the
+// v15 shape). When Advize publishes an official 1.21.x this entry moves back to
+// `Advize-PlantEverything-<ver>` and the minter flags go back to `--plant <ver>`.
 //
 // ValheimPlus is BACK, as Grantapher 10.0.2: a real 1.0 build with working CraftFromChest,
 // published 2026-09-10. It declares BepInExPack 5.4.2350, so the PACK pins 5.4.2350 even
@@ -85,7 +94,8 @@ const VERCEL_SCOPE = 'charlie-9292s-projects';
 // proved on the local 1.0 rig). Pack v13, minted on launch night, had no V+ at all.
 //
 // Override wholesale with --pins when a ship/drop call lands (e.g. a night that has to fall
-// back to the v13 shape, which needs --pins without the ValheimPlus entry).
+// back to the v13 shape, which needs --pins without the ValheimPlus entry, or a v14-shaped
+// pack, which needs --pins without the PlantEverything entry).
 //
 // The two custom versions are READ OUT OF THE WORKING TREE, never written here: the csproj
 // is the only place that number is decided, and a literal rots silently — this list said
@@ -99,15 +109,19 @@ function csprojVersion(rel, fallback) {
     return fallback;
   }
 }
-const PACK_V14_PINS = [
+const PACK_V15_PINS = [
   'denikson-BepInExPack_Valheim-5.4.2350',
   'Grantapher-ValheimPlus_Grantapher_Temporary-10.0.2',
+  // The unofficial 1.0 rebuild, NOT Advize/PlantEverything. Optional in the minter
+  // (`--plant-fork 1.21.1`, and it must travel with `--no-plant`), but a pack that
+  // ships it has to resolve it like any other pin.
+  'fedorovdgap-PlantEverything-1.21.1',
   'Proudlock_Technology-GsValheimStatsClient-0.2.12',
   `Eilif-EilifPaths-${csprojVersion('plugins/eilif-paths/EilifPaths.csproj', '1.7.1')}`,
   `Eilif-EilifCompanionClient-${csprojVersion('plugins/eilif-companion-client/EilifCompanionClient.csproj', '0.4.0')}`,
   // Optional in the minter (`--unshamed 1.0.0`, absent unless asked), but a pack
   // that DOES ship it has to resolve it like any other pin, so it is checked here
-  // whenever v14 is the candidate set. Client-only: nothing on the box runs it.
+  // whenever v15 is the candidate set. Client-only: nothing on the box runs it.
   'Azumatt-Unshamed-1.0.0',
 ];
 
@@ -128,7 +142,7 @@ const EXPECT_PLUGINS = Number(opt('expect-plugins', '8')) || 8;
 const PHASE = opt('phase', 'pre-wipe');
 const POSTURE = (opt('posture', 'GO-A') || 'GO-A').toUpperCase();
 const RECAPS_START_LAUNCH = opt('recaps-start', '2026-09-09');
-const PINS = (opt('pins') || PACK_V14_PINS.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+const PINS = (opt('pins') || PACK_V15_PINS.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
 const DEEP_LISTING = flag('deep-listing');
 const SKIP_SFTP = flag('skip-sftp');
 const SKIP_VERCEL = flag('skip-vercel');

@@ -66,9 +66,9 @@ const MACHEIM_ALL_URL = 'https://github.com/lofcgi/macheim/releases/latest';
 // The pack's .cfg files, zipped, for the Mac path: Macheim cannot read an
 // r2modman profile code, so a hand install gets none of the pack's settings.
 // Re-cut this zip out of the pack export whenever the pack code is re-minted, and
-// point this constant at the new file. The v13 zip stays on disk so no link 404s
-// while the v14 build is going out.
-const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v14.zip';
+// point this constant at the new file. The v14 zip stays on disk so no link 404s
+// while the v15 build is going out.
+const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v15.zip';
 
 // The mods a Mac player installs one at a time, read out of config/mods.ts
 // so the page cannot fall behind the pack. See the CUTOVER ANCHOR note below.
@@ -547,7 +547,7 @@ export default function GetStartedPage() {
             needs the same four:
               1. CONFIG_BUNDLE_URL above -> the new bundle filename. This is the
                  one version-bearing string still typed into this file. It reads
-                 eilif-configs-pack-v14.zip now.
+                 eilif-configs-pack-v15.zip now.
               2. The mod names and versions in the table below are NOT typed
                  here: it is built by `checklistFrom(CLIENT_MODS)` out of
                  config/mods.ts, and the counts on this page are MAC_MODS.length
@@ -566,7 +566,18 @@ export default function GetStartedPage() {
                  superseded by V+ CraftFromChest). And the server DOES
                  version-check V+ again: enforceMod is on, so a Mac player on
                  any other V+ version is refused at the door, which is what the
-                 "at the exact versions the pack pins" line above protects. */}
+                 "at the exact versions the pack pins" line above protects.
+              5. 2026-09-10, pack v15: PLANTEVERYTHING IS BACK, under a new
+                 owner. Advize still has no Valheim 1.0 build, so the pack pins
+                 fedorovdgap/PlantEverything 1.21.1, which is his own master
+                 branch republished (same plugin GUID, same cfg file). Its row
+                 in config/mods.ts is unhidden with the fedorovdgap author,
+                 version and url, so it appears in the Mac table on its own with
+                 no edit here. CONFIG_BUNDLE_URL above moved to
+                 eilif-configs-pack-v15.zip. The server version-checks this one
+                 too, so a Mac player on Advize 1.20.0 is refused at the door.
+                 When Advize publishes an official 1.21.x the row moves back to
+                 his namespace and nothing on this page changes. */}
         <ModChecklist mods={MAC_MODS} />
         <p className="text-xs text-muted">
           The{' '}

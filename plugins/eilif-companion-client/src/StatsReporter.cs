@@ -79,6 +79,9 @@ namespace EilifCompanionClient
             new StatKey("vh_DistanceRun", PlayerStatType.DistanceRun),
             new StatKey("vh_DistanceSail", PlayerStatType.DistanceSail),
             new StatKey("vh_DistanceAir", PlayerStatType.DistanceAir),
+            // 0.4.3: every item picked up, the profile's own lifetime counter. GsValheimStatsClient
+            // sends no pickups[] list on Valheim 1.0, so this is what feeds the Resources board.
+            new StatKey("vh_ItemsPickedUp", PlayerStatType.ItemsPickedUp),
         };
 
         /// <summary>
