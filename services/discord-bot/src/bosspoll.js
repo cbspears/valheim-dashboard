@@ -37,6 +37,7 @@ const MAX_POST_FAILURES = 3;
 
 import { sessionHours, pickTopHours } from './chronicle.js';
 import { escapeMd, defangLinks, clipChars } from './format.js';
+import { filterExcluded } from './excluded.js';
 
 // A player-typed string on its way into a poll question, a poll answer or the
 // follow-up message. This module used to carry its own escapeMd frozen at the
@@ -314,7 +315,10 @@ export function createBossPolls({
       console.warn(`[boss-polls] sessions read failed, the ballot is empty this tick: ${error.message}`);
       return [];
     }
-    return pickPollCandidates(sessions, { nowMs, days });
+    // An excluded character (an alt; db/2026-09-11_players_excluded.sql) is never
+    // on the first-blood ballot — the poll is a public honour, and a two-answer
+    // minimum makes a wasted slot expensive as well as wrong.
+    return pickPollCandidates(filterExcluded(sessions), { nowMs, days });
   }
 
   /** Open ONE poll for `boss`. Returns true when a poll was actually posted. */

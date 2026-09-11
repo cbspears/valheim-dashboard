@@ -54,3 +54,29 @@ export const MODPACK_VERSION_LABEL = 'Pack v15 · Sep 10';
 //    back: Steam, Library, right-click Valheim, Properties, Betas. Do not
 //    re-install the pack.'
 export const LAUNCH_NOTICE = ''; // Charlie 2026-09-05: no site banner for launch week. The drafted text lives in the vault note 10-Launch-Comms-2026-09-09.md.
+
+// ── Excluded characters ─────────────────────────────────────────────────────
+//
+// Characters that must not appear on any competitive or public surface: the
+// leaderboards, the roster, Player of the Day, the title registry, Great Deed
+// evaluation and progress, the /api/boards in-game sign feed, and presence.
+// The first case is "Steward", an alt used to run errands in the hall — its
+// sessions and stats are real, but the boards ask "which of the VIKINGS is
+// ahead" and an alt is not one of them.
+//
+// THE DATABASE FLAG IS THE SOURCE OF TRUTH: `players.excluded`
+// (db/2026-09-11_players_excluded.sql). This list is the FALLBACK, and it exists
+// for the two cases the flag cannot cover:
+//   1. before that migration is applied (the column does not exist yet, so every
+//      read that names it fails and the site falls back to reading without it);
+//   2. raw-query sites that never join `players` at all — sessions and events are
+//      keyed by `character_name`, and the Discord bot tallies them by name.
+// Either condition is enough: lib/excluded.ts treats `excluded === true` OR a
+// name in this list as excluded.
+//
+// Names are matched case- and whitespace-insensitively (Valheim names are
+// case-sensitive, but a typo here must not silently un-exclude anybody).
+// The Discord bot mirrors this list — it cannot import TypeScript — via the
+// EXCLUDED_CHARACTER_NAMES env var, defaulting to the same value. Change one,
+// change the other, then `sudo systemctl restart eilif-discord-bot`.
+export const EXCLUDED_CHARACTER_NAMES: readonly string[] = ['Steward'];

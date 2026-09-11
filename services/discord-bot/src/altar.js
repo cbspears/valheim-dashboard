@@ -23,6 +23,7 @@
 import { serviceClient } from './supabase.js';
 import { clipChars } from './format.js';
 import { ALTAR_TELLING_TAILS } from './voice.js';
+import { filterExcluded } from './excluded.js';
 
 /**
  * The pin kind the ingest writes and this loop reads. 'boss' is the vocabulary
@@ -330,6 +331,8 @@ export function createAltarTellings({
     const freshSince = new Date(nowMs - POSITION_FRESH_MS).toISOString();
     const [posRes, onlineRes] = await Promise.all([
       db.from('player_positions').select('character_name, x, z, updated_at').gte('updated_at', freshSince),
+      // `excluded` would fail the read before the migration lands, and this read
+      // throws on error — so the name-list fallback in excluded.js carries it here.
       db.from('players').select('character_name').eq('is_online', true),
     ]);
     if (posRes.error) throw new Error(`player positions: ${posRes.error.message}`);
@@ -339,7 +342,8 @@ export function createAltarTellings({
     const due = altarCandidates({
       altars,
       positions: posRes.data ?? [],
-      online: (onlineRes.data ?? []).map((p) => p.character_name).filter(Boolean),
+      // An excluded character standing at an altar does not summon a telling.
+      online: filterExcluded(onlineRes.data ?? []).map((p) => p.character_name).filter(Boolean),
       tellings,
       memory: told,
       nowMs,

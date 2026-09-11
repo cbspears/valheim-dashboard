@@ -34,6 +34,7 @@
 import { serviceClient } from './supabase.js';
 import { causeNoun, clipChars, defangLinks, nameMd, safeText } from './format.js';
 import { MENTION_STRICT } from './discord.js';
+import { isExcluded, isExcludedName } from './excluded.js';
 
 const TICK_MS = 60_000;                 // the caller ticks us every 60s
 const CADENCE_MINUTES = 120;            // one ambient line per ~2h online-time
@@ -666,7 +667,11 @@ export function createVoiceEngine({
         .gte('created_at', start.toISOString())
         .lt('created_at', end.toISOString())
         .limit(20);
-      const rows = (data || []).filter((r) => (r.character_name || '').trim());
+      // Eilif never reminisces about an excluded character: the callback is a
+      // SPOKEN line naming a viking, and an alt is not one of the hall's.
+      const rows = (data || [])
+        .filter((r) => (r.character_name || '').trim())
+        .filter((r) => !isExcludedName(r.character_name));
       if (rows.length) {
         const r = rows[Math.floor(rand() * rows.length)];
         // Noun phrase, always: the callback templates drop {cause} mid-sentence,
@@ -683,13 +688,19 @@ export function createVoiceEngine({
 
   // Online character names, sorted so a seeded pick is stable across ticks.
   async function onlineRoster() {
+    // Name-list exclusion only, deliberately: a read error here returns an empty
+    // hall, so this select must never name a column that might not exist yet.
     const { data, error } = await db.from('players').select('character_name, is_online');
     if (error) {
       log.warn?.(`[voice] roster read failed: ${error.message}`);
       return [];
     }
+    // Presence: an excluded character (an alt) is never "in the hall" as far as
+    // any spoken line is concerned — it must not be greeted, addressed, or picked
+    // as the target of a whisper. (db/2026-09-11_players_excluded.sql)
     return (data || [])
       .filter((p) => p.is_online && String(p.character_name || '').trim())
+      .filter((p) => !isExcluded(p))
       .map((p) => String(p.character_name).trim())
       .sort();
   }
@@ -924,6 +935,11 @@ export function createVoiceEngine({
   async function checkDeathMilestones() {
     const v = st();
     const [playersRes, statsRes] = await Promise.all([
+      // NOT `select(..., excluded)`: this read FAILS CLOSED (an error skips the
+      // whole tick), so naming a column that the migration has not added yet would
+      // silence death milestones entirely. The name list in excluded.js does the
+      // work here, and picks up the flag's effect the moment the flag is set too,
+      // because an excluded character is on that list by construction.
       db.from('players').select('id, character_name'),
       db.from('player_stats').select('player_id, deaths'),
     ]);
@@ -935,7 +951,10 @@ export function createVoiceEngine({
     const idToName = new Map();
     for (const p of playersRes.data || []) {
       const nm = (p.character_name || '').trim();
-      if (nm) idToName.set(p.id, nm);
+      // Excluded vikings get no death-milestone proclamation: leaving them out of
+      // the id->name map drops their player_stats row before any tier is computed,
+      // so no tier is ever seeded, crossed or announced for them.
+      if (nm && !isExcluded({ character_name: nm, excluded: p.excluded })) idToName.set(p.id, nm);
     }
     // Keyed by NAME, keeping the highest count: duplicate players rows (the
     // 2026-07-25 Testman incident) must never split or multiply a viking's tally.

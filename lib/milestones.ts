@@ -32,6 +32,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Milestone, GameSession } from './types';
 import { formatDistance, formatNumber } from './format';
+import {
+  filterExcluded,
+  filterExcludedByPlayerId,
+  isExcludedName,
+  onlyExcluded,
+} from './excluded';
 
 // ── types ────────────────────────────────────────────────────────────────────
 
@@ -176,8 +182,12 @@ function fishCount(row: Record<string, unknown>): number {
  * the callers swallow, so a typo here stops deeds recording rather than crashing.
  * scripts/milestones.test.mjs asserts the two stay in step.
  */
+// `player_id` is not read by any metric — it is the only handle on WHOSE row this
+// is. `player_stats` carries no character name, so dropping an excluded viking's
+// contribution to a Great Deed (db/2026-09-11_players_excluded.sql, lib/excluded.ts)
+// is impossible without it. Keep it in the list.
 export const AGGREGATE_STAT_COLUMNS =
-  'deaths, kills, damage_dealt, resources_harvested, items_crafted, structures_built, map_explored_pct, gs_stats';
+  'player_id, deaths, kills, damage_dealt, resources_harvested, items_crafted, structures_built, map_explored_pct, gs_stats';
 
 export const METRICS: Record<string, (a: AggregateInput) => number> = {
   // Per-mode distances (metres) — sail vs walk/run split lives in gs_stats.
@@ -409,6 +419,32 @@ function isMissingTable(error: { code?: string; message?: string } | null): bool
 
 let warnedMissing = false;
 
+/** The `players` columns the aggregate pass needs: who is online, and who is excluded. */
+interface AggregatePlayerRow {
+  id?: string | null;
+  character_name?: string | null;
+  is_online?: boolean | null;
+  excluded?: boolean | null;
+}
+
+/**
+ * The roster read behind the aggregate: online set + exclusion, in one query.
+ *
+ * TWO-TIER, exactly like lib/data.ts PLAYERS_PUBLIC_COLS_V2 and for the same
+ * reason: `excluded` arrives in a hand-applied migration
+ * (db/2026-09-11_players_excluded.sql), and naming a column that does not exist
+ * yet fails the WHOLE read. That failure is not cosmetic here — the rows are the
+ * online set, and an empty online set drops every currently-playing viking's
+ * evening out of playtime_total_hours. So: ask for the flag, and on any error ask
+ * again without it, where the config name list (EXCLUDED_CHARACTER_NAMES) still
+ * carries the exclusion on its own.
+ */
+async function readPlayersForAggregate(client: SupabaseClient) {
+  const withFlag = await client.from('players').select('id, character_name, is_online, excluded');
+  if (!withFlag.error) return withFlag;
+  return client.from('players').select('id, character_name, is_online');
+}
+
 /**
  * Load unachieved milestone rows, evaluate them against the live aggregates,
  * stamp any newly crossed as achieved, and write each one's Saga event. Cheap:
@@ -456,16 +492,44 @@ export async function evaluateAndRecord(
   const [statsRes, sessionsRes, onlineRes, bossesRes] = await Promise.all([
     client.from('player_stats').select(AGGREGATE_STAT_COLUMNS),
     client.from('sessions').select('character_name, joined_at, duration_minutes'),
-    client.from('players').select('character_name, is_online'),
+    // `id` and `excluded` ride along for the exclusion pass below: this read is
+    // the only one of the four that knows which viking is which.
+    readPlayersForAggregate(client),
     // The authoritative "which Forsaken are down" — see AggregateInput.bossesKilled.
     client.from('bosses').select('is_killed'),
   ]);
-  const stats = (statsRes.data ?? []) as Record<string, unknown>[];
-  const sessions = (sessionsRes.data ?? []) as GameSession[];
+
+  // ── EXCLUDED VIKINGS DO NOT COUNT TOWARD A GREAT DEED ──────────────────────
+  // An excluded character (an alt; db/2026-09-11_players_excluded.sql) keeps
+  // logging sessions and accruing stats, and ingest keeps writing every one of
+  // those rows. What must not happen is the warband's collective deeds being
+  // advanced by a character the boards do not even show — so the three inputs
+  // keyed to a person are filtered before the maths, exactly the way
+  // lib/data.ts loadMilestoneAggregates filters the site's progress bars. The two
+  // MUST agree: if the bar counted someone the evaluator did not, it would sit
+  // past 100 % and the deed would never fire.
+  const playerRows = (onlineRes.data ?? []) as AggregatePlayerRow[];
+  const excludedRows = onlyExcluded(playerRows);
+  const excludedIds = new Set(
+    excludedRows.map((p) => p.id).filter((id): id is string => typeof id === 'string' && id !== ''),
+  );
+  const excludedNames = new Set(excludedRows.map((p) => String(p.character_name ?? '')));
+  const isCounted = (name: string | null | undefined) => {
+    const nm = String(name ?? '');
+    return !isExcludedName(nm) && !excludedNames.has(nm);
+  };
+
+  const stats = filterExcludedByPlayerId(
+    (statsRes.data ?? []) as (Record<string, unknown> & { player_id?: string })[],
+    excludedIds,
+  );
+  const sessions = ((sessionsRes.data ?? []) as GameSession[]).filter((s) =>
+    isCounted(s.character_name),
+  );
   const onlineNames = new Set(
-    ((onlineRes.data ?? []) as { character_name: string; is_online: boolean }[])
+    filterExcluded(playerRows)
       .filter((p) => p.is_online && p.character_name)
-      .map((p) => p.character_name),
+      .map((p) => p.character_name as string),
   );
   const bossesKilled = ((bossesRes.data ?? []) as { is_killed?: unknown }[]).filter(
     (b) => b.is_killed === true,

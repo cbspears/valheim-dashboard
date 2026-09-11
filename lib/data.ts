@@ -115,6 +115,12 @@ import type {
   Tale,
 } from './types';
 import { AGGREGATE_STAT_COLUMNS, computeAggregates, type Aggregates } from './milestones';
+import {
+  filterExcluded,
+  filterExcludedByPlayerId,
+  isExcludedName,
+  onlyExcluded,
+} from './excluded';
 
 function db() {
   return createClient(
@@ -131,6 +137,21 @@ function db() {
 // (discord_user_id/discord_username stay readable — the viking page needs them.)
 const PLAYERS_PUBLIC_COLS =
   'id, character_name, discord_id, first_seen_at, last_seen_at, total_playtime_minutes, is_online, bio, role, discord_user_id, discord_username, current_title, title_updated_at';
+
+// The same list plus `excluded`, the admin flag that keeps a character off every
+// public board (db/2026-09-11_players_excluded.sql). Named separately for exactly
+// the reason BOSS_TELLINGS_PUBLIC_COLS_V2 below is: the column arrives in a
+// hand-applied migration, and asking for a column that does not exist fails the
+// WHOLE query — an unconditional mention would take the entire roster, and with
+// it the Hall, down until the migration landed. Every roster read asks for this
+// list first and falls back to the one above, where the config name list
+// (EXCLUDED_CHARACTER_NAMES) carries the exclusion on its own.
+//
+// Note the migration ALSO has to `grant select (excluded)`: players' column
+// grants are an explicit list (db/2026-07-11_players_pii_revoke.sql), so the
+// column existing is not by itself enough for the anon key to read it. Same
+// fallback covers that half.
+const PLAYERS_PUBLIC_COLS_V2 = `${PLAYERS_PUBLIC_COLS}, excluded`;
 
 export const getServerStatus = cache(async (): Promise<ServerStatus | null> => {
   const { data } = await db().from('server_status').select('*').eq('id', 1).single();
@@ -220,13 +241,16 @@ export const getOnlinePlayers = cache(async (): Promise<Player[]> => {
  * whatever the roster does, and the two callers of it only ever want names.
  */
 export const getOnlinePlayerNames = cache(async (): Promise<string[]> => {
-  const { data } = await db()
-    .from('players')
-    .select('character_name')
-    .eq('is_online', true)
-    .order('character_name')
-    .limit(500);
-  return ((data as { character_name: string }[]) ?? []).map((r) => r.character_name);
+  const read = (cols: string) =>
+    db().from('players').select(cols).eq('is_online', true).order('character_name').limit(500);
+  // `excluded` is one boolean on top of a two-byte read, and presence is one of
+  // the surfaces an excluded character stays off: /api/status is what the Discord
+  // bot and any status widget call "who is sailing". Same ask-then-fall-back dance
+  // as the roster read — the column arrives by hand (PLAYERS_PUBLIC_COLS_V2).
+  let res = await read('character_name, excluded');
+  if (res.error) res = await read('character_name');
+  const rows = (res.data as unknown as { character_name: string; excluded?: boolean }[]) ?? [];
+  return filterExcluded(rows).map((r) => r.character_name);
 });
 
 /**
@@ -253,13 +277,40 @@ export const getOnlinePlayerNames = cache(async (): Promise<string[]> => {
  */
 const ALL_PLAYERS_LIMIT = 500;
 
-export const getAllPlayers = cache(async (): Promise<Player[]> => {
-  const { data } = await db()
-    .from('players')
-    .select(PLAYERS_PUBLIC_COLS)
-    .order('total_playtime_minutes', { ascending: false })
-    .limit(ALL_PLAYERS_LIMIT);
-  const rows = (data as Player[]) ?? [];
+/**
+ * The roster read, split into who the site may show and who it must not.
+ *
+ * ONE READ, TWO ANSWERS. Every public surface wants the visible roster, but the
+ * milestone aggregate also needs the excluded vikings' `id`s — `player_stats`
+ * carries no name, so the only way to drop an excluded viking's stat row is to
+ * know which id is theirs. Both come out of the same query rather than a second
+ * round trip, and `cache()` means one render pays for it once.
+ */
+interface RosterRead {
+  /** Everyone the public site, the boards, the titles and the deeds may count. */
+  visible: Player[];
+  /** `players.id` of every excluded viking — the key `player_stats` is keyed by. */
+  excludedIds: Set<string>;
+  /** Their character names — the key `sessions` and `events` are keyed by. */
+  excludedNames: Set<string>;
+}
+
+const loadRoster = cache(async (): Promise<RosterRead> => {
+  const read = (cols: string) =>
+    db()
+      .from('players')
+      .select(cols)
+      .order('total_playtime_minutes', { ascending: false })
+      .limit(ALL_PLAYERS_LIMIT);
+
+  // Ask for `excluded`; on ANY error ask again without it. See
+  // PLAYERS_PUBLIC_COLS_V2 — the column and its grant both arrive by hand, and a
+  // roster that renders one flag late is infinitely better than one that does not
+  // render. The config name list still excludes Steward on the fallback path.
+  let res = await read(PLAYERS_PUBLIC_COLS_V2);
+  if (res.error) res = await read(PLAYERS_PUBLIC_COLS);
+
+  const rows = (res.data as unknown as Player[]) ?? [];
   if (rows.length >= ALL_PLAYERS_LIMIT) {
     console.error(
       `[data] getAllPlayers hit its ${ALL_PLAYERS_LIMIT}-row cap. The players table has forked ` +
@@ -267,12 +318,57 @@ export const getAllPlayers = cache(async (): Promise<Player[]> => {
         `AND from the online list. Dedupe players by character_name before trusting the site.`,
     );
   }
-  return rows;
+
+  const excludedIds = new Set<string>();
+  const excludedNames = new Set<string>();
+  for (const row of onlyExcluded(rows)) {
+    if (row.id) excludedIds.add(row.id);
+    if (row.character_name) excludedNames.add(row.character_name);
+  }
+  return { visible: filterExcluded(rows), excludedIds, excludedNames };
 });
 
+/**
+ * The roster the public site may show: `loadRoster().visible`, i.e. every row
+ * MINUS the excluded ones (db/2026-09-11_players_excluded.sql).
+ *
+ * FILTERED HERE ON PURPOSE, AT THE TOP. The Hall, the Vikings page, the gallery
+ * byline, every war room, `getOnlinePlayers`, `getPlayersWithStats` and through
+ * it /api/titles and the in-game /api/boards feed all read the roster from this
+ * one function. Excluding once, here, is what makes "Steward is off every board"
+ * a fact about the system rather than a checklist of a dozen call sites that each
+ * have to remember.
+ */
+export const getAllPlayers = cache(async (): Promise<Player[]> => (await loadRoster()).visible);
+
+/**
+ * The excluded vikings' ids and names — for the aggregate paths only.
+ *
+ * `player_stats` is keyed by `player_id` and `sessions`/`events` by
+ * `character_name`, and neither carries the flag, so a read that does not go
+ * through the roster has to be told who to drop.
+ */
+export const getExcludedRoster = cache(
+  async (): Promise<{ ids: ReadonlySet<string>; names: ReadonlySet<string> }> => {
+    const { excludedIds, excludedNames } = await loadRoster();
+    return { ids: excludedIds, names: excludedNames };
+  },
+);
+
 export const getPlayersWithStats = cache(async (): Promise<PlayerWithStats[]> => {
-  const [players, stats] = await Promise.all([getAllPlayers(), getAllStats()]);
-  const byPlayer = new Map(stats.map((s) => [s.player_id, s]));
+  const [players, stats, excluded] = await Promise.all([
+    getAllPlayers(),
+    getAllStats(),
+    getExcludedRoster(),
+  ]);
+  // `players` is already filtered, so an excluded viking's stats could only reach
+  // a caller through the map below — but the map is built from EVERY stat row, and
+  // "nothing looks it up" is a property of today's code rather than a guarantee.
+  // Drop the rows outright: the boards, the titles and the war rooms all read this
+  // function, and none of them may see an excluded viking's numbers by any route.
+  const byPlayer = new Map(
+    filterExcludedByPlayerId(stats, excluded.ids).map((s) => [s.player_id, s]),
+  );
   return players.map((p) => ({ ...p, stats: byPlayer.get(p.id) ?? null }));
 });
 
@@ -544,16 +640,35 @@ export const getOaths = cache(async (): Promise<Oath[]> => {
   return (data as Oath[]) ?? [];
 });
 
-/** All sessions from the last `days` days, oldest first (attendance calendar, episodes). */
+/**
+ * All sessions from the last `days` days, oldest first (attendance calendar,
+ * episodes, the Hours-played board, the durable playtime the titles rank on).
+ *
+ * EXCLUDED VIKINGS ARE DROPPED HERE, which is the second choke point after the
+ * roster. Sessions are keyed by `character_name` and join nothing, so filtering
+ * the roster alone would leave an excluded character out of the leaderboards
+ * while still counting their evenings in the attendance calendar, in the episode
+ * "who was in the hall" lines, and in the hall's total hours. One filter, in the
+ * read every one of those surfaces already goes through.
+ *
+ * The ingested rows themselves are untouched — this is a read filter, and
+ * /admin/ops reads `sessions` directly when it needs the unabridged truth.
+ */
 export const getSessionsSince = cache(async (days = 70): Promise<GameSession[]> => {
   const since = windowStartIso(days);
-  const { data } = await db()
-    .from('sessions')
-    .select('*')
-    .gte('joined_at', since)
-    .order('joined_at', { ascending: true })
-    .limit(2000);
-  return (data as GameSession[]) ?? [];
+  const [{ data }, excluded] = await Promise.all([
+    db()
+      .from('sessions')
+      .select('*')
+      .gte('joined_at', since)
+      .order('joined_at', { ascending: true })
+      .limit(2000),
+    getExcludedRoster(),
+  ]);
+  return ((data as GameSession[]) ?? []).filter((s) => {
+    const nm = s.character_name ?? '';
+    return !excluded.names.has(nm) && !isExcludedName(nm);
+  });
 });
 
 /**
@@ -1014,7 +1129,7 @@ export const getMilestones = cache(async (): Promise<Milestone[]> => {
  * a wide window of sessions (for the playtime derivation), and the online roster.
  */
 async function loadMilestoneAggregates(): Promise<Aggregates> {
-  const [statsRes, sessions, online, bosses] = await Promise.all([
+  const [statsRes, sessions, online, bosses, excluded] = await Promise.all([
     // Only the columns the metrics actually read (AGGREGATE_STAT_COLUMNS). The
     // wide `select('*')` this replaced carried every player's whole gs_stats
     // blob twice over: measured at 12.8 KB for five vikings, i.e. ~51 KB at a
@@ -1027,8 +1142,22 @@ async function loadMilestoneAggregates(): Promise<Aggregates> {
     // AggregateInput.bossesKilled. Fetched here so the /world progress bars show
     // exactly the number the evaluator will fire on.
     getBosses(),
+    // Who must not count toward a Great Deed. `getOnlinePlayers()` above is
+    // already filtered (it derives from the roster), but the other two inputs are
+    // not: `player_stats` is keyed by player_id and the sessions window is keyed
+    // by character_name, and neither read joins `players` at all.
+    getExcludedRoster(),
   ]);
-  const stats = (statsRes.data as Record<string, unknown>[] | null) ?? [];
+  // `sessions` and `online` arrive already filtered (getSessionsSince and the
+  // roster both drop excluded vikings); `player_stats` is the one input that
+  // joins nothing and is keyed by player_id, so it is filtered here. The site's
+  // progress bars and the evaluator in lib/milestones.ts must see the IDENTICAL
+  // aggregate — a bar that counts an excluded viking's kills while the evaluator
+  // does not would sit past 100 % and never fire.
+  const stats = filterExcludedByPlayerId(
+    (statsRes.data as (Record<string, unknown> & { player_id?: string })[] | null) ?? [],
+    excluded.ids,
+  );
   const onlineNames = new Set(online.map((p) => p.character_name));
   const bossesKilled = bosses.filter((b) => b.is_killed).length;
   return computeAggregates({ stats, sessions, onlineNames, bossesKilled });

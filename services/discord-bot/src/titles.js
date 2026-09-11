@@ -54,6 +54,7 @@
 // column, logs once, and skips (no seed, no announcement).
 
 import { nameMd, escapeMd } from './format.js';
+import { isExcluded } from './excluded.js';
 
 const firstName = (s) => String(s || '').trim().split(/\s+/)[0] || 'viking';
 
@@ -271,9 +272,18 @@ export function createTitlesAnnouncer({
     }
     if (computed.size === 0) return emptyPass();
 
-    const { data, error } = await writeDb
+    // `excluded` rides along so an excluded character is skipped below. Asked for
+    // first and dropped on error, because the column lands in a hand-applied
+    // migration and naming it too early would fail the read and stop ALL titling.
+    let res = await writeDb
       .from('players')
-      .select('id, character_name, current_title, title_updated_at');
+      .select('id, character_name, current_title, title_updated_at, excluded');
+    if (res.error) {
+      res = await writeDb
+        .from('players')
+        .select('id, character_name, current_title, title_updated_at');
+    }
+    const { data, error } = res;
     if (error) {
       if (isMissingColumn(error)) {
         if (!warnedMissing) {
@@ -306,6 +316,13 @@ export function createTitlesAnnouncer({
       if (!name) continue;
       if (handled.has(name)) continue;
       handled.add(name);
+      // STICKY TITLES STOP AT AN EXCLUDED CHARACTER. /api/titles already computes
+      // from a filtered roster, so `computed` never names one — but this loop also
+      // WRITES players.current_title, and that column is what the in-game boards
+      // and the #server proclamation render. Skipping here means an excluded row's
+      // last crown is never refreshed, re-announced, or reshuffled by the
+      // uniqueness pass. (db/2026-09-11_players_excluded.sql clears it once.)
+      if (isExcluded(row)) continue;
       const entry = computed.get(name);
       if (!entry) continue; // no computed title for this viking this pass
       const title = entry.title;

@@ -29,6 +29,7 @@
 // without it, and tolerates the milestones table not existing yet.
 
 import { GOLD } from './format.js';
+import { isExcluded, isExcludedName } from './excluded.js';
 
 const FOOTER = 'Eilif · The Cozy Canon Playthrough';
 const DEFAULT_MIN_GAP_MS = 60_000; // MILESTONE_MIN_GAP_MS default — 1 minute
@@ -197,6 +198,18 @@ export function createMilestonesAnnouncer({
     return Number.isFinite(t) ? t : null;
   }
 
+  /**
+   * The roster read behind the progress line: online set + exclusion, one query.
+   * Two-tier for the same reason lib/milestones.ts readPlayersForAggregate is —
+   * `players.excluded` arrives by hand, and a select naming a missing column fails
+   * outright, which here would empty the online set and undercount playtime.
+   */
+  async function readPlayersForProgress(client) {
+    const withFlag = await client.from('players').select('id, character_name, is_online, excluded');
+    if (!withFlag.error) return withFlag;
+    return client.from('players').select('id, character_name, is_online');
+  }
+
   // The nearest unachieved milestone by percentage, with its progress %.
   async function nextDeedProgress(allRows) {
     const pending = allRows.filter((m) => !m.achieved_at);
@@ -205,12 +218,25 @@ export function createMilestonesAnnouncer({
     const [statsRes, sessionsRes, playersRes] = await Promise.all([
       db.from('player_stats').select('*'),
       db.from('sessions').select('*'),
-      db.from('players').select('character_name, is_online'),
+      readPlayersForProgress(db),
     ]);
-    const stats = statsRes.data ?? [];
-    const sessions = sessionsRes.data ?? [];
+
+    // The "Next deed (NN%)" line under every Great Deed embed is the same number
+    // the site's progress bar shows, and lib/data.ts computes that one from
+    // filtered inputs. If this one counted an excluded character (an alt —
+    // db/2026-09-11_players_excluded.sql) the bot would advertise a percentage
+    // the site never reaches, on a deed the evaluator will fire at a different
+    // moment. Filter the same three person-keyed inputs, the same way.
+    const playerRows = playersRes.data ?? [];
+    const excludedIds = new Set(
+      playerRows.filter((p) => isExcluded(p)).map((p) => p.id).filter(Boolean),
+    );
+    const stats = (statsRes.data ?? []).filter((s) => !excludedIds.has(s.player_id));
+    const sessions = (sessionsRes.data ?? []).filter((s) => !isExcludedName(s.character_name));
     const onlineNames = new Set(
-      (playersRes.data ?? []).filter((p) => p.is_online && p.character_name).map((p) => p.character_name),
+      playerRows
+        .filter((p) => p.is_online && p.character_name && !isExcluded(p))
+        .map((p) => p.character_name),
     );
     const agg = computeAggregates({ stats, sessions, onlineNames });
 

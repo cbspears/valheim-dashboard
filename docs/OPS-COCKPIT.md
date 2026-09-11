@@ -693,3 +693,78 @@ glossary captions point into it.
 
 **This file is the operational document.** Where the two disagree about what
 shipped, this one is right.
+
+## 13. Excluding a character
+
+Some characters on the roster are not players competing. The first case is
+**Steward**, an alt used to run errands in the hall: it joins, it logs sessions,
+and it accrues kills, deaths and playtime like anybody else — so it lands on the
+leaderboards, in the roster, in the Player-of-the-Day draw, in the title
+registry, in the Great Deed aggregates, on the in-game sign boards and in "who is
+sailing". None of that is wrong data; it is the wrong question. The boards ask
+which of the **vikings** is ahead, and an alt is not one of them.
+
+**Ingest is untouched.** `/api/webhook` and `/api/gs-ingest` keep writing every
+row for an excluded character — sessions, events, `player_stats`, presence. The
+log stays a faithful log, this cockpit still sees everything that happened, and
+un-excluding somebody is one `update`, not a restore. Exclusion happens on
+**read** and on **aggregation**, in exactly two places: `lib/excluded.ts` for the
+site and `services/discord-bot/src/excluded.js` for the bot.
+
+### Flip the flag
+
+`players.excluded` (`db/2026-09-11_players_excluded.sql` — **apply that file
+first**; it also carries the `grant select (excluded)` without which every anon
+read that names the column fails):
+
+```sql
+update public.players
+   set excluded = true,
+       current_title = null,
+       title_updated_at = null
+ where character_name = 'Steward';
+```
+
+Expect `UPDATE 1`. `UPDATE 0` means no row is spelled exactly that way —
+`character_name` is unique and case-sensitive, so check it against
+`select character_name from public.players` rather than loosening the predicate.
+
+`current_title` is cleared in the same statement because the title registry stops
+maintaining an excluded row the moment it is excluded; leaving the last crown
+behind would freeze an epithet on a character nothing re-evaluates, and the bot
+writes that column straight to the in-game boards.
+
+To **un-exclude**, set `excluded = false` and remove the name from the two lists
+below. The site picks it up on its next read.
+
+### Restart the bot
+
+The Discord bot cannot import the site's TypeScript, so it mirrors the rule. It
+reads `EXCLUDED_CHARACTER_NAMES` (comma-separated) from its `.env`, defaulting to
+the same value as `config/server.ts`, and resolves it **once at startup**:
+
+```bash
+sudo systemctl restart eilif-discord-bot
+```
+
+### The name list is the fallback, not the switch
+
+`EXCLUDED_CHARACTER_NAMES` in `config/server.ts` (and its env twin in the bot)
+exists for the two cases the database flag cannot cover: **before** the migration
+is applied, and at the many read sites that never join `players` at all —
+`sessions` and `events` are keyed by `character_name`, and every bot tally is
+keyed by name. Either signal is decisive: `excluded = true` **or** a listed name.
+Keep the two lists in step; a name on the list alone is already a working
+exclusion, which is what makes the rollout safe in either order.
+
+### What it actually changes
+
+| Surface | Effect |
+|---|---|
+| `/players`, the Hall roster, `/viking/<slug>`, the gallery byline | the character is gone (its viking page 404s) |
+| `/api/titles`, the title registry, the #server proclamation | never computed, never written, never announced |
+| `/api/boards` (in-game signs) and the leader plaques | absent from every board |
+| Great Deeds — the `/world` bars and the evaluator that fires them | its stats, sessions and presence stop counting toward both, together |
+| `/api/status`, presence-driven voice, altar tellings | not "in the hall" |
+| Nightly recap, Player of the Day, the weekly chronicle | off every per-name board and out of the draw |
+| `/admin/ops`, `events`, `sessions`, `player_stats` | **unchanged** — the raw record is complete |

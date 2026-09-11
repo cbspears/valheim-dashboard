@@ -912,15 +912,17 @@ for (const [rel, data] of withUnshamed) {
 }
 
 // ── the pinned cfg is the whole point ───────────────────────────────────────
-// Unshamed's OWN defaults wipe the character's cheat flag on load, on save and
-// after a dev command, and zero the Cheats stat with it. That is cheat-flag
-// washing, and Eilif wants none of it: a viking who typed a cheat command stays
-// disqualified exactly as in vanilla. Only "Ignore Modded Flag" is on, which is
-// the one thing this mod is here to do. If this ever renders On, the pack is
-// laundering saves and nothing downstream would say so.
+// Unshamed 1.0.0's defaults WIPED the character's cheat flag on load, on save
+// and after a dev command (cheat-flag washing; Eilif wants none of it). 1.0.2
+// replaced those four switches with one, "Ignore Cheat Flags", which forces
+// Achievements.CanGetAchievements true without clearing or hiding anything on
+// disk - the flags stay, they just stop blocking achievements. That is the one
+// thing this mod is here to do, so it is On; the retroactive grant stays Off.
+// If a Clear* switch ever reappears in this map the pack is on a build that
+// launders saves again and nothing downstream would say so.
 const unshamedCfg = withUnshamed.get('config/Azumatt.Unshamed.cfg').toString('latin1');
 assert.match(
-  unshamedCfg, /^## Settings file was created by plugin Unshamed v1\.0\.0$/m,
+  unshamedCfg, /^## Settings file was created by plugin Unshamed v1\.0\.2$/m,
   'the cfg carries the writer header of the build that wrote it',
 );
 assert.match(unshamedCfg, /^## Plugin GUID: Azumatt\.Unshamed$/m, 'and the plugin GUID BepInEx writes under it');
@@ -931,17 +933,13 @@ assert.deepEqual(
   unshamedValues,
   {
     Enabled: 'On',
-    'Clear On Load': 'Off',
-    'Clear On Save': 'Off',
-    'Clear After Command': 'Off',
-    'Clear Cheat Stat': 'Off',
-    'Ignore Modded Flag': 'On',
+    'Ignore Cheat Flags': 'On',
     'Show Popups': 'Off',
     'Force True Methods': '',
     'Force False Methods': '',
     'Enable Retroactive': 'Off',
   },
-  'every Clear switch is pinned Off against the mod\'s own On defaults, and the overrides stay empty',
+  '1.0.2 has no Clear switches; Ignore Cheat Flags is the one On, the overrides stay empty',
 );
 // BepInEx orders sections alphabetically and writes entries in Bind order, so a
 // hand-edited template in the wrong order would be silently rewritten the first

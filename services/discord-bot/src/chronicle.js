@@ -21,6 +21,7 @@
 import cron from 'node-cron';
 import { GOLD, escapeMd, nameMd, defangLinks, clipChars } from './format.js';
 import { collapseDeathRows } from './recap.js';
+import { filterExcluded, isExcludedName } from './excluded.js';
 
 const FOOTER = 'Eilif · The Cozy Canon Playthrough';
 
@@ -387,7 +388,16 @@ export function createChronicle({
         .select('character_name, joined_at, left_at')
         .or(`left_at.is.null,left_at.gte.${startIso}`)
     );
-    const { hours, staleOpen, totalHours } = sessionHours(sessions, startMs, nowMs);
+    // The weekly chronicle is the same kind of public per-name board the nightly
+    // recap is — hours, deaths, war parties, arrivals, the week's kills — so an
+    // excluded character (an alt; db/2026-09-11_players_excluded.sql) stays out of
+    // every one of them. Filtered at each input rather than at the render, so no
+    // total silently disagrees with the list beside it.
+    const { hours, staleOpen, totalHours } = sessionHours(
+      filterExcluded(sessions),
+      startMs,
+      nowMs,
+    );
     if (staleOpen.length) {
       console.warn(
         `[chronicle] ignored ${staleOpen.length} stale open session(s) (left_at NULL, joined >${days}d ago) — close these rows: ${staleOpen.join(', ')}`
@@ -410,6 +420,7 @@ export function createChronicle({
     for (const r of collapseDeathRows(deathRows)) {
       const nm = (r.character_name || '').trim();
       if (!nm) continue;
+      if (isExcludedName(nm)) continue;
       const t = Date.parse(r.created_at);
       windowDeaths[nm] = (windowDeaths[nm] || 0) + 1;
       if (lastCauseAt[nm] === undefined || t >= lastCauseAt[nm]) {
@@ -445,7 +456,8 @@ export function createChronicle({
             : []
         )
           .map((n) => String(n || '').trim())
-          .filter(Boolean),
+          .filter(Boolean)
+          .filter((n) => !isExcludedName(n)),
       }));
 
     // --- arrivals (new vikings) --------------------------------------------
@@ -459,6 +471,9 @@ export function createChronicle({
     for (const p of playerRows || []) {
       const nm = (p.character_name || '').trim();
       if (!nm) continue;
+      // No id->name entry means no kills contribution and no "new viking" arrival
+      // line — one guard covering both tallies this loop feeds.
+      if (isExcludedName(nm)) continue;
       idToName.set(p.id, nm);
       const seen = Date.parse(p.first_seen_at);
       if (Number.isFinite(seen) && seen >= startMs) arrivals.push({ name: nm, at: p.first_seen_at });

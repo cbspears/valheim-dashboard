@@ -37,6 +37,7 @@ import { nameMd, replyPayload, replySafeName, clipChars, GOLD } from './format.j
 import { MENTION_STRICT, clampEmbed } from './discord.js';
 import { sessionHours, pickTopHours } from './chronicle.js';
 import { STORYTELLER_PROCLAIM_LINES, STORYTELLER_NUDGE_LINES } from './voice.js';
+import { filterExcluded } from './excluded.js';
 
 /** The only office there is. The check constraint on `offices.office` agrees. */
 export const OFFICE = 'storyteller';
@@ -774,7 +775,13 @@ export function createStoryteller({
     if (playersRes.error) throw new Error(`players: ${playersRes.error.message}`);
     if (sessionsRes.error) throw new Error(`sessions: ${sessionsRes.error.message}`);
 
-    const candidates = eligibleCandidates(playersRes.data ?? [], sessionsRes.data ?? []);
+    // The Storyteller ballot is an honour the hall votes on, so an excluded
+    // character is not on it — nor are its sessions part of anyone's eligibility
+    // hours. (db/2026-09-11_players_excluded.sql)
+    const candidates = eligibleCandidates(
+      filterExcluded(playersRes.data ?? []),
+      filterExcluded(sessionsRes.data ?? []),
+    );
     if (candidates.length < MIN_BALLOT_OPTIONS) {
       await reply(
         message,

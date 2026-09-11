@@ -11,6 +11,7 @@
 // format.js, which stays pure — buildStats hands it a fully-resolved stats obj.
 import cron from 'node-cron';
 import { formatRecap } from './format.js';
+import { isExcluded, isExcludedName, withoutExcluded } from './excluded.js';
 
 // Epic categories headline even on back-to-back nights (exempt from anti-repeat).
 const EPIC_KEYS = new Set(['boss_kill', 'most_explored']);
@@ -127,12 +128,27 @@ const UNDERDOG = {
  */
 export function selectPlayerOfDay(ctx = {}) {
   const {
-    windowDeaths = {}, lastCause = {}, hours = {},
-    bossesPresent = {}, latestBoss = {},
-    killsDelta = {}, resourcesDelta = {}, craftsDelta = {}, newBiomes = {},
+    windowDeaths: windowDeaths_ = {}, lastCause = {}, hours: hours_ = {},
+    bossesPresent: bossesPresent_ = {}, latestBoss = {},
+    killsDelta: killsDelta_ = {}, resourcesDelta: resourcesDelta_ = {},
+    craftsDelta: craftsDelta_ = {}, newBiomes: newBiomes_ = {},
     lastCat = null, lastWinner = null, winStreak = 0, forceUnderdog = false,
     seed = 0,
   } = ctx;
+
+  // THE CROWN IS NEVER OFFERED TO AN EXCLUDED CHARACTER. buildStats already drops
+  // them from every tally it builds, so in production these filters find nothing —
+  // they are here because this function is EXPORTED and pure, and is called
+  // directly by scripts/preview.js and by the tests. A draw that could crown an
+  // alt depending on which caller assembled the ctx is not a rule, it is a habit;
+  // this makes it a property of the draw itself. (db/2026-09-11_players_excluded.sql)
+  const windowDeaths = withoutExcluded(windowDeaths_);
+  const hours = withoutExcluded(hours_);
+  const bossesPresent = withoutExcluded(bossesPresent_);
+  const killsDelta = withoutExcluded(killsDelta_);
+  const resourcesDelta = withoutExcluded(resourcesDelta_);
+  const craftsDelta = withoutExcluded(craftsDelta_);
+  const newBiomes = withoutExcluded(newBiomes_);
 
   // most_explored metric = count of newly-discovered biomes per player.
   const newBiomeCount = {};
@@ -284,6 +300,12 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
         staleOpen.push(s.character_name || '?');
         continue;
       }
+      // An excluded character (an alt — db/2026-09-11_players_excluded.sql) is off
+      // every board this function feeds: the Online-today list, the hall's total
+      // hours, the active-player count, and the `hours` map the Player-of-the-Day
+      // draw ranks on. Dropped at the top of the loop so no downstream tally can
+      // pick it up by accident.
+      if (isExcludedName(s.character_name)) continue;
       const start = Math.max(new Date(s.joined_at).getTime(), startMs);
       const end = Math.min(s.left_at ? new Date(s.left_at).getTime() : now, now);
       if (end > start) {
@@ -325,6 +347,7 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     for (const r of collapsedDeaths) {
       const nm = (r.character_name || '').trim();
       if (!nm) continue;
+      if (isExcludedName(nm)) continue; // off the Fallen board and the 'The Bold' tally
       const t = new Date(r.created_at).getTime();
       windowDeaths[nm] = (windowDeaths[nm] || 0) + 1;
       if (lastCauseAt[nm] === undefined || t >= lastCauseAt[nm]) {
@@ -375,6 +398,7 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
       for (const raw of present) {
         const nm = (raw || '').trim();
         if (!nm) continue;
+        if (isExcludedName(nm)) continue; // no boss-slayer crown for an excluded character
         bossesPresent[nm] = (bossesPresent[nm] || 0) + 1;
         if (!latestBoss[nm] || t >= latestBoss[nm].t) {
           latestBoss[nm] = { boss: b.name, biome: b.biome, t };
@@ -391,11 +415,20 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     const craftsDelta = {};
     const newBiomes = {};
     try {
-      const { data: players } = await db.from('players').select('id, character_name');
+      // Ask for `excluded` and fall back without it: the column arrives in a
+      // hand-applied migration, and naming a column that does not exist fails the
+      // whole read (which here means every delta silently goes to zero).
+      let playersRes = await db.from('players').select('id, character_name, excluded');
+      if (playersRes.error) playersRes = await db.from('players').select('id, character_name');
+      const players = playersRes.data;
       const idToName = new Map();
       for (const p of players || []) {
         const nm = (p.character_name || '').trim();
-        if (nm) idToName.set(p.id, nm);
+        // Excluded vikings never enter the id->name map, so their player_stats row
+        // resolves to no name below and falls out of the snapshot AND of every
+        // delta (kills, resources, crafts, new biomes) the POTY draw scores on.
+        // `excluded` is read when the column exists; the name list covers the rest.
+        if (nm && !isExcluded({ character_name: nm, excluded: p.excluded })) idToName.set(p.id, nm);
       }
       const { data: pstats } = await db
         .from('player_stats')
