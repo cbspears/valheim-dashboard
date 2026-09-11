@@ -89,7 +89,7 @@ export const ALL_MODS: Mod[] = [
     author: 'Grantapher (fork of the ValheimPlus team)',
     description:
       'The all-round comfort mod, the source of most of the small kindnesses you feel every session. Craft and build straight out of the chests around you, out to 30 metres from the workbench area. Rain no longer wears down what you have built, one hammer swing repairs everything damaged within 7.5 metres, you can place pieces from 12 metres away, taking a piece back down refunds every resource it cost, and pieces can be placed freely rather than only where the game usually allows. Fires and furnishings warm you out to 20 metres. Workbenches and other stations reach 30 metres and need no roof, and upgrades attach from 20 metres out. Fires, ovens and torches burn without fuel. Gathering and picking run 30% richer. Dropped items float instead of sinking and wait an hour before they fade. The map is shared, so exploration and pins spread to everyone, and carts and boats show on it too. The camera pulls back to 100 metres with a wider view. You can sleep in any bed nobody has claimed. Hold LeftAlt to snap building pieces to a grid, F7 turns snapping on and off, F6 sets the default. The server checks the version, so everyone needs exactly this one. Ships in the modpack.',
-    version: '10.0.2',
+    version: '10.0.3', // 2026-09-11: r2modman installs the newest V+ on every profile update; the box moved to 10.0.3 in the pack v16 window (Valheim hotfix 1.0.12 day). Same cfg schema as 10.0.2.
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Grantapher/ValheimPlus_Grantapher_Temporary/',
@@ -130,7 +130,7 @@ export const ALL_MODS: Mod[] = [
     // the copy below and config/server.ts MAX_PLAYERS points at V+, not here.
     description:
       "The voice of the Hall itself: it carries the in-game /oath swearing and speaks as Eilif. It holds the world's death rule steady, so the gear you are wearing stays with you when you fall and the rest waits in your tombstone. Built just for this server; nothing to install.",
-    version: '0.3.3',
+    version: '0.3.4', // 2026-09-11: on the box since the pack v16 window; stops re-sending world keys every 30 s (that RPC closed every open map) and carries the ValheimPlus 1.0.12 safety shim.
     category: 'Core',
     clientRequired: false,
   },
@@ -182,8 +182,8 @@ export const ALL_MODS: Mod[] = [
     name: 'Eilif Companion Client',
     author: 'cbspears (custom-built)',
     description:
-      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play, with no setup and nothing to upload. It names exactly what killed you the moment you die, the creature or the hazard, so How We Die and the Saga show the real cause instead of a guess. It also carries a keep-list, so the tools and gear a viking cannot afford to lose stay on you through a death that would otherwise scatter them. New in this pack: it reads your own kills, deaths, builds, crafts and distance travelled straight off your character and sends them along, so those boards fill in again. Ships in the modpack.',
-    version: '0.4.2',
+      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play, with no setup and nothing to upload. It names exactly what killed you the moment you die, the creature or the hazard, so How We Die and the Saga show the real cause instead of a guess. It also carries a keep-list, so the tools and gear a viking cannot afford to lose stay on you through a death that would otherwise scatter them. It reads your own builds, crafts, pickups and distance travelled straight off your character and sends them along, so those boards fill in again (kills come from the weapon breakdown, deaths from the death reports). Ships in the modpack.',
+    version: '0.4.3',
     category: 'Content',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Eilif/EilifCompanionClient/',
