@@ -83,10 +83,10 @@ const VERCEL_SCOPE = 'charlie-9292s-projects';
 // PlantEverything died the same way and came BACK on 2026-09-10, under a different owner:
 // `fedorovdgap/PlantEverything` 1.21.1 is Advize's own master branch republished (commit
 // e4a628c, "Initial update to Valheim 1.0"), same plugin GUID advize.PlantEverything, same
-// cfg file. So the pin below is the fedorovdgap namespace, NOT Advize, and a pack carries
-// exactly one of the two — the minter refuses both (`--no-plant --plant-fork 1.21.1` is the
-// v15 shape). When Advize publishes an official 1.21.x this entry moves back to
-// `Advize-PlantEverything-<ver>` and the minter flags go back to `--plant <ver>`.
+// cfg file. Pack v15 pinned that fork (`--no-plant --plant-fork 1.21.1`). Advize published the
+// OFFICIAL 1.21.0 on 2026-09-11 01:25 CT, so from v16 the pin is back under his namespace
+// (`--plant 1.21.0`) and the fork row in the minter is a contingency only; a pack carries
+// exactly one of the two and the minter refuses both.
 //
 // ValheimPlus is BACK, as Grantapher 10.0.2: a real 1.0 build with working CraftFromChest,
 // published 2026-09-10. It declares BepInExPack 5.4.2350, so the PACK pins 5.4.2350 even
