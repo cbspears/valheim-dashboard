@@ -38,7 +38,7 @@
 //                        downgraded to informational instead of failing the run.
 //   --recaps-start <d>   Launch value expected in the bot .env (default 2026-09-09)
 //   --pins <list>        Comma-separated ns-name-version triples the next pack pins.
-//                        Default = the pack v15 candidate set (see PACK_V15_PINS).
+//                        Default = the pack v16 candidate set (see PACK_V16_PINS).
 //   --expect-plugins <n> How many server plugins this boot must load (default 8, the
 //                        rehearsal count). 2026-09-09: the 1.0 load test left three
 //                        (Companion, Boards, Emitter), so the night runs --expect-plugins 3.
@@ -109,13 +109,13 @@ function csprojVersion(rel, fallback) {
     return fallback;
   }
 }
-const PACK_V15_PINS = [
+const PACK_V16_PINS = [
   'denikson-BepInExPack_Valheim-5.4.2350',
   'Grantapher-ValheimPlus_Grantapher_Temporary-10.0.2',
   // The unofficial 1.0 rebuild, NOT Advize/PlantEverything. Optional in the minter
   // (`--plant-fork 1.21.1`, and it must travel with `--no-plant`), but a pack that
   // ships it has to resolve it like any other pin.
-  'fedorovdgap-PlantEverything-1.21.1',
+  'Advize-PlantEverything-1.21.0',
   'Proudlock_Technology-GsValheimStatsClient-0.2.12',
   `Eilif-EilifPaths-${csprojVersion('plugins/eilif-paths/EilifPaths.csproj', '1.7.1')}`,
   `Eilif-EilifCompanionClient-${csprojVersion('plugins/eilif-companion-client/EilifCompanionClient.csproj', '0.4.0')}`,
@@ -142,7 +142,7 @@ const EXPECT_PLUGINS = Number(opt('expect-plugins', '8')) || 8;
 const PHASE = opt('phase', 'pre-wipe');
 const POSTURE = (opt('posture', 'GO-A') || 'GO-A').toUpperCase();
 const RECAPS_START_LAUNCH = opt('recaps-start', '2026-09-09');
-const PINS = (opt('pins') || PACK_V15_PINS.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+const PINS = (opt('pins') || PACK_V16_PINS.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
 const DEEP_LISTING = flag('deep-listing');
 const SKIP_SFTP = flag('skip-sftp');
 const SKIP_VERCEL = flag('skip-vercel');

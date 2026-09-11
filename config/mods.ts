@@ -218,17 +218,19 @@ export const ALL_MODS: Mod[] = [
     // nothing since. fedorovdgap/PlantEverything 1.21.1 is Advize's OWN master branch
     // republished (commit e4a628c, "Initial update to Valheim 1.0"): same plugin GUID
     // advize.PlantEverything, same cfg file, internal version 1.21.0. Decompiled and
-    // vetted before it went in the pack. Pack v15 pins it as `--no-plant --plant-fork
-    // 1.21.1`; when Advize ships an official 1.21.x this row goes back to his namespace
-    // and the minter flags go back to `--plant <ver>`.
+    // vetted before it went in the pack. Pack v15 pinned it as `--no-plant --plant-fork
+    // 1.21.1`. Advize published the OFFICIAL 1.21.0 on 2026-09-11 01:25 CT (it differs
+    // from the fork's snapshot: config, init patches, localization, assets), so v16 goes
+    // back to `--plant 1.21.0` under his namespace and the server DLL is swapped to the
+    // official build in the same window. This row is the v16 state.
     name: 'PlantEverything',
-    author: 'fedorovdgap (unofficial 1.0 rebuild of Advize\'s mod)',
+    author: 'Advize',
     description:
-      'Plant and harvest every flower, sapling, and crop with the cultivator, so you can raise proper farms and managed forests. Yields stay vanilla. Advize, who wrote it, has not published a Valheim 1.0 build yet, so the modpack ships this rebuild of his code in the meantime and will move back to his release when it arrives. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
-    version: '1.21.1',
+      'Plant and harvest every flower, sapling, and crop with the cultivator, so you can raise proper farms and managed forests. Yields stay vanilla. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
+    version: '1.21.0',
     category: 'QoL',
     clientRequired: true,
-    url: 'https://thunderstore.io/c/valheim/p/fedorovdgap/PlantEverything/',
+    url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
   },
   // ── Hidden since 2026-09-09: not running on the 1.0 box, not in pack v15 ────
   // Each row keeps its last known-good pin and copy. Remove `hidden: true` (and
