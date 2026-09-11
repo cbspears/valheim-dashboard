@@ -1,4 +1,4 @@
--- STATUS: NOT APPLIED. Written 2026-09-11. Apply by hand (Supabase SQL editor or
+-- STATUS: APPLIED TO PROD 2026-09-11 09:45 CT (column, comment, grants; Steward flipped by hand the same minute). Written 2026-09-11. Apply by hand (Supabase SQL editor or
 -- `psql "$SUPABASE_DB_URL" -f db/2026-09-11_players_excluded.sql`), then flip this
 -- line to "APPLIED TO PROD <date>" the way every other file in db/ records it.
 -- `players.excluded` — the admin flag that keeps a character out of every
