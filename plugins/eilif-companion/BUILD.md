@@ -8,6 +8,55 @@ byte-identical to that install — no drift found. dotnet SDK on this machine: *
 launch-day rebuild needs **no network access** for NuGet. Full build (`dotnet build -c Release`)
 takes under 2s.
 
+## Deploying **0.3.4** (built 2026-09-11, staged, NOT yet on the box)
+
+`dist/EilifCompanion.dll` is now **0.3.4**. It carries everything 0.3.3 did, unchanged, plus two
+things — one new feature and one bug fix that players can feel.
+
+**1. `[VPlusHotfixShim]`, ON by default.** Valheim hotfix 1.0.10/1.0.12 (dedicated build
+`25253791`) turned `PlayerProfile.s_bypassCheatChecks` from a public static FIELD into a static
+PROPERTY. ValheimPlus 10.0.2 and 10.0.3 were compiled against the field and still carry
+`ldsfld bool [assembly_valheim]PlayerProfile::s_bypassCheatChecks` in two places, so on 1.0.12 they
+throw `MissingFieldException` and smelters, kilns, furnaces, windmills, spinning wheels and
+fermenter taps stop producing while V+ is loaded. This section removes **exactly two** ValheimPlus
+patches and nothing else: the prefix `ValheimPlus.GameClasses.Smelter_Spawn_Patch` puts on
+`Smelter.Spawn`, and the transpiler `ValheimPlus.GameClasses.Fermenter_DelayedTap_Transpiler` puts
+on `Fermenter.DelayedTap`. Full design, the identification rule, and why it re-runs after every V+
+repatch: `README.md`, section `[VPlusHotfixShim]`. The identical shim ships in EilifPaths 1.7.2 for
+the client side.
+
+**No new Harmony patch class**, so `patch classes applied: 2/2` is unchanged. **Three log lines are
+new**; the first is the one to grep on the boot:
+
+```
+[Eilif] VPlusHotfixShim: Smelter.Spawn prefix removed (1), Fermenter.DelayedTap transpiler removed (1). ...
+[Eilif] VPlusHotfixShim: after - Smelter.Spawn prefixes 0 [], transpilers 0 []; Fermenter.DelayedTap prefixes 0 [], transpilers 0 [].
+[Eilif] VPlusHotfixShim: ValheimPlus re-applied its patches; removed again (...)   # only when it had to
+```
+
+`VPlusHotfixShim: inert - ValheimPlus is not loaded` is the healthy line on a box with no V+.
+A `ValheimPlus is loaded but neither broken patch was found` **warning** means either V+ has been
+fixed (switch the section off) or its class names moved (the shim is no longer finding them, and
+smelters are still dead) — read it, do not skip it.
+
+**2. Bug fix: the 30-second map-closer is gone.** `EnforceWorldKeys()` used to call the private
+`ZoneSystem.SendGlobalKeys(0L)` on every pass where any peer was connected. On the client that RPC
+ends in `Game.UpdateNoMap()` → `Minimap.SetMapMode(Small)`, i.e. it **shuts every player's open
+large map, every 30 seconds** (Mikael's report). The re-send was redundant: vanilla
+`RPC_SetGlobalKey` already calls `SendGlobalKeys(0L)` itself whenever a key is actually added, and a
+joining peer gets its own `SendGlobalKeys(peerID)`. Removed outright rather than made conditional —
+on the tick a key IS enforced, vanilla has already broadcast. Key enforcement and the `[EILIF_KEY]`
+lines are untouched, and the log poller needs no edit.
+
+**Load-tested 2026-09-11** on `~/Valheim-Test-Server-hotfix` (game **1.0.12**, dedicated build
+25253791, BepInEx 5.4.23.3, the box's plugin set), two 200 s boots — one with ValheimPlus **10.0.2**
+and one with **10.0.3** — plus a throwaway test plugin that drove V+'s own
+`UnpatchSelf()` + `PatchAll()` twice per boot to exercise the repatch path. Both boots: `2/2`,
+shim removed `(1)`/`(1)`, post-strip dump empty on both methods, **0 `Exception` lines**, and the
+shim re-stripped on every driven repatch.
+
+---
+
 ## Deploying **0.3.3** (built 2026-09-05, staged, NOT yet on the box)
 
 > "NOT uploaded" here means **not yet SFTP'd onto the GTX box**, which is a stopped-window job.
@@ -197,7 +246,7 @@ few seconds after the process exits) → **Panel Start** (Stop → Start, never 
    names the class **and the feature that died with it**
    (`EilifCompanionPlugin.cs:288`). One hit is one feature gone, silently, with nothing else
    saying so.
-2. **`Eilif Companion 0.3.3`** — the version actually loaded.
+2. **`Eilif Companion 0.3.4`** — the version actually loaded.
 3. **`[Eilif] patch classes applied: 2/2`** — both hooks on (OathCapture + the pin capture); anything
    else means read the `[Eilif] could not apply <Class>: <message>` lines above it. The denominator
    is a fixed roster in the source, never a count of what loaded, so a class the runtime could not

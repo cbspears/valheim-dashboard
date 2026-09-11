@@ -154,6 +154,18 @@ and one of them also relies on a *parameter* name.
   1.0 rebuild, re-read that block and compare it against the one quoted in full in
   `src/SwimStaminaPatch.cs`. Nothing counts that for you.
 
+**Sixth risk (added 1.7.2): the ValheimPlus hotfix shim resolves ValheimPlus by reflection.**
+`[VPlusHotfixShim]` reaches three names that live in ValheimPlus, not in the game:
+`ValheimPlus.ValheimPlusPlugin` (the type), its `PatchAll()` method, and the Harmony patch-class
+names `Smelter_Spawn_Patch` / `Fermenter_DelayedTap_Transpiler`. None of them is a compile-time
+reference, so a ValheimPlus update that renames any of them is a **silent** loss, not a build error.
+The shim covers each with its own log line — see `README.md`, "ValheimPlus hotfix shim" — and the
+one that matters most is the WARNING `ValheimPlus is loaded but neither broken patch was found`,
+which reads identically whether V+ has been FIXED (good) or RENAMED (bad). Grade it against the V+
+build number, never on its own. It also reaches two game methods by name,
+`Smelter.Spawn` and `Fermenter.DelayedTap`; if either moves the shim says so on its own line and
+removes nothing.
+
 **The first grep after a 1.0 rebuild: `MISSING patch class`.** Zero lines is healthy. A plugin
 prints its `Loading [...]` line whether or not its Harmony patches went on, so `Loading` proves the
 DLL was chainloaded and nothing more; each `MISSING patch class` line names the class **and the

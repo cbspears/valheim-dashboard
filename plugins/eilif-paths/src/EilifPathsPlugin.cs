@@ -62,11 +62,17 @@ namespace EilifPaths
     /// (see src/SwimStaminaPatch.cs).
     /// </summary>
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    // SOFT dependency on ValheimPlus, purely for LOAD ORDER (1.7.2). BepInEx sorts plugins so a
+    // declared dependency's Awake runs first, and ValheimPlus applies its Harmony patches from its
+    // own Awake — so declaring this is what lets [VPlusHotfixShim] find those patches already in
+    // place rather than racing them. Soft: EilifPaths loads perfectly well with no ValheimPlus at
+    // all, and the shim then says it is inert. See src/VPlusHotfixShim.cs.
+    [BepInDependency(VPlusHotfix.ValheimPlusGuid, BepInDependency.DependencyFlags.SoftDependency)]
     public class EilifPathsPlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "net.eilif.paths";
         public const string PluginName = "Eilif Paths";
-        public const string PluginVersion = "1.7.1";
+        public const string PluginVersion = "1.7.2";
 
         // GUID of the old Menthus mod — if it is still loaded we must not double-apply.
         private const string OldModGuid = "Menthus.bepinex.plugins.UsefulPaths";
@@ -148,6 +154,11 @@ namespace EilifPaths
             // whether any of those patch classes may touch anything (see src/VPlusFallbackPatch.cs).
             VPlusFallback.Bind(Config);
             VPlusFallback.Refuse();
+
+            // [VPlusHotfixShim] — removes the two ValheimPlus patches that MissingFieldException
+            // on Valheim 1.0.12 (Smelter.Spawn prefix, Fermenter.DelayedTap transpiler). Bound
+            // here; applied AFTER our own Harmony patches, below (see src/VPlusHotfixShim.cs).
+            VPlusHotfix.Bind(Config);
 
             OldModPresent = Chainloader.PluginInfos != null &&
                             Chainloader.PluginInfos.ContainsKey(OldModGuid);
@@ -236,6 +247,13 @@ namespace EilifPaths
             // whatever happened above.
             ToolStamina.Apply(harmony);
 
+            // The ValheimPlus 1.0.12 hotfix shim. Applied by hand, like ToolStamina above, and
+            // deliberately NOT an attribute-declared patch class — so the two roster counts above
+            // mean exactly what they meant in 1.7.1. See src/VPlusHotfixShim.cs.
+            VPlusHotfix.Apply(harmony);
+            if (VPlusHotfix.Armed)
+                InvokeRepeating(nameof(VPlusHotfixRecheck), VPlusHotfix.RecheckSeconds, VPlusHotfix.RecheckSeconds);
+
             // One line per enabled fallback feature, or 'VPlusFallback: disabled'.
             VPlusFallback.Report();
 
@@ -254,7 +272,7 @@ namespace EilifPaths
             ReportMissing(applied, ExpectedCoreClasses);
         }
 
-        // ---- The patch roster (v1.7.1) --------------------------------------
+        // ---- The patch roster (v1.7.2) --------------------------------------
         // The list the "Core patch classes: N/M" health line is measured against. M must never be
         // derived from what loaded (see the comment at the apply loop).
         private static readonly string[] ExpectedCoreClasses =
@@ -351,6 +369,20 @@ namespace EilifPaths
         }
 
         private static string F(ConfigEntry<float> c) => c.Value.ToString("0.##", CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// Slow guard for the ValheimPlus hotfix shim. ValheimPlus re-applies ALL of its patches
+        /// (UnpatchSelf + PatchAll) when a client receives the server's config and when its config
+        /// source changes, which would put the two broken patches straight back. The PatchAll
+        /// postfix in VPlusHotfix covers the routes we know about; this timer covers the ones we do
+        /// not. It is quiet unless it actually had to remove something, and it is only scheduled at
+        /// all when the shim is armed.
+        /// </summary>
+        private void VPlusHotfixRecheck()
+        {
+            try { VPlusHotfix.Recheck(); }
+            catch { /* InvokeRepeating keeps calling this; never let it flood */ }
+        }
 
         /// <summary>
         /// 0.4s poll: work out which surface the local player is on and update <see cref="Current"/>.

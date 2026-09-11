@@ -18,6 +18,12 @@ using UnityEngine;
 namespace EilifCompanion
 {
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    // SOFT dependency on ValheimPlus, purely for LOAD ORDER (0.3.4). BepInEx sorts plugins so a
+    // declared dependency's Awake runs first, and ValheimPlus applies its Harmony patches from its
+    // own Awake — so declaring this is what lets [VPlusHotfixShim] find those patches already in
+    // place rather than racing them. Soft: the Companion loads perfectly well with no ValheimPlus
+    // at all, and the shim then says it is inert. See src/VPlusHotfixShim.cs.
+    [BepInDependency(VPlusHotfix.ValheimPlusGuid, BepInDependency.DependencyFlags.SoftDependency)]
     public class EilifCompanionPlugin : BaseUnityPlugin
     {
         public const string PluginGuid = "media.blockspace.eilif.companion";
@@ -33,11 +39,11 @@ namespace EilifCompanion
         /// services/log-poller/test-parser.js.
         /// </summary>
         public const string PluginName = "Eilif Companion";
-        public const string PluginVersion = "0.3.3";
+        public const string PluginVersion = "0.3.4";
 
         internal static ManualLogSource Log;
 
-        // ---- The patch roster (v0.3.3, audit plugins-1.0) --------------------------------------
+        // ---- The patch roster (v0.3.4, audit plugins-1.0) --------------------------------------
         //
         // WHY A HARD-CODED LIST AND NOT JUST A COUNT. The apply loop below used to compute BOTH
         // halves of its "patch classes applied: N/M" line from the types it could enumerate, and
@@ -104,8 +110,8 @@ namespace EilifCompanion
         private float _enforceTimer;
         private const float EnforceIntervalSeconds = 30f;
         private string _lastLoggedKeys;
-        private System.Reflection.MethodInfo _sendGlobalKeys; // private ZoneSystem.SendGlobalKeys(long)
-        private bool _sendGlobalKeysMissing;
+        // (0.3.3 also held a reflected ZoneSystem.SendGlobalKeys here for a periodic re-broadcast.
+        // Removed in 0.3.4 — see the note at the foot of EnforceWorldKeys.)
 
         // ---- Voice pump state (main thread except where noted) ----
         // NOTE: no System.ValueTuple anywhere in this file — see BUILD.md and the source comment in
@@ -170,6 +176,11 @@ namespace EilifCompanion
             // decide whether to touch the IL at all (see src/ServerFallbackPatch.cs).
             ServerFallback.Bind(Config);
             ServerFallback.Refuse();
+
+            // [VPlusHotfixShim] — removes the two ValheimPlus patches that MissingFieldException
+            // on Valheim 1.0.12 (Smelter.Spawn prefix, Fermenter.DelayedTap transpiler). Bound
+            // here; applied AFTER our own Harmony patches, below (see src/VPlusHotfixShim.cs).
+            VPlusHotfix.Bind(Config);
 
             _voiceDormant = string.IsNullOrEmpty(_voiceToken.Value);
             if (_voiceDormant)
@@ -260,6 +271,11 @@ namespace EilifCompanion
             // [ServerFallback] is off.
             PlayFabPlayerCap.Apply(harmony);
 
+            // The ValheimPlus 1.0.12 hotfix shim. Applied by hand, like PlayFabPlayerCap above,
+            // and deliberately NOT an attribute-declared patch class — so 'patch classes applied:
+            // 2/2' means exactly what it meant in 0.3.3. See src/VPlusHotfixShim.cs.
+            VPlusHotfix.Apply(harmony);
+
             // One line per enabled fallback feature, or 'ServerFallback: disabled'.
             ServerFallback.Report();
 
@@ -303,6 +319,7 @@ namespace EilifCompanion
             try { PositionEmitter.Tick(Time.unscaledDeltaTime); } catch (Exception ex) { Fault("position", ex); }
             try { PumpWorldKeys(); } catch (Exception ex) { Fault("worldkeys", ex); }
             try { PumpVoicePoll(); } catch (Exception ex) { Fault("voice", ex); }
+            try { PumpVPlusHotfixShim(); } catch (Exception ex) { Fault("vplusshim", ex); }
         }
 
         // ---- Fault reporting for the Update pump ------------------------------------------------
@@ -374,6 +391,22 @@ namespace EilifCompanion
             if (_enforceTimer < EnforceIntervalSeconds) return;
             _enforceTimer = 0f;
             EnforceWorldKeys();
+        }
+
+        // Slow guard for the ValheimPlus hotfix shim (0.3.4). ValheimPlus re-applies ALL of its
+        // patches (UnpatchSelf + PatchAll) when its config source changes, which would put the two
+        // broken patches straight back. The PatchAll postfix in VPlusHotfix covers the routes we
+        // know about; this timer covers the ones we do not. Quiet unless it removed something, and
+        // it does nothing at all when the shim is not armed.
+        private float _vplusShimTimer;
+
+        private void PumpVPlusHotfixShim()
+        {
+            if (!VPlusHotfix.Armed) return;
+            _vplusShimTimer += Time.unscaledDeltaTime;
+            if (_vplusShimTimer < VPlusHotfix.RecheckSeconds) return;
+            _vplusShimTimer = 0f;
+            VPlusHotfix.Recheck();
         }
 
         private void PumpVoicePoll()
@@ -459,30 +492,28 @@ namespace EilifCompanion
                 }
             }
 
-            // Belt-and-suspenders: re-sync every connected client's key list. Cheap (a small
-            // string list per pass) and idempotent client-side (RPC_GlobalKeys clears + re-adds).
-            if (ConnectedPeerCount() > 0 && !_sendGlobalKeysMissing)
-            {
-                try
-                {
-                    if (_sendGlobalKeys == null)
-                    {
-                        _sendGlobalKeys = AccessTools.Method(typeof(ZoneSystem), "SendGlobalKeys");
-                        if (_sendGlobalKeys == null)
-                        {
-                            _sendGlobalKeysMissing = true;
-                            Log.LogWarning("[Eilif] ZoneSystem.SendGlobalKeys not found - client key re-sync disabled.");
-                            return;
-                        }
-                    }
-                    _sendGlobalKeys.Invoke(ZoneSystem.instance, new object[] { ZRoutedRpc.Everybody });
-                }
-                catch (Exception ex)
-                {
-                    _sendGlobalKeysMissing = true; // don't retry a broken reflection path every pass
-                    Log.LogWarning($"[Eilif] client key re-sync failed (disabled): {ex.Message}");
-                }
-            }
+            // REMOVED IN 0.3.4 — the unconditional 30s re-broadcast of the global-key list.
+            //
+            // It used to call the private ZoneSystem.SendGlobalKeys(0L) on every pass where any
+            // peer was connected, "belt and suspenders". On the client that RPC lands in
+            // ZoneSystem.RPC_GlobalKeys -> the world-rate update -> Game.UpdateNoMap() ->
+            // Minimap.SetMapMode(Small), which SHUTS the large map. Every player therefore had
+            // their open map slammed closed every 30 seconds for as long as they were online
+            // (Mikael reported exactly this). Half a minute is short enough that reading the map
+            // at all became a fight.
+            //
+            // It bought nothing. Decompiled ZoneSystem (1.0.12, build 25253791) shows the
+            // enforcement path above already broadcasts on its own: SetGlobalKey(string) routes
+            // through the "SetGlobalKey" RPC, and the server's handler RPC_SetGlobalKey calls
+            // SendGlobalKeys(0L) itself the moment the key is actually added. A peer that joins
+            // later is served by ZoneSystem's own new-peer path, which calls SendGlobalKeys(peerID)
+            // for that one client. So every case this line claimed to cover is covered by vanilla,
+            // and what remained was a pure 30s map-closer.
+            //
+            // Deliberately removed OUTRIGHT rather than made conditional on "a key was enforced
+            // this tick": in that case vanilla has already broadcast, so a conditional send would
+            // be exactly as redundant and would still close the map on the rare tick it fired.
+            // The [EILIF_KEY] logging and the assert-if-missing enforcement above are untouched.
         }
 
         private static int ConnectedPeerCount()

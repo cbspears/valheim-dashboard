@@ -14,7 +14,7 @@ observational, one (WORLD KEYS, added in 0.3.0) that **does change the world's r
   `[WorldKeys] EnforcedGlobalKeys` into the running world. Ships defaulting to `deathkeepequip`
   (keep equipped gear on death). **This overrides the GTX panel** — see [World keys](#world-keys-v030).
 
-`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.3`.
+`BepInPlugin` GUID: `media.blockspace.eilif.companion` — name `Eilif Companion` — v`0.3.4`.
 
 ---
 
@@ -149,8 +149,20 @@ clients — this is log-only, tailed by the SFTP poller.
 Every `30s` the plugin walks `EnforcedGlobalKeys` and, for any key where
 `ZoneSystem.GetGlobalKeyExact(key)` is false, calls `ZoneSystem.SetGlobalKey(key)`. The changed
 key list is logged once per change as `[EILIF_KEY] runtime world keys (N): …`, and each assertion
-as `[EILIF_KEY] enforced world key: <key>`. Connected clients get their key list re-synced on the
-same pass (`ZoneSystem.SendGlobalKeys`, idempotent client-side).
+as `[EILIF_KEY] enforced world key: <key>`.
+
+> **Changed in 0.3.4 — the 30s re-broadcast is gone, and it was closing everybody's map.** Up to
+> 0.3.3 each pass also called the private `ZoneSystem.SendGlobalKeys(0L)` whenever any peer was
+> connected, as belt and braces. On the client that RPC lands in `RPC_GlobalKeys` → the world-rate
+> update → `Game.UpdateNoMap()` → `Minimap.SetMapMode(Small)`, which **shuts the large map**. Every
+> player therefore had their open map slammed closed every 30 seconds (Mikael's "the map keeps
+> closing"). It bought nothing: decompiled `ZoneSystem` (1.0.12, build 25253791) shows
+> `SetGlobalKey(string)` routing through the `SetGlobalKey` RPC whose server-side handler
+> `RPC_SetGlobalKey` already calls `SendGlobalKeys(0L)` the moment a key is actually added, and a
+> peer that joins later is served by ZoneSystem's own new-peer `SendGlobalKeys(peerID)`. Removed
+> outright rather than made conditional on "a key was enforced this tick", because on that tick
+> vanilla has already broadcast — a conditional send would be exactly as redundant and would still
+> close the map. Enforcement and `[EILIF_KEY]` logging are unchanged.
 
 **This exists because the panel's `-modifier deathpenalty` args do not grant keep-gear at the tier
 the server actually runs.** Decompile-verified against 0.221.12: the death-penalty tiers map to
@@ -208,6 +220,51 @@ enforcement as belt-and-braces on top of it, not as a replacement for it.
 | Key | Default | Notes |
 | --- | --- | --- |
 | `EnforcedGlobalKeys` | `deathkeepequip` | Comma-separated global keys re-asserted into the world whenever missing (checked every 30s). Value keys (`skillreductionrate 15`) work too. **Empty = feature off** — that is the switch for relaxing keep-gear, and it needs a restart. |
+
+### Section `[VPlusHotfixShim]` (v0.3.4)
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `Enabled` | `true` | Removes the two ValheimPlus Harmony patches that are broken on Valheim 1.0.12 and nothing else. Inert when ValheimPlus is not loaded. |
+
+Valheim's 1.0.10/1.0.12 hotfix (dedicated build 25253791) turned `PlayerProfile.s_bypassCheatChecks`
+from a **field** into a **property**. ValheimPlus 10.0.2 and 10.0.3 were compiled against the field
+and their IL still carries `ldsfld … PlayerProfile::s_bypassCheatChecks` in two places (confirmed by
+IL dump of both DLLs):
+
+| ValheimPlus class | Patch | Target |
+| --- | --- | --- |
+| `ValheimPlus.GameClasses.Smelter_Spawn_Patch` | Prefix | `Smelter.Spawn` |
+| `ValheimPlus.GameClasses.Fermenter_DelayedTap_Transpiler` | Transpiler (via its injected `DropItemToNearbyChest`) | `Fermenter.DelayedTap` |
+
+A field token that now resolves to a property is a `MissingFieldException` at JIT time, so smelters,
+kilns, furnaces, windmills, spinning wheels and fermenter taps stop producing while V+ is loaded.
+This section removes exactly those two patches. A patch is only ever removed when its patch method's
+**declaring type name** contains one of those two class names — that is the hard gate, so no other
+ValheimPlus patch and no other mod's patch can be caught by it. The Harmony owner id
+(`mod.valheim_plus`) is checked too, but only to log a warning if it does not match, so a renamed
+fork is still covered. The only V+ feature lost is auto-deposit into a nearby chest, which this
+server has disabled in `valheim_plus.cfg` anyway.
+
+**It re-runs, because V+ re-patches.** `ValheimPlusPlugin.ReapplyPatches` (= `UnpatchSelf()` then
+`PatchAll()`) fires on "Received config from the server" and "Config source changed", so a one-shot
+unpatch at startup would not hold. The shim installs a Harmony **postfix on
+`ValheimPlusPlugin.PatchAll`** (resolved by reflection, so the plugin still loads without V+) and
+re-strips there, with a 30 s timer as belt and braces. Our postfix survives V+'s `UnpatchSelf()`,
+which only removes patches owned by `mod.valheim_plus`. The plugin also declares
+`[BepInDependency("org.bepinex.plugins.valheim_plus", SoftDependency)]` so BepInEx runs V+'s Awake —
+and therefore its first `PatchAll` — before ours.
+
+Boot lines:
+
+```
+[Eilif] VPlusHotfixShim: Smelter.Spawn prefix removed (1), Fermenter.DelayedTap transpiler removed (1). ValheimPlus seen as BepInEx GUID org.bepinex.plugins.valheim_plus; re-checked on every ValheimPlus repatch and every 30s.
+[Eilif] VPlusHotfixShim: after - Smelter.Spawn prefixes 0 [], transpilers 0 []; Fermenter.DelayedTap prefixes 0 [], transpilers 0 [].
+[Eilif] VPlusHotfixShim: inert - ValheimPlus is not loaded, so there is nothing to undo.
+[Eilif] VPlusHotfixShim: ValheimPlus re-applied its patches; removed again (Smelter.Spawn prefix 1, Fermenter.DelayedTap transpiler 1).
+```
+
+The shim is **not** a patch-roster class, so `patch classes applied: 2/2` is unchanged.
 
 ### Section `[ServerFallback]` (v0.3.3)
 

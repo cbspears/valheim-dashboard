@@ -491,6 +491,64 @@ add, so the ZDO trails the real bar by a single physics tick. That is visible to
 reads `m_stamina` directly for the local one, and the local bar, every local gate and drowning are
 all on `m_stamina`.
 
+## ValheimPlus hotfix shim (1.7.2)
+
+**Different thing from `[VPlusFallback]` below.** The fallback is what runs *instead of*
+ValheimPlus. This shim runs *alongside* it, and its whole job is to delete two ValheimPlus patches
+that Valheim's 1.0.10/1.0.12 hotfix broke.
+
+**What broke.** Hotfix build `25253791` turned `PlayerProfile.s_bypassCheatChecks` from a public
+static **field** into a static **property**. ValheimPlus 10.0.2 and 10.0.3 were compiled against
+the field, so their IL still carries `ldsfld bool [assembly_valheim]PlayerProfile::s_bypassCheatChecks`
+in two places (confirmed by IL dump of both DLLs, 2026-09-11):
+
+| ValheimPlus class | Patch | Target | Where the `ldsfld` sits |
+| --- | --- | --- | --- |
+| `Smelter_Spawn_Patch` | Prefix | `Smelter.Spawn` | its compiler-generated local function `<Prefix>g__spawn\|0_0` |
+| `Fermenter_DelayedTap_Transpiler` | Transpiler | `Fermenter.DelayedTap` | its `DropItemToNearbyChest` helper, which the transpiler injects into the vanilla body |
+
+A field token that now resolves to a property is a `MissingFieldException` the moment Mono
+JIT-compiles the method holding it, so smelters, kilns, furnaces, windmills, spinning wheels and
+fermenter taps stop producing while ValheimPlus is loaded.
+
+**What the shim removes, and what it will not touch.** `[VPlusHotfixShim] Enabled` (default `true`)
+removes exactly those two patches. A patch is only ever removed when its patch method's **declaring
+type name** contains `Smelter_Spawn_Patch` or `Fermenter_DelayedTap_Transpiler` — that name test is
+the hard gate, so no other ValheimPlus patch on the same method, and no other mod's patch, can be
+caught by it. The Harmony owner id (`mod.valheim_plus`) is checked as well, but only to log a
+warning when it does not match: a renamed fork carries the same broken class names, and covering it
+matters more than insisting on the id. The only ValheimPlus feature that goes with the two patches
+is auto-deposit from a smelter or fermenter into a nearby chest, which the Eilif server has
+disabled in `valheim_plus.cfg` anyway.
+
+**Why it re-runs.** ValheimPlus does not patch once. `ValheimPlusPlugin.ReapplyPatches(reason)` —
+`UnpatchSelf()` then `PatchAll()` — fires on *"Received config from the server"*, i.e. **every time
+you join a server**, and on *"Config source changed"*, and again when the Configuration Manager
+window closes after an edit. A one-shot unpatch in `Awake` would therefore last until the loading
+screen ended. So the shim installs a Harmony **postfix on `ValheimPlusPlugin.PatchAll`** (resolved
+by reflection, so this file still compiles and loads with no ValheimPlus anywhere) and re-strips
+there, with a 30-second timer behind it for any repatch route nobody has found. Our postfix survives
+V+'s own `UnpatchSelf()`, which only removes patches owned by `mod.valheim_plus`. The plugin also
+declares `[BepInDependency("org.bepinex.plugins.valheim_plus", SoftDependency)]`, which is what makes
+BepInEx run ValheimPlus's `Awake` — and so its first `PatchAll` — before ours.
+
+**It does not move either health count.** The shim carries no `[HarmonyPatch]` attribute and is
+applied by hand (same convention as the tool-stamina hooks), so `Core patch classes: 8/8 applied`
+and `VPlusFallback patch classes: 17/17 applied` mean exactly what they meant in 1.7.1. Its own
+lines are:
+
+```
+[EilifPaths] VPlusHotfixShim: Smelter.Spawn prefix removed (1), Fermenter.DelayedTap transpiler removed (1). ...
+[EilifPaths] VPlusHotfixShim: after - Smelter.Spawn prefixes 0 [], transpilers 0 []; Fermenter.DelayedTap prefixes 0 [], transpilers 0 [].
+[EilifPaths] VPlusHotfixShim: inert - ValheimPlus is not loaded, so there is nothing to undo.
+[EilifPaths] VPlusHotfixShim: ValheimPlus re-applied its patches; removed again (...)
+```
+
+A `ValheimPlus is loaded but neither broken patch was found` **warning** means one of two very
+different things: ValheimPlus has shipped a fixed build (switch the section off), or its patch class
+names moved and the shim is no longer finding them (smelters are still dead). Check the V+ build
+before grading that line.
+
 ## ValheimPlus fallback (1.5.0)
 
 ValheimPlus has no 1.0 build. If it is absent from the pack on launch day the crew loses infinite
