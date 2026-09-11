@@ -543,11 +543,69 @@ export default async function PlayersPage() {
         </section>
       </div>
 
+      {/* ── Attendance Constellation ───────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="Activity"
+          subtitle="The last ten weeks. Every night the longhouse fires were lit, and by whom."
+          icon={<CalendarDays size={20} />}
+        />
+        <AttendanceCalendar sessions={attendanceSessions} />
+      </section>
+
+      {/* ── Leaderboards ───────────────────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="Leaderboards"
+          subtitle="Every number below is one viking's own, on this world, all time. The deeds, and the misdeeds, that will be sung of in the mead halls."
+          icon={<Swords size={20} />}
+        />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {boards.map((board) => (
+            <LeaderboardCard
+              key={board.key}
+              title={board.titleOverride ?? metricInfo(board.metric).label}
+              icon={board.icon}
+              accent={board.accent}
+              entries={board.entries}
+              emptyMessage={board.empty}
+              emptyTitle={board.emptyTitle}
+              subtitle={board.subtitle}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* ── How We Die ─────────────────────────────────────────── */}
+      <section>
+        <SectionHeader
+          title="How We Die"
+          subtitle="The last ten weeks. Every warrior meets Valhalla eventually, and these are the roads that take them there."
+          icon={<Skull size={20} />}
+        />
+        <div className="grid grid-cols-1 lg:grid-cols-2">
+          <HowWeDie deaths={deaths} />
+        </div>
+      </section>
+
+      {/* ── Players of the Day (history) ───────────────────────── */}
+      <section>
+        <SectionHeader
+          title="Players of the Day"
+          subtitle="The nightly crown. Every champion the saga has named, and who's worn it most."
+          icon={<Crown size={20} />}
+        />
+        <PotyArchive entries={potyArchive} />
+      </section>
+
       {/*
         ── Oaths sworn ───────────────────────────────────────────
         Was its own tab and its own page until 2026-09-06. It is the roster's
-        other half (who these people said they would be), so it sits directly
-        under the roster, and /oath is a 308 to this anchor. `scroll-mt-20`
+        other half (who these people said they would be). It sat directly under the
+        roster until 2026-09-10, when the wall grew past twenty signatures and
+        crowded the boards off the first screen (Charlie), so it now closes the
+        page; /oath is still a 308 to this anchor. `scroll-mt-20`
         clears the 64px sticky header a reader arriving on that redirect would
         otherwise land behind.
 
@@ -646,62 +704,6 @@ export default async function PlayersPage() {
             </CardBody>
           </Card>
         </div>
-      </section>
-
-      {/* ── Attendance Constellation ───────────────────────────── */}
-      <section>
-        <SectionHeader
-          title="Activity"
-          subtitle="The last ten weeks. Every night the longhouse fires were lit, and by whom."
-          icon={<CalendarDays size={20} />}
-        />
-        <AttendanceCalendar sessions={attendanceSessions} />
-      </section>
-
-      {/* ── Leaderboards ───────────────────────────────────────── */}
-      <section>
-        <SectionHeader
-          title="Leaderboards"
-          subtitle="Every number below is one viking's own, on this world, all time. The deeds, and the misdeeds, that will be sung of in the mead halls."
-          icon={<Swords size={20} />}
-        />
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {boards.map((board) => (
-            <LeaderboardCard
-              key={board.key}
-              title={board.titleOverride ?? metricInfo(board.metric).label}
-              icon={board.icon}
-              accent={board.accent}
-              entries={board.entries}
-              emptyMessage={board.empty}
-              emptyTitle={board.emptyTitle}
-              subtitle={board.subtitle}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* ── How We Die ─────────────────────────────────────────── */}
-      <section>
-        <SectionHeader
-          title="How We Die"
-          subtitle="The last ten weeks. Every warrior meets Valhalla eventually, and these are the roads that take them there."
-          icon={<Skull size={20} />}
-        />
-        <div className="grid grid-cols-1 lg:grid-cols-2">
-          <HowWeDie deaths={deaths} />
-        </div>
-      </section>
-
-      {/* ── Players of the Day (history) ───────────────────────── */}
-      <section>
-        <SectionHeader
-          title="Players of the Day"
-          subtitle="The nightly crown. Every champion the saga has named, and who's worn it most."
-          icon={<Crown size={20} />}
-        />
-        <PotyArchive entries={potyArchive} />
       </section>
     </div>
   );
