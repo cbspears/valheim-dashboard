@@ -68,7 +68,7 @@ const MACHEIM_ALL_URL = 'https://github.com/lofcgi/macheim/releases/latest';
 // Re-cut this zip out of the pack export whenever the pack code is re-minted, and
 // point this constant at the new file. The v14 zip stays on disk so no link 404s
 // while the v15 build is going out.
-const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v16.zip';
+const CONFIG_BUNDLE_URL = '/downloads/eilif-configs-pack-v17.zip';
 
 // The mods a Mac player installs one at a time, read out of config/mods.ts
 // so the page cannot fall behind the pack. See the CUTOVER ANCHOR note below.
