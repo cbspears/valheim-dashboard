@@ -122,7 +122,7 @@ const PACK_V16_PINS = [
   // Optional in the minter (`--unshamed 1.0.0`, absent unless asked), but a pack
   // that DOES ship it has to resolve it like any other pin, so it is checked here
   // whenever v15 is the candidate set. Client-only: nothing on the box runs it.
-  'Azumatt-Unshamed-1.0.0',
+  'Azumatt-Unshamed-1.0.2',
 ];
 
 const UA = 'eilif-launch-preflight/1.0';

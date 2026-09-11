@@ -189,25 +189,22 @@ export const ALL_MODS: Mod[] = [
     url: 'https://thunderstore.io/c/valheim/p/Eilif/EilifCompanionClient/',
   },
   {
-    // Added 2026-09-10 (Charlie). Client-only; nothing on the server runs it.
-    //
-    // WHY THE PACK PINS ITS CFG, and do not "tidy" this away: Unshamed's own
-    // defaults switch ON four settings that wipe the character's cheat flag -
-    // `Clear On Load`, `Clear On Save`, `Clear After Command` and `Clear Cheat
-    // Stat`. That is cheat-flag washing: it would let a viking who typed a dev
-    // command claim achievements anyway, and it edits the character file to do it.
-    // Eilif wants none of that, so `scripts/pack-templates/config/Azumatt.Unshamed.cfg.tmpl`
-    // pins all four **Off** and leaves only `Ignore Modded Flag` on, which is the
-    // single thing this mod is here for. The copy below promises exactly that, so
-    // if the cfg ever changes, this row has to change with it.
-    //
-    // Optional in the minter: `--unshamed 1.0.0`, absent from a render that does
-    // not ask for it (it was not in pack v11, so there is no baseline).
-    name: 'Unshamed',
+    // Back in the pack 2026-09-10 (Charlie). Pinned 1.0.2 since 2026-09-11: Azumatt's
+    // 1.0.0 washed the cheat flag by default (Clear On Load/Save/After Command/Cheat
+    // Stat) and looped the console's confirmcheats prompt; 1.0.1 removed the clearing
+    // for good and 1.0.2 moved the hook to Achievements.CanGetAchievements. The one
+    // behaviour to know: from 1.0.1 ALL four cheat terms (isModded, m_usedCheats,
+    // cheated items, cheated worlds) are ignored for achievements, so a flagged
+    // character earns them too. Nothing is cleared and nothing is hidden from a
+    // server; the flags stay on disk. r2modman had already installed 1.0.2 into
+    // profiles minted at 1.0.0 (observed 2026-09-10 21:28 in Charlie's own profile).
+    // The pack cfg (scripts/pack-templates/config/Azumatt.Unshamed.cfg.tmpl) is the
+    // 1.0.2 schema: Ignore Cheat Flags On, Show Popups Off, Retroactive Off.
+name: 'Unshamed',
     author: 'Azumatt',
     description:
-      'Valheim 1.0 switches Steam achievements off for anyone running mods, whatever the mods actually do. This turns them back on for a modded client, and only that. Real cheating still counts against you exactly as it does in plain Valheim: cheat commands, spawned items and cheated worlds all disqualify you, and the settings the modpack ships keep it that way. If you already earned achievements while they were blocked, type unshamed retro in the console to see the list and claim them. Ships in the modpack.',
-    version: '1.0.0',
+      'Valheim 1.0 switches Steam achievements off for anyone running mods, whatever the mods actually do. This turns them back on for a modded client, and only that. Cheat commands, spawned items and cheated worlds are still recorded by the game exactly as in plain Valheim, and nothing here hides or clears those marks; they simply no longer block achievements. If you already earned achievements while they were blocked, type unshamed retro in the console to see the list and claim them. Ships in the modpack.',
+    version: '1.0.2',
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Azumatt/Unshamed/',
