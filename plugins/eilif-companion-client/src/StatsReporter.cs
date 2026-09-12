@@ -37,11 +37,17 @@ namespace EilifCompanionClient
     ///     (reads the RawStats bucket <c>m_playerStats[0]</c> unless achievements
     ///     are enabled; the PlayerStats ctor pre-seeds every enum index 0..204, so
     ///     the dictionary read never throws for any member we touch).
-    ///   • <c>PlayerStatType</c> members used — Deaths, EnemyKills, Builds, Crafts,
-    ///     DistanceTraveled, DistanceWalk, DistanceRun, DistanceSail, DistanceAir —
-    ///     all present in the 1.0 enum. `Crafts` (not `CraftsOrUpgrades`) maps to
-    ///     `vh_Crafts` so a returning pre-1.0 baseline is differenced like against
-    ///     like (the .fch "vh_Crafts" counter was the Crafts total).
+    ///   • <c>PlayerStatType</c> members used — Builds, Crafts, ItemsPickedUp,
+    ///     DistanceTraveled, DistanceWalk, DistanceRun, DistanceSail, DistanceAir and
+    ///     (0.4.4) FishCaught, FishHooked, FishLost, FishCaughtTier0..FishCaughtTier6 —
+    ///     all present in the 1.0 enum (re-verified against the 1.0.12 hotfix assembly).
+    ///     `Crafts` (not `CraftsOrUpgrades`) maps to `vh_Crafts` so a returning pre-1.0
+    ///     baseline is differenced like against like (the .fch "vh_Crafts" counter was
+    ///     the Crafts total). Every read goes through <c>TryReadStat</c>, whose catch is
+    ///     what makes a member this build knows but a future game build drops a SKIPPED
+    ///     key rather than an exception: the profile's stat store is a
+    ///     <c>Dictionary&lt;PlayerStatType, float&gt;</c>, so a value it has no entry for
+    ///     throws <c>KeyNotFoundException</c> on read and the key is simply omitted.
     ///
     /// ⚠️ NO System.ValueTuple ANYWHERE (target net462; the BepInEx/Unity Mono
     /// runtime ships no ValueTuple reference and a tuple on a load path fails the
@@ -82,6 +88,25 @@ namespace EilifCompanionClient
             // 0.4.3: every item picked up, the profile's own lifetime counter. GsValheimStatsClient
             // sends no pickups[] list on Valheim 1.0, so this is what feeds the Resources board.
             new StatKey("vh_ItemsPickedUp", PlayerStatType.ItemsPickedUp),
+            // 0.4.4: fishing. FishingFloat increments these three through
+            // Game.instance.IncrementPlayerStat (FishHooked when a fish takes the hook,
+            // FishLost when the line snaps or the catch escapes, FishCaught when one is
+            // landed), so they are the game's own record of a viking's fishing career.
+            new StatKey("vh_FishCaught", PlayerStatType.FishCaught),
+            new StatKey("vh_FishHooked", PlayerStatType.FishHooked),
+            new StatKey("vh_FishLost", PlayerStatType.FishLost),
+            // ...and the per-quality breakdown of what was landed. FishingFloat.Catch does
+            // IncrementPlayerStat((PlayerStatType)(161 + m_itemData.m_quality)), i.e. tier N
+            // is the fish's quality level, so Tier0..Tier6 sum to at most FishCaught. Sent
+            // separately so the dashboard can rank a raw haul against a trophy haul; a tier
+            // the game never touches simply stays 0 (a real zero, not an omitted key).
+            new StatKey("vh_FishCaughtTier0", PlayerStatType.FishCaughtTier0),
+            new StatKey("vh_FishCaughtTier1", PlayerStatType.FishCaughtTier1),
+            new StatKey("vh_FishCaughtTier2", PlayerStatType.FishCaughtTier2),
+            new StatKey("vh_FishCaughtTier3", PlayerStatType.FishCaughtTier3),
+            new StatKey("vh_FishCaughtTier4", PlayerStatType.FishCaughtTier4),
+            new StatKey("vh_FishCaughtTier5", PlayerStatType.FishCaughtTier5),
+            new StatKey("vh_FishCaughtTier6", PlayerStatType.FishCaughtTier6),
         };
 
         /// <summary>

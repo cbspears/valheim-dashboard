@@ -40,7 +40,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.4.3"; // Keep this in lockstep with the csproj <Version>. (0.3.4 shipped with this const still reading "0.3.3", so its BepInEx load line said 0.3.3 while the manifest/assembly were 0.3.4 — do not repeat that drift.)
+        public const string PluginVersion = "0.4.4"; // Keep this in lockstep with the csproj <Version>. (0.3.4 shipped with this const still reading "0.3.3", so its BepInEx load line said 0.3.3 while the manifest/assembly were 0.3.4 — do not repeat that drift.)
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
@@ -178,7 +178,7 @@ namespace EilifCompanionClient
 
             Log.LogInfo($"[EilifMap] {PluginName} v{PluginVersion} loaded. Posting explored-map % to {_url.Value} every {_intervalSeconds.Value}s while on a server.");
             Log.LogInfo($"[EilifDeath] death-cause reporter armed (posts source:'eilif-death' to {_url.Value} when the local player dies on a server).");
-            Log.LogInfo($"[EilifStats] raw profile-stats reporter {(_statsEnabled.Value ? "armed" : "DISABLED")} (posts source:'client' kills/deaths/builds/crafts/distance to {_url.Value} every {_intervalSeconds.Value}s and on logout while on a server).");
+            Log.LogInfo($"[EilifStats] raw profile-stats reporter {(_statsEnabled.Value ? "armed" : "DISABLED")} (posts source:'client' builds/crafts/distance/pickups/fish to {_url.Value} every {_intervalSeconds.Value}s and on logout while on a server).");
         }
 
         // ---- The patch roster (v0.3.3, audit plugins-1.0) --------------------------------------
