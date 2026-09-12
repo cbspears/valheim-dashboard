@@ -47,6 +47,41 @@ const RAID_MESSAGES = {
 // forged".
 const EILIF_PREFIX = String.raw`^\[\w+\s*:\s*Eilif Companion\]\s*`;
 
+// --- The log line's own clock (2026-09-12 replay fix) ----------------------
+// Unity stamps every console line the game writes with the SERVER BOX's local
+// date and time, immediately after the BepInEx source tag:
+//
+//   [Info   : Unity Log] 09/12/2026 08:42:02: Got connection SteamID 7656…
+//
+// READ THIS BEFORE USING THE RETURN VALUE. The box is a GTX Windows host whose
+// timezone this process does not know and cannot ask for; the stamp carries no
+// offset and no zone name. So the number below is deliberately computed as if
+// the wall-clock reading were UTC: it is a point in an ARBITRARY BUT CONSISTENT
+// frame, and ONLY DIFFERENCES BETWEEN TWO OF THEM ARE MEANINGFUL. Never hand
+// one to `new Date()` and call it an event time — anchor it against a line
+// known to be fresh first (see Poller.anchorBatchTimes). The one thing that
+// distorts a difference is a DST step in the box's local clock, which shifts
+// lines on opposite sides of it by an hour; an hour of skew on a four-hour
+// replay is a far smaller error than filing all four hours under "now".
+const LOG_LINE_TIME_RE = /\b(\d{2})\/(\d{2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2}):/;
+
+/**
+ * The line's own timestamp as milliseconds in the arbitrary frame described
+ * above, or null when the line carries no (valid) stamp. Exported for tests and
+ * for the poller's batch anchoring.
+ */
+export function parseLogLineTime(line) {
+  const m = LOG_LINE_TIME_RE.exec(String(line ?? ''));
+  if (!m) return null;
+  const [, mm, dd, yyyy, hh, mi, ss] = m.map(Number);
+  // Reject impossible readings rather than letting Date.UTC roll them over into
+  // a plausible-looking instant (month 13 would silently become January).
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  if (hh > 23 || mi > 59 || ss > 60) return null;
+  const ms = Date.UTC(yyyy, mm - 1, dd, hh, mi, ss);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 // Valheim shouts this automatically whenever a character spawns — it is not
 // player speech, and mirroring it doubled every join in #server.
 const ARRIVAL_SHOUT_RE = /^\s*i\s+have\s+arrived\s*!*\s*$/i;
@@ -279,7 +314,12 @@ export class LogParser {
    */
   processLine(line) {
     const events = this.parseLine(line);
+    // The producing line's own clock reading, in the arbitrary frame
+    // parseLogLineTime documents. The poller anchors it against the newest line
+    // in the same batch to recover a real instant; nothing else may use it.
+    const logTimeMs = parseLogLineTime(line);
     for (const ev of events) {
+      if (logTimeMs !== null && ev.logTimeMs === undefined) ev.logTimeMs = logTimeMs;
       if (ev.characterName && ev.steamId === undefined) {
         const steamId = this.steamIdFor(ev.characterName);
         if (steamId) ev.steamId = steamId;

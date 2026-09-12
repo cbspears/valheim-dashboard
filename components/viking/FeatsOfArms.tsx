@@ -54,7 +54,14 @@ export function FeatsOfArms({
 
   const fishingLevel = (gs.skills ?? []).find((sk) => sk.skill === 'Fishing')?.level ?? 0;
   const catches = gs.fish ?? [];
-  const totalCatches = catches.reduce((sum, c) => sum + c.count, 0);
+  // The greater of the per-species breakdown and the profile's own catch total
+  // (see `totalCatches` on /players for why both exist and why max is right).
+  // On Valheim 1.0 only the profile counter is ever populated, so the log below
+  // shows every species at 0 while this line still reports the real tally.
+  const totalCatches = Math.max(
+    catches.reduce((sum, c) => sum + c.count, 0),
+    gs.fishCaught ?? 0,
+  );
 
   const records: Rec[] = [
     {

@@ -135,10 +135,22 @@ function fishingLevel(p: PlayerWithStats): number {
   return skills.find((sk) => sk.skill === 'Fishing')?.level ?? 0;
 }
 
-/** Total catches (sum of `gs_stats.fish[].count`), 0 if absent. */
+/**
+ * Total catches, 0 if absent — the GREATER of the two readings that exist.
+ *
+ * `gs_stats.fish[]` is the per-species breakdown GsValheimStatsClient derives
+ * from pickups[]; on Valheim 1.0 it reports `fish: []` for EVERY viking, which
+ * is why this board's tie-break has been a row of zeros since launch.
+ * `gs_stats.fishCaught` is the profile's own catch total, posted by
+ * EilifCompanionClient ≥0.4.4 and baselined like every other counter. Neither
+ * can be trusted to be the whole story on its own — the species list can be
+ * short of the total, the total carries no species detail — so take the max and
+ * neither source is lost if the other comes back.
+ */
 function totalCatches(p: PlayerWithStats): number {
   const fish = p.stats?.gs_stats?.fish ?? [];
-  return fish.reduce((sum, f) => sum + f.count, 0);
+  const bySpecies = fish.reduce((sum, f) => sum + f.count, 0);
+  return Math.max(bySpecies, p.stats?.gs_stats?.fishCaught ?? 0);
 }
 
 /**

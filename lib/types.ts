@@ -66,6 +66,20 @@ export interface GsClientStats {
   materials: { material: string; amount: number }[];
   /** Per-species catch counts (pickups filtered to config/fish.ts ids), sorted desc. */
   fish: { item: string; count: number }[];
+  /**
+   * TOTAL fish landed on this world, from the profile's own `vh_FishCaught`
+   * counter (EilifCompanionClient ≥0.4.4), baselined and differenced like every
+   * other counter. Optional so blobs written before this landed still type.
+   *
+   * WHY IT EXISTS ALONGSIDE `fish[]`. GsValheimStatsClient 0.2.12 reports
+   * `fish: []` for everyone on Valheim 1.0, so the per-species breakdown — and
+   * with it the Anglers board's catch tie-break — has been empty since launch.
+   * This is a total with no species detail; `fish[]` is species detail that may
+   * be short of the total. Readers take the GREATER of the two (see
+   * `totalCatches` on /players and components/viking/FeatsOfArms), so whichever
+   * source is richer wins and neither is lost if the other returns.
+   */
+  fishCaught?: number;
   records: {
     topWeapon: string | null;
     topWeaponDamage: number;

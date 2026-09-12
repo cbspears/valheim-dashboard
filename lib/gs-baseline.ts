@@ -152,7 +152,14 @@ export const BASELINE_GROUPS: readonly BaselineGroup[] = [
   // own `events` death rows meanwhile (GREATEST, so it can only raise it).
   g('counters', 'deaths', (p) => p.hasDeaths),
   g('counters', 'bossKills', (p) => p.hasBossKills),
-  g('counters', 'resourcesHarvested', (p) => p.hasPickups || p.hasPickupCount),
+  g('counters', 'resourcesHarvested', (p) => p.pickupsSource !== 'none'),
+  // fishCaught: the profile's lifetime catch total (EilifCompanionClient
+  // ≥0.4.4). Its own group, deliberately NOT folded into counterMaps.fish: the
+  // fish MAP is gated on pickups[] (GsValheimStatsClient), and a payload that
+  // carries one never carries the other. Sharing a gate would either hole the
+  // total whenever the profile poster is the only one reporting (i.e. always, on
+  // 1.0) or credit a lifetime total against a species-map zero-point.
+  g('counters', 'fishCaught', (p) => p.hasFishCaught),
   g('counters', 'itemsCrafted', (p) => p.craftsSource !== 'none'),
   g('counters', 'structuresBuilt', (p) => p.hasBuilds),
   g('counters', 'damageDealt', (p) => p.hasWeapons),
@@ -248,6 +255,21 @@ export interface GsBaseline {
    */
   craftsSource?: 'vh_Crafts' | 'crafts';
   /**
+   * Which parse source `counters.resourcesHarvested` was read from — the
+   * world-scoped `pickups[]` sum (GsValheimStatsClient) or the profile's
+   * LIFETIME `vh_ItemsPickedUp` counter (EilifCompanionClient). Same contract as
+   * killsSource, and the same remedy on a change: the zero-point is RE-TAKEN
+   * from the snapshot that changed it (credits 0 that cycle, full growth after)
+   * rather than frozen. Freezing is wrong here because the two posters alternate
+   * — a frozen counter would simply never move again — while a re-take can only
+   * ever cost one cycle, and crediting across the change would hand a viking
+   * every item they have picked up on every world they have ever played.
+   *
+   * Absent = a zero-point captured before this field existed. Stamped, not
+   * re-taken, on the next snapshot.
+   */
+  pickupsSource?: 'pickups' | 'vh_ItemsPickedUp';
+  /**
    * Which parse source `counters.kills` was read from at capture — the client's
    * own kills counter, or the summed weapons[] breakdown (the VALHEIM 1.0
    * STOPGAP in lib/gs-client.ts). Same "like against like" contract as
@@ -321,6 +343,8 @@ export interface EffectiveStats {
   structuresBuilt: number;
   damageDealt: number;
   distanceTraveled: number;
+  /** Fish landed HERE, from the profile's lifetime `vh_FishCaught` counter. */
+  fishCaught: number;
   longestLifeSec: number;
   bestKillsBeforeDeath: number;
   /** Effective long-tail blob, capped exactly like the parser caps the raw one. */
@@ -478,12 +502,73 @@ export interface CaptureQualification {
  * or weapons[] sum, lib/gs-client): 'none' means the payload carried neither,
  * which is not a report we can account for at all.
  */
-export function captureQualification(s: ParsedSelf): CaptureQualification {
+export function captureQualification(s: ParsedSelf, dist: ParsedDistances | null = null): CaptureQualification {
   const p = s.provenance;
   const missing: string[] = [];
   if (!p.ownEntry) missing.push(`players[] entry for "${s.reporter}" (only a bystander entry was present)`);
-  if (p.killsSource === 'none') missing.push('kills (no kills counter and no weapons[] to derive one from)');
+  if (p.killsSource === 'none' && !profileOnlyQualifies(s, dist)) {
+    missing.push('kills (no kills counter and no weapons[] to derive one from)');
+  }
   return { ok: missing.length === 0, missing };
+}
+
+/**
+ * ── THE PROFILE-ONLY EXCEPTION (EilifCompanionClient ≥0.4.x, 2026-09-12) ─────
+ *
+ * THE BUG. The Companion Client posts `source:'client'` carrying ONLY a `stats`
+ * map — vh_Builds, vh_Crafts, vh_Distance*, vh_ItemsPickedUp, vh_FishCaught —
+ * and none of the GsValheimStatsClient breakdown lists. lib/gs-client
+ * deliberately makes the two posters disjoint (see its PROFILE-ONLY POST
+ * block): such an entry's kills/deaths/crafts-from-crafts[] are treated as
+ * absent so the two can't fight over a zero-point. That left it with
+ * `killsSource: 'none'` — and the gate above refused EVERY such post, on a fresh
+ * row and on an existing baseline alike. Result: builds, crafts, distance,
+ * pickups and catches were deferred forever, writing nothing at all, which is
+ * rule 6 ("a viking is NEVER muted") failing in exactly the way rule 6 was
+ * written to stop.
+ *
+ * THE RULE. A profile-only post from the reporter's OWN entry that carries at
+ * least one profile counter we can account for QUALIFIES. It is not a broken
+ * report — it is a complete report of a smaller thing, and the hole machinery
+ * already exists to say so: kills, deaths, bossKills, damage, weapons,
+ * creatures, boss damage, materials, fish species and skills all become HOLES
+ * (they credit nothing until a GsValheimStatsClient post first carries them),
+ * while builds / crafts / distances / pickups / catches capture their zero-point
+ * and are differenced from here on.
+ *
+ * WHY IT IS NOT JUST "killsSource === 'none' qualifies". A GsValheimStatsClient
+ * post with no kills counter AND no weapons[] is a different animal: it should
+ * have carried a combat reading and didn't, so we cannot account for the report
+ * at all and deferring is right. `provenance.profileOnly` is what tells the two
+ * apart — it is set only when the payload carries a stats map and NOT ONE of the
+ * breakdown lists.
+ *
+ * The bystander deferral is untouched: no own entry is still no career.
+ */
+function profileOnlyQualifies(s: ParsedSelf, dist: ParsedDistances | null): boolean {
+  const p = s.provenance;
+  if (!p.ownEntry || !p.profileOnly || !p.hasStats || p.killsSource !== 'none') return false;
+  // At least one profile counter worth accounting for. A `stats` map with none
+  // of these is an empty report and stays deferred.
+  return (
+    p.hasBuilds ||
+    p.craftsSource === 'vh_Crafts' ||
+    p.pickupsSource === 'vh_ItemsPickedUp' ||
+    p.hasFishCaught ||
+    dist !== null
+  );
+}
+
+/** The groups a profile-only post actually spoke for, for the ingest log line. */
+export function profileOnlyCaptured(s: ParsedSelf, dist: ParsedDistances | null): string[] {
+  const p = s.provenance;
+  const out: string[] = [];
+  if (p.hasBuilds) out.push(`builds ${s.structuresBuilt}`);
+  if (p.craftsSource === 'vh_Crafts') out.push(`crafts ${s.itemsCrafted}`);
+  if (p.pickupsSource === 'vh_ItemsPickedUp') out.push(`pickups ${s.resourcesHarvested}`);
+  if (p.hasFishCaught) out.push(`catches ${s.fishCaught}`);
+  if (dist) out.push(`distance ${Math.round(dist.distanceTraveled)}m`);
+  return out;
 }
 
 // ── capture ──────────────────────────────────────────────────────────────────
@@ -511,6 +596,9 @@ export function captureBaseline(s: ParsedSelf, dist: ParsedDistances | null, at:
     // (rule 4). 'none' means neither was carried — itemsCrafted is a hole, and
     // craftsSource is then meaningless, so it is dropped below with the group.
     craftsSource: s.provenance.craftsSource === 'crafts' ? 'crafts' : 'vh_Crafts',
+    // Which side of the pickups[] / vh_ItemsPickedUp fork this zero-point was
+    // read from (rule 4). 'none' is dropped below with the group.
+    pickupsSource: s.provenance.pickupsSource === 'vh_ItemsPickedUp' ? 'vh_ItemsPickedUp' : 'pickups',
     // Which side of the client-counter / weapons-sum fork this zero-point was
     // read from (VALHEIM 1.0 STOPGAP). 'none' is dropped below with the group.
     killsSource: s.provenance.killsSource === 'weapons' ? 'weapons' : 'client',
@@ -523,6 +611,7 @@ export function captureBaseline(s: ParsedSelf, dist: ParsedDistances | null, at:
       structuresBuilt: num(s.structuresBuilt),
       damageDealt: num(s.damageDealt),
       distanceTraveled: num(dist?.distanceTraveled),
+      fishCaught: num(s.fishCaught),
     },
     counterMaps: {
       weaponDamage: toMap(gs.weapons, (w) => w.weapon, (w) => w.damageDealt),
@@ -560,6 +649,7 @@ export function captureBaseline(s: ParsedSelf, dist: ParsedDistances | null, at:
   }
   if (holes.length > 0) full.holes = holes;
   if (s.provenance.craftsSource === 'none') delete full.craftsSource;
+  if (s.provenance.pickupsSource === 'none') delete full.pickupsSource;
   if (s.provenance.killsSource === 'none') delete full.killsSource;
   return full;
 }
@@ -629,6 +719,7 @@ export function readBaseline(raw: unknown, fallbackAt: string = new Date().toISO
     recordMaps: readMapSection('recordMaps', o.recordMaps),
   };
   if (o.craftsSource === 'vh_Crafts' || o.craftsSource === 'crafts') baseline.craftsSource = o.craftsSource;
+  if (o.pickupsSource === 'pickups' || o.pickupsSource === 'vh_ItemsPickedUp') baseline.pickupsSource = o.pickupsSource;
   if (o.killsSource === 'client' || o.killsSource === 'weapons') baseline.killsSource = o.killsSource;
 
   // Holes: only recognized group paths survive, so a hand-edited or future
@@ -775,6 +866,11 @@ function reconcileBaseline(base: GsBaseline, fresh: GsBaseline, carried: (path: 
       if (fresh.craftsSource) next.craftsSource = fresh.craftsSource;
       else delete next.craftsSource;
     }
+    // Same for resourcesHarvested: a fill brings the source across too.
+    if (grp.path === 'counters.resourcesHarvested') {
+      if (fresh.pickupsSource) next.pickupsSource = fresh.pickupsSource;
+      else delete next.pickupsSource;
+    }
     // Same for kills: a fill brings the source across with the number.
     if (grp.path === 'counters.kills') {
       if (fresh.killsSource) next.killsSource = fresh.killsSource;
@@ -783,6 +879,7 @@ function reconcileBaseline(base: GsBaseline, fresh: GsBaseline, carried: (path: 
   };
   const punch = (grp: BaselineGroup) => {
     if (grp.path === 'counters.kills') delete next.killsSource;
+    if (grp.path === 'counters.resourcesHarvested') delete next.pickupsSource;
     delete sectionOf(grp.section)[grp.key];
     if (!holes.has(grp.path)) holed.push(grp.path);
     holes.add(grp.path);
@@ -954,9 +1051,58 @@ export interface RebaselineCheck {
  * below half of the baselined signature, and the baseline must be large enough
  * for that ratio to mean something.
  */
-export function shouldRebaseline(s: ParsedSelf, base: GsBaseline): RebaselineCheck {
-  const rawSignature = rawCareerSignature(s);
-  const baseSignature = signature(base.counters);
+export function shouldRebaseline(
+  s: ParsedSelf,
+  base: GsBaseline,
+  carried: (path: string) => boolean = () => true,
+): RebaselineCheck {
+  // ── COMPARE LIKE WITH LIKE, OR NOT AT ALL (2026-09-12) ────────────────────
+  //
+  // THE INCIDENT THIS PREVENTS. Two posters now share `source:'client'` for one
+  // viking: the profile post carries builds / crafts / pickups (at LIFETIME
+  // scale) and no kills; the GsValheimStatsClient post carries kills and none of
+  // those. Summed blind, the zero-point ends up holding 1,200 builds + 800
+  // crafts + 9,000 pickups from the profile post, and then EVERY GS post looks
+  // like a career that collapsed from 11,053 to 55 — `reset-pending` on every
+  // second post, crediting nothing, and a full RE-BASELINE after three of them.
+  // The character had not changed at all; the two posts simply speak about
+  // different things.
+  //
+  // So the signature is taken over the counters BOTH sides can speak for: the
+  // snapshot carries the group, the zero-point has a real reading for it (not a
+  // hole, not absent), and the parse source matches where a counter has one.
+  // Everything else is excluded from both sums. When nothing survives the filter
+  // there is no test to run, and no test is the safe answer — a wipe still shows
+  // up on the very next post that does carry the collapsed counters.
+  const holes = new Set(base.holes ?? []);
+  const sourceOk: Record<string, boolean> = {
+    itemsCrafted: craftsComparable(s, base),
+    resourcesHarvested: pickupsComparable(s, base),
+  };
+  const keys = SIGNATURE_KEYS.filter(
+    (k) =>
+      carried(`counters.${k}`) &&
+      !holes.has(`counters.${k}`) &&
+      typeof base.counters[k] === 'number' &&
+      (sourceOk[k] ?? true),
+  );
+  const pick = (c: Record<string, number>): number => keys.reduce((t, k) => t + num(c[k]), 0);
+  const rawSignature = pick({
+    kills: s.kills,
+    deaths: s.deaths,
+    itemsCrafted: s.itemsCrafted,
+    structuresBuilt: s.structuresBuilt,
+    resourcesHarvested: s.resourcesHarvested,
+  });
+  const baseSignature = pick(base.counters);
+  if (keys.length === 0) {
+    return {
+      reset: false,
+      rawSignature,
+      baseSignature,
+      reason: 'this snapshot and the zero-point share no comparable career counter',
+    };
+  }
   if (baseSignature < REBASELINE_MIN_SIGNATURE) {
     return { reset: false, rawSignature, baseSignature, reason: 'baseline too small to test proportionally' };
   }
@@ -990,6 +1136,7 @@ function zeroEffective(s: ParsedSelf): EffectiveStats {
     structuresBuilt: 0,
     damageDealt: 0,
     distanceTraveled: 0,
+    fishCaught: 0,
     longestLifeSec: 0,
     bestKillsBeforeDeath: 0,
     gsStats: capGsStats({
@@ -1033,7 +1180,7 @@ export function applyBaseline(
   stored: unknown,
   at: string = new Date().toISOString(),
 ): BaselineResult {
-  const qual = captureQualification(s);
+  const qual = captureQualification(s, dist);
   const existing = readBaseline(stored, at);
 
   // ── 0. Not a snapshot we trust: credit nothing, persist nothing ────────────
@@ -1082,7 +1229,7 @@ export function applyBaseline(
         ? 'first client snapshot for this character — zero-point captured, this post credits nothing'
         : 'stored baseline was unreadable — re-captured from this snapshot (credits nothing)') + holesNote;
   } else {
-    const reset = shouldRebaseline(s, existing);
+    const reset = shouldRebaseline(s, existing, carried);
     if (reset.reset) {
       // ── 2. collapsed career: believed only at N consecutive ────────────────
       const streak = (existing.pendingReset?.count ?? 0) + 1;
@@ -1190,6 +1337,37 @@ function craftsComparable(s: ParsedSelf, base: GsBaseline): boolean {
     `[gs-baseline] crafts source changed for "${s.reporter}": zero-point was taken from ` +
       `${base.craftsSource}, this snapshot parses ${s.provenance.craftsSource}. The two are not ` +
       `comparable, so itemsCrafted credits 0 this cycle rather than a fabricated delta.`,
+  );
+  return false;
+}
+
+/**
+ * The same question for `resourcesHarvested`, and it became a live hazard the
+ * day the profile-only post started qualifying (captureQualification).
+ *
+ * `sum(pickups[].count)` is world-scoped and comes from GsValheimStatsClient;
+ * `vh_ItemsPickedUp` is the .fch profile's LIFETIME total and comes from the
+ * EilifCompanionClient profile post. Two posters, five minutes apart, same
+ * `source:'client'`. Difference the lifetime 9,000 against a world-scoped
+ * zero-point of 50 and the viking is credited with every item they have ever
+ * picked up, on every world they have ever played — the Chærlie incident again.
+ *
+ * FROZEN, not re-taken (unlike kills). A re-take on every source change would
+ * fire twice a cycle forever, since both posters keep posting, writing a new
+ * zero-point and a BASELINE REPAIRED line every few minutes. Freezing costs the
+ * non-matching source its contribution and nothing else: the source that WAS
+ * baselined keeps crediting normally, so the counter still grows. A zero-point
+ * with no recorded source predates this field and is treated as comparable,
+ * exactly as craftsSource does, rather than freezing every existing row.
+ */
+function pickupsComparable(s: ParsedSelf, base: GsBaseline): boolean {
+  if (s.provenance.pickupsSource === 'none') return false;
+  if (!base.pickupsSource) return true;
+  if (base.pickupsSource === s.provenance.pickupsSource) return true;
+  console.warn(
+    `[gs-baseline] pickups source changed for "${s.reporter}": zero-point was taken from ` +
+      `${base.pickupsSource}, this snapshot parses ${s.provenance.pickupsSource}. The two are not ` +
+      `comparable, so resourcesHarvested credits 0 this cycle rather than a fabricated delta.`,
   );
   return false;
 }
@@ -1386,7 +1564,11 @@ function computeEffective(s: ParsedSelf, dist: ParsedDistances | null, base: GsB
     kills: counter('kills', s.kills),
     deaths: counter('deaths', s.deaths),
     bossKills: counter('bossKills', s.bossKills),
-    resourcesHarvested: counter('resourcesHarvested', s.resourcesHarvested),
+    // Like against like (rule 4), same as crafts: the world-scoped pickups[] sum
+    // and the lifetime vh_ItemsPickedUp counter are different quantities and
+    // arrive from different posters, so neither is ever differenced against the
+    // other's zero-point.
+    resourcesHarvested: pickupsComparable(s, base) ? counter('resourcesHarvested', s.resourcesHarvested) : 0,
     // Like against like (rule 4): only difference itemsCrafted when this
     // snapshot was parsed from the same source the zero-point was.
     itemsCrafted: craftsComparable(s, base) ? counter('itemsCrafted', s.itemsCrafted) : 0,
@@ -1396,6 +1578,7 @@ function computeEffective(s: ParsedSelf, dist: ParsedDistances | null, base: GsB
     // raw parse — a payload gated in by e.g. vh_DistanceWalk alone must not later
     // credit a lifetime vh_DistanceTraveled against a synthesized-zero baseline.
     distanceTraveled: distances ? distances.total : 0,
+    fishCaught: counter('fishCaught', s.fishCaught),
     longestLifeSec: record('longestLifeSec', s.longestLifeSec),
     bestKillsBeforeDeath: record('bestKillsBeforeDeath', s.bestKillsBeforeDeath),
     gsStats: capGsStats(effectiveGs),
@@ -1593,6 +1776,10 @@ export function mergeGsStats(prevGsStats: unknown, effective: EffectiveStats): R
     merged.distances = maxByKey(effective.distances, prev?.distances);
     merged.distancesRaw = maxByKey(effective.distancesRaw ?? {}, prev?.distancesRaw);
   }
+  // Total catches: GREATEST like every other counter, so a post that carried no
+  // vh_FishCaught leaves the stored total alone rather than blanking it.
+  const fishCaught = Math.max(num(effective.fishCaught), num(prev?.fishCaught));
+  if (fishCaught > 0) merged.fishCaught = fishCaught;
   return merged;
 }
 

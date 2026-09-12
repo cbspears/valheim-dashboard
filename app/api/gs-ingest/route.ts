@@ -11,6 +11,7 @@ import {
 } from '@/lib/gs-client';
 import {
   applyBaseline,
+  profileOnlyCaptured,
   reconstructRawWeapons,
   mergeIntoRow,
   needsBaselineMigration,
@@ -570,6 +571,25 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
     console.info(`[gs-ingest] reset streak cleared for "${s.reporter}" — ${reason}.`);
   } else if (change === 'repair') {
     console.warn(`[gs-ingest] BASELINE REPAIRED for "${s.reporter}" — ${reason}. Those fields credit nothing this cycle.`);
+  }
+
+  // ── PROFILE-ONLY POST (EilifCompanionClient) ───────────────────────────────
+  // These used to be deferred outright (lib/gs-baseline profileOnlyQualifies),
+  // so the only trace of one in the log was a DEFERRED line naming "kills" —
+  // which said nothing about the builds/crafts/distance/pickups/catches the post
+  // actually carried, and made a real bug look like a flaky payload. Say plainly
+  // what this post spoke for and what it left to the GsValheimStatsClient post.
+  if (s.provenance.profileOnly) {
+    const carried = profileOnlyCaptured(s, dist);
+    console.info(
+      `[gs-ingest] PROFILE POST from "${s.reporter}" (EilifCompanionClient) — raw ` +
+        `${carried.length > 0 ? carried.join(', ') : 'nothing accountable'}; credited builds ` +
+        `${effective.structuresBuilt}, crafts ${effective.itemsCrafted}, pickups ` +
+        `${effective.resourcesHarvested}, catches ${effective.fishCaught}, distance ` +
+        `${Math.round(effective.distanceTraveled)}m. Kills, deaths, weapons, creatures, boss damage, ` +
+        `materials, fish species and skills are HOLES on this post — the GsValheimStatsClient post ` +
+        `carries those.`,
+    );
   }
 
   // Build the row: GREATEST on every column, per-key GREATEST inside gs_stats,

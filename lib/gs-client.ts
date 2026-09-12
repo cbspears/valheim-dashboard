@@ -119,6 +119,22 @@ export interface SelfProvenance {
   ownEntry: boolean;
   /** `stats` (the raw .fch profile counter map) was present as an object. */
   hasStats: boolean;
+  /**
+   * This is a PROFILE-ONLY post: a `stats` map and NOT ONE of the
+   * GsValheimStatsClient breakdown lists (weapons/crafts/pickups/skills/
+   * materials/boss/creatureKills). Since pack v14 two posters share
+   * `source:'client'` for the same viking (see the PROFILE-ONLY POST block in
+   * parseSelfSnapshot) and they are deliberately made DISJOINT: this one speaks
+   * only for builds / crafts / distances / pickup count / fish caught, and its
+   * kills, deaths and combat breakdowns are holes.
+   *
+   * The baseline capture gate reads this flag directly rather than re-deriving
+   * it from the other flags, because "no kills reading" means two very different
+   * things: a profile post that was never going to carry one (capture what it
+   * has, hole the rest) versus a GsValheimStatsClient post that should have and
+   * didn't (defer — we cannot account for that report at all).
+   */
+  profileOnly: boolean;
   /** kills / deaths present as real numbers on the entry. */
   hasKills: boolean;
   hasDeaths: boolean;
@@ -154,6 +170,28 @@ export interface SelfProvenance {
   hasPickups: boolean;
   /** `stats.vh_ItemsPickedUp` present (resourcesHarvested from the profile counter, no fish). */
   hasPickupCount: boolean;
+  /**
+   * Which source `resourcesHarvested` was read from — the SAME "like against
+   * like" contract craftsSource and killsSource carry (lib/gs-baseline rule 4).
+   *
+   *   'pickups'          — sum(pickups[].count), world-scoped, from
+   *                        GsValheimStatsClient.
+   *   'vh_ItemsPickedUp' — the .fch profile's LIFETIME pickup counter, from the
+   *                        EilifCompanionClient profile post.
+   *   'none'             — neither.
+   *
+   * They are not the same quantity, and they now arrive from two different
+   * posters minutes apart: differencing a lifetime 9,000 against a world-scoped
+   * zero-point of 50 is the Chærlie incident wearing a fishing hat.
+   */
+  pickupsSource: 'pickups' | 'vh_ItemsPickedUp' | 'none';
+  /**
+   * `stats.vh_FishCaught` present — the profile's lifetime catch total
+   * (EilifCompanionClient ≥0.4.4). GsValheimStatsClient 0.2.12 reports
+   * `fish: []` for everyone on Valheim 1.0, so on 1.0 this is the only reading
+   * of "how many fish has this viking landed" that exists.
+   */
+  hasFishCaught: boolean;
   /** weapons[] present (damageDealt + every per-weapon counter/record). */
   hasWeapons: boolean;
   /** creatureKills[] present (the per-creature kill breakdown). */
@@ -185,6 +223,12 @@ export interface ParsedSelf {
   itemsCrafted: number;
   structuresBuilt: number;
   damageDealt: number;
+  /**
+   * Lifetime fish landed, from the profile's own `vh_FishCaught` counter
+   * (EilifCompanionClient ≥0.4.4). 0 when the payload carried none — read
+   * `provenance.hasFishCaught` to tell that apart from a real zero.
+   */
+  fishCaught: number;
   /** The long-tail blob as stored: top-N capped (see capGsStats). */
   gsStats: GsClientStats;
   /**
@@ -393,9 +437,29 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   // pickups[] (GsValheimStatsClient, absent on 1.0) or the profile's own lifetime
   // ItemsPickedUp counter (EilifCompanionClient ≥0.4.3, `vh_ItemsPickedUp`).
   const hasPickupCount = isNum(stats.vh_ItemsPickedUp);
-  const resourcesHarvested = Array.isArray(self.pickups)
-    ? sumBy(pickups, 'count')
-    : hasPickupCount ? statNum('vh_ItemsPickedUp') : 0;
+  // Recorded as a SOURCE, not just a presence flag: the two readings are
+  // different quantities (world-scoped sum vs lifetime profile counter) and they
+  // now arrive from two different posters, so the baseline layer must never
+  // difference one against a zero-point taken from the other.
+  const pickupsSource: SelfProvenance['pickupsSource'] = Array.isArray(self.pickups)
+    ? 'pickups'
+    : hasPickupCount
+      ? 'vh_ItemsPickedUp'
+      : 'none';
+  const resourcesHarvested =
+    pickupsSource === 'pickups' ? sumBy(pickups, 'count')
+    : pickupsSource === 'vh_ItemsPickedUp' ? statNum('vh_ItemsPickedUp')
+    : 0;
+  // ── FISH (Valheim 1.0) ─────────────────────────────────────────────────────
+  // GsValheimStatsClient 0.2.12 reports `fish: []` for EVERY viking on 1.0 (its
+  // pickups[] no longer carries the species rows), so the Anglers board's
+  // tie-break — total catches — has been stuck at 0 for the whole server.
+  // EilifCompanionClient ≥0.4.4 reads the profile's own lifetime counter
+  // instead. It is a COUNTER like every other one here: baselined and
+  // differenced, with its own hole gate, so catches landed on somebody else's
+  // world are never credited to Eilif.
+  const hasFishCaught = isNum(stats.vh_FishCaught);
+  const fishCaught = statNum('vh_FishCaught');
   // Prefer the authoritative profile counter; fall back to the per-item breakdown.
   // Chosen by PRESENCE, not by truthiness: `vh_Crafts || sumBy(crafts)` silently
   // switched source whenever the profile counter read 0, so a baseline captured
@@ -445,11 +509,13 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
     itemsCrafted,
     structuresBuilt,
     damageDealt,
+    fishCaught,
     gsStats: capGsStats(gsStatsFull),
     gsStatsFull,
     provenance: {
       ownEntry: self === own,
       hasStats,
+      profileOnly,
       hasKills: !profileOnly && isNum(self.kills),
       hasDeaths: !profileOnly && isNum(self.deaths),
       killsSource,
@@ -463,6 +529,8 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
       // no information at all and must become a baseline hole instead of a 0.
       hasPickups: Array.isArray(self.pickups),
       hasPickupCount,
+      pickupsSource,
+      hasFishCaught,
       hasWeapons: Array.isArray(self.weapons),
       hasCreatureKills: Array.isArray(self.creatureKills),
       hasBoss: Array.isArray(self.boss),

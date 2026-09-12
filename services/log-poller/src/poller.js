@@ -4,7 +4,7 @@
 
 import SftpClient from 'ssh2-sftp-client';
 import { readFile, writeFile, stat } from 'node:fs/promises';
-import { LogParser, isArrivalShout, DEFAULT_POS_STALE_MS } from './parser.js';
+import { LogParser, isArrivalShout, parseLogLineTime, DEFAULT_POS_STALE_MS } from './parser.js';
 import { createHeartbeatSender } from './heartbeat.js';
 import {
 
@@ -22,6 +22,41 @@ import {
 // makes the heartbeat go degraded/error instead of reporting the previous
 // tick's stale `ok` forever.
 const SFTP_TICK_TIMEOUT_MS = 60000;
+
+// THE 4.5 HOUR WEDGE (2026-09-12). fetchFromSftp's `finally` awaited
+// `sftp.end()`, which ssh2-sftp-client implements as "call client.end() and
+// wait for a 'close' event" — with NO timeout of its own. ssh2's Client.end()
+// only writes a disconnect `if (this._sock && isWritable(this._sock))`, so a
+// socket this host has already black-holed (or half-killed) makes end() a
+// silent no-op that never emits 'close' and never settles. Because a rethrown
+// error only propagates AFTER an awaiting `finally` completes, that swallowed
+// the tick's own error too: no `[tick]` line, no `[event]` line, and — the
+// fatal part — loop() never reached its `setTimeout(loop, intervalMs)`. The
+// heartbeat's own setInterval kept running, which is exactly why the cockpit
+// went on posting ("no successful tick for 16154s") while nothing polled.
+// Teardown is now bounded and the socket forcibly destroyed if it overruns.
+const SFTP_END_TIMEOUT_MS = 5000;
+
+// Tick watchdog: if no tick has COMPLETED (ok or failed) within this window,
+// the loop is wedged in a way no in-band timeout caught, and the only honest
+// move is to die and let systemd (Restart=always, RestartSec=10) restart us.
+const TICK_WATCHDOG_MIN_MS = 5 * 60 * 1000;
+const TICK_WATCHDOG_INTERVALS = 6;
+const TICK_WATCHDOG_CHECK_MS = 30 * 1000;
+
+// --- Replay (2026-09-12, the other half of the incident) -------------------
+// When the poller came back after the 4.5 h wedge the log had been rotated, the
+// shrink check rewound the cursor to 0, and FOUR HOURS of history was re-read
+// and dispatched as if it had just happened: 12 joins, 6 leaves, 10 deaths, 4
+// shouts and 1 oath into #server inside three minutes, and every re-created
+// session stamped joined_at = the replay's wall clock instead of the real
+// arrival time, so played-hours were undercounted.
+//
+// A line whose own stamp is older than this — measured against the NEWEST line
+// in the same batch, never against a clock we can't compare to (see
+// parseLogLineTime) — is history, not news: it carries its own `occurredAt` to
+// the webhook, and it does not get announced in Discord a second time.
+const REPLAY_STALE_MS = 2 * 60 * 1000;
 
 // SFTP auth failures are special: GTX bans repeated failed logins and the map
 // snapshotter shares this one account, so retrying every 20 s after a password
@@ -131,6 +166,69 @@ export function webhookRetryDelayMs(headerValue, body) {
   return Math.min(Math.max(ms, 0), WEBHOOK_RETRY_CAP_MS);
 }
 
+/**
+ * Last resort teardown: rip the underlying socket out from under a client whose
+ * end() will not settle. Never throws — by the time this runs the connection is
+ * already written off, and the client object is dropped on the floor right
+ * afterwards (a fresh SftpClient is built for every fetch).
+ */
+export function destroySftpClient(sftp, log = console) {
+  try {
+    sftp.sftp = undefined; // stop end()/haveConnection believing there is a channel
+  } catch {
+    /* not ours to fix */
+  }
+  const client = sftp?.client;
+  try {
+    client?.destroy?.();
+  } catch (e) {
+    log.warn?.(`[sftp] destroy: ${e.message}`);
+  }
+  try {
+    client?._sock?.destroy?.();
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
+ * `sftp.end()`, bounded. Resolves 'ended' if the library tore the connection
+ * down (or threw doing it — a teardown failure is not fatal: the bytes are
+ * already in hand or already lost), and 'timeout' if it did not settle inside
+ * `timeoutMs`, in which case the socket is destroyed. NEVER rejects and never
+ * hangs — this is the call whose unbounded await wedged the loop for 4.5h.
+ *
+ * Exported so the bound is testable without a real SFTP host.
+ */
+export async function endSftpQuietly(sftp, timeoutMs = SFTP_END_TIMEOUT_MS, log = console) {
+  // Two-arg then(): the rejection is consumed here, so the promise we abandon
+  // on the timeout path can never surface as an unhandled rejection later.
+  const ended = Promise.resolve()
+    .then(() => sftp.end())
+    .then(
+      () => 'ended',
+      (e) => {
+        log.warn?.(`[sftp] end: ${e.message}`);
+        return 'ended';
+      }
+    );
+  let timer;
+  // Deliberately NOT unref'd: this timer is the only thing standing between a
+  // black-holed socket and a loop that never ticks again, and it is always
+  // cleared a line later. An unref'd one would let a process whose last handle
+  // is the dead socket exit before it fires.
+  const expired = new Promise((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+  });
+  const outcome = await Promise.race([ended, expired]);
+  clearTimeout(timer);
+  if (outcome === 'timeout') {
+    log.warn?.(`[sftp] end() did not settle in ${timeoutMs}ms — destroying the socket and moving on`);
+    destroySftpClient(sftp, log);
+  }
+  return outcome;
+}
+
 export class Poller {
   constructor(config, logger = console) {
     this.cfg = config; // { source, sftp, logPath, webhookUrl, webhookSecret, intervalMs, statePath, syncEveryMs }
@@ -159,6 +257,13 @@ export class Poller {
     this.tickStartedAt = null;
     this.lastTickOkAt = 0;
     this.startedAt = Date.now();
+    // Tick watchdog handle (see startTickWatchdog) — null until armed.
+    this.watchdogTimer = null;
+    this.watchdogTripped = false;
+    // How many shouts have been withheld from the Discord mirror because they
+    // were replayed history (see REPLAY_STALE_MS). Monotonic; the tick diffs it
+    // to report one summary line per replay.
+    this.chatMirrorSuppressed = 0;
     // The in-flight tick promise, so stop() can wait for it instead of killing
     // a batch mid-dispatch (which would replay it from the old offset).
     this.current = null;
@@ -259,14 +364,7 @@ export class Poller {
       throw new Error(`sftp auth backoff — not reconnecting for another ${leftSec}s`);
     }
 
-    // Quiet callbacks: the library's defaults console.log every close/end event
-    // (50 "Global close listener" lines in the journal) and console.error the
-    // errors we already handle.
-    const sftp = new SftpClient('poller', {
-      error: (e) => this.log.warn?.(`[sftp] client error: ${e.message}`),
-      end: () => {},
-      close: () => {},
-    });
+    const sftp = this.newSftpClient();
 
     let onTrap;
     const trapped = new Promise((_, reject) => {
@@ -275,16 +373,22 @@ export class Poller {
     });
     trapped.catch(() => {}); // never awaited on the happy path — prevent an unhandled rejection
 
+    const deadlineMs = this.fetchTimeoutMs();
     let timer;
     const timeout = new Promise((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`sftp tick timed out after ${SFTP_TICK_TIMEOUT_MS}ms`)),
-        SFTP_TICK_TIMEOUT_MS
-      );
+      timer = setTimeout(() => reject(new Error(`sftp tick timed out after ${deadlineMs}ms`)), deadlineMs);
     });
 
+    // Held in a variable so the LOSING promise is explicitly accounted for: the
+    // race discards its result, and this catch means a late failure (the get()
+    // that finally errors two minutes after we gave up on it) can never surface
+    // as an unhandled rejection. It resolves into nothing — there is no second
+    // resolve path for the race to take.
+    const inner = this.fetchFromSftpInner(sftp);
+    inner.catch(() => {});
+
     try {
-      return await Promise.race([this.fetchFromSftpInner(sftp), trapped, timeout]);
+      return await Promise.race([inner, trapped, timeout]);
     } catch (err) {
       this.noteAuthFailure(err);
       throw err;
@@ -294,8 +398,47 @@ export class Poller {
       // Teardown failure is NOT fatal: by this point the bytes are already in
       // hand (or already lost to a real error), and a throwing end() used to
       // discard a whole fetched batch (3× '[tick] end: read ETIMEDOUT').
-      await sftp.end().catch((e) => this.log.warn?.(`[sftp] end: ${e.message}`));
+      //
+      // BOUNDED, because an await in here delays the rethrow above: an end()
+      // that never settles does not merely leak a socket, it eats the tick's
+      // error and stops the loop dead (2026-09-12). endSftpQuietly never
+      // rejects and never hangs.
+      await endSftpQuietly(sftp, this.endTimeoutMs(), this.log);
     }
+  }
+
+  /** How long teardown may take before the socket is destroyed under it. */
+  endTimeoutMs() {
+    const v = Number(this.cfg.sftpEndTimeoutMs);
+    return Number.isFinite(v) && v > 0 ? v : SFTP_END_TIMEOUT_MS;
+  }
+
+  /**
+   * Hard ceiling on one whole SFTP fetch. Roughly 2× the handshake budget
+   * (SFTP_TIMEOUT_MS → sftp.readyTimeout), floored at SFTP_TICK_TIMEOUT_MS so
+   * raising the handshake budget widens the ceiling but lowering it can never
+   * start cutting off healthy large `get()`s.
+   */
+  fetchTimeoutMs() {
+    const ready = Number(this.cfg.sftp?.readyTimeout);
+    const twice = Number.isFinite(ready) && ready > 0 ? ready * 2 : 0;
+    return Math.max(SFTP_TICK_TIMEOUT_MS, twice);
+  }
+
+  /**
+   * One SFTP client for one fetch. Quiet callbacks: the library's defaults
+   * console.log every close/end event (50 "Global close listener" lines in the
+   * journal) and console.error the errors we already handle.
+   *
+   * Its own method so a test can substitute a client whose end() never settles
+   * — the exact shape that wedged the loop on 2026-09-12 — without a host.
+   */
+  newSftpClient() {
+    return new SftpClient('poller', {
+      error: (e) => this.log.warn?.(`[sftp] client error: ${e.message}`),
+      end: () => {},
+      close: () => {},
+    });
   }
 
   async fetchFromSftpInner(sftp) {
@@ -411,6 +554,66 @@ export class Poller {
     }
   }
 
+  // --- Anchoring a batch onto our clock (2026-09-12) -----------------------
+  // parseLogLineTime returns a reading in an arbitrary frame (the box's local
+  // wall clock, zone unknown — see parser.js), so an absolute value from it is
+  // worthless and a DIFFERENCE between two is not. The newest line in a batch
+  // was written moments before this very poll, so:
+  //
+  //     occurredAt = now - (newestLineInBatch - thisLine)
+  //
+  // is a real instant that needs no timezone, survives a skewed box clock, and
+  // degrades gracefully: in a normal 20 s poll every line is within seconds of
+  // the newest one, nothing is stale, and nothing changes at all.
+  //
+  // occurredAt is attached ONLY to stale events on purpose. A fresh event is
+  // left exactly as it was before this change — no occurredAt on the wire, the
+  // webhook stamps it `now` — so the live path is untouched by a mechanism that
+  // exists for replays.
+  //
+  // `lineTimes` is one entry per line of the batch — the line's own stamp, or
+  // the nearest preceding one for the unstamped plugin lines, or null when
+  // nothing above it was stamped either.
+  //
+  // Returns { newestRaw, staleLines, staleEvents } for the summary line.
+  anchorBatchTimes(batch, lineTimes, now = Date.now(), staleMs = REPLAY_STALE_MS) {
+    let newestRaw = null;
+    for (const t of lineTimes) {
+      if (t !== null && (newestRaw === null || t > newestRaw)) newestRaw = t;
+    }
+    // No stamped line anywhere in the batch: there is nothing to anchor to, so
+    // leave every event exactly as it was (live behaviour).
+    if (newestRaw === null) return { newestRaw: null, staleLines: 0, staleEvents: 0 };
+
+    let staleLines = 0;
+    for (const t of lineTimes) {
+      if (t !== null && newestRaw - t >= staleMs) staleLines++;
+    }
+
+    let staleEvents = 0;
+    for (const ev of batch) {
+      if (!Number.isFinite(ev.logTimeMs)) continue;
+      // max(0, …): a clock that stepped backwards mid-log must never date an
+      // event into the future, which is the one thing the webhook clamps.
+      const ageMs = Math.max(0, newestRaw - ev.logTimeMs);
+      if (ageMs < staleMs) continue;
+      ev.stale = true;
+      ev.occurredAtMs = now - ageMs;
+      staleEvents++;
+    }
+    return { newestRaw, staleLines, staleEvents };
+  }
+
+  /**
+   * The `occurredAt` an event should carry to the webhook, or undefined for a
+   * live one (JSON.stringify drops the key entirely, so the live wire format is
+   * byte-identical to what it was before replay handling existed).
+   */
+  occurredAtIso(ev) {
+    const ms = ev?.occurredAtMs;
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+  }
+
   async tickAfterFetch({ text, size, mtimeMs }) {
     this.offset = size;
 
@@ -443,9 +646,30 @@ export class Poller {
       // Both of Companion 0.3.1's and 0.3.2's identity fixes reached the log
       // and nowhere else.
       const batch = [];
+      const lineTimes = [];
+      // Only the game's own "Unity Log" lines carry a date; BepInEx writes the
+      // companion plugin's [EILIF_CHAT]/[EILIF_OATH]/[EILIF_PIN]/[EILIF_POS]
+      // markers with no timestamp at all. The log is strictly chronological, so
+      // an unstamped line takes the clock of the most recent stamped line above
+      // it — without which a REPLAYED shout captured by the plugin (rather than
+      // by the console echo) would still have been mirrored into #server, which
+      // is more than half the spam this guard exists to stop.
+      let lastStamp = null;
       for (const line of lines) {
-        batch.push(...this.parser.processLine(line));
+        const t = parseLogLineTime(line);
+        if (t !== null) lastStamp = t;
+        lineTimes.push(t === null ? lastStamp : t);
+        const evs = this.parser.processLine(line);
+        for (const ev of evs) {
+          if (!Number.isFinite(ev.logTimeMs) && lastStamp !== null) ev.logTimeMs = lastStamp;
+        }
+        batch.push(...evs);
       }
+      // Put the batch on our clock and mark anything that is history. MUST run
+      // before the first dispatch: `stale` decides both whether the event
+      // carries its own occurredAt and whether it may reach Discord.
+      const replay = this.anchorBatchTimes(batch, lineTimes);
+      const suppressedBefore = this.chatMirrorSuppressed;
       const pluginTwinKeys = new Set(
         batch
           .filter((e) => TWIN_TYPES.has(e.type) && e.metadata?.source === 'plugin')
@@ -460,6 +684,15 @@ export class Poller {
           continue; // twin of a plugin-captured shout in this same batch
         }
         await this.dispatch(ev);
+      }
+
+      // One line per replay, not one per replayed event — the whole point is
+      // that a replay should be quiet.
+      if (replay.staleEvents > 0) {
+        this.log.warn?.(
+          `[replay] replayed ${replay.staleLines} lines, ${replay.staleEvents} events, ` +
+            `chat mirror suppressed for ${this.chatMirrorSuppressed - suppressedBefore} lines`
+        );
       }
     }
 
@@ -672,8 +905,23 @@ export class Poller {
     // mirror, so mirror the exact same line to the dashboard webhook for the
     // /tv chat rail — never a superset. Best-effort and fire-and-forget: a
     // webhook failure must NEVER block the Discord post below.
-    this.postEvent({ type: 'chat', characterName: name, message: ev.metadata.text })
-      .catch((e) => this.log.warn?.(`[chat->webhook] ${e.message}`));
+    this.postEvent({
+      type: 'chat',
+      characterName: name,
+      message: ev.metadata.text,
+      occurredAt: this.occurredAtIso(ev),
+    }).catch((e) => this.log.warn?.(`[chat->webhook] ${e.message}`));
+
+    // REPLAYED HISTORY STOPS HERE (2026-09-12). The webhook post above still
+    // happens — a chat_lines row for a shout that really was said is worth
+    // having, dated correctly — but re-announcing four hours of old shouts in
+    // #server is the spam this incident produced, so the Discord mirror sees
+    // nothing. Every dedupe gate above ran exactly as it always does.
+    if (ev.stale) {
+      this.chatMirrorSuppressed++;
+      this.log.info?.(`[replay] chat mirror suppressed for ${name} (replayed line)`);
+      return;
+    }
 
     if (this.cfg.chatWebhookUrl) {
       // Channel webhook: post AS the player (username override). Discord
@@ -776,6 +1024,7 @@ export class Poller {
         characterName: ev.characterName,
         text: ev.metadata.text,
         steamId: ev.steamId,
+        occurredAt: this.occurredAtIso(ev),
       });
       if (res?.status === 'identity_mismatch') {
         this.log.warn?.(`[identity] oath from ${ev.characterName} refused — steam id does not match the binding`);
@@ -789,6 +1038,7 @@ export class Poller {
         characterName: ev.characterName,
         metadata: ev.metadata,
         steamId: ev.steamId,
+        occurredAt: this.occurredAtIso(ev),
       });
       if (res?.status === 'identity_mismatch') {
         this.log.warn?.(`[identity] pin from ${ev.characterName} refused — steam id does not match the binding`);
@@ -807,6 +1057,7 @@ export class Poller {
         x: ev.metadata.x,
         z: ev.metadata.z,
         biome: ev.metadata.biome,
+        occurredAt: this.occurredAtIso(ev),
       }).catch((e) => this.log.warn?.(`[pos] ${e.message}`));
       return;
     }
@@ -825,7 +1076,17 @@ export class Poller {
     // join line logs exactly as it always did.
     const src = (type === 'join' || type === 'leave') && metadata?.source ? ` (${metadata.source})` : '';
     this.log.info?.(`[event] ${type}${characterName ? ` ${characterName}` : ''}${src}${metadata?.event ? ` (${metadata.event})` : ''}`);
-    const res = await this.postEvent({ type, characterName, metadata, steamId: ev.steamId });
+    const res = await this.postEvent({
+      type,
+      characterName,
+      metadata,
+      steamId: ev.steamId,
+      // Replayed history carries the time it really happened, so a re-created
+      // session's joined_at is the viking's real arrival and not the moment the
+      // poller caught up. clampEventTime (lib/event-time.ts) leaves past times
+      // untouched; only future ones are pulled back.
+      occurredAt: this.occurredAtIso(ev),
+    });
     // The webhook binds players.steam_id on first sight and flags a join that
     // arrives under a different Steam account than the one already bound. It
     // still records the presence (someone really is in the world), but every
@@ -852,8 +1113,69 @@ export class Poller {
     );
   }
 
+  // --- Tick watchdog (belt and braces for 2026-09-12) ----------------------
+  // Every in-band timeout in this file bounds a thing we KNOW can stall. The
+  // watchdog bounds the things we don't: it watches only one number — how long
+  // since a tick last COMPLETED, success or failure — and if that number passes
+  // the deadline it says so loudly and exits(1) so systemd restarts a process
+  // whose loop is provably dead. It deliberately does not try to repair
+  // anything; a poller that cannot complete a tick has no state worth keeping
+  // (state.json is written by successful ticks and survives the restart).
+
+  /** max(5 min, 6 × POLL_INTERVAL_MS). */
+  tickWatchdogDeadlineMs() {
+    const iv = Number(this.cfg.intervalMs);
+    const byInterval = Number.isFinite(iv) && iv > 0 ? iv * TICK_WATCHDOG_INTERVALS : 0;
+    return Math.max(TICK_WATCHDOG_MIN_MS, byInterval);
+  }
+
+  /**
+   * Arm the watchdog. Returns `{ deadlineMs, check, stop }` — `check` is the
+   * one-shot probe the interval calls, exported through the return value so a
+   * test can drive it with an injected clock and exit instead of a real timer
+   * and a real process kill.
+   *
+   * The interval is unref'd: it must never be the reason this process stays
+   * alive. It still fires, because the tick timer and the heartbeat interval
+   * keep the loop referenced — and in the wedge this was written for, the
+   * heartbeat interval was demonstrably still firing.
+   */
+  startTickWatchdog({ checkEveryMs = TICK_WATCHDOG_CHECK_MS, exit, now = Date.now } = {}) {
+    const doExit = exit || ((code) => process.exit(code));
+    const deadlineMs = this.tickWatchdogDeadlineMs();
+    const check = () => {
+      if (this.stopped || this.watchdogTripped) return false;
+      const last = this.lastTickAt || this.startedAt;
+      const ageMs = now() - last;
+      if (!(ageMs >= deadlineMs)) return false; // NaN-safe: never trips on junk
+      // Once. The process is on its way out; a second exit() would only muddy
+      // the journal line the on-call is about to read.
+      this.watchdogTripped = true;
+      this.stopTickWatchdog();
+      this.log.error?.(
+        `[watchdog] TICK LOOP WEDGED — no tick has completed for ${Math.round(ageMs / 1000)}s ` +
+          `(deadline ${Math.round(deadlineMs / 1000)}s, interval ${this.cfg.intervalMs}ms). ` +
+          `Exiting(1) so systemd restarts the poller.`
+      );
+      doExit(1);
+      return true;
+    };
+    this.stopTickWatchdog();
+    this.watchdogTimer = setInterval(check, checkEveryMs);
+    this.watchdogTimer.unref?.();
+    this.log.info?.(`[watchdog] armed — trips after ${Math.round(deadlineMs / 1000)}s without a completed tick`);
+    return { deadlineMs, check, stop: () => this.stopTickWatchdog() };
+  }
+
+  stopTickWatchdog() {
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+    this.watchdogTimer = null;
+  }
+
   async start() {
     await this.loadState();
+    // Armed BEFORE the first tick: the very first fetch can wedge too.
+    this.startTickWatchdog();
     this.log.info?.(
       `[poller] source=${this.cfg.source} interval=${this.cfg.intervalMs}ms target=${this.cfg.webhookUrl}`
     );
@@ -946,6 +1268,7 @@ export class Poller {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.stopTickWatchdog();
     if (!this.current) return;
     let timer;
     await Promise.race([

@@ -40,6 +40,7 @@ function payload({
   bestKillsBeforeDeath = 0,
   builds = 0,
   crafts = 0,
+  fishCaught = 0,
   pickups = [],
   weapons = [],
   creatures = [],
@@ -75,6 +76,7 @@ function payload({
           vh_DistanceRun: run,
           vh_DistanceSail: sail,
           vh_DistanceAir: air,
+          vh_FishCaught: fishCaught,
         },
         weapons,
         creatureKills: creatures,
@@ -855,7 +857,7 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
     bossKills: 0,
     longestLifeSec: 0,
     bestKillsBeforeDeath: 0,
-    stats: { vh_Builds: 0, vh_Crafts: 0, vh_DistanceTraveled: 0, vh_DistanceWalk: 0, vh_DistanceRun: 0, vh_DistanceSail: 0, vh_DistanceAir: 0 },
+    stats: { vh_Builds: 0, vh_Crafts: 0, vh_DistanceTraveled: 0, vh_DistanceWalk: 0, vh_DistanceRun: 0, vh_DistanceSail: 0, vh_DistanceAir: 0, vh_FishCaught: 0 },
   });
   const rookie = parseSelfSnapshot(rookieBody);
   assert.equal(captureQualification(rookie).ok, true, 'all-zero but complete is a perfectly good zero-point');
@@ -897,6 +899,7 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
           vh_DistanceRun: 0,
           vh_DistanceSail: 0,
           vh_DistanceAir: 0,
+          vh_FishCaught: 0,
         }, // no vh_Crafts
         crafts: [{ item: 'ArrowWood', count: 460 }],
         pickups: [],
@@ -1549,7 +1552,7 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
   //     walked and 410 km sailed on another server were credited in full. The
   //     five modes are a CLOSED key set: an absent one is a per-key hole.
   const totalOnly = structuredClone(payload(VETERAN));
-  totalOnly.players[0].stats = { vh_Builds: 27207, vh_Crafts: 912, vh_DistanceTraveled: 1550000 };
+  totalOnly.players[0].stats = { vh_Builds: 27207, vh_Crafts: 912, vh_DistanceTraveled: 1550000, vh_FishCaught: 0 };
   const cap = ingest(totalOnly, null, '2026-08-23T12:00:00.000Z');
   assert.equal(cap.change, 'capture');
   assert.deepEqual(cap.nextBaseline.counterMaps.distances, { total: 1550000 }, 'only the mode that was reported');
@@ -1657,8 +1660,11 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
   assert.equal(cap.nextBaseline.counters.kills, 342);
   assert.deepEqual(
     cap.nextBaseline.holes,
-    ['counters.distanceTraveled', 'counterMaps.distances', 'counterMaps.distancesRaw'],
-    'the one thing it cannot speak for is holed — everything else is baselined',
+    // vh_FishCaught joined the list on 2026-09-12: GsValheimStatsClient has
+    // never emitted it (it is an EilifCompanionClient ≥0.4.4 profile counter),
+    // so this payload cannot speak for the catch total either — holed, not 0.
+    ['counters.fishCaught', 'counters.distanceTraveled', 'counterMaps.distances', 'counterMaps.distancesRaw'],
+    'the things it cannot speak for are holed — everything else is baselined',
   );
   // A row IS produced, which is the half that was missing: a deferred cycle
   // wrote nothing at all, so gs_reporter / gs_updated_at never advanced and
