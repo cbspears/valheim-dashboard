@@ -57,10 +57,15 @@ const R2MODMAN_ALL_URL = 'https://github.com/ebkr/r2modmanPlus/releases/latest';
 // ⚠️ When bumping: NEVER template this from the tag. Read the exact asset name
 // off the release and curl it before shipping. The old pin here
 // (Macheim_1.0.0_aarch64.dmg under tag v1.0.1) 404'd from the live page; the
-// v1.0.1 release actually ships Macheim_1.0.1_aarch64.dmg. Verified 200 with
-// `curl -sIL <url>` on 2026-09-05 (6,024,201 bytes, matches the GitHub API).
+// v1.0.1 release actually ships Macheim_1.0.1_aarch64.dmg. Upstream's own v1.0.1
+// notes tell an Intel reader to download `x86_64.dmg`, which is not an asset name
+// either: the Intel file is Macheim_<ver>_x64.dmg.
+// 2026-09-13: bumped v1.0.1 (2026-04-10) -> v1.1.0 (2026-09-06). v1.0.1 predates
+// the 2026-09-04 "Fix config editor loading and saving" commit, and the config
+// editor is the Config view step 3 sends every Mac player to. Verified 200 with
+// `curl -sIL <url>` (5,761,104 bytes, matches the GitHub API).
 const MACHEIM_APPLE_SILICON_URL =
-  'https://github.com/lofcgi/macheim/releases/download/v1.0.1/Macheim_1.0.1_aarch64.dmg';
+  'https://github.com/lofcgi/macheim/releases/download/v1.1.0/Macheim_1.1.0_aarch64.dmg';
 const MACHEIM_ALL_URL = 'https://github.com/lofcgi/macheim/releases/latest';
 
 // The pack's .cfg files, zipped, for the Mac path: Macheim cannot read an
@@ -493,9 +498,14 @@ export default function GetStartedPage() {
         </p>
         <p>
           Open the downloaded <span className="text-ash">.dmg</span> and drag{' '}
-          <span className="text-ash">Macheim</span> into Applications. The first launch is blocked
-          because Macheim is not signed. Open <span className="text-ash">Terminal</span>, run this,
-          then open Macheim:
+          <span className="text-ash">Macheim</span> into Applications. macOS blocks the first
+          launch, because Macheim is signed but not notarised by Apple. Open it anyway from{' '}
+          <span className="text-ash">System Settings, Privacy and Security, Open Anyway</span>.
+        </p>
+        <p className="text-xs text-muted">
+          If macOS says Macheim is damaged and offers no Open Anyway, that is the quarantine flag.
+          Open <span className="text-ash">Terminal</span>, run this, then open Macheim. It changes
+          nothing else, and you only run it once.
         </p>
         <div className="py-0.5">
           <CopyChip
@@ -503,11 +513,6 @@ export default function GetStartedPage() {
             describe="the command that unlocks Macheim"
           />
         </div>
-        <p className="text-xs text-muted">
-          This clears the quarantine flag macOS puts on anything you download. It changes nothing
-          else, and you only run it once. Still blocked? System Settings, Privacy and Security, Open
-          Anyway.
-        </p>
         <DoneWhen>Macheim opens.</DoneWhen>
       </Step>
 
@@ -516,6 +521,17 @@ export default function GetStartedPage() {
           Macheim finds your Valheim install on its own. Click{' '}
           <span className="text-ash">Install BepInEx</span>. It sets up the mod loader and installs
           Rosetta automatically (on Apple Silicon the mods run under Rosetta).
+        </p>
+        {/* Verified 2026-09-13 against lofcgi/macheim v1.1.0: the last release is
+            2026-09-06, three days before Valheim went to 1.0, and its README says
+            in as many words that 1.0 compatibility is not guaranteed. The mods
+            themselves are fine (managed DLLs, and Macheim pulls the same
+            BepInExPack the pack pins), but the loader is the untested piece, so
+            the page says so rather than promising a clean run. */}
+        <p className="text-xs text-muted">
+          Macheim has not had a release since Valheim went to 1.0, so this is the one path we
+          cannot promise. If it will not find the game, will not install the mod loader, or the
+          game opens unmodded anyway, say so in Discord rather than working around it.
         </p>
         <DoneWhen>
           Macheim shows your Valheim install with <span className="text-ash-dim">BepInEx</span>{' '}
@@ -579,6 +595,20 @@ export default function GetStartedPage() {
                  When Advize publishes an official 1.21.x the row moves back to
                  his namespace and nothing on this page changes. */}
         <ModChecklist mods={MAC_MODS} />
+        {/* The table is checklistFrom(CLIENT_MODS) and BepInExPack is a
+            clientRequired row, so it appears here too. On the r2modman paths that
+            is right: the pack installs it. On this path step 2 already did, and
+            Macheim's own Install BepInEx button downloads the same Thunderstore
+            package (denikson-BepInExPack_Valheim, newest version) into the game
+            folder. Hand-installing it again from the Mods tab would lay the
+            Windows-shaped pack over the macOS loader Macheim just set up, so the
+            row is a version check here, not an install. Said in copy rather than
+            filtered out of the list, because the list is derived on purpose. */}
+        <p className="text-xs text-muted">
+          The mod loader row is the one you already did in step 2. Check the version Macheim shows
+          against the table and move on. Do not install it again from the Mods tab: the download
+          there is the Windows build, and it would go over the Mac one.
+        </p>
         <p className="text-xs text-muted">
           The{' '}
           <Link href="/resources#mods" className="prose-link text-gold-light">
@@ -622,6 +652,14 @@ export default function GetStartedPage() {
           Launch from <span className="text-ash">Macheim</span>,{' '}
           <strong className="text-ash-dim">not</strong>{' '}Steam&apos;s Play button. Let Valheim
           load, then pick your character.
+        </p>
+        {/* Verified against macheim v1.1.0 launcher.rs: Play Modded writes a
+            script and runs it in Terminal.app (arch -x86_64 + DYLD_INSERT_LIBRARIES
+            on libdoorstop.dylib, with -console). The Terminal window is the loader,
+            not a leftover, and closing it takes the game with it. */}
+        <p className="text-xs text-muted">
+          Macheim opens a Terminal window and starts the game from it. That window is the mod
+          loader talking, so leave it alone until you are done playing.
         </p>
         <p className="text-xs text-muted">
           Some modded objects may look bright pink. This is a harmless Mac shader quirk, not a
@@ -1036,9 +1074,10 @@ export default function GetStartedPage() {
             On Apple Silicon, use <span className="text-ash">Macheim</span>: choose{' '}
             <span className="text-ash">Mac</span> in the chooser above and follow steps 1 to 4. It
             runs the mods under Rosetta for you. If Macheim itself will not open, it needs the
-            Gatekeeper step: Terminal{' '}
-            <span className="font-mono text-xs">xattr -cr /Applications/Macheim.app</span>, or
-            System Settings, Privacy and Security, Open Anyway. Still stuck? Ask in Discord.
+            Gatekeeper step: System Settings, Privacy and Security, Open Anyway, or, if macOS calls
+            it damaged instead, Terminal{' '}
+            <span className="font-mono text-xs">xattr -cr /Applications/Macheim.app</span>. Still
+            stuck? Ask in Discord.
           </Trouble>
           <Trouble symptom="“Failed to connect” / can't reach the server">
             An admin may be restarting it (check <span className="font-mono text-xs">#server</span>{' '}
