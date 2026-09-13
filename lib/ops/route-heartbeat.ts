@@ -33,6 +33,7 @@
 
 import 'server-only';
 import { createClient } from '@supabase/supabase-js';
+import { retryingFetch } from '@/lib/supabase-fetch';
 
 /** One write per component per minute per instance. */
 const THROTTLE_MS = 60_000;
@@ -63,7 +64,7 @@ export async function recordRouteHeartbeat(
   if (!url || !key) return false; // unconfigured → the cockpit shows 'unknown', which is honest
 
   try {
-    const db = createClient(url, key, { auth: { persistSession: false } });
+    const db = createClient(url, key, { auth: { persistSession: false }, global: { fetch: retryingFetch() } });
     const nowIso = new Date(now).toISOString();
     const { error } = await db.from('ops_heartbeats').upsert(
       {

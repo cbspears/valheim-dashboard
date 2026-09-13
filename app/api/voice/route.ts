@@ -7,6 +7,7 @@
 // until spoken). Guarded by a shared secret (`x-voice-token`).
 
 import { createClient } from '@supabase/supabase-js';
+import { retryingFetch } from '@/lib/supabase-fetch';
 import { safeEqual } from '@/lib/ops/auth';
 import { recordRouteHeartbeat } from '@/lib/ops/route-heartbeat';
 import { companionCapabilities, voiceBatch } from '@/lib/voice';
@@ -20,7 +21,7 @@ function serviceClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
+    { auth: { persistSession: false }, global: { fetch: retryingFetch() } }
   );
 }
 

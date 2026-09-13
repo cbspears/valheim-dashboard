@@ -95,6 +95,7 @@
 import { cache } from 'react';
 import { unstable_cache } from 'next/cache';
 import { createClient } from '@supabase/supabase-js';
+import { retryingFetch } from '@/lib/supabase-fetch';
 import type {
   Player,
   PlayerStats,
@@ -126,7 +127,7 @@ function db() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false } }
+    { auth: { persistSession: false }, global: { fetch: retryingFetch() } }
   );
 }
 

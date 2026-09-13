@@ -14,6 +14,7 @@
 // and NEVER logged — only generic, caller-safe messages leave this file.
 
 import { createClient } from '@supabase/supabase-js';
+import { retryingFetch } from '@/lib/supabase-fetch';
 import { matchPinInCaption } from '@/lib/pin-match';
 import { webhookRateLimit, ipFromRequest } from '@/lib/rate-limit';
 import { safeEqual } from '@/lib/ops/auth';
@@ -88,7 +89,7 @@ function serviceClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
+    { auth: { persistSession: false }, global: { fetch: retryingFetch() } }
   );
 }
 
@@ -721,7 +722,7 @@ export async function POST(request: Request) {
       const day = (status?.world_day as number | undefined) ?? 1;
 
       await db.from('pins').delete().ilike('name', escapeLikePattern(pinName));
-      const { data: newPin } = await db
+      const { data: newPin, error: newPinErr } = await db
         .from('pins')
         .insert({
           name: pinName,
@@ -735,6 +736,16 @@ export async function POST(request: Request) {
         })
         .select('id')
         .single();
+      // FAIL CLOSED. The delete above has ALREADY removed the pin this one
+      // replaces, so a swallowed insert error leaves the map with neither — and
+      // the `{ ok: true }` at the end of this branch would tell the caller the
+      // landmark was charted. A 500 is what the caller retries on (see the
+      // identityRefusal note: any non-2xx makes the poller re-send), and a retry
+      // of a pin is idempotent by name.
+      if (newPinErr) {
+        console.error(`[webhook] pin "${pinName}" insert failed — ${newPinErr.message}`);
+        return Response.json({ error: 'internal_error' }, { status: 500 });
+      }
 
       // ---- Retro-match (BIDIRECTIONAL): back-fill photos that named this place
       // before it was pinned. Photo-first / pin-later works because a caption
@@ -746,11 +757,17 @@ export async function POST(request: Request) {
       if (newPin?.id) {
         try {
           const like = `%${escapeLikePattern(pinName)}%`;
-          const { data: candidates } = await db
+          const { data: candidates, error: candidatesErr } = await db
             .from('gallery_photos')
             .select('id, caption')
             .is('pin_id', null)
             .ilike('caption', like);
+          // Warn, don't fail: this block is best-effort by contract (the pin is
+          // already written) and it only ever ADDS a link. An unreadable scan
+          // links nothing this time; the next pin of the same name retries it.
+          if (candidatesErr) {
+            console.warn(`[webhook] pin retro-match read failed — ${candidatesErr.message}; photos not linked.`);
+          }
           const toLink = (candidates ?? [])
             .filter((p) => matchPinInCaption(p.caption as string | null, [{ id: newPin.id as string, name: pinName }]))
             .map((p) => p.id as string);
@@ -922,7 +939,7 @@ export async function POST(request: Request) {
         // A name nobody has ever seen still auto-creates its row, exactly as
         // before. The SteamID is bound a moment later in §3b (a separate write
         // on purpose — see there) so this insert can never fail on it.
-        const { data: inserted } = await db
+        const { data: inserted, error: insertedErr } = await db
           .from('players')
           .insert({
             character_name: characterName,
@@ -932,6 +949,17 @@ export async function POST(request: Request) {
           })
           .select('id')
           .single();
+        // The other half of the guard above it. A swallowed error here leaves
+        // playerId null, and the event, the session and §3b's identity binding
+        // all then land unattached to any viking — a join recorded for nobody.
+        // The likeliest error is the players_character_name_key race (two events
+        // for a first-time name in one tick), and a 500 is exactly right for it:
+        // the poller rewinds, the lookup above finds the row the winner wrote,
+        // and the retry takes the existing-player branch.
+        if (insertedErr) {
+          console.error(`[webhook] players insert for "${characterName}" failed — ${insertedErr.message}`);
+          return Response.json({ error: 'internal_error' }, { status: 500 });
+        }
         playerId = (inserted?.id as string) ?? null;
       }
 
@@ -1087,11 +1115,21 @@ export async function POST(request: Request) {
       const statusUpdate: Record<string, unknown> = { updated_at: occurredIso };
 
       if (presenceChanged) {
-        const { data: onlineRows } = await db
+        const { data: onlineRows, error: onlineErr } = await db
           .from('players')
           .select('character_name')
           .eq('is_online', true)
           .order('character_name');
+        // FAIL CLOSED — this read is the ONLY source of the two values written
+        // just below. `{ data: null, error }` reads as "nobody is online", which
+        // would blank server_status.current_players and set player_count to 0
+        // for the whole clan on one unlucky 504. A 500 rewinds the poller's
+        // cursor; §2h suppresses the duplicate event on the replay but §6 here
+        // still re-runs, so the roster is recomputed rather than lost.
+        if (onlineErr) {
+          console.error(`[webhook] online roster read failed — ${onlineErr.message}`);
+          return Response.json({ error: 'internal_error' }, { status: 500 });
+        }
 
         const currentPlayers = (onlineRows ?? [])
           .map((r) => r.character_name as string)

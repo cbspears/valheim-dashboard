@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { retryingFetch } from '@/lib/supabase-fetch';
 import {
   parseSelfSnapshot,
   parseSelfDistances,
@@ -64,8 +65,59 @@ function db() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } },
+    { auth: { persistSession: false }, global: { fetch: retryingFetch() } },
   );
+}
+
+/**
+ * FAIL CLOSED ON A FAILED READ (2026-09-13 data-loss incident).
+ *
+ * supabase-js reports a failed read as `{ data: null, error }` — which at a
+ * `const { data } = await …` destructure is BYTE-IDENTICAL to "there is no such
+ * row". Supabase REST 504s on roughly 0.3 % of requests all day (75 GETs on
+ * `players` and 37 on `player_stats` in the last 24 h), so that is not a
+ * theoretical case, it is a nightly one.
+ *
+ * What it cost: a 504 on the `player_stats` read in ingestPlayerStats made
+ * `prev` null → applyBaseline saw no stored zero-point → `change === 'capture'`
+ * → the baseline was RE-TAKEN at the character's LIFETIME totals, and
+ * mergeIntoRow(prev = null, …) then had no stored values to GREATEST against,
+ * so it overwrote every column with the (now tiny) effective values. Three
+ * vikings lost their boards overnight — Yunter's zero-point holds 132 kills and
+ * his column read 8.
+ *
+ * So every read a WRITE depends on goes through readRows(). It throws; POST
+ * turns the throw into a 503 and NOTHING is written. Refusing a cycle costs
+ * nothing — every producer here re-posts a CUMULATIVE snapshot on its next
+ * ~120 s cycle, and the milestones re-fire wholesale — while guessing costs a
+ * leaderboard. Reads that are purely diagnostic (the weapon-collision monitor,
+ * the altar pin's decorations) keep warning and returning as before: they write
+ * nothing, so a miss there loses a log line, not a stat.
+ */
+class DbReadError extends Error {
+  constructor(what: string, message: string) {
+    super(`${what} read failed: ${message}`);
+    this.name = 'DbReadError';
+  }
+}
+
+/**
+ * Await a PostgREST list read, log + throw on error, and return `[]` ONLY for a
+ * genuine empty result. The two cases are never again reachable through the
+ * same variable, which is the whole point: "no row" stays a legitimate, handled
+ * state (a brand-new player has no players row yet, and that must keep being a
+ * quiet skip) and "the read failed" becomes impossible to mistake for it.
+ */
+async function readRows<T>(
+  what: string,
+  q: PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const { data, error } = await q;
+  if (error) {
+    console.error(`[gs-ingest] ${what} read failed: ${error.message}`);
+    throw new DbReadError(what, error.message);
+  }
+  return data ?? [];
 }
 
 /**
@@ -130,15 +182,21 @@ async function dropStaleLeavers(
   names: string[],
 ): Promise<string[]> {
   if (names.length === 0) return names;
-  const { data } = await client
-    .from('events')
-    .select('character_name, type, created_at')
-    .in('character_name', names)
-    .in('type', ['join', 'leave'])
-    .order('created_at', { ascending: false });
+  // Fails closed (readRows): an unreadable trail is NOT "nobody has left". This
+  // roster decides who gets `is_online: true` and who gets flipped off, so a 504
+  // here would re-assert the very stale roster this function exists to reconcile.
+  const data = await readRows<{ character_name: string | null; type: string }>(
+    'presence reconciliation (events join/leave)',
+    client
+      .from('events')
+      .select('character_name, type, created_at')
+      .in('character_name', names)
+      .in('type', ['join', 'leave'])
+      .order('created_at', { ascending: false }),
+  );
 
   const latestTypeByName = new Map<string, string>();
-  for (const row of data ?? []) {
+  for (const row of data) {
     const name = row.character_name as string | null;
     if (!name || latestTypeByName.has(name)) continue; // first hit per name = most recent (desc order)
     latestTypeByName.set(name, row.type as string);
@@ -189,15 +247,24 @@ async function confirmOnThisServer(name: string): Promise<{ onServer: boolean; r
   const GRACE_MS = 5 * 60_000; // 5 min: client's ~120s emit cycle + log-poller polling lag
 
   const client = db();
-  const { data } = await client
-    .from('events')
-    .select('type, created_at')
-    .ilike('character_name', trimmed.replace(/[%_]/g, '\\$&'))
-    .in('type', ['join', 'leave'])
-    .order('created_at', { ascending: false })
-    .limit(1);
+  // Fails closed (readRows). "Never block on absence of EVIDENCE" is the rule
+  // above; a failed read is absence of an ANSWER, which is a different thing. On
+  // a 504 the old destructure produced `latest === undefined` and therefore an
+  // unconditional ACCEPT — the guard silently switching itself off for that
+  // request. A 503 instead: nothing is written and the mod re-posts its
+  // cumulative snapshot next cycle.
+  const data = await readRows<{ type: string; created_at: string }>(
+    'presence check (events join/leave)',
+    client
+      .from('events')
+      .select('type, created_at')
+      .ilike('character_name', trimmed.replace(/[%_]/g, '\\$&'))
+      .in('type', ['join', 'leave'])
+      .order('created_at', { ascending: false })
+      .limit(1),
+  );
 
-  const latest = data?.[0];
+  const latest = data[0];
   if (!latest) {
     // No positive evidence either way — never block on absence of evidence.
     return { onServer: true, reason: 'no join/leave history (new player or poller not caught up yet)' };
@@ -287,17 +354,25 @@ async function ingestClientMap(body: Obj): Promise<{ ok: boolean; pct: number | 
 
   // Resolve an EXISTING players row only — never auto-create from a client payload.
   // A new player's row lands via the poller join path first; until then, skip.
-  const { data: found } = await client.from('players').select('id').eq('character_name', player).limit(1);
-  const pid = (found?.[0]?.id as string | undefined) ?? undefined;
+  // Fails closed (readRows) so an unreadable `players` table can never be
+  // reported as "this viking doesn't exist yet"; a genuine empty result keeps
+  // the quiet skip below, which is the honest answer for a brand-new name.
+  const found = await readRows<{ id: string }>(
+    'client-map players lookup',
+    client.from('players').select('id').eq('character_name', player).limit(1),
+  );
+  const pid = (found[0]?.id as string | undefined) ?? undefined;
   if (!pid) return { ok: false, pct, player };
 
   // GREATEST: never let a lower reading (different world, older snapshot) overwrite a higher one.
-  const { data: prevRows } = await client
-    .from('player_stats')
-    .select('map_explored_pct, gs_stats')
-    .eq('player_id', pid)
-    .limit(1);
-  const prevRow = (prevRows?.[0] as Obj | undefined) ?? undefined;
+  // Fails closed (readRows) — GREATEST is computed FROM this row, so a 504 read
+  // as "prev = 0" would hand the incoming reading the full +15 %/5 min jump
+  // allowance from zero and walk a real explorer's percentage backwards.
+  const prevRows = await readRows<Obj>(
+    'client-map player_stats',
+    client.from('player_stats').select('map_explored_pct, gs_stats').eq('player_id', pid).limit(1),
+  );
+  const prevRow = (prevRows[0] as Obj | undefined) ?? undefined;
   const prevPct = num(prevRow?.map_explored_pct);
 
   // How much of the allowance has refilled since this instance last let this
@@ -435,10 +510,18 @@ async function warnOnWeaponCollision(
 
   // Cheap at 15-20 players: one scan of every OTHER stored player's breakdown.
   // gs_reporter carries that row's character name (written alongside gs_stats).
-  const { data: others } = await client
+  const { data: others, error: othersErr } = await client
     .from('player_stats')
     .select('player_id, gs_reporter, gs_stats, gs_baseline')
     .neq('player_id', pid);
+  // WARN, DON'T FAIL — the one read in this file that is allowed to stay
+  // data-only in spirit. This monitor writes nothing and decides nothing; an
+  // unreadable scan costs a log line that would have said "these two rows look
+  // alike". Failing the ingest for that would turn a diagnostic into an outage.
+  if (othersErr) {
+    console.warn(`[gs-ingest] weapon-collision monitor read failed: ${othersErr.message} — skipping this scan.`);
+    return;
+  }
   if (!others || others.length === 0) return;
 
   for (const row of others) {
@@ -493,12 +576,16 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
   // Case-insensitive (escaped ilike, same as the webhook): a case/whitespace-skewed
   // reporter name must not silently drop the payload forever (R3).
   const escapedReporter = s.reporter.trim().replace(/[%_]/g, '\\$&');
-  const { data: found } = await client
-    .from('players')
-    .select('id')
-    .ilike('character_name', escapedReporter)
-    .limit(1);
-  const pid = (found?.[0]?.id as string | undefined) ?? undefined;
+  // Fails closed (readRows). The "no players row → skip" line below is the
+  // correct answer for an EMPTY result and stays exactly as it was; it was the
+  // wrong answer for a 504, where it turned a transient outage into a payload
+  // silently dropped (and a log line blaming the poller for a row it had
+  // already written).
+  const found = await readRows<{ id: string }>(
+    'players lookup for reporter',
+    client.from('players').select('id').ilike('character_name', escapedReporter).limit(1),
+  );
+  const pid = (found[0]?.id as string | undefined) ?? undefined;
   if (!pid) {
     console.warn(`[gs-ingest] no players row for reporter "${s.reporter}" — payload skipped (row lands via poller join first)`);
     return false;
@@ -523,7 +610,26 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
 
   // Read the current row: it carries this character's stored zero-point AND the
   // values to GREATEST against (only-writer-per-row makes the RMW safe).
-  const { data: prevRows } = await client.from('player_stats').select('*').eq('player_id', pid).limit(1);
+  //
+  // ⚠️ THE 2026-09-13 READ (see DbReadError at the top of this file). This is
+  // the one that cost three vikings their boards, and it is spelled out here
+  // rather than routed through readRows() so the success branch can set a flag
+  // the merge below re-checks. `prev === null` is the single most destructive
+  // value in this function: it means both "no zero-point stored" (capture the
+  // baseline at these lifetime totals) and "nothing to GREATEST against"
+  // (overwrite every column), and a 504 produced it just as readily as a
+  // first-ever snapshot did.
+  let prevReadOk = false;
+  const { data: prevRows, error: prevErr } = await client
+    .from('player_stats')
+    .select('*')
+    .eq('player_id', pid)
+    .limit(1);
+  if (prevErr) {
+    console.error(`[gs-ingest] player_stats (baseline + GREATEST) read failed: ${prevErr.message}`);
+    throw new DbReadError('player_stats (baseline + GREATEST)', prevErr.message);
+  }
+  prevReadOk = true; // set ONLY past the guard above — re-checked at mergeIntoRow
   const prev = (prevRows?.[0] ?? null) as Obj | null;
 
   // Hard prerequisite. An existing row that has no gs_baseline COLUMN (rather
@@ -589,6 +695,22 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
         `${Math.round(effective.distanceTraveled)}m. Kills, deaths, weapons, creatures, boss damage, ` +
         `materials, fish species and skills are HOLES on this post — the GsValheimStatsClient post ` +
         `carries those.`,
+    );
+  }
+
+  // BELT AND BRACES (2026-09-13). A capture on a null `prev` is legitimate in
+  // exactly one situation: the read above SUCCEEDED and returned zero rows — a
+  // character posting for the first time, whose zero-point is supposed to be
+  // taken here and who has no stored values to lose. It is catastrophic in the
+  // other: the read failed and we are about to re-baseline a veteran at their
+  // lifetime totals and blank their columns. Nothing distinguishes the two by
+  // the time the values reach mergeIntoRow, so assert the distinction HERE,
+  // where it still exists. Unreachable today (the guard above throws first);
+  // this is what makes it stay unreachable after the next refactor.
+  if (change === 'capture' && prev === null && !prevReadOk) {
+    throw new DbReadError(
+      'player_stats (baseline + GREATEST)',
+      'baseline capture reached on an unverified read — refusing to re-baseline and overwrite the row',
     );
   }
 
@@ -1019,9 +1141,17 @@ async function ingestBossMilestones(
   // the client-damage fallback may be folding fighters and a damage map onto this
   // very row concurrently — see ingestBossDamageDeltas — and the seed must union
   // with what is ACTUALLY stored, not with a read that has already gone stale.
-  const { data: rows } = await client.from('bosses').select('id, name, is_killed').in('name', names);
+  // Fails closed (readRows): an unreadable `bosses` table used to read as "none
+  // of these bosses exist", so every milestone in the payload was skipped and a
+  // first kill went unrecorded and unannounced with no line in the log saying
+  // why. A 503 says it out loud and the Emitter re-POSTs the same milestones
+  // ~120 s later (they re-fire wholesale, and the flip is is_killed-guarded).
+  const rows = await readRows<{ id: string; name: string; is_killed: boolean }>(
+    'boss milestone bosses lookup',
+    client.from('bosses').select('id, name, is_killed').in('name', names),
+  );
   const byName = new Map<string, { id: string; is_killed: boolean }>(
-    (rows ?? []).map((r) => [r.name as string, { id: r.id as string, is_killed: !!r.is_killed }]),
+    rows.map((r) => [r.name as string, { id: r.id as string, is_killed: !!r.is_killed }]),
   );
 
   for (const m of milestones) {
@@ -1123,12 +1253,20 @@ async function ingestBossMilestones(
       // so it stays exactly-once — and leave fight_stats to the damage folds and to
       // ingestBossKillEvents. A kill that goes unrecorded is worse than a kill with
       // a thinner record.
-      const { data: flipped } = await client
+      const { data: flipped, error: flipErr } = await client
         .from('bosses')
         .update({ is_killed: true, killed_at: killedAt, players_present: presentAtFlip })
         .eq('id', row.id)
         .eq('is_killed', false)
         .select('id');
+      // A WRITE, not a read — but the same trap: `{ data: null, error }` is
+      // indistinguishable from the honest "somebody else already flipped it",
+      // and this is the last chance a first kill has to be recorded. Say which
+      // one happened; the milestone re-POSTs in ~120 s either way.
+      if (flipErr) {
+        console.error(`[gs-ingest] boss milestone ${m.bossName}: degraded flip write failed — ${flipErr.message}`);
+        continue;
+      }
       if (!flipped || flipped.length === 0) continue;
       console.warn(
         `[gs-ingest] boss milestone ${m.bossName}: recorded the kill without seeding fight_stats ` +
@@ -1237,11 +1375,18 @@ async function recordBossAltar(
       return;
     }
 
-    const { data: status } = await client
+    // Warn, don't fail: `day` is a decoration on the pin and the insert below
+    // already accepts null for it. The two reads above guard the pin's identity
+    // and its position and therefore return early; this one cannot write a wrong
+    // value, only a missing one.
+    const { data: status, error: statusErr } = await client
       .from('server_status')
       .select('world_day')
       .eq('id', 1)
       .maybeSingle();
+    if (statusErr) {
+      console.warn(`[gs-ingest] altar pin for ${bossName}: world-day read failed — ${statusErr.message}; charting it without a day.`);
+    }
 
     const { error: insertErr } = await client.from('pins').insert({
       name: pin.name,
@@ -1407,13 +1552,22 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client', r
     // ingestBossMilestones' own degraded flip does NOT have this problem: it
     // seeds `presentAtFlip` from the payload before the CAS runs, so a read
     // error there still registers the kill.
-    const { data: ev } = await client
+    const { data: ev, error: evErr } = await client
       .from('events')
       .select('id, metadata')
       .eq('type', 'boss')
       .eq('metadata->>boss', bossName)
       .order('created_at', { ascending: false })
       .limit(1);
+    // Warn, don't fail. This is the degradation of a degradation: the fight
+    // summary is only ever ADDED to an event row that already records the kill,
+    // so a missed read loses detail, never a fact — and the writes that matter
+    // have already landed, so a 503 here would ask a producer to re-post work
+    // that succeeded.
+    if (evErr) {
+      console.warn(`[gs-ingest] ${source} bossKillEvents (${bossName}): boss-event read failed — ${evErr.message}; fight summary not merged.`);
+      continue;
+    }
     const evRow = ev?.[0];
     if (evRow) {
       await client
@@ -1424,7 +1578,34 @@ async function ingestBossKillEvents(raw: unknown, source: 'server' | 'client', r
   }
 }
 
+/**
+ * The one place a failed READ becomes an HTTP answer (2026-09-13).
+ *
+ * Every guarded read in this file throws DbReadError rather than returning a
+ * value the caller might mistake for "no row", and they all funnel here. 503 is
+ * chosen deliberately over this route's usual `{ status: 'ignored' }` 200: an
+ * `ignored` means "we looked, and this payload should not be written", which a
+ * mod is right to accept and never repeat. A failed read means "we could not
+ * look" — the payload is still good and we want it AGAIN. 503 is the one answer
+ * that says so, to the Emitter and to every client mod alike, and nothing has
+ * been written by the time we get here.
+ *
+ * Deliberately AFTER the rate limiter and the auth check, which return their own
+ * codes and never read the database.
+ */
 export async function POST(req: Request) {
+  try {
+    return await ingest(req);
+  } catch (e) {
+    if (e instanceof DbReadError) {
+      console.error(`[gs-ingest] refusing the payload — ${e.message}. Nothing was written; retry next cycle.`);
+      return Response.json({ error: 'database read failed, retry' }, { status: 503 });
+    }
+    throw e;
+  }
+}
+
+async function ingest(req: Request) {
   // Best-effort per-IP rate limit (see lib/rate-limit.ts) — first line of defence.
   if (!rateLimit(ipFromRequest(req))) {
     return Response.json({ error: 'rate limited' }, { status: 429 });
@@ -1705,11 +1886,14 @@ export async function POST(req: Request) {
     // Compute the offline set by ID in JS — never interpolate a character name (which
     // originates from a client-controlled roster) into a PostgREST filter string.
     const nameSet = new Set(names);
-    const { data: onlineRows } = await client
-      .from('players')
-      .select('id, character_name')
-      .eq('is_online', true);
-    const goneIds = (onlineRows ?? [])
+    // Fails closed (readRows): read as "nobody is currently online", a 504 here
+    // flips nobody off — every viking who left stays lit on the site until a
+    // later payload happens to read cleanly.
+    const onlineRows = await readRows<{ id: string; character_name: string }>(
+      'online players roster',
+      client.from('players').select('id, character_name').eq('is_online', true),
+    );
+    const goneIds = onlineRows
       .filter((r) => !nameSet.has(r.character_name as string))
       .map((r) => r.id as string);
     if (goneIds.length > 0) {

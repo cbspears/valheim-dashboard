@@ -11,6 +11,7 @@
 // persist it into ops_heartbeats (which the cockpit renders).
 
 import { createClient } from '@supabase/supabase-js';
+import { retryingFetch } from '@/lib/supabase-fetch';
 import { rateLimit, ipFromRequest } from '@/lib/rate-limit';
 import { safeEqual } from '@/lib/ops/auth';
 import { validateHeartbeat } from '@/lib/ops/heartbeat';
@@ -21,6 +22,7 @@ export const runtime = 'nodejs';
 function serviceClient() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { persistSession: false },
+    global: { fetch: retryingFetch() },
   });
 }
 
