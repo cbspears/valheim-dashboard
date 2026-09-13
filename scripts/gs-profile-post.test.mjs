@@ -449,6 +449,76 @@ const row = (prev, effective, nextBaseline) =>
   eq(wiped.change, 'reset-pending', 'a real profile collapse is still detected');
 }
 
+// ── 10. VALHEIM 1.0 EMPTY LISTS: `crafts: []` / `pickups: []` are not readings ─
+//
+// THE BUG THIS CASE EXISTS FOR (2026-09-13). GsValheimStatsClient 0.2.12 cannot
+// read the 1.0 profile storage, so it posts `crafts: []`, `pickups: []`,
+// `fish: []`, `materials: []`, `creatureKills: []` for EVERY viking. The parser
+// read array PRESENCE as a reading, so every zero-point captured from a GS post
+// stored `craftsSource:'crafts', itemsCrafted:0` — and the profile post that
+// carries the only real reading (vh_Crafts) then parsed the OTHER source, was
+// "not comparable", credited 0, and never re-took. items_crafted sat at 0 for 29
+// of 30 vikings while Mikael's profile reported 140 crafts. Same story for
+// pickups on every row baselined after the 09-12 pickups guard.
+
+{
+  /** The 1.0 GS post as it actually arrives: lists present, every one empty. */
+  const gsEmptyLists = (over = {}) => {
+    const body = gsPost(over);
+    Object.assign(body.players[0], { crafts: [], pickups: [], fish: [], materials: [], creatureKills: [] });
+    return body;
+  };
+
+  const s = parseSelfSnapshot(gsEmptyLists());
+  eq(s.provenance.craftsSource, 'none', 'an empty crafts[] is no reading, so it claims no source');
+  eq(s.provenance.pickupsSource, 'none', 'and neither is an empty pickups[]');
+  eq(s.itemsCrafted, 0);
+  eq(s.provenance.killsSource, 'weapons', 'the kills fork is untouched by any of this');
+
+  const w = world(null);
+  const cap = w.post(gsEmptyLists());
+  eq(cap.change, 'capture');
+  ok(cap.nextBaseline.holes.includes('counters.itemsCrafted'), 'crafts is a HOLE, never a zero-point of 0');
+  ok(cap.nextBaseline.holes.includes('counters.resourcesHarvested'), 'and so are pickups');
+  eq(cap.nextBaseline.counters.itemsCrafted, undefined, 'no filler 0 is stored for crafts');
+  eq(cap.nextBaseline.counters.resourcesHarvested, undefined);
+  eq(cap.nextBaseline.craftsSource, undefined, 'nor a source the payload cannot claim');
+  eq(cap.nextBaseline.pickupsSource, undefined);
+
+  // The profile post carries the only reading of either that exists on 1.0, so
+  // it FILLS both holes: this post credits nothing, growth after it is real.
+  const fill = w.post(profilePost({ crafts: 140, pickedUp: 4731 }), '2026-09-13T12:05:00.000Z');
+  eq(fill.change, 'repair');
+  ok(/first sighting of/.test(fill.reason), 'the holes are filled, not re-holed');
+  eq(w.baseline.counters.itemsCrafted, 140, 'the crafts hole takes its zero-point from THIS post');
+  eq(w.baseline.craftsSource, 'vh_Crafts', 'and the fill brings the source across with the number');
+  eq(w.baseline.counters.resourcesHarvested, 4731);
+  eq(w.baseline.pickupsSource, 'vh_ItemsPickedUp');
+  eq(fill.effective.itemsCrafted, 0, 'the filling post itself credits nothing');
+  eq(fill.effective.resourcesHarvested, 0);
+
+  // …and the freeze is over: the next profile post is credited its delta.
+  const grew = w.post(profilePost({ crafts: 152, pickedUp: 4800 }), '2026-09-13T12:10:00.000Z');
+  eq(grew.effective.itemsCrafted, 12, '12 crafted HERE are credited — the column moves again');
+  eq(grew.effective.resourcesHarvested, 69);
+  eq(w.row.items_crafted, 12);
+  eq(w.row.resources_harvested, 69);
+
+  // An interleaved GS post speaks for neither and zeroes neither.
+  w.post(gsEmptyLists({ weaponKills: 44 }), '2026-09-13T12:12:00.000Z');
+  eq(w.row.items_crafted, 12, 'a GS post never blanks the profile-derived columns');
+  eq(w.row.resources_harvested, 69);
+  eq(w.baseline.counters.itemsCrafted, 140, 'nor re-takes their zero-points');
+  eq(w.baseline.craftsSource, 'vh_Crafts');
+
+  // THE PRE-1.0 SHAPE STILL WORKS: a crafts[] with rows in it is a real reading.
+  const withList = gsEmptyLists();
+  withList.players[0].crafts = [{ item: 'ArrowWood', count: 5 }];
+  const listed = parseSelfSnapshot(withList);
+  eq(listed.provenance.craftsSource, 'crafts', 'a non-empty crafts[] is still the summed source');
+  eq(listed.itemsCrafted, 5, 'valued at the sum, exactly as before');
+}
+
 console.log(`OK — profile-only post + fish total: ${checks} checks. A stats-only own-entry post captures what it`);
 console.log('carries (builds, crafts, distance, pickups, catches) and holes what it does not, an existing');
 console.log('holed baseline is repaired from it, later posts are credited the delta, interleaved');

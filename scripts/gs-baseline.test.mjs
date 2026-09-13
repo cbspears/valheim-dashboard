@@ -21,6 +21,7 @@ import {
   isMissingBaselineColumn,
   baseColumnsOnly,
   BASELINE_GROUP_PATHS,
+  GS_BASELINE_VERSION,
   MIGRATION_REQUIRED,
   POISON_CAPS,
   REBASELINE_CONSECUTIVE,
@@ -41,6 +42,9 @@ function payload({
   builds = 0,
   crafts = 0,
   fishCaught = 0,
+  // Optional: the profile's LIFETIME pickup counter (EilifCompanionClient).
+  // Absent unless a test asks for it, so no existing case changes source.
+  pickedUp,
   pickups = [],
   weapons = [],
   creatures = [],
@@ -77,6 +81,7 @@ function payload({
           vh_DistanceSail: sail,
           vh_DistanceAir: air,
           vh_FishCaught: fishCaught,
+          ...(pickedUp === undefined ? {} : { vh_ItemsPickedUp: pickedUp }),
         },
         weapons,
         creatureKills: creatures,
@@ -848,9 +853,15 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
     for (const h of drop(mut).holes) assert.ok(BASELINE_GROUP_PATHS.has(h), `${h} is a known group`);
   }
 
-  // Genuine zeros / empty lists ARE presence — a brand-new viking baselines at
-  // zero and is credited from their very first metre, with no holes at all.
-  const rookieBody = wrap({
+  // Genuine zeros ARE presence — a brand-new viking baselines at zero on every
+  // SCALAR and is credited from their very first metre.
+  //
+  // An empty LIST is the one exception (2026-09-13): `sum([])` is 0 whether the
+  // viking has picked up nothing or the mod cannot read pickups at all (which is
+  // what GsValheimStatsClient 0.2.12 does on Valheim 1.0, for everyone), so an
+  // empty pickups[] is a HOLE and the profile post's vh_ItemsPickedUp fills it.
+  // The per-key fish MAP still reads the empty list as "no species yet".
+  const rookieSelf = {
     ...structuredClone(base),
     kills: 0,
     deaths: 0,
@@ -858,10 +869,21 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
     longestLifeSec: 0,
     bestKillsBeforeDeath: 0,
     stats: { vh_Builds: 0, vh_Crafts: 0, vh_DistanceTraveled: 0, vh_DistanceWalk: 0, vh_DistanceRun: 0, vh_DistanceSail: 0, vh_DistanceAir: 0, vh_FishCaught: 0 },
-  });
+  };
+  const rookieBody = wrap(rookieSelf);
   const rookie = parseSelfSnapshot(rookieBody);
   assert.equal(captureQualification(rookie).ok, true, 'all-zero but complete is a perfectly good zero-point');
-  assert.deepEqual(snapshotHoles(rookie, parseSelfDistances(rookieBody)), [], 'present-and-zero is a reading, never a hole');
+  assert.deepEqual(
+    snapshotHoles(rookie, parseSelfDistances(rookieBody)),
+    ['counters.resourcesHarvested'],
+    'present-and-zero scalars are readings; only the summed empty list is a hole',
+  );
+
+  // …and one real pickup row makes it a reading again, at whatever it sums to.
+  const pickedBody = wrap({ ...structuredClone(rookieSelf), pickups: [{ item: 'Wood', count: 0 }] });
+  const picked = parseSelfSnapshot(pickedBody);
+  assert.equal(picked.provenance.pickupsSource, 'pickups');
+  assert.deepEqual(snapshotHoles(picked, parseSelfDistances(pickedBody)), [], 'a non-empty pickups[] is a reading, even summing to 0');
 }
 
 // ── 11. crafts source: capture and delta must difference like against like ───
@@ -1838,6 +1860,86 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
   );
   assert.equal(grew.effective.kills, 4);
   assert.equal(mergeRow(afterFlip, grew.effective, { reporter: 'Kaetiloy' }).kills, 10, 'GREATEST, never a sum');
+}
+
+// ── MIGRATION ON READ: the empty-list zero-points Valheim 1.0 wrote ─────────
+//
+// THE BUG (2026-09-13, verified in production). GsValheimStatsClient 0.2.12
+// sends `crafts: []` and `pickups: []` for every viking on 1.0. The parser read
+// array PRESENCE as a reading, so every zero-point captured from a GS post
+// stored `craftsSource:'crafts', itemsCrafted:0` and `pickupsSource:'pickups',
+// resourcesHarvested:0`. Neither is a reading — nobody asked — and both are
+// UNREPAIRABLE in that shape: the profile post carrying the real counter parses
+// the other source, craftsComparable/pickupsComparable say "not comparable", it
+// credits 0, and never re-takes. items_crafted was 0 for 29 of 30 vikings
+// (Mikael's profile reported 140) and nine vikings had 0 pickups.
+//
+// lib/gs-client no longer writes that shape; readBaseline repairs the rows that
+// already carry it, so there is no SQL to hand-apply and no window where the two
+// shapes disagree.
+
+{
+  /** The shape production is full of: captured from a 1.0 GS post. */
+  const emptyListBlob = (over = {}) => ({
+    v: GS_BASELINE_VERSION,
+    capturedAt: '2026-09-11T00:00:00.000Z',
+    reporter: 'Mikael',
+    world: 'Eilif',
+    killsSource: 'client',
+    craftsSource: 'crafts',
+    pickupsSource: 'pickups',
+    counters: { kills: 50, deaths: 2, bossKills: 0, itemsCrafted: 0, resourcesHarvested: 0, damageDealt: 12000 },
+    counterMaps: { weaponDamage: {}, weaponKills: {}, creatureKills: {}, bossDamage: {}, bossFightSec: {}, materials: {}, fish: {} },
+    records: { longestLifeSec: 0, bestKillsBeforeDeath: 0 },
+    recordMaps: { weaponHardestHit: {}, weaponBiggestSwing: {}, skills: {} },
+    holes: ['counters.structuresBuilt', 'counters.fishCaught', 'counters.distanceTraveled', 'counterMaps.distances', 'counterMaps.distancesRaw'],
+    ...over,
+  });
+
+  // (b) CRAFTS → a HOLE. Not a reading, so it takes its zero-point from the next
+  // post that actually carries one (the policy builds and distance already use).
+  const read = readBaseline(emptyListBlob());
+  assert.equal(read.counters.itemsCrafted, undefined, 'the fake 0 is dropped, not kept');
+  assert.equal(read.craftsSource, undefined, 'and so is the source it was never entitled to');
+  assert.ok(read.holes.includes('counters.itemsCrafted'), 'itemsCrafted reads as a HOLE');
+  assert.deepEqual(
+    read.holes,
+    [...BASELINE_GROUP_PATHS].filter((p) => read.holes.includes(p)),
+    'and holes are still stored in BASELINE_GROUPS order',
+  );
+  // IDEMPOTENT: re-reading a migrated blob (it is only persisted when some other
+  // change writes it back) must produce exactly the same thing.
+  assert.deepEqual(readBaseline(JSON.parse(JSON.stringify(read))), read, 'the migration is idempotent');
+  // A blob that never carried the bad shape is untouched.
+  const honest = emptyListBlob({ craftsSource: 'vh_Crafts', counters: { kills: 50, deaths: 2, itemsCrafted: 0, resourcesHarvested: 0 } });
+  assert.equal(readBaseline(honest).counters.itemsCrafted, 0, 'a real vh_Crafts zero-point of 0 is a reading and survives');
+  assert.equal(readBaseline(honest).craftsSource, 'vh_Crafts');
+
+  // The next vh_Crafts post FILLS the hole (credits 0), and growth follows.
+  const fill = ingest(payload({ reporter: 'Mikael', kills: 50, deaths: 2, crafts: 140, pickedUp: 4731 }), emptyListBlob(), '2026-09-13T12:00:00.000Z');
+  assert.equal(fill.change, 'repair');
+  assert.equal(fill.nextBaseline.counters.itemsCrafted, 140, 'the zero-point is taken from the post that can speak');
+  assert.equal(fill.nextBaseline.craftsSource, 'vh_Crafts');
+  assert.equal(fill.effective.itemsCrafted, 0, 'the filling post credits nothing');
+  const grew = ingest(payload({ reporter: 'Mikael', kills: 50, deaths: 2, crafts: 152, pickedUp: 4731 }), fill.nextBaseline, '2026-09-13T12:05:00.000Z');
+  assert.equal(grew.effective.itemsCrafted, 12, 'and the column moves again — the freeze is over');
+
+  // (c) PICKUPS → re-stamped as the profile counter at 0, i.e. credited
+  // LIFETIME (decided 2026-09-12), which is exactly what the OLDER rows with no
+  // pickupsSource at all already do.
+  assert.equal(read.pickupsSource, 'vh_ItemsPickedUp', 'pickups is re-sourced, not holed');
+  assert.equal(read.counters.resourcesHarvested, 0, 'at a zero-point of 0');
+  assert.ok(!(read.holes ?? []).includes('counters.resourcesHarvested'));
+  assert.equal(fill.effective.resourcesHarvested, 4731, 'so the full lifetime count is credited, as for the sourceless rows');
+
+  // (3) THE RESET DETECTOR MUST NOT COUNT A HOLE. itemsCrafted is now a hole for
+  // most of the server; a signature that still summed it would read every post
+  // as a career that had shed its crafts.
+  const s = parseSelfSnapshot(payload({ reporter: 'Mikael', kills: 50, deaths: 2, crafts: 140, pickedUp: 4731 }));
+  const check = shouldRebaseline(s, read);
+  assert.equal(check.reset, false, 'a holed counter never reads as a collapse');
+  assert.equal(check.baseSignature, 52, 'kills 50 + deaths 2 — the holed itemsCrafted is out of both sums');
+  assert.equal(check.rawSignature, 4783, '50 + 2 + 4,731 pickups, and NOT the 140 crafts');
 }
 
 console.log('OK — all world-baseline assertions passed');

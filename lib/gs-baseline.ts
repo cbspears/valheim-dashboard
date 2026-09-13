@@ -729,6 +729,8 @@ export function readBaseline(raw: unknown, fallbackAt: string = new Date().toISO
     : [];
   if (holes.length > 0) baseline.holes = holes;
 
+  migrateEmptyListZeroPoints(baseline);
+
   const pending = plainObj(o.pendingReset);
   const pendingCount = pending ? Math.floor(num(pending.count)) : 0;
   if (pending && pendingCount > 0) {
@@ -755,6 +757,54 @@ export function readBaseline(raw: unknown, fallbackAt: string = new Date().toISO
 
   if (Object.keys(unusable).length > 0) baseline.unusable = unusable;
   return baseline;
+}
+
+/**
+ * MIGRATION ON READ (2026-09-13): undo the zero-points an EMPTY GS list wrote.
+ *
+ * THE INCIDENT. GsValheimStatsClient 0.2.12 sends `crafts: []` and
+ * `pickups: []` for every viking on Valheim 1.0. The parser used to read array
+ * PRESENCE as a reading, so every zero-point captured from a GS post stored
+ * `craftsSource:'crafts', itemsCrafted:0` and `pickupsSource:'pickups',
+ * resourcesHarvested:0`. Both are lies of the same kind: not "this character
+ * had crafted nothing", but "nobody asked". lib/gs-client no longer writes
+ * them — that fixes tomorrow's captures and nothing already stored, and the
+ * stored ones are self-sealing: the profile post that carries the real counter
+ * parses the OTHER source, craftsComparable/pickupsComparable say "not
+ * comparable", and it credits 0 on every post forever (29 of 30 vikings with
+ * items_crafted 0; nine with 0 pickups).
+ *
+ * Repaired here rather than in SQL so there is nothing to hand-apply and no
+ * window where new rows are written in the old shape. It is a pure rewrite of
+ * an in-memory read — deterministic and IDEMPOTENT, so re-reading an
+ * un-persisted blob produces the same thing every time; the corrected blob is
+ * written back by the ordinary applyBaseline paths (for crafts, by the hole
+ * fill on the very next profile post, which reports `change:'repair'`).
+ *
+ * The two counters get DIFFERENT treatment because their policies differ:
+ *   • itemsCrafted → a HOLE. Crafts are credited from a fresh zero-point (the
+ *     next vh_Crafts post is the zero-point, growth after it is credited) —
+ *     the same policy builds and distance already use.
+ *   • resourcesHarvested → re-stamped as `vh_ItemsPickedUp` at 0, i.e. pickups
+ *     are credited LIFETIME (decided 2026-09-12). That is exactly what the
+ *     OLDER rows — the ones with no pickupsSource at all — already do, and it
+ *     makes them agree instead of splitting the server in two by capture date.
+ */
+function migrateEmptyListZeroPoints(b: GsBaseline): void {
+  const holes = new Set(b.holes ?? []);
+
+  if (b.craftsSource === 'crafts' && b.counters.itemsCrafted === 0) {
+    delete b.counters.itemsCrafted;
+    delete b.craftsSource;
+    holes.add('counters.itemsCrafted');
+    // Stored in BASELINE_GROUPS order, same as a fresh capture and as
+    // reconcileBaseline, so two blobs for the same set of holes compare equal.
+    b.holes = BASELINE_GROUPS.filter((x) => holes.has(x.path)).map((x) => x.path);
+  }
+
+  if (b.pickupsSource === 'pickups' && b.counters.resourcesHarvested === 0 && !holes.has('counters.resourcesHarvested')) {
+    b.pickupsSource = 'vh_ItemsPickedUp';
+  }
 }
 
 /** A copy fit to be STORED as someone else's `superseded` ceiling (rule 2). */

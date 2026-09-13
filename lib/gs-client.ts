@@ -178,7 +178,8 @@ export interface SelfProvenance {
    *                        GsValheimStatsClient.
    *   'vh_ItemsPickedUp' — the .fch profile's LIFETIME pickup counter, from the
    *                        EilifCompanionClient profile post.
-   *   'none'             — neither.
+   *   'none'             — neither, INCLUDING an empty pickups[] (a sum of
+   *                        nothing is not a zero-point; see parseSelfSnapshot).
    *
    * They are not the same quantity, and they now arrive from two different
    * posters minutes apart: differencing a lifetime 9,000 against a world-scoped
@@ -206,7 +207,8 @@ export interface SelfProvenance {
    * Which source itemsCrafted was read from. The two sources are NOT
    * interchangeable — differencing a vh_Crafts baseline against a crafts[]-summed
    * snapshot (or vice versa) compares unlike against unlike, so the baseline
-   * records this and refuses to credit across a source change.
+   * records this and refuses to credit across a source change. 'none' includes an
+   * EMPTY crafts[] (a sum of nothing is not a zero-point).
    */
   craftsSource: 'vh_Crafts' | 'crafts' | 'none';
 }
@@ -441,7 +443,18 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   // different quantities (world-scoped sum vs lifetime profile counter) and they
   // now arrive from two different posters, so the baseline layer must never
   // difference one against a zero-point taken from the other.
-  const pickupsSource: SelfProvenance['pickupsSource'] = Array.isArray(self.pickups)
+  // PRESENCE IS NOT A READING WHEN THE LIST IS EMPTY (2026-09-13). On Valheim
+  // 1.0 GsValheimStatsClient 0.2.12 ships `pickups: []` for EVERY viking — it
+  // can no longer read the new profile storage — and an empty list summed to 0
+  // was being stored as a real zero-point of `pickupsSource:'pickups', 0`. From
+  // then on every `vh_ItemsPickedUp` post was "source changed, not comparable"
+  // and credited 0, forever, for everyone baselined from a GS post. An empty
+  // list is a SUMMED SCALAR with nothing to sum: no reading, so 'none' → a hole,
+  // which the profile post then fills. (The per-key fish MAP still keys off
+  // `hasPickups` presence: an empty map there is the honest "no species yet",
+  // and rule 3 credits any species in full the day it first appears.)
+  const hasPickupList = Array.isArray(self.pickups) && self.pickups.length > 0;
+  const pickupsSource: SelfProvenance['pickupsSource'] = hasPickupList
     ? 'pickups'
     : hasPickupCount
       ? 'vh_ItemsPickedUp'
@@ -469,12 +482,19 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   // Crafts DO come from the profile-only post (vh_Crafts): GsValheimStatsClient
   // sends no crafts[] on Valheim 1.0 at all, so this is the only reading there is.
   // (Kills stay world-scoped via weapons[]; deaths stay with our own death events.)
+  // …and the same empty-list rule as pickups above: `crafts: []` (what 0.2.12
+  // sends on 1.0) is not "this viking has crafted nothing", it is no reading at
+  // all. Stored as `craftsSource:'crafts', 0` it froze itemsCrafted at 0 for 29
+  // of 30 vikings — Mikael's profile reported 140 crafts against a column of 0.
   const craftsSource: SelfProvenance['craftsSource'] = isNum(stats.vh_Crafts)
     ? 'vh_Crafts'
-    : Array.isArray(self.crafts)
+    : Array.isArray(self.crafts) && self.crafts.length > 0
       ? 'crafts'
       : 'none';
-  const itemsCrafted = craftsSource === 'vh_Crafts' ? statNum('vh_Crafts') : sumBy(arr(self.crafts), 'count');
+  const itemsCrafted =
+    craftsSource === 'vh_Crafts' ? statNum('vh_Crafts')
+    : craftsSource === 'crafts' ? sumBy(arr(self.crafts), 'count')
+    : 0;
   const structuresBuilt = statNum('vh_Builds');
 
   // Built UNCAPPED first (records are derived from every weapon), then capped for
@@ -524,9 +544,12 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
       hasBestKillsBeforeDeath: isNum(self.bestKillsBeforeDeath),
       hasBuilds: isNum(stats.vh_Builds),
       hasDistance: isNum(stats.vh_DistanceTraveled),
-      // Array PRESENCE, not length: an empty list is a real "this character has
-      // none of that yet" (a perfectly good zero-point), while an ABSENT list is
-      // no information at all and must become a baseline hole instead of a 0.
+      // Array PRESENCE, not length — and this one stays that way on purpose: it
+      // gates the per-key fish MAP, where an empty {} means "no species caught
+      // yet" and costs nothing (rule 3 credits a species in full the day it
+      // first appears). The SUMMED scalar above cannot use presence, because a
+      // sum of an empty list is an indistinguishable 0. An ABSENT list is no
+      // information either way and becomes a baseline hole.
       hasPickups: Array.isArray(self.pickups),
       hasPickupCount,
       pickupsSource,
