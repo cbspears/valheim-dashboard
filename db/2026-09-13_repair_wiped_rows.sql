@@ -1,4 +1,9 @@
--- STATUS: READY, NOT APPLIED. Repairs the three player_stats rows the ingest WIPED on
+-- STATUS: APPLIED 2026-09-13 ~11:25 CT via the Supabase MCP, with ONE deviation from the text
+-- below: Rosir's restored blob took its builds/distance groups (structuresBuilt 2469, the
+-- distances maps) from the LIVE zero-point instead of the lineage holes, so his builds keep
+-- counting exactly as before the repair instead of re-filling at today's lifetime and
+-- stalling. Yunter's lineage blob already carried those groups; Fjällhnot's are near zero.
+-- Original text kept for the record. Repairs the three player_stats rows the ingest WIPED on
 -- 2026-09-12/13 (see 08-Dashboard tracker, 2026-09-13 stats audit).
 --
 -- WHAT HAPPENED. app/api/gs-ingest/route.ts read the existing player_stats row with

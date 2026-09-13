@@ -1,4 +1,6 @@
--- STATUS: READY, NOT APPLIED. Two data repairs from the 2026-09-13 stats audit.
+-- STATUS: APPLIED 2026-09-13 ~11:25 CT via the Supabase MCP. Backfilled 45 sessions: Mikael 20
+-- (1,145 min), Æymundr 11 (635), Lóa 9 (796), Psifour 3 (102), Ræginál 1 (120), Charleif 1 (145).
+-- Two data repairs from the 2026-09-13 stats audit.
 --
 -- 1. RE-BIND players.steam_id for names the launch-night join burst paired with the
 --    wrong Steam account (2026-09-09 16:35 CT: eight vikings joined inside a minute
