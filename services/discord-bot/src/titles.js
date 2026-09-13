@@ -36,6 +36,14 @@
 //      the name the hall gave them for at least a day. Placeholder -> earned has
 //      NO tenure gate: a viking earning their first real title is the special
 //      moment the whole feature exists for.
+//   4b. ONE HOLDER PER EARNED TITLE. While a viking holds an earned title under
+//      tenure, the engine has usually already moved them on and handed that
+//      title to whoever is next on the dimension (2026-09-11: Kætiløy held "the
+//      Far-Seer" under tenure while the engine gave the map crown to Rosir, and
+//      the hall proclaimed a second Far-Seer). An offer of a title that another
+//      viking currently holds under tenure is HELD, not confirmed: the offer
+//      clock does not run, so when the tenure clears the challenger still has to
+//      be offered it twice, 15 min apart, like any other change.
 //   5. DAILY BUDGET. At most TITLES_PER_DAY (default 3) proclamations per rolling
 //      24 h, counted from title_history. When more qualify at once they are ranked
 //      deterministically — first titles first, then combat crowns (kills, damage,
@@ -311,6 +319,21 @@ export function createTitlesAnnouncer({
     // announcement, whatever upstream let them in.
     const handled = new Set();
 
+    // Rule 4b: earned title -> the name holding it under tenure right now. Built
+    // from the same players read the loop walks, so it is exactly what the hall
+    // currently proclaims. Excluded rows never hold anything (their crown is
+    // cleared once by db/2026-09-11_players_excluded.sql and never refreshed).
+    const heldUnderTenure = new Map();
+    for (const row of data || []) {
+      const holder = (row.character_name || '').trim();
+      const held = String(row.current_title || '').trim();
+      if (!holder || !isEarnedTitle(held) || isExcluded(row)) continue;
+      const heldForMs = row.title_updated_at ? nowMs - Date.parse(row.title_updated_at) : NaN;
+      if (Number.isFinite(heldForMs) && heldForMs < minTenureMs && !heldUnderTenure.has(held)) {
+        heldUnderTenure.set(held, { name: holder, heldForMs });
+      }
+    }
+
     for (const row of data || []) {
       const name = (row.character_name || '').trim();
       if (!name) continue;
@@ -384,6 +407,20 @@ export function createTitlesAnnouncer({
 
       // Everything below is a change that WOULD be proclaimed.
       const kind = currentEarned ? 'earned' : 'promotion';
+
+      // 4b. ONE HOLDER PER EARNED TITLE. Someone else wears this title under
+      //     tenure: hold, and do NOT start the offer clock (see the header).
+      const holder = heldUnderTenure.get(title);
+      if (holder && holder.name !== name) {
+        quiet(
+          nowMs,
+          name,
+          `offered "${title}" but ${holder.name} holds it (${Math.floor(holder.heldForMs / HOUR_MS)} h of ${Math.round(minTenureMs / HOUR_MS)} h tenure); not confirming`,
+        );
+        pass.held++;
+        pending.delete(name);
+        continue;
+      }
 
       // Track the offer BEFORE the gates, so an offer that stands through a whole
       // tenure window is already confirmed the moment tenure clears.

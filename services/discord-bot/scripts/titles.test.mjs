@@ -282,6 +282,51 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   ok(r.announced === 1, 'a first earned title needs confirmation but no tenure');
 }
 
+// ── 8c. ONE HOLDER PER EARNED TITLE: an offer of a title someone else holds
+//        under tenure is held, and its confirmation clock does not run ─────────
+{
+  const posts = [];
+  const c = clock();
+  const roster = [
+    // Kætiløy's shape on 2026-09-11: wearing the Far-Seer for 2 h, the engine
+    // has already moved her to a different earned title.
+    { id: 'h1', character_name: 'Holder', current_title: 'the Far-Seer', title_updated_at: ago(2 * HOUR) },
+    // Rosir's shape: a placeholder wearer the engine now names the Far-Seer.
+    { id: 'c1', character_name: 'Challenger', current_title: 'of the Quiet Fjord', title_updated_at: ago(3 * DAY) },
+  ];
+  const writeDb = fakeDb({ players: roster });
+  const ann = announcer({
+    db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: fakeApi([['Holder', 'the Ever-Present', 'presence'], ['Challenger', 'the Far-Seer', 'map']]),
+    now: c.now,
+  });
+  const first = await ann.tick();
+  ok(first.held === 2 && first.confirming === 0 && first.announced === 0,
+    `both hold: the wearer under tenure, the challenger because the title is taken, got ${JSON.stringify(first)}`);
+  c.advance(16 * MIN);
+  const second = await ann.tick();
+  ok(second.held === 2 && second.announced === 0, 'a confirm window later the challenger is still not confirmed');
+  ok(posts.length === 0 && writeDb.writes.updates.length === 0, 'no second Far-Seer proclaimed, nothing written');
+
+  // Tenure clears (24 h from the holder's title_updated_at). The holder's own
+  // offer stood the whole time, so it goes out now; the challenger's clock only
+  // STARTS now.
+  c.advance(22 * HOUR);
+  const third = await ann.tick();
+  ok(third.announced === 1 && posts.length === 1 && posts[0].includes('**Holder**') && posts[0].includes('the Ever-Present'),
+    `the wearer moves on once tenure clears, got ${JSON.stringify(third)} / ${posts[0]}`);
+  ok(third.confirming === 1, `the challenger starts confirming only now, got ${JSON.stringify(third)}`);
+  // Mirror the registry write the fake does not apply.
+  roster[0].current_title = 'the Ever-Present';
+  roster[0].title_updated_at = new Date(c.now()).toISOString();
+
+  c.advance(16 * MIN);
+  const fourth = await ann.tick();
+  ok(fourth.announced === 1 && posts.length === 2 && posts[1].includes('**Challenger**') && posts[1].includes('the Far-Seer'),
+    `the challenger is confirmed 16 min later and takes the vacated title, got ${JSON.stringify(fourth)}`);
+  ok(writeDb.writes.history.length === 2, 'exactly two history rows: one Far-Seer at a time');
+}
+
 // ── 9. DAILY BUDGET caps the pass, in a deterministic order ───────────────
 {
   const roster = [
