@@ -1,4 +1,5 @@
--- STATUS: DRAFT, NOT APPLIED. Waits on Charlie's decision (open since 2026-09-12).
+-- STATUS: APPLIED 2026-09-13 13:07 CT via the Supabase MCP (Charlie's yes, crew updating to Client 0.4.5).
+-- Verify query returned zero rows; backup table player_stats_gs_baseline_bak_2026_09_13 holds the old zero-points.
 --
 -- Drops the builds / crafts / distance / pickups / kills zero-points so a launch-fresh
 -- character's WHOLE Eilif history counts. Deaths/damage/fish are not touched.
