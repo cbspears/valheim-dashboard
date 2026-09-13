@@ -883,7 +883,11 @@ function relayEventsDb(rows) {
 
   // Both send paths escape the name and suppress previews.
   const postChat = pollerSrc.slice(pollerSrc.indexOf('async postChat('), pollerSrc.indexOf('// --- Send one parsed event onward'));
-  ok(!/\$\{name\}/.test(postChat), 'no send path interpolates the raw shouted name');
+  // Logger lines are not send paths: the 09-12 replay guard logs the raw name
+  // to the journal ("chat mirror suppressed for <name>"), which never reaches
+  // Discord. Only what is sent has to be escaped.
+  const postChatSends = postChat.split('\n').filter((l) => !/this\.log\./.test(l)).join('\n');
+  ok(!/\$\{name\}/.test(postChatSends), 'no send path interpolates the raw shouted name');
   eq((postChat.match(/flags: 4/g) || []).length, 3, 'every chat send carries SUPPRESS_EMBEDS');
 
   // Round 3 review: the fix moved every NAME cap off `slice` and left the shout
