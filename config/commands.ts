@@ -370,7 +370,8 @@ export const GAME_SHOUTS: GameShout[] = [
 
   // ── the board signs ──────────────────────────────────────────────────────
   // Written, not shouted. Everything below is derived from the marker regex in
-  // SignBoards.cs, the key list in BoardsFeed.cs and the strings lib/boards.ts
+  // SignBoards.cs, the key list lib/boards.ts publishes (BOARD_KEYS / STAT_KEYS —
+  // the feed decides the vocabulary since EilifBoards 0.3.0) and the strings it
   // renders, and the tripwire reads all three.
   {
     kind: 'in-game',
@@ -383,13 +384,17 @@ export const GAME_SHOUTS: GameShout[] = [
       '[board:resources]',
       '[board:explored]',
       '[board:distance]',
+      '[board:damage]',
+      '[board:hours]',
+      '[board:crafts]',
+      '[board:fish]',
     ],
     who: 'any member',
-    what: 'Turns an ordinary sign into a live leaderboard. Build a sign, write the marker as the whole of its text, and the top five for that stat appear on it with the leader accented. Write anything else on the sign and it is yours again.',
+    what: 'Turns an ordinary sign into a live leaderboard: every ranked board on the Vikings page has a marker (kills, deaths, builds, resources, explored, distance, damage, hours, crafts, fish). Build a sign, write the marker as the whole of its text, and the top five for that stat appear on it with the leader accented. Write anything else on the sign and it is yours again.',
     example: '[board:resources]',
     note: 'This one is written on a sign, never shouted. It has to be the plain wooden sign you can write on, and the marker has to be the sign’s whole text: a sign that only mentions a marker inside a sentence stays yours. Case and stray spaces do not matter. A newly marked sign is found within about five minutes, and every board redraws about once a minute after that.',
     source:
-      'plugins/eilif-boards/src/SignBoards.cs MarkerRe, ParseMarker; plugins/eilif-boards/src/BoardsFeed.cs BoardKeys, Canonical; plugins/eilif-boards/src/EilifBoardsPlugin.cs ScanSeconds, PollSeconds; lib/boards.ts statBoard, TOP_N',
+      'plugins/eilif-boards/src/SignBoards.cs MarkerRe, ParseMarker; lib/boards.ts BOARD_KEYS, STAT_KEYS, statBoard, TOP_N; plugins/eilif-boards/src/BoardsFeed.cs FallbackAll; plugins/eilif-boards/src/EilifBoardsPlugin.cs ScanSeconds, PollSeconds',
   },
   {
     kind: 'in-game',
@@ -402,13 +407,17 @@ export const GAME_SHOUTS: GameShout[] = [
       '[board:resources:leader]',
       '[board:explored:leader]',
       '[board:distance:leader]',
+      '[board:damage:leader]',
+      '[board:hours:leader]',
+      '[board:crafts:leader]',
+      '[board:fish:leader]',
     ],
     who: 'any member',
-    what: 'The same six stats as a one line plaque: the heading, whoever leads it, and their number, with no runners up. Write the other marker on the same sign to turn a plaque back into a full board.',
+    what: 'The same ten stats as a one line plaque: the heading, whoever leads it, and their number, with no runners up. Write the other marker on the same sign to turn a plaque back into a full board.',
     example: '[board:distance:leader]',
-    note: 'Written on a sign, never shouted. Only those six take the leader ending. There is no leader of Living Titles and no leader of Great Deeds, so a sign written that way is not a marker at all and stays yours.',
+    note: 'Written on a sign, never shouted. Only those ten take the leader ending. There is no leader of Living Titles and no leader of Great Deeds, so a sign written that way is not a marker at all and stays yours.',
     source:
-      'plugins/eilif-boards/src/BoardsFeed.cs BoardKeys, Claim, Leader, Stats; lib/boards.ts buildLeaders, leaderPlaque',
+      'lib/boards.ts STAT_KEYS, buildLeaders, leaderPlaque; plugins/eilif-boards/src/BoardsFeed.cs FallbackLeaders',
   },
   {
     kind: 'in-game',
@@ -420,7 +429,7 @@ export const GAME_SHOUTS: GameShout[] = [
     example: '[board:titles]',
     note: 'Written on a sign, never shouted. A viking who has not earned a title yet is left off until they do.',
     source:
-      'plugins/eilif-boards/src/BoardsFeed.cs BoardKeys, Titles; lib/boards.ts titlesBoard, MAX_TITLE_CHARS',
+      'lib/boards.ts BOARD_KEYS, titlesBoard, MAX_TITLE_CHARS; plugins/eilif-boards/src/BoardsFeed.cs FallbackAll',
   },
   {
     kind: 'in-game',
@@ -432,7 +441,7 @@ export const GAME_SHOUTS: GameShout[] = [
     example: '[board:deeds]',
     note: 'Written on a sign, never shouted. This one counts for all of you at once, so there is nobody to name on it.',
     source:
-      'plugins/eilif-boards/src/BoardsFeed.cs BoardKeys, Deeds; lib/boards.ts deedsBoard, DeedsSummary',
+      'lib/boards.ts BOARD_KEYS, deedsBoard, DeedsSummary; plugins/eilif-boards/src/BoardsFeed.cs FallbackAll',
   },
 ];
 

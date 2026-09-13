@@ -182,8 +182,8 @@ export const ALL_MODS: Mod[] = [
     name: 'Eilif Companion Client',
     author: 'cbspears (custom-built)',
     description:
-      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play, with no setup and nothing to upload. It names exactly what killed you the moment you die, the creature or the hazard, so How We Die and the Saga show the real cause instead of a guess. It also carries a keep-list, so the tools and gear a viking cannot afford to lose stay on you through a death that would otherwise scatter them. It reads your own builds, crafts, pickups and distance travelled straight off your character and sends them along, so those boards fill in again (kills come from the weapon breakdown, deaths from the death reports). Ships in the modpack.',
-    version: '0.4.3',
+      'Your explored-map percentage flows to the Cartographer leaderboard automatically while you play, with no setup and nothing to upload. It names exactly what killed you the moment you die, the creature or the hazard, so How We Die and the Saga show the real cause instead of a guess. It also carries a keep-list, so the tools and gear a viking cannot afford to lose stay on you through a death that would otherwise scatter them. It reads your own kills, builds, crafts, pickups, distance travelled and fish caught straight off your character and sends them along, so those boards fill in again and your kill count no longer depends on a per-world weapon file that can reset or get mixed up between characters on one PC (deaths still come from the death reports). Ships in the modpack.',
+    version: '0.4.5', // 2026-09-13: 0.4.4 (fish caught/hooked/lost + quality tiers) + 0.4.5 (total kills from the profile's EnemyKills counter; the kill board no longer depends on the GS per-world weapon file). Pack v19 pins it.
     category: 'Content',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Eilif/EilifCompanionClient/',
@@ -224,7 +224,7 @@ name: 'Unshamed',
     author: 'Advize',
     description:
       'Plant and harvest every flower, sapling, and crop with the cultivator, so you can raise proper farms and managed forests. Yields stay vanilla. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
-    version: '1.21.0',
+    version: '1.21.2', // 2026-09-12 15:19 CT: Advize's 1.21.2 ("Fixed seed drops for poteitrs") on the box; pack v19 pins it (v16–v18 pinned 1.21.0, r2modman installed the newest anyway).
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',

@@ -55,6 +55,7 @@ import {
   NOTIFICATIONS,
   SITE_PAGES,
 } from '../config/commands.ts';
+import { BOARD_KEYS, STAT_KEYS } from '../lib/boards.ts';
 
 let passed = 0;
 const skips = [];
@@ -259,34 +260,36 @@ const offersVerb = (verb) =>
 // ── 2b. the board markers the sign plugin really paints ───────────────────
 //
 // The Living Boards are the one thing on this page that is written rather than
-// typed, and the whole vocabulary lives in the plugin: BoardKeys says which
-// boards exist and which of them have a leader, and SignBoards.MarkerRe says
+// typed. Since EilifBoards 0.3.0 the vocabulary is the FEED's: lib/boards.ts
+// BOARD_KEYS says which boards exist and STAT_KEYS which of them have a leader
+// plaque; the plugin claims whatever the feed lists and only keeps a fallback
+// list for markers written during an outage. SignBoards.MarkerRe still says
 // what shape a marker has to be. None of that is remembered here.
 {
+  const allKeys = [...BOARD_KEYS];
+  const statKeys = [...STAT_KEYS];
+  const leader = 'leader';
+  ok(allKeys.length >= 8, `the feed carries every board (${allKeys.join(', ')})`);
+  ok(statKeys.every((k) => allKeys.includes(k)), 'every stat board is a board');
+
+  // The plugin's offline fallback must not drift from the feed: a key missing
+  // from it is claimable only one poll later, and a key it names that the feed
+  // never publishes resolves to nothing.
   const feedCs = read('plugins/eilif-boards/src/BoardsFeed.cs');
-  const constOf = Object.fromEntries(
-    [...feedCs.matchAll(/internal const string (\w+)\s*=\s*"([a-z]+)"/g)].map((m) => [m[1], m[2]]),
-  );
-  const arrayOf = (name) => {
+  const fallbackOf = (name) => {
     const block = new RegExp(
       `internal static readonly string\\[\\] ${name}\\s*=\\s*\\{([^}]*)\\}`,
     ).exec(feedCs);
     ok(block, `BoardsFeed.cs still declares BoardKeys.${name} as a literal this test can read`);
-    return block[1]
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((sym) => {
-        ok(constOf[sym], `BoardKeys.${name} names ${sym}, which is a board key`);
-        return constOf[sym];
-      });
+    return [...block[1].matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
   };
-
-  const allKeys = arrayOf('All');
-  const statKeys = arrayOf('Stats');
-  const leader = constOf.Leader;
-  ok(allKeys.length >= 8, `the feed carries every board (${allKeys.join(', ')})`);
-  ok(leader, 'BoardKeys still names the leader variant');
+  const same = (a, b) => {
+    const x = [...a].sort();
+    const y = [...b].sort();
+    return x.length === y.length && x.every((v, i) => v === y[i]);
+  };
+  ok(same(fallbackOf('FallbackAll'), allKeys), 'BoardKeys.FallbackAll matches lib/boards.ts BOARD_KEYS');
+  ok(same(fallbackOf('FallbackLeaders'), statKeys), 'BoardKeys.FallbackLeaders matches lib/boards.ts STAT_KEYS');
 
   const signs = GAME_SHOUTS.filter((e) => e.how === 'sign');
   ok(signs.length >= 1, `the register offers the board signs (${signs.length} entries)`);
@@ -296,7 +299,7 @@ const offersVerb = (verb) =>
 
   // Every board a player can claim is on the page...
   for (const k of allKeys) {
-    ok(offered.has(`[board:${k}]`), `the plugin paints [board:${k}] and the register offers it`);
+    ok(offered.has(`[board:${k}]`), `the feed paints [board:${k}] and the register offers it`);
   }
   for (const k of statKeys) {
     ok(
