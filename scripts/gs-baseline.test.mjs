@@ -1699,6 +1699,11 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
   // credited — no amount of repetition can strand this character again.
   const played = structuredClone(canonical);
   played.players[0].kills = 402;
+  // The mod's own payload carries `stats.vh_EnemyKills` — which is now the kills
+  // SOURCE (it outranks the entry's own counter, lib/gs-client), so a realistic
+  // hour of play moves both. Bumping only `kills` would model a payload the mod
+  // never emits and would credit nothing.
+  played.players[0].stats.vh_EnemyKills = 402;
   played.players[0].stats.vh_Builds = 260;
   const next = applyBaseline(parseSelfSnapshot(played), parseSelfDistances(played), cap.nextBaseline, '2026-08-23T13:00:00.000Z');
   assert.equal(next.deferred, false);

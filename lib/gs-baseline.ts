@@ -142,10 +142,13 @@ const g = (
 
 export const BASELINE_GROUPS: readonly BaselineGroup[] = [
   // scalar cumulative counters mirrored into player_stats columns
-  // kills: carried whenever the parse found ANY usable source — the client's own
-  // counter, or the weapons[] sum (VALHEIM 1.0 STOPGAP). Neither = a hole, not a
-  // zero: baselining kills at 0 because the payload could not speak for it is
-  // exactly the Chærlie incident.
+  // kills: carried whenever the parse found ANY usable source — the profile's
+  // vh_EnemyKills counter, the client's own counter, or the weapons[] sum
+  // (VALHEIM 1.0 STOPGAP). None = a hole, not a zero: baselining kills at 0
+  // because the payload could not speak for it is exactly the Chærlie incident.
+  // ⚠️ This gate is snapshot-only. Whether the reading is COMPARABLE with the
+  // stored zero-point is a second question, answered per post against the
+  // stored source (killsComparable) and folded into `carried` by applyBaseline.
   g('counters', 'kills', (p) => p.killsSource !== 'none'),
   // deaths: 1.0 payloads can carry no deaths reading at all. A hole credits
   // nothing until it first appears; the ingest route fills the COLUMN from our
@@ -281,8 +284,15 @@ export interface GsBaseline {
    * Absent = a zero-point captured before this field existed. It is stamped (not
    * re-taken) on the next snapshot, so an old zero-point keeps crediting exactly
    * what it credited before while gaining the protection.
+   *
+   * ⚠️ 'profile' (`vh_EnemyKills`, EilifCompanionClient ≥0.4.5) is the END
+   * STATE, not one more flip: once a zero-point is taken from it, a weapons- or
+   * client-derived snapshot never re-takes it and never credits kills (it is
+   * NOT CARRIED for that post — killsComparable). Both posters keep posting, so
+   * a re-take on every change would flip-flop the zero-point twice a cycle
+   * forever, which is exactly the 2026-09-10 incident.
    */
-  killsSource?: 'client' | 'weapons';
+  killsSource?: 'client' | 'weapons' | 'profile';
   /**
    * Consecutive-low streak toward a re-baseline (rule 2). Persisted here rather
    * than in a column so the whole reset decision lives in one jsonb value.
@@ -547,6 +557,8 @@ export function captureQualification(s: ParsedSelf, dist: ParsedDistances | null
  */
 function profileOnlyQualifies(s: ParsedSelf, dist: ParsedDistances | null): boolean {
   const p = s.provenance;
+  // ≥0.4.5 profile posts carry vh_EnemyKills, so they clear the gate on kills
+  // alone and never reach here; this exception is for the 0.4.0–0.4.4 shape.
   if (!p.ownEntry || !p.profileOnly || !p.hasStats || p.killsSource !== 'none') return false;
   // At least one profile counter worth accounting for. A `stats` map with none
   // of these is an empty report and stays deferred.
@@ -564,6 +576,8 @@ export function profileOnlyCaptured(s: ParsedSelf, dist: ParsedDistances | null)
   const p = s.provenance;
   const out: string[] = [];
   if (p.hasBuilds) out.push(`builds ${s.structuresBuilt}`);
+  // ≥0.4.5 — this post carries the kills column too (vh_EnemyKills).
+  if (p.killsSource === 'profile') out.push(`kills ${s.kills}`);
   if (p.craftsSource === 'vh_Crafts') out.push(`crafts ${s.itemsCrafted}`);
   if (p.pickupsSource === 'vh_ItemsPickedUp') out.push(`pickups ${s.resourcesHarvested}`);
   if (p.hasFishCaught) out.push(`catches ${s.fishCaught}`);
@@ -599,9 +613,9 @@ export function captureBaseline(s: ParsedSelf, dist: ParsedDistances | null, at:
     // Which side of the pickups[] / vh_ItemsPickedUp fork this zero-point was
     // read from (rule 4). 'none' is dropped below with the group.
     pickupsSource: s.provenance.pickupsSource === 'vh_ItemsPickedUp' ? 'vh_ItemsPickedUp' : 'pickups',
-    // Which side of the client-counter / weapons-sum fork this zero-point was
-    // read from (VALHEIM 1.0 STOPGAP). 'none' is dropped below with the group.
-    killsSource: s.provenance.killsSource === 'weapons' ? 'weapons' : 'client',
+    // Which side of the profile-counter / client-counter / weapons-sum fork this
+    // zero-point was read from. 'none' is dropped below with the group.
+    killsSource: s.provenance.killsSource === 'none' ? 'client' : s.provenance.killsSource,
     counters: {
       kills: num(s.kills),
       deaths: num(s.deaths),
@@ -720,7 +734,9 @@ export function readBaseline(raw: unknown, fallbackAt: string = new Date().toISO
   };
   if (o.craftsSource === 'vh_Crafts' || o.craftsSource === 'crafts') baseline.craftsSource = o.craftsSource;
   if (o.pickupsSource === 'pickups' || o.pickupsSource === 'vh_ItemsPickedUp') baseline.pickupsSource = o.pickupsSource;
-  if (o.killsSource === 'client' || o.killsSource === 'weapons') baseline.killsSource = o.killsSource;
+  if (o.killsSource === 'client' || o.killsSource === 'weapons' || o.killsSource === 'profile') {
+    baseline.killsSource = o.killsSource;
+  }
 
   // Holes: only recognized group paths survive, so a hand-edited or future
   // `holes` entry can never freeze a group that this build doesn't know about.
@@ -805,6 +821,49 @@ function migrateEmptyListZeroPoints(b: GsBaseline): void {
   if (b.pickupsSource === 'pickups' && b.counters.resourcesHarvested === 0 && !holes.has('counters.resourcesHarvested')) {
     b.pickupsSource = 'vh_ItemsPickedUp';
   }
+}
+
+/**
+ * ── ROLLOUT HELPER: adopt vh_EnemyKills as the kills zero-point ──────────────
+ *
+ * The ordinary path needs no help: the first profile post carrying
+ * `vh_EnemyKills` re-takes the kills zero-point at the character's lifetime
+ * total (that post credits 0, every kill after it is credited in full).
+ *
+ * This is for the OTHER choice the operator has on a launch-fresh server, where
+ * every character was rolled on this world and the lifetime counter IS the
+ * career earned here: zero the zero-point so the FULL counter is credited.
+ * `{ killsSource: 'profile', counters: { kills: 0 } }` is a perfectly legal
+ * stored shape — 0 is a real reading, not a hole — and this returns exactly it.
+ *
+ * Pure: takes a read baseline, returns a new one, touches no database. Equivalent
+ * SQL, for a rollout that would rather not run code (NOT RUN by this repo):
+ *
+ *   update player_stats set gs_baseline = jsonb_set(
+ *            jsonb_set(gs_baseline #- '{superseded,counters,kills}',
+ *                      '{counters,kills}', '0'::jsonb, true),
+ *            '{killsSource}', '"profile"'::jsonb, true)
+ *    where gs_baseline ? 'counters';
+ *
+ * …plus dropping 'counters.kills' from `holes` where it is listed. Both halves
+ * matter: a stale weapons-derived `superseded` ceiling would floor the credit at
+ * that old sum (zeroFloor), and a listed hole credits nothing at all.
+ */
+export function withProfileKillsZeroPoint(base: GsBaseline): GsBaseline {
+  const out: GsBaseline = {
+    ...base,
+    counters: { ...base.counters, kills: 0 },
+    killsSource: 'profile',
+  };
+  const holes = (base.holes ?? []).filter((h) => h !== 'counters.kills');
+  if (holes.length > 0) out.holes = holes;
+  else delete out.holes;
+  if (base.superseded) {
+    const sup: GsBaseline = { ...base.superseded, counters: { ...base.superseded.counters } };
+    delete sup.counters.kills; // a weapons-era ceiling is not a profile-counter ceiling
+    out.superseded = sup;
+  }
+  return out;
 }
 
 /** A copy fit to be STORED as someone else's `superseded` ceiling (rule 2). */
@@ -1128,6 +1187,11 @@ export function shouldRebaseline(
   const sourceOk: Record<string, boolean> = {
     itemsCrafted: craftsComparable(s, base),
     resourcesHarvested: pickupsComparable(s, base),
+    // …and kills, for the same reason: a weapons sum (55) measured against a
+    // profile zero-point (11,053) reads as a collapsed career on every GS post.
+    // `carried` already excludes it via applyBaseline; this keeps the filter
+    // right for any caller that passes the plain snapshot-hole predicate.
+    kills: killsComparable(s, base),
   };
   const keys = SIGNATURE_KEYS.filter(
     (k) =>
@@ -1255,7 +1319,13 @@ export function applyBaseline(
 
   const fresh = captureBaseline(s, dist, at);
   const snapshotHoleSet = new Set(snapshotHoles(s, dist));
-  const carried = (path: string) => !snapshotHoleSet.has(path);
+  // A kills reading the stored zero-point cannot be compared with is NOT CARRIED
+  // for this post (killsComparable): the hole machinery then does the rest —
+  // no fill, no re-take, no credit, and no contribution to the reset signature —
+  // without the group being recorded as a hole on the stored blob, so the poster
+  // that DOES own kills keeps crediting normally on its own posts.
+  const killsDemoted = !!existing && !killsComparable(s, existing);
+  const carried = (path: string) => !snapshotHoleSet.has(path) && !(killsDemoted && path === 'counters.kills');
 
   let base: GsBaseline;
   let nextBaseline: GsBaseline | null = null;
@@ -1423,6 +1493,40 @@ function pickupsComparable(s: ParsedSelf, base: GsBaseline): boolean {
 }
 
 /**
+ * ── ONE POSTER OWNS KILLS (2026-09-13) ──────────────────────────────────────
+ *
+ * Is this snapshot's kills reading comparable with the stored zero-point?
+ *
+ * THE INCIDENT THIS CLOSES. Two posters report the same viking two minutes
+ * apart and both say `source:'client'`: GsValheimStatsClient (kills = the summed
+ * per-world weapons TSV) and our EilifCompanionClient (kills = the profile's
+ * lifetime vh_EnemyKills). Under the plain "source changed → re-take" rule that
+ * fires on EVERY post in both directions — the zero-point ping-pongs, nothing is
+ * ever credited, and the column jumps around (Kætiløy 183 → 97 on 2026-09-10).
+ *
+ * THE RULE. 'profile' is the END STATE and it is one-way:
+ *   • stored source is not 'profile' → comparable exactly as before, so the
+ *     one-time transitions weapons→profile and client→profile still re-take the
+ *     zero-point (that post credits 0, growth after it is credited in full).
+ *   • stored source IS 'profile' and this post is weapons/client → NOT
+ *     comparable. applyBaseline folds that into `carried()`, so kills is a hole
+ *     FOR THIS POST ONLY: it credits nothing, the zero-point is untouched, the
+ *     group is not re-holed, and kills is excluded from the profile-reset
+ *     signature. The GS post still contributes weapons, damage and skills; the
+ *     profile post still contributes kills.
+ *
+ * Deliberately SILENT. This is the designed steady state — every GS post from
+ * here on lands here — so a warn per post per viking would be pure noise. The
+ * positive reading is logged once per post in /api/gs-ingest instead.
+ */
+function killsComparable(s: ParsedSelf, base: GsBaseline): boolean {
+  const src = s.provenance.killsSource;
+  if (src === 'none') return false; // no reading to compare; the group is a hole
+  if (base.killsSource !== 'profile') return true;
+  return src === 'profile';
+}
+
+/**
  * Keep the kills zero-point comparable with the snapshot being differenced
  * against it (VALHEIM 1.0 STOPGAP — see lib/gs-client parseSelfSnapshot).
  *
@@ -1451,8 +1555,13 @@ function reconcileKillsSource(base: GsBaseline, fresh: GsBaseline, s: ParsedSelf
   // when it fills (reconcileBaseline), so there is nothing to do here.
   if (src === 'none') return null;
   if ((base.holes ?? []).includes('counters.kills')) return null;
+  // A weapons/client reading against a PROFILE zero-point is not a source change
+  // to act on — it is simply the other poster, which owns none of this column
+  // any more. Leave the zero-point exactly as it is (killsComparable has already
+  // made this post's kills not-carried, so it credits nothing either).
+  if (!killsComparable(s, base)) return null;
   if (!base.killsSource) {
-    base.killsSource = src === 'weapons' ? 'weapons' : 'client';
+    base.killsSource = src;
     return (
       `stamped the kills source (${src}) onto a zero-point captured before that was recorded — ` +
       `the zero-point number itself is unchanged, so nothing already earned moves`
@@ -1460,7 +1569,7 @@ function reconcileKillsSource(base: GsBaseline, fresh: GsBaseline, s: ParsedSelf
   }
   if (base.killsSource === src) return null;
   const from = base.killsSource;
-  base.killsSource = src === 'weapons' ? 'weapons' : 'client';
+  base.killsSource = src;
   base.counters.kills = num(fresh.counters.kills);
   console.warn(
     `[gs-baseline] kills source changed for "${s.reporter}": zero-point was taken from ${from}, this ` +
@@ -1611,7 +1720,9 @@ function computeEffective(s: ParsedSelf, dist: ParsedDistances | null, base: GsB
       : null;
 
   return {
-    kills: counter('kills', s.kills),
+    // Like against like (rule 4): a weapons/client reading is never differenced
+    // against a profile-counter zero-point (killsComparable).
+    kills: killsComparable(s, base) ? counter('kills', s.kills) : 0,
     deaths: counter('deaths', s.deaths),
     bossKills: counter('bossKills', s.bossKills),
     // Like against like (rule 4), same as crafts: the world-scoped pickups[] sum

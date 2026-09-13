@@ -135,24 +135,35 @@ export interface SelfProvenance {
    * didn't (defer — we cannot account for that report at all).
    */
   profileOnly: boolean;
-  /** kills / deaths present as real numbers on the entry. */
+  /**
+   * A kills reading was present on the entry — the profile counter
+   * (`stats.vh_EnemyKills`) or the entry's own `kills` number. NOT set by the
+   * weapons[] fallback, which `killsSource` records instead.
+   */
   hasKills: boolean;
+  /** deaths present as a real number on the entry. */
   hasDeaths: boolean;
   /**
    * WHERE `kills` CAME FROM — the same "like against like" contract craftsSource
    * carries (see the VALHEIM 1.0 STOPGAP block above parseSelfSnapshot).
    *
+   *   'profile' — `stats.vh_EnemyKills`, Valheim's own PlayerStatType.EnemyKills
+   *               from the LIFETIME bucket (EilifCompanionClient ≥0.4.5). The
+   *               only source that is monotonic, per character, and immune to a
+   *               mod reinstall / rebuilt profile / new PC — so it WINS.
    *   'client'  — the entry's own `kills` counter, the only source before 1.0.
    *   'weapons' — sum(weapons[].kills), because the client counter is absent or
    *               provably broken (0 while the weapon breakdown shows kills).
-   *   'none'    — no usable reading at all (no kills number, no weapons[]).
+   *   'none'    — no usable reading at all (no counter, no weapons[]).
    *
    * The baseline layer refuses to difference one source against a zero-point
-   * taken from the other: it re-takes the zero-point instead (credits 0 for that
-   * one cycle, full growth after), so the day the mod starts reporting LIFETIME
-   * kills again nobody is handed 1,500 foreign kills.
+   * taken from the other. Between 'client' and 'weapons' it re-takes the
+   * zero-point (credits 0 for that one cycle, full growth after); once the
+   * zero-point is 'profile' the other two are NOT CARRIED at all, because both
+   * posters keep posting and a re-take on each would flip-flop the zero-point
+   * forever (lib/gs-baseline killsComparable).
    */
-  killsSource: 'client' | 'weapons' | 'none';
+  killsSource: 'profile' | 'client' | 'weapons' | 'none';
   /** bossKills present as a real number on the entry. */
   hasBossKills: boolean;
   /** longestLifeSec / bestKillsBeforeDeath present as real numbers. */
@@ -405,7 +416,7 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
 
   const damageDealt = Math.round(sumBy(weapons, 'damageDealt'));
 
-  // ── kills: client counter, or the weapon breakdown (VALHEIM 1.0 STOPGAP) ───
+  // ── kills: profile counter, client counter, or the weapon breakdown ────────
   // Chosen by USABILITY, not truthiness alone: an absent counter is no reading,
   // and a counter of 0 sitting next to a weapon breakdown that lists kills is a
   // BROKEN reading — one cannot have 27 axe kills and 0 kills. Anything else
@@ -423,17 +434,37 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
   // and crafts anyway: lifetime across every world, and on 1.0 read from the
   // achievement-eligible bucket. So the two posters are made DISJOINT here: a
   // self entry carrying `stats` and NONE of the GS breakdown lists contributes
-  // builds and distances only. Its kills, deaths and crafts are treated as absent (holes),
-  // and the world-scoped GS values plus our own death events stay the record.
+  // builds and distances only. Its deaths and crafts-from-crafts[] are treated
+  // as absent (holes), and our own death events stay the record for deaths.
+  // ⚠️ KILLS ARE NO LONGER PART OF THAT DISJOINTNESS (0.4.5, below): the profile
+  // post now carries the BETTER kills reading, so it owns the kills column and
+  // the GS post is the one that goes quiet there.
   const GS_LISTS = ['weapons', 'crafts', 'pickups', 'skills', 'materials', 'boss', 'creatureKills'] as const;
   const profileOnly = hasStats && !GS_LISTS.some((k) => Array.isArray(self[k]));
+  // ── THE PROFILE KILL COUNTER WINS (EilifCompanionClient ≥0.4.5, 2026-09-13) ─
+  // `vh_EnemyKills` is Valheim's own PlayerStatType.EnemyKills read from the
+  // character profile's LIFETIME bucket: monotonic, per CHARACTER, and it
+  // survives a mod reinstall, a rebuilt profile and a new PC. The weapons TSV is
+  // none of those — it is per world per character, it RESETS when a player
+  // rebuilds their profile or changes machine (the kills column stalls), and it
+  // LEAKS across characters on a shared PC (the column inflates). So when the
+  // profile counter is present it is the reading, and weapons[] goes back to
+  // being what it now only is: the Feats of Arms breakdown (weaponKills below,
+  // unchanged) and the damageDealt source.
+  const hasProfileKills = isNum(stats.vh_EnemyKills);
   const clientKillsUsable = !profileOnly && isNum(self.kills) && !(num(self.kills) === 0 && weaponKills > 0);
-  const killsSource: SelfProvenance['killsSource'] = clientKillsUsable
-    ? 'client'
-    : Array.isArray(self.weapons)
-      ? 'weapons'
-      : 'none';
-  const kills = killsSource === 'weapons' ? weaponKills : killsSource === 'client' ? num(self.kills) : 0;
+  const killsSource: SelfProvenance['killsSource'] = hasProfileKills
+    ? 'profile'
+    : clientKillsUsable
+      ? 'client'
+      : Array.isArray(self.weapons)
+        ? 'weapons'
+        : 'none';
+  const kills =
+    killsSource === 'profile' ? statNum('vh_EnemyKills')
+    : killsSource === 'weapons' ? weaponKills
+    : killsSource === 'client' ? num(self.kills)
+    : 0;
   // Fish are pickups too — counted here same as every other resource, no
   // double-subtract; the fish[] breakdown above is purely additive detail.
   // pickups[] (GsValheimStatsClient, absent on 1.0) or the profile's own lifetime
@@ -536,7 +567,9 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
       ownEntry: self === own,
       hasStats,
       profileOnly,
-      hasKills: !profileOnly && isNum(self.kills),
+      // A profile post that carries vh_EnemyKills DOES speak for kills — that is
+      // the whole point of 0.4.5. Deaths stay a hole on a profile post.
+      hasKills: hasProfileKills || (!profileOnly && isNum(self.kills)),
       hasDeaths: !profileOnly && isNum(self.deaths),
       killsSource,
       hasBossKills: isNum(self.bossKills),

@@ -687,14 +687,18 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
   // what this post spoke for and what it left to the GsValheimStatsClient post.
   if (s.provenance.profileOnly) {
     const carried = profileOnlyCaptured(s, dist);
+    // ≥0.4.5 moved kills to this post (vh_EnemyKills); on 0.4.4 and older it is
+    // still a hole the GsValheimStatsClient post fills.
+    const ownsKills = s.provenance.killsSource === 'profile';
     console.info(
       `[gs-ingest] PROFILE POST from "${s.reporter}" (EilifCompanionClient) — raw ` +
         `${carried.length > 0 ? carried.join(', ') : 'nothing accountable'}; credited builds ` +
         `${effective.structuresBuilt}, crafts ${effective.itemsCrafted}, pickups ` +
         `${effective.resourcesHarvested}, catches ${effective.fishCaught}, distance ` +
-        `${Math.round(effective.distanceTraveled)}m. Kills, deaths, weapons, creatures, boss damage, ` +
-        `materials, fish species and skills are HOLES on this post — the GsValheimStatsClient post ` +
-        `carries those.`,
+        `${Math.round(effective.distanceTraveled)}m` +
+        `${ownsKills ? `, kills ${effective.kills}` : ''}. ` +
+        `${ownsKills ? 'Deaths' : 'Kills, deaths'}, weapons, creatures, boss damage, materials, ` +
+        `fish species and skills are HOLES on this post — the GsValheimStatsClient post carries those.`,
     );
   }
 
@@ -746,6 +750,13 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
   // re-taken zero-point simply starts crediting growth again from that day.
   //
   // BOTH COME OUT when GsValheimStatsClient ships a 1.0 build.
+  if (s.provenance.killsSource === 'profile') {
+    // The way OUT of the stopgap: EilifCompanionClient ≥0.4.5 reads Valheim's own
+    // PlayerStatType.EnemyKills from the profile's lifetime bucket — monotonic,
+    // per character, immune to a mod reinstall or a new PC. Mirrors the weapons
+    // line below so one grep tells you which poster owns the column.
+    console.info(`[gs] kills from the profile counter (${s.kills}) for "${s.reporter}".`);
+  }
   if (s.provenance.killsSource === 'weapons') {
     console.info(
       `[gs] kills derived from weapons (${s.kills}) for "${s.reporter}" — the 1.0 client sent no usable ` +

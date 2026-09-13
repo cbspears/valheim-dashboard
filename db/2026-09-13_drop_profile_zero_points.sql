@@ -1,7 +1,7 @@
 -- STATUS: DRAFT, NOT APPLIED. Waits on Charlie's decision (open since 2026-09-12).
 --
--- Drops the builds / crafts / distance / pickups zero-points so a launch-fresh
--- character's WHOLE Eilif history counts. Kills/deaths/damage/fish are not touched.
+-- Drops the builds / crafts / distance / pickups / kills zero-points so a launch-fresh
+-- character's WHOLE Eilif history counts. Deaths/damage/fish are not touched.
 --
 -- WHY. Every character on Eilif was made for launch (2026-09-09), so the profile
 -- counters ARE the Eilif history. But the builds/crafts/distance zero-point was
@@ -28,6 +28,13 @@
 --   pickupsSource -> 'vh_ItemsPickedUp' with resourcesHarvested 0 (same story for rows
 --                                       baselined after the 09-12 pickups guard; pickups are
 --                                       credited lifetime by decision, like the older rows)
+--   killsSource   -> 'profile' with counters.kills 0, and the weapons-era
+--                                       superseded.counters.kills ceiling dropped (Companion
+--                                       Client 0.4.5 posts vh_EnemyKills; without this the first
+--                                       profile post re-takes the kills zero-point at the lifetime
+--                                       total and credits 0 that cycle, growth after — see
+--                                       lib/gs-baseline withProfileKillsZeroPoint). RUN ONLY AFTER
+--                                       the 0.4.5 dashboard code is live (deployed 2026-09-13).
 -- The player_stats COLUMNS are not touched: the next profile post from each
 -- character merges raw − 0 through GREATEST (rule 3), so every board climbs on
 -- its own the next time that viking plays. Nothing is announced by the ingest
@@ -48,6 +55,7 @@ set gs_baseline = (
       #- '{superseded,counters,itemsCrafted}'
       #- '{superseded,counters,distanceTraveled}'
       #- '{superseded,counters,resourcesHarvested}'
+      #- '{superseded,counters,kills}'
       #- '{superseded,counterMaps,distances}'
       #- '{superseded,counterMaps,distancesRaw}'
       #- '{holes}') as j, b.j as orig from b
@@ -56,18 +64,19 @@ set gs_baseline = (
     select jsonb_agg(h) as arr
     from stripped, jsonb_array_elements_text(coalesce(stripped.orig->'holes', '[]'::jsonb)) h
     where h not in ('counters.structuresBuilt', 'counters.itemsCrafted', 'counters.distanceTraveled',
-                    'counters.resourcesHarvested', 'counterMaps.distances', 'counterMaps.distancesRaw')
+                    'counters.resourcesHarvested', 'counters.kills', 'counterMaps.distances', 'counterMaps.distancesRaw')
   )
   select stripped.j
     || jsonb_build_object(
          'counters',
            coalesce(stripped.j->'counters', '{}'::jsonb)
-           || '{"structuresBuilt":0,"itemsCrafted":0,"distanceTraveled":0,"resourcesHarvested":0}'::jsonb,
+           || '{"structuresBuilt":0,"itemsCrafted":0,"distanceTraveled":0,"resourcesHarvested":0,"kills":0}'::jsonb,
          'counterMaps',
            coalesce(stripped.j->'counterMaps', '{}'::jsonb)
            || '{"distances":{},"distancesRaw":{}}'::jsonb,
          'craftsSource', 'vh_Crafts',
-         'pickupsSource', 'vh_ItemsPickedUp')
+         'pickupsSource', 'vh_ItemsPickedUp',
+         'killsSource', 'profile')
     || case when remaining_holes.arr is null then '{}'::jsonb
             else jsonb_build_object('holes', remaining_holes.arr) end
   from stripped, remaining_holes
@@ -89,6 +98,8 @@ where ps.gs_baseline is not null and coalesce(p.excluded, false) = false
      or ps.gs_baseline->'counterMaps'->'distancesRaw' <> '{}'::jsonb
      or coalesce(ps.gs_baseline->'holes', '[]'::jsonb) ?| array['counters.structuresBuilt','counters.itemsCrafted','counters.distanceTraveled','counters.resourcesHarvested','counterMaps.distances','counterMaps.distancesRaw']
      or ps.gs_baseline->>'craftsSource' is distinct from 'vh_Crafts'
+     or ps.gs_baseline->>'killsSource' is distinct from 'profile'
+     or (ps.gs_baseline->'counters'->>'kills')::numeric <> 0
      or ps.gs_baseline->>'pickupsSource' is distinct from 'vh_ItemsPickedUp'
      or ps.gs_baseline->'superseded'->'counters' ?| array['structuresBuilt','itemsCrafted','distanceTraveled'] );
 
