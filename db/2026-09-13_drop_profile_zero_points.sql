@@ -1,8 +1,7 @@
 -- STATUS: DRAFT, NOT APPLIED. Waits on Charlie's decision (open since 2026-09-12).
 --
--- Drops the builds / crafts / distance zero-points so a launch-fresh character's
--- WHOLE Eilif history counts. Pickups are already credited lifetime (the 09-12
--- pickups source guard), kills/deaths/damage/fish are not touched.
+-- Drops the builds / crafts / distance / pickups zero-points so a launch-fresh
+-- character's WHOLE Eilif history counts. Kills/deaths/damage/fish are not touched.
 --
 -- WHY. Every character on Eilif was made for launch (2026-09-09), so the profile
 -- counters ARE the Eilif history. But the builds/crafts/distance zero-point was
@@ -21,7 +20,14 @@
 --        re-captured from the next post at its lifetime value instead)
 --   those six paths leave `holes`      (they are readings now, not gaps)
 --   the same keys leave `superseded`   (absent key = no ceiling, rule 2)
---   craftsSource is left as is         (absent = comparable, rule 4 helper)
+--   craftsSource  -> 'vh_Crafts'       (the 2026-09-13 audit: every GS-captured zero-point
+--                                       carried craftsSource 'crafts' from an EMPTY 1.0 list,
+--                                       so the profile's vh_Crafts was "not comparable" and
+--                                       items_crafted froze at 0 for 29 of 30 players; the
+--                                       profile post is the only crafts reading on 1.0)
+--   pickupsSource -> 'vh_ItemsPickedUp' with resourcesHarvested 0 (same story for rows
+--                                       baselined after the 09-12 pickups guard; pickups are
+--                                       credited lifetime by decision, like the older rows)
 -- The player_stats COLUMNS are not touched: the next profile post from each
 -- character merges raw − 0 through GREATEST (rule 3), so every board climbs on
 -- its own the next time that viking plays. Nothing is announced by the ingest
@@ -41,6 +47,7 @@ set gs_baseline = (
       #- '{superseded,counters,structuresBuilt}'
       #- '{superseded,counters,itemsCrafted}'
       #- '{superseded,counters,distanceTraveled}'
+      #- '{superseded,counters,resourcesHarvested}'
       #- '{superseded,counterMaps,distances}'
       #- '{superseded,counterMaps,distancesRaw}'
       #- '{holes}') as j, b.j as orig from b
@@ -49,16 +56,18 @@ set gs_baseline = (
     select jsonb_agg(h) as arr
     from stripped, jsonb_array_elements_text(coalesce(stripped.orig->'holes', '[]'::jsonb)) h
     where h not in ('counters.structuresBuilt', 'counters.itemsCrafted', 'counters.distanceTraveled',
-                    'counterMaps.distances', 'counterMaps.distancesRaw')
+                    'counters.resourcesHarvested', 'counterMaps.distances', 'counterMaps.distancesRaw')
   )
   select stripped.j
     || jsonb_build_object(
          'counters',
            coalesce(stripped.j->'counters', '{}'::jsonb)
-           || '{"structuresBuilt":0,"itemsCrafted":0,"distanceTraveled":0}'::jsonb,
+           || '{"structuresBuilt":0,"itemsCrafted":0,"distanceTraveled":0,"resourcesHarvested":0}'::jsonb,
          'counterMaps',
            coalesce(stripped.j->'counterMaps', '{}'::jsonb)
-           || '{"distances":{},"distancesRaw":{}}'::jsonb)
+           || '{"distances":{},"distancesRaw":{}}'::jsonb,
+         'craftsSource', 'vh_Crafts',
+         'pickupsSource', 'vh_ItemsPickedUp')
     || case when remaining_holes.arr is null then '{}'::jsonb
             else jsonb_build_object('holes', remaining_holes.arr) end
   from stripped, remaining_holes
@@ -78,7 +87,9 @@ where ps.gs_baseline is not null and coalesce(p.excluded, false) = false
      or (ps.gs_baseline->'counters'->>'distanceTraveled')::numeric <> 0
      or ps.gs_baseline->'counterMaps'->'distances' <> '{}'::jsonb
      or ps.gs_baseline->'counterMaps'->'distancesRaw' <> '{}'::jsonb
-     or coalesce(ps.gs_baseline->'holes', '[]'::jsonb) ?| array['counters.structuresBuilt','counters.itemsCrafted','counters.distanceTraveled','counterMaps.distances','counterMaps.distancesRaw']
+     or coalesce(ps.gs_baseline->'holes', '[]'::jsonb) ?| array['counters.structuresBuilt','counters.itemsCrafted','counters.distanceTraveled','counters.resourcesHarvested','counterMaps.distances','counterMaps.distancesRaw']
+     or ps.gs_baseline->>'craftsSource' is distinct from 'vh_Crafts'
+     or ps.gs_baseline->>'pickupsSource' is distinct from 'vh_ItemsPickedUp'
      or ps.gs_baseline->'superseded'->'counters' ?| array['structuresBuilt','itemsCrafted','distanceTraveled'] );
 
 -- ROLLBACK (only if the old zero-points are wanted back; the columns keep

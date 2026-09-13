@@ -81,6 +81,14 @@ const KEEP = {
   ops_heartbeats: 'ops telemetry about the SERVICES, which are the same services after the wipe',
   ops_heartbeat_log: 'ops telemetry history; keeping it is how the launch-night graph has a before',
   ops_alerts: 'the watchdog’s dedupe memory -- clearing it would re-alert on a state it already announced',
+  // One-off repair backups from the 2026-09-13 stats audit (db/2026-09-13_*.sql). The
+  // scan truncates the date suffix at the first digit. They hold pre-repair copies of
+  // rows for rollback and nothing the site reads; drop them by hand once the repairs
+  // have stood for a week. A future wipe recreates nothing here.
+  player_stats_gs_baseline_bak_: 'rollback copy for db/2026-09-13_drop_profile_zero_points.sql',
+  player_stats_wiped_rows_bak_: 'rollback copy for db/2026-09-13_repair_wiped_rows.sql',
+  players_steam_rebind_bak_: 'rollback copy for db/2026-09-13_rebind_steam_backfill_sessions.sql',
+  sessions_backfill_: 'log of the sessions that same file inserted, for rollback',
 };
 
 // ── 4. the join ─────────────────────────────────────────────────────────────
