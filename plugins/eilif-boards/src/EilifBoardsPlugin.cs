@@ -15,6 +15,12 @@ namespace EilifBoards
     /// only the leader on it; from then on the plugin owns that sign until the player writes
     /// something else on it.
     ///
+    /// 0.3.0: THE BOARD VOCABULARY IS DATA, NOT CODE. There is no compiled-in list of boards any
+    /// more — any key the feed publishes is a valid marker, so adding a leaderboard on the
+    /// dashboard never needs another plugin build. The vocabulary in force is printed to the log
+    /// on the first successful poll and again whenever the feed changes it; if no poll has ever
+    /// succeeded, a small built-in fallback list is printed and used instead.
+    ///
     /// SHAPE (deliberately the same as ../eilif-companion): one BaseUnityPlugin with an Update()
     /// pump on the main thread, one background Task for HTTP, results handed back by reference and
     /// applied on the main thread. Nothing here patches the game — no Harmony, no hooks. If the
@@ -29,7 +35,7 @@ namespace EilifBoards
     {
         public const string PluginGuid = "media.blockspace.eilif.boards";
         public const string PluginName = "Eilif Boards";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.3.0";
 
         /// <summary>Every log line this plugin emits starts with this. Grep for it after a restart.</summary>
         private const string LogPrefix = "[EilifBoards] ";
@@ -48,6 +54,9 @@ namespace EilifBoards
 
         /// <summary>Delay from "server is up" to the first discovery scan, so the first poll lands first.</summary>
         private const float FirstScanDelaySeconds = 10f;
+
+        /// <summary>Cap on how many markers one vocabulary log line spells out before "(+N more)".</summary>
+        private const int MaxMarkersLogged = 40;
 
         internal static ManualLogSource Log;
 
@@ -73,6 +82,8 @@ namespace EilifBoards
         private float _nextScanIn = FirstScanDelaySeconds;
         private bool _backingOff;
         private string _lastStatusKey;      // "ok" / "http:401" / "network"; drives log-once
+        private string _vocabSignature;     // the marker vocabulary we last printed; null = never
+        private bool _fallbackVocabLogged;  // the "no feed yet, these are the fallback markers" line
 
         // =====================================================================================
 
@@ -85,7 +96,7 @@ namespace EilifBoards
 
             _url = Config.Bind("Feed", "Url",
                 "https://eilif-dashboard.vercel.app/api/boards",
-                "The dashboard's boards feed. Returns JSON: {\"generatedAt\":\"..\",\"boards\":{\"kills\":\"..\",\"deaths\":\"..\",\"builds\":\"..\",\"resources\":\"..\",\"explored\":\"..\",\"distance\":\"..\",\"titles\":\"..\",\"deeds\":\"..\"},\"data\":{..}}");
+                "The dashboard's boards feed. Returns JSON: {\"generatedAt\":\"..\",\"keys\":[\"kills\",\"deaths\",..],\"boards\":{\"<key>\":\"<sign text>\",..},\"leaders\":{\"<key>\":\"<sign text>\",..},\"data\":{..}}. The board keys are whatever the feed publishes - the plugin has no built-in list; it logs the vocabulary it found on the first successful poll.");
 
             _token = Config.Bind("Feed", "Token", "",
                 "Sent as 'Authorization: Bearer <Token>'. Must match the dashboard's BOARDS_TOKEN. SERVER-ONLY secret - it never ships in a player-facing pack. If empty, the plugin logs one error and stays dormant.");
@@ -126,10 +137,9 @@ namespace EilifBoards
 
                 LogInfo(PluginName + " v" + PluginVersion + " loaded. Enabled=true, Url=" + _url.Value +
                      ", PollSeconds=" + PollInterval() + ", ScanSeconds=" + ScanInterval() +
-                     ", Token=set (" + _token.Value.Length + " chars). Markers: [board:kills] " +
-                     "[board:deaths] [board:builds] [board:resources] [board:explored] [board:distance] " +
-                     "[board:titles] [board:deeds]. The six stat markers also take a ':leader' " +
-                     "suffix ([board:kills:leader]) for a plaque showing only the leader.");
+                     ", Token=set (" + _token.Value.Length + " chars). The board markers are not " +
+                     "compiled in: the feed decides them, and the next line starting 'feed " +
+                     "vocabulary:' lists the ones in force.");
             }
             catch (Exception ex)
             {
@@ -214,6 +224,7 @@ namespace EilifBoards
                 _lastStatusKey = key;
                 _backingOff = false;
                 _latest = result.Snapshot;
+                LogVocabulary(result.Snapshot);
                 _boards.Apply(result.Snapshot);
                 return;
             }
@@ -227,6 +238,69 @@ namespace EilifBoards
             }
             _lastStatusKey = key;
             _backingOff = true;
+
+            // The operator asked "what can I write on a sign?" and the feed cannot answer. Say what
+            // the built-in fallback allows, once, so the log still carries a usable vocabulary.
+            if (_vocabSignature == null && !_fallbackVocabLogged)
+            {
+                _fallbackVocabLogged = true;
+                LogInfo("no board list has been read from the feed yet, so until one lands only the " +
+                        "built-in fallback markers can be claimed: " + Markers(BoardKeys.FallbackAll, false) +
+                        " - of these, " + Markers(BoardKeys.FallbackLeaders, true) +
+                        " also work as leader plaques. The feed is the authority; this list is only " +
+                        "a stand-in while it is unreachable.");
+            }
+        }
+
+        /// <summary>
+        /// Print the marker vocabulary the moment we learn it, and again whenever the feed changes
+        /// it. This is the ONLY place an operator can read the vocabulary from: 0.3.0 has no
+        /// compiled-in list of boards, so the feed is the only place the answer exists.
+        /// </summary>
+        private void LogVocabulary(BoardsResponse snapshot)
+        {
+            string[] all = BoardKeys.VocabularyOf(snapshot);
+            string[] leaders = BoardKeys.LeaderVocabularyOf(snapshot);
+
+            string signature = string.Join(",", all) + "|" + string.Join(",", leaders);
+            if (signature == _vocabSignature) return;
+            bool first = _vocabSignature == null;
+            _vocabSignature = signature;
+
+            LogInfo((first ? "feed vocabulary: " : "feed vocabulary CHANGED: ") +
+                    all.Length + " board(s) - " + Markers(all, false) + ". " +
+                    (leaders.Length == 0
+                        ? "The feed carries no 'leaders' object, so no ':leader' plaque can be claimed right now " +
+                          "(signs already stamped as plaques fall back to the full board and become plaques " +
+                          "again by themselves when the feed carries one)."
+                        : leaders.Length + " of them also take ':leader' - " + Markers(leaders, true) + "."));
+
+            // A key the feed names but carries no string for is a marker a player can claim that
+            // can never paint. That is a feed-side bug, and this is where it becomes visible.
+            string[] empty = snapshot == null ? new string[0] : snapshot.KeysWithoutText();
+            if (empty.Length > 0)
+            {
+                LogWarn("the feed lists " + empty.Length + " board key(s) in 'keys' that its 'boards' " +
+                        "object does not carry text for: " + string.Join(", ", empty) +
+                        ". Signs marked with them will be claimed and then keep their last text.");
+            }
+        }
+
+        /// <summary>"[board:kills] [board:deaths] ..." for a log line. Truncated if absurdly long.</summary>
+        private static string Markers(string[] keys, bool leader)
+        {
+            if (keys == null || keys.Length == 0) return "(none)";
+            var sb = new System.Text.StringBuilder();
+            int shown = keys.Length > MaxMarkersLogged ? MaxMarkersLogged : keys.Length;
+            for (int i = 0; i < shown; i++)
+            {
+                if (i > 0) sb.Append(' ');
+                sb.Append("[board:").Append(keys[i]);
+                if (leader) sb.Append(':').Append(BoardKeys.Leader);
+                sb.Append(']');
+            }
+            if (shown < keys.Length) sb.Append(" (+").Append(keys.Length - shown).Append(" more)");
+            return sb.ToString();
         }
 
         /// <summary>

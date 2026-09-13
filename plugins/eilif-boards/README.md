@@ -4,11 +4,19 @@ A deliberately tiny, **server-side-only** BepInEx 5 plugin for the Eilif Valheim
 (BepInEx 5.4.2333 + ValheimPlus). No client installs, no gameplay changes, **no Harmony patches at
 all** — it only reads and writes sign ZDOs.
 
-It polls the dashboard's `/api/boards` feed and paints the eight leaderboard strings onto ordinary
-in-game signs, so the crew can read the standings without leaving Valheim. The six ranked stat
-boards can also be asked for as a one-line **leader plaque** instead of a full top five.
+It polls the dashboard's `/api/boards` feed and paints the leaderboard strings onto ordinary
+in-game signs, so the crew can read the standings without leaving Valheim. A board that also
+publishes a `leaders` entry can be asked for as a one-line **leader plaque** instead of a full top
+five.
 
-`BepInPlugin` GUID: `media.blockspace.eilif.boards` — name `Eilif Boards` — v`0.2.0`.
+**Since 0.3.0 the list of boards is DATA, not code.** The plugin has no compiled-in vocabulary: any
+key the feed publishes is a valid `[board:<key>]` marker, so adding a leaderboard on the dashboard
+never needs another plugin build. The vocabulary in force is printed to `LogOutput.log` on the first
+successful poll (grep `feed vocabulary:`) — that log line is the only authoritative list.
+
+`BepInPlugin` GUID: `media.blockspace.eilif.boards` — name `Eilif Boards` — v`0.3.0`.
+
+Version history: `CHANGELOG.md` in this folder.
 
 Sibling plugins: `../eilif-companion` (server, ears/voice/positions — the HTTP + threading pattern
 here is lifted from it), `../eilif-paths` and `../eilif-companion-client` (client, shipped in the
@@ -23,27 +31,37 @@ r2modman pack). **This one ships to the dedicated server only.**
 Write a marker on any sign in-game (build a sign, interact, type):
 
 ```
-[board:kills]      [board:deaths]     [board:builds]     [board:resources]
-[board:explored]   [board:distance]   [board:titles]     [board:deeds]
-
-[board:kills:leader]   <- any of the six stat markers, with ":leader" added
+[board:<key>]          <- any key the feed publishes
+[board:<key>:leader]   <- any key the feed also publishes a plaque for
 ```
+
+At the time of writing the dashboard publishes these (**always confirm against the `feed
+vocabulary:` line in the log — this list is documentation, not the contract**):
 
 | Marker | What the sign shows |
 | --- | --- |
-| `[board:kills]` … `[board:distance]` | The **top five** for that stat, leader's number accented. |
-| `[board:kills:leader]` … `[board:distance:leader]` | Only the **leader** — header plus one line. Same header, same name, same number as the top row of the full board. |
+| `[board:kills]` `[board:deaths]` `[board:builds]` `[board:resources]` `[board:explored]` `[board:distance]` `[board:damage]` `[board:hours]` `[board:crafts]` `[board:fish]` | The **top five** for that stat, leader's number accented. |
+| the same ten with `:leader` — `[board:kills:leader]` | Only the **leader** — header plus one line. Same header, same name, same number as the top row of the full board. |
 | `[board:titles]` | Every titled viking, alphabetical. |
 | `[board:deeds]` | Great Deeds progress and the newest deed earned. |
 
 Case-insensitive, surrounding whitespace fine (`  [BOARD: Deeds ]  `, `[ board : kills : leader ]`
-both work). The marker must be the sign's **whole** text — a sign that merely mentions a marker
-inside a sentence is a player's sign and is never touched.
+both work). The key may be letters, digits and `_`. Matching is **case-insensitive on the marker and
+exact on the feed**: whatever spelling the feed uses is what gets stamped into the sign. The marker
+must be the sign's **whole** text — a sign that merely mentions a marker inside a sentence is a
+player's sign and is never touched.
 
-`:leader` works on the **six ranked stat boards only**. Living Titles is alphabetical (no winner to
-name) and Great Deeds is a warband total, so `[board:titles:leader]` and `[board:deeds:leader]` are
-not markers at all: those signs stay the player's, exactly like any other text we do not recognise.
-An unknown suffix (`[board:kills:best]`) is the same — not a marker, sign untouched.
+`:leader` works only on keys the feed carries a `leaders` entry for. Living Titles is alphabetical
+(no winner to name) and Great Deeds is a warband total, so the feed publishes no plaque for them and
+`[board:titles:leader]` / `[board:deeds:leader]` are not markers at all: those signs stay the
+player's, exactly like any other text we do not recognise. An unknown key (`[board:bogus]`) or an
+unknown suffix (`[board:kills:best]`) is the same — not a marker, sign untouched.
+
+**Before the first successful poll** (the first seconds after a restart, or a whole session with the
+feed down) the plugin has no feed vocabulary, so it falls back to a small built-in list — the twelve
+keys above — purely so a marker written during an outage is still claimed and painted once the feed
+recovers. The fallback is printed to the log if the first poll fails. It is a stand-in, never the
+authority.
 
 To change a live board into a plaque (or the other way round), just write the other marker on it.
 The next poll re-points it; nothing has to be rebuilt.
@@ -73,8 +91,14 @@ Every `PollSeconds` (default 60) a **background** task does
 `DataContractJsonSerializer` (no extra shipped dependency, same as the Companion's `/api/voice`
 parser) and handed back to the main thread, which is the only place that touches the world.
 
-A plaque claim reads the response's `leaders` member. If a dashboard is older than that member, the
-claim falls back to the full board **silently** — a top five where a plaque was asked for, rather
+The response is read as `boards` = `{ "<key>": "<sign text>" }` and `leaders` = the same shape for
+the subset that has a plaque; a top-level `keys` array, when present, is the authoritative
+vocabulary (otherwise the keys of `boards` are). Neither object's keys are known at compile time, so
+they are read by a small hand-rolled string-map reader rather than by a DataContract — see
+`src/BoardsFeed.cs` (`JsonMaps`) for why that, and not `UseSimpleDictionaryFormat`.
+
+A plaque claim reads the response's `leaders` member. If a dashboard is older than that member, or a
+board simply stops publishing a plaque, the claim falls back to the full board **silently** — a top five where a plaque was asked for, rather
 than a frozen sign — and becomes a plaque again by itself once the feed carries one.
 
 For each claimed sign, the board string is written to `ZDOVars.s_text` **only if it differs** from
@@ -125,7 +149,7 @@ key with no claimed sign costs nothing.
 | Section | Key | Default | Notes |
 | --- | --- | --- | --- |
 | `[General]` | `Enabled` | `true` | Master switch. `false` = loads and does nothing. |
-| `[Feed]` | `Url` | `https://eilif-dashboard.vercel.app/api/boards` | Never point this at the old `valheim-dashboard.vercel.app` host unless you know why. |
+| `[Feed]` | `Url` | `https://eilif-dashboard.vercel.app/api/boards` | Never point this at the old `valheim-dashboard.vercel.app` host unless you know why. Expected JSON: `{"generatedAt":"..","keys":["kills",..],"boards":{"<key>":"<sign text>",..},"leaders":{"<key>":"<sign text>",..},"data":{..}}` — `boards` is the only required member. |
 | `[Feed]` | `Token` | `` (empty) | `Authorization: Bearer <Token>`, must equal the dashboard's `BOARDS_TOKEN`. **Empty *or still the literal `__BOARDS_TOKEN__` placeholder* ⇒ one error line naming which, and the plugin stays dormant.** Server-only secret — it is NOT in any player-facing pack. |
 | `[Feed]` | `PollSeconds` | `60` | Clamped to `15..3600`. The feed has a 30s server-side cache, so below ~30 buys nothing. |
 | `[Discovery]` | `ScanSeconds` | `300` | Clamped to `60..86400`. How often new markers are picked up. |
@@ -148,7 +172,9 @@ A healthy boot looks like this (in this order, within ~15s of the world loading)
 
 | Grep | Meaning |
 | --- | --- |
-| `Eilif Boards v0.2.0 loaded. Enabled=true, Url=…, PollSeconds=60, ScanSeconds=300, Token=set (N chars)` | **The boot summary.** Confirms the DLL loaded AND the cfg was read; it also lists the markers. Absent ⇒ the plugin did not load at all. |
+| `Eilif Boards v0.3.0 loaded. Enabled=true, Url=…, PollSeconds=60, ScanSeconds=300, Token=set (N chars)` | **The boot summary.** Confirms the DLL loaded AND the cfg was read. Absent ⇒ the plugin did not load at all. It no longer lists the markers — the next line does. |
+| `feed vocabulary: 12 board(s) - [board:kills] [board:deaths] …. 10 of them also take ':leader' - …` | **The marker vocabulary**, read off the first successful poll. This is the authoritative answer to "what can the crew write on a sign?". It is re-logged as `feed vocabulary CHANGED:` whenever the dashboard adds or drops a board — i.e. a new leaderboard shows up here with no plugin change. |
+| `no board list has been read from the feed yet …` | The **first** poll failed, so the built-in fallback list is in force. Logged once; the real vocabulary line replaces it as soon as a poll lands. |
 | `updated 3/8 boards` | A poll landed and wrote 3 of 8 claimed signs. Logged on the first apply and thereafter only when something changed. |
 | `scan complete: 12 sign(s) in world, 8 claimed, 0 new this scan` | A discovery scan finished. The first number is **distinct valid** sign ZDOs (the game's iterator hands back the boundary sector twice; that is deduped before counting). |
 | `claimed sign 123456:78 for board kills` | A marker was picked up. A plaque reads `for board kills:leader`. |
@@ -165,7 +191,9 @@ Trouble:
 | `the world was reloaded; dropping N cached claim(s)` | Should never appear on a dedicated server. Harmless (claims rebuild from the ZDO stamps on the next scan), but worth knowing about. |
 | `feed poll failed: HTTP 401 …` | Token mismatch with the dashboard's `BOARDS_TOKEN`. |
 | `feed poll failed: HTTP 503 …` | `BOARDS_TOKEN` is unset on Vercel. |
-| `board 'titles' is not in the feed` | The feed shape changed; that sign keeps its last text. A claim reads `'kills:leader'` here only when the **full board** is missing too — a missing plaque alone falls back quietly and logs nothing. |
+| `board 'titles' is not in the feed` | That key vanished from the feed; the sign keeps its last text. A claim reads `'kills:leader'` here only when the **full board** is missing too — a missing plaque alone falls back quietly and logs nothing. |
+| `the feed lists N board key(s) in 'keys' that its 'boards' object does not carry text for: …` | **Feed-side bug.** Those markers are claimable but can never paint. Fix the dashboard, not the plugin. |
+| `boards JSON envelope (generatedAt/keys) did not bind: … Logged once.` | The `keys` array (or `generatedAt`) was malformed. Harmless: the vocabulary falls back to the keys of `boards`. Logged once per server lifetime. |
 | `the update pump threw and has been stopped` | Bug. Signs are frozen; nothing else is affected. Restart to retry, and file it. |
 | *(nothing at all)* | The DLL is not in `BepInEx/plugins/` — or the log did not truncate and you are reading the previous boot. Confirm the truncation first. |
 
@@ -173,6 +201,30 @@ Trouble:
 > new plugin code loaded.
 
 ---
+
+## Ops: swapping the DLL on the live box
+
+The GTX host is **Windows**, so a loaded plugin DLL is file-locked and cannot be overwritten while
+the server runs. The swap is always:
+
+1. **Panel → Stop.** Wait for the process to actually exit (the lock can linger a few seconds).
+2. SFTP `dist/EilifBoards.dll` over `BepInEx/plugins/EilifBoards.dll` (retry the upload if it is
+   refused — that is the lock, not a permissions problem). **Nothing else changes:** the cfg, the
+   token, the URL, the `eilif_board` ZDO stamps and every claimed sign carry over untouched.
+3. **Panel → Start** (Stop → Start, never a soft "Restart").
+4. Grep the fresh `LogOutput.log`:
+
+   ```bash
+   grep -F '[EilifBoards]' LogOutput.log | head -20
+   ```
+
+   Expect `Eilif Boards v0.3.0 loaded…`, then within a poll `feed vocabulary: …` listing the keys,
+   then `updated N/M boards`. If the version still says `v0.2.0`, the old DLL is still in place
+   (the upload lost the race with the lock) — or the log did not truncate; confirm that first.
+
+**0.2.0 → 0.3.0 is a DLL-only swap.** No config change, no migration, no re-mint of the modpack
+(this plugin is server-side and ships in no player-facing pack), and no coordination with the
+dashboard deploy in either direction: 0.3.0 reads an old feed fine, and 0.2.0 ignores new keys.
 
 ## Build
 

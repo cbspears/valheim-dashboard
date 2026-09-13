@@ -11,10 +11,16 @@ namespace EilifBoards
     /// ---------------------------------------------------------------------------------------
     /// HOW A SIGN BECOMES A BOARD
     /// ---------------------------------------------------------------------------------------
-    /// A player writes a marker on any sign in-game: "[board:kills]" (the eight keys are the eight
-    /// members of <see cref="BoardsPayload"/>; case-insensitive, surrounding whitespace ignored).
-    /// The six ranked stat boards also take an optional ":leader" suffix — "[board:kills:leader]" —
-    /// which asks for a compact plaque holding only the leader instead of the top five.
+    /// A player writes a marker on any sign in-game: "[board:kills]". As of 0.3.0 the set of valid
+    /// keys is NOT compiled in — it is whatever the feed publishes (its "keys" array, or the keys
+    /// of its "boards" object), so a new leaderboard on the dashboard becomes a sign marker with no
+    /// plugin build. Matching is case-insensitive on the marker and exact on the feed; surrounding
+    /// whitespace is ignored. A key the feed does not publish is NOT a marker: that sign stays the
+    /// player's, untouched, exactly as in 0.2.0.
+    ///
+    /// A key the feed also publishes a "leaders" entry for takes an optional ":leader" suffix —
+    /// "[board:kills:leader]" — which asks for a compact plaque holding only the leader instead of
+    /// the top five.
     /// The periodic discovery scan sees that text, stamps the CLAIM into a custom ZDO string
     /// (<c>eilif_board</c> = "kills" or "kills:leader") and immediately writes the live board text
     /// over the marker. From then on the sign is found by its <c>eilif_board</c> stamp, so the
@@ -169,13 +175,17 @@ namespace EilifBoards
         // "[board:kills]", "  [BOARD: Deeds ]  ", "[board:kills:leader]" — anchored, so a sign that
         // merely mentions a marker inside a longer sentence is a player's sign and is left alone.
         //
-        // The variant is captured as a plain word rather than the literal "leader" so the whole
-        // vocabulary lives in BoardKeys and nowhere else: this regex decides SHAPE, BoardKeys.Claim
-        // decides MEANING. An unknown suffix ("[board:kills:best]") therefore fails the same way an
-        // unknown key does — not a marker, sign untouched — instead of being rejected here by shape
-        // and accepted there by meaning, or vice versa.
+        // Key and variant are captured as plain words rather than as a list of literals, so the
+        // whole vocabulary lives in the FEED and nowhere else: this regex decides SHAPE, the
+        // snapshot decides MEANING (BoardKeys.Claim). An unknown suffix ("[board:kills:best]")
+        // therefore fails the same way an unknown key does — not a marker, sign untouched — instead
+        // of being rejected here by shape and accepted there by meaning, or vice versa.
+        //
+        // The key class is [A-Za-z0-9_]+, wider than the letters-only class 0.2.0 used, so a future
+        // feed key like "boss_damage" or "day7" is reachable without another plugin build. It is
+        // kept in lockstep with BoardKeys.IsKeyShape, which validates the eilif_board stamp.
         private static readonly Regex MarkerRe =
-            new Regex(@"^\s*\[\s*board\s*:\s*([A-Za-z]+)\s*(?::\s*([A-Za-z]+)\s*)?\]\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            new Regex(@"^\s*\[\s*board\s*:\s*([A-Za-z0-9_]+)\s*(?::\s*([A-Za-z0-9_]+)\s*)?\]\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         private readonly Dictionary<ZDOID, Claim> _claims = new Dictionary<ZDOID, Claim>();
         private readonly HashSet<string> _missingBoardLogged = new HashSet<string>();
@@ -343,7 +353,7 @@ namespace EilifBoards
                 if (!_scanSeen.Add(id)) return;
 
                 string text = zdo.GetString(ZDOVars.s_text, "");
-                string marked = ParseMarker(text);
+                string marked = ParseMarker(text, snapshot);
                 string stamped = BoardKeys.CanonicalClaim(zdo.GetString(BoardKeyZdoKey, ""));
 
                 if (marked != null)
@@ -450,7 +460,7 @@ namespace EilifBoards
                         // Differs from BOTH our last write and the board string => a human touched it.
                         if (current != claim.LastWrote && current != want)
                         {
-                            string marked = ParseMarker(current);
+                            string marked = ParseMarker(current, snapshot);
                             if (marked != null)
                             {
                                 // They re-pointed the sign at a (possibly different) board.
@@ -540,15 +550,24 @@ namespace EilifBoards
             return true;
         }
 
-        /// <summary>The canonical claim a sign's text makes, or null if it is not a marker.</summary>
-        private static string ParseMarker(string text)
+        /// <summary>
+        /// The canonical claim a sign's text makes, or null if it is not a marker.
+        ///
+        /// <paramref name="snapshot"/> is the vocabulary: a marker is only a marker if the feed
+        /// publishes that key (and, for ":leader", a plaque for it). It may be null — before the
+        /// first successful poll — in which case BoardKeys falls back to its built-in list so a
+        /// sign written during a feed outage is still claimed and painted once the feed recovers.
+        /// </summary>
+        private static string ParseMarker(string text, BoardsResponse snapshot)
         {
             if (string.IsNullOrEmpty(text)) return null;
             // Cheap reject before the regex: every marker contains '['.
             if (text.IndexOf('[') < 0) return null;
             Match m = MarkerRe.Match(text);
             if (!m.Success) return null;
-            return BoardKeys.Claim(m.Groups[1].Value, m.Groups[2].Success ? m.Groups[2].Value : null);
+            return BoardKeys.Claim(m.Groups[1].Value,
+                                   m.Groups[2].Success ? m.Groups[2].Value : null,
+                                   snapshot);
         }
 
         private static ZDO SafeGet(ZDOID id)

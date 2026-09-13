@@ -174,15 +174,30 @@ inside a stopped window, and it must be the same window as the game update:
   this one. After a 1.0 rebuild the boot proof for Boards is its own
   `Eilif Boards <ver> loaded. Enabled=true, Url=…` line plus a fresh `boards-plugin` heartbeat in
   the ops cockpit, which it writes on a timer whether or not anyone is playing.
-- **The JSON contract classes must stay `public`.** `BoardsResponse` / `BoardsPayload` are filled by
-  `DataContractJsonSerializer` via reflection. Making them `internal` turns every field into a
-  `CS0649` "never assigned" warning (10 of them). `../eilif-companion` has the same classes public
-  for the same reason.
+- **The JSON contract class must stay `public`.** `BoardsResponse` is filled by
+  `DataContractJsonSerializer` via reflection. Making it `internal` turns every `[DataMember]` field
+  into a `CS0649` "never assigned" warning. `../eilif-companion` has the same classes public for the
+  same reason. (0.3.0 deleted `BoardsPayload` / `LeadersPayload`: the board keys are no longer known
+  at compile time, so those two objects are read by `JsonMaps` instead — see the next bullet.)
+- **`boards` / `leaders` are read by hand, and that is deliberate (0.3.0).** The obvious alternative
+  is `[DataMember] Dictionary<string,string>` plus
+  `DataContractJsonSerializerSettings.UseSimpleDictionaryFormat = true`. It is rejected because the
+  **deserialisation** half of that flag lives in `System.Runtime.Serialization`, and the runtime this
+  DLL executes on is the Unity/BepInEx **Mono** BCL — a re-implementation that cannot be exercised
+  from this build machine without the game. A silent mis-bind there freezes every board on the
+  server and is found by a player, not by a build. `JsonMaps` in `src/BoardsFeed.cs` uses nothing but
+  `string`/`char`/`StringBuilder`, is deterministic, and is unit-testable off the game: a throwaway
+  net8 console project that `<Compile Include>`s `src/BoardsFeed.cs` plus a six-line stub for
+  `EilifBoardsPlugin.Log*` runs the whole contract in about a second (64 assertions at 0.3.0 —
+  BOM, escapes, nested `data`, non-string values, hostile nesting, and every backward-compatible
+  feed shape). Rebuild that harness rather than reasoning about the parser.
 - **`DataContractJsonSerializer` tolerates a lot, but NOT a UTF-8 BOM.** Executed 2026-08-27 against
   a realistic `/api/boards` body: out-of-order members bind fine (the contract sorts members
   alphabetically, so 9 of our 10 arrive "wrong" — this is the assumption the parser rests on), the
   undeclared `data` member and its nested arrays are skipped, missing members stay `null`, and raw
-  multi-byte UTF-8 round-trips. A leading `EF BB BF` however throws
+  multi-byte UTF-8 round-trips. (Since 0.3.0 the serializer reads only the envelope —
+  `generatedAt` / `keys` — and a throw there is no longer fatal: it is logged once and the
+  vocabulary falls back to the keys of the `boards` object.) A leading `EF BB BF` however throws
   `SerializationException: Encountered unexpected character 'ï'`. `Parse` in `src/BoardsFeed.cs`
   therefore skips a BOM before handing the bytes to the deserializer. `Response.json()` never emits
   one, so this only matters if something is ever put in front of the feed.
