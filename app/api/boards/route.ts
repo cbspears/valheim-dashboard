@@ -19,11 +19,37 @@
 // numbers the public site renders, so this route needs no service-role privilege.
 // Board formatting is pure and lives in lib/boards.ts (unit-tested); this file is
 // only auth, IO, and the cache.
+//
+// COVERAGE: the feed carries one board per leaderboard /players shows (ten stat
+// boards), plus Living Titles and Great Deeds — twelve in `boards`, and a leader
+// plaque for each of the ten ranked ones in `leaders`.
+//
+// `keys`: the marker vocabulary, top-level and flat (lib/boards BOARD_KEYS). It
+// lists EVERY board key this payload carries, stat boards first, so a plugin can
+// claim any sign whose text is `[board:<key>]` for a key in that array — and
+// `[board:<key>:leader]` for any key that also appears in `leaders` — without
+// being rebuilt the next time a board is added here. Keys are append-only and
+// never re-spelled: a sign in the world is already claimed with the old one, and
+// the deployed 0.2.0 plugin still reads its eight fixed fields by name and
+// ignores everything else (DataContractJsonSerializer binds what it declares).
 
-import { getPlayersWithStats, getMilestones } from '@/lib/data';
+import {
+  getPlayersWithStats,
+  getMilestones,
+  getSessionsSince,
+  playtimeMinutesByCharacter,
+} from '@/lib/data';
 import { safeEqual } from '@/lib/ops/auth';
 import { recordRouteHeartbeat } from '@/lib/ops/route-heartbeat';
-import { buildBoards, buildLeaders, type BoardPlayer, type Boards, type DeedsSummary, type Leaders } from '@/lib/boards';
+import {
+  buildBoards,
+  buildLeaders,
+  BOARD_KEYS,
+  type BoardPlayer,
+  type Boards,
+  type DeedsSummary,
+  type Leaders,
+} from '@/lib/boards';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,6 +68,8 @@ interface BoardsResponse {
   generatedAt: string;
   boards: Boards;
   leaders: Leaders;
+  /** Every board key `boards` carries — see the `keys` note in the header. */
+  keys: string[];
   data: { players: BoardPlayer[]; deeds: DeedsSummary };
 }
 
@@ -56,9 +84,42 @@ function bearer(request: Request): string | null {
   return m ? m[1].trim() : null;
 }
 
-/** Flatten players + player_stats into the shape lib/boards renders from. */
+/**
+ * Total catches for one viking — the GREATER of the per-species `gs_stats.fish`
+ * sum and the profile's own `gs_stats.fishCaught`.
+ *
+ * Deliberately the same rule as `totalCatches` on /players (and FeatsOfArms on a
+ * viking page): GsValheimStatsClient reports `fish: []` for everyone on Valheim
+ * 1.0, so the species breakdown alone is a row of zeros, while the profile total
+ * carries no species detail. Taking the max loses neither source. Kept here in
+ * the IO layer rather than in lib/boards because it reads a third-party blob —
+ * lib/boards stays pure and renders from flat numbers.
+ */
+function totalCatches(stats: { gs_stats?: { fish?: { count: number }[]; fishCaught?: number } | null } | null): number {
+  const gs = stats?.gs_stats;
+  const bySpecies = (gs?.fish ?? []).reduce((sum, f) => sum + (f.count ?? 0), 0);
+  return Math.max(bySpecies, gs?.fishCaught ?? 0);
+}
+
+/** Flatten players + player_stats (+ sessions, for hours) into the shape lib/boards renders from. */
 async function compute(): Promise<BoardsResponse> {
-  const [withStats, milestones] = await Promise.all([getPlayersWithStats(), getMilestones()]);
+  // `sessions` is the third read, and only the Hours board needs it: the real
+  // pipeline never writes `players.total_playtime_minutes`, so /players derives
+  // hours live from session rows and this feed has to derive them the same way or
+  // the sign and the site would disagree. Behind the same 30 s cache as the rest,
+  // and already filtered of excluded vikings inside getSessionsSince.
+  const [withStats, milestones, sessions] = await Promise.all([
+    getPlayersWithStats(),
+    getMilestones(),
+    getSessionsSince(70),
+  ]);
+
+  // Who is online comes off the roster rows already in hand — an open session only
+  // counts as live time for a viking actually on the server (same rule as /players),
+  // and a Route Handler gets no per-request memoization, so re-reading `players`
+  // through getOnlinePlayers() would be a second round trip for a field we have.
+  const onlineNames = new Set(withStats.filter((p) => p.is_online).map((p) => p.character_name));
+  const playtimeByName = playtimeMinutesByCharacter(sessions, onlineNames);
 
   const players: BoardPlayer[] = withStats.map((p) => ({
     name: p.character_name,
@@ -73,6 +134,8 @@ async function compute(): Promise<BoardsResponse> {
     longestLifeSec: p.stats?.longest_life_sec ?? 0,
     bestKillsBeforeDeath: p.stats?.best_kills_before_death ?? 0,
     damageDealt: p.stats?.damage_dealt ?? 0,
+    playtimeMin: playtimeByName.get(p.character_name) ?? 0,
+    fishCaught: totalCatches(p.stats),
   }));
 
   // "Most recent" is by achieved_at, not by the display `sort` order — the sign
@@ -91,6 +154,7 @@ async function compute(): Promise<BoardsResponse> {
     generatedAt: new Date().toISOString(),
     boards: buildBoards(players, deeds),
     leaders: buildLeaders(players),
+    keys: [...BOARD_KEYS],
     data: { players, deeds },
   };
 }

@@ -54,6 +54,23 @@ export interface BoardPlayer {
   longestLifeSec: number;
   bestKillsBeforeDeath: number;
   damageDealt: number;
+  /**
+   * Playtime in MINUTES, derived from `sessions` the same way /players derives
+   * its Hours board (closed sessions at their recorded duration, plus the one
+   * open session of a viking who is online right now). NOT
+   * `players.total_playtime_minutes` — nothing in the live pipeline writes that
+   * column, so it reads back 0 for every real viking.
+   */
+  playtimeMin: number;
+  /**
+   * Total catches — the same number the site's Anglers board counts: the GREATER
+   * of the per-species `gs_stats.fish` sum and the profile's own
+   * `gs_stats.fishCaught`. Either source alone can be short of the truth (the
+   * species list is empty on Valheim 1.0; the profile total carries no species),
+   * so the max is the honest reading. The max is taken in the route, next to the
+   * blob it reads — this module stays pure.
+   */
+  fishCaught: number;
 }
 
 /** Great Deeds roll-up (the `milestones` table). */
@@ -63,7 +80,13 @@ export interface DeedsSummary {
   latest: { title: string; achievedAt: string | null } | null;
 }
 
-/** The eight ready-to-paste sign strings. */
+/**
+ * The twelve ready-to-paste sign strings: ten ranked stat boards (one per
+ * leaderboard the dashboard shows on /players) plus Living Titles and Great Deeds.
+ *
+ * The six original keys never change spelling — `builds`, not `built`; a rename
+ * would blank every sign already claimed with `[board:builds]` in the world.
+ */
 export interface Boards {
   kills: string;
   deaths: string;
@@ -71,14 +94,18 @@ export interface Boards {
   resources: string;
   explored: string;
   distance: string;
+  damage: string;
+  hours: string;
+  crafts: string;
+  fish: string;
   titles: string;
   deeds: string;
 }
 
 /**
- * The leader-only plaques: the same six RANKED stat boards, each cut down to its top row.
+ * The leader-only plaques: the same ten RANKED stat boards, each cut down to its top row.
  *
- * Six, not eight, on purpose. Living Titles is alphabetical (colouring a first name would
+ * Ten, not twelve, on purpose. Living Titles is alphabetical (colouring a first name would
  * invent a winner) and Great Deeds is a warband total, not a race — neither has a leader to
  * put on a plaque, so neither gets one here or in the marker vocabulary.
  */
@@ -89,6 +116,10 @@ export interface Leaders {
   resources: string;
   explored: string;
   distance: string;
+  damage: string;
+  hours: string;
+  crafts: string;
+  fish: string;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────
@@ -111,6 +142,15 @@ export function formatCount(n: number): string {
 /** Metres -> "84.2 km". Always kilometres, always one decimal (stable width). */
 export function formatKm(meters: number): string {
   return `${(meters / 1000).toFixed(1)} km`;
+}
+
+/**
+ * Minutes -> "12.5 h". Always hours, always one decimal — same reasoning as
+ * formatKm: one fixed unit per board so a row never changes width between polls
+ * (the site's formatPlaytime switches between "48m" and "2h 5m", which would).
+ */
+export function formatHours(minutes: number): string {
+  return `${(minutes / 60).toFixed(1)} h`;
 }
 
 /** 31.94 -> "31.9%" (drops a trailing ".0", matching the site). */
@@ -179,9 +219,10 @@ interface StatSpec {
 }
 
 /**
- * The six ranked stat boards, declared ONCE. The full board and the leader plaque both
- * render from this table, which is what makes "the plaque names whoever tops the board"
- * true by construction instead of by two lists happening to agree.
+ * The ten ranked stat boards, declared ONCE — one per leaderboard /players shows.
+ * The full board and the leader plaque both render from this table, which is what makes
+ * "the plaque names whoever tops the board" true by construction instead of by two lists
+ * happening to agree.
  */
 const STATS: Record<keyof Leaders, StatSpec> = {
   kills: { header: 'Kills', pick: (p) => p.kills, format: formatCount },
@@ -190,7 +231,29 @@ const STATS: Record<keyof Leaders, StatSpec> = {
   resources: { header: 'Resources', pick: (p) => p.resources, format: formatCount },
   explored: { header: 'Explored', pick: (p) => p.exploredPct, format: formatPct },
   distance: { header: 'Distance', pick: (p) => p.distanceM, format: formatKm },
+  damage: { header: 'Damage', pick: (p) => p.damageDealt, format: formatCount },
+  hours: { header: 'Hours', pick: (p) => p.playtimeMin, format: formatHours },
+  crafts: { header: 'Crafts', pick: (p) => p.crafts, format: formatCount },
+  fish: { header: 'Catches', pick: (p) => p.fishCaught, format: formatCount },
 };
+
+/**
+ * Every ranked stat key, in board order — the keys that have a leader plaque.
+ *
+ * Derived from STATS rather than typed out again: a board added to that table is a
+ * board the vocabulary below advertises, with no second list to forget.
+ */
+export const STAT_KEYS = Object.keys(STATS) as (keyof Leaders)[];
+
+/**
+ * THE MARKER VOCABULARY: every board key this feed carries, stat boards first.
+ *
+ * Served as `keys` on the payload so a plugin can claim any `[board:<key>]` whose key
+ * appears here — and honour `[board:<key>:leader]` for any key in STAT_KEYS — without a
+ * code change the next time a board is added. Order is stable and append-only; a key is
+ * never re-spelled, because a sign in the world is already claimed with the old one.
+ */
+export const BOARD_KEYS: readonly string[] = [...STAT_KEYS, 'titles', 'deeds'];
 
 /**
  * The top `limit` rows of one ranked stat, rendered.
@@ -251,7 +314,7 @@ function deedsBoard(deeds: DeedsSummary): string {
   return fitBudget(lines);
 }
 
-/** Build all eight sign strings from an already-flattened roster. */
+/** Build all twelve sign strings from an already-flattened roster. */
 export function buildBoards(players: BoardPlayer[], deeds: DeedsSummary): Boards {
   return {
     kills: statBoard(players, STATS.kills),
@@ -260,13 +323,17 @@ export function buildBoards(players: BoardPlayer[], deeds: DeedsSummary): Boards
     resources: statBoard(players, STATS.resources),
     explored: statBoard(players, STATS.explored),
     distance: statBoard(players, STATS.distance),
+    damage: statBoard(players, STATS.damage),
+    hours: statBoard(players, STATS.hours),
+    crafts: statBoard(players, STATS.crafts),
+    fish: statBoard(players, STATS.fish),
     titles: titlesBoard(players),
     deeds: deedsBoard(deeds),
   };
 }
 
 /**
- * Build the six leader plaques from the same roster.
+ * Build the ten leader plaques from the same roster.
  *
  * A player asks for one by writing `[board:kills:leader]` instead of `[board:kills]`; the
  * plugin resolves that claim against this map and falls back to the full board if a feed
@@ -280,5 +347,9 @@ export function buildLeaders(players: BoardPlayer[]): Leaders {
     resources: leaderPlaque(players, STATS.resources),
     explored: leaderPlaque(players, STATS.explored),
     distance: leaderPlaque(players, STATS.distance),
+    damage: leaderPlaque(players, STATS.damage),
+    hours: leaderPlaque(players, STATS.hours),
+    crafts: leaderPlaque(players, STATS.crafts),
+    fish: leaderPlaque(players, STATS.fish),
   };
 }
