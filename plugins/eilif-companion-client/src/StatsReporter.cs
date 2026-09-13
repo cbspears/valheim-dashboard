@@ -37,7 +37,7 @@ namespace EilifCompanionClient
     ///     (reads the RawStats bucket <c>m_playerStats[0]</c> unless achievements
     ///     are enabled; the PlayerStats ctor pre-seeds every enum index 0..204, so
     ///     the dictionary read never throws for any member we touch).
-    ///   • <c>PlayerStatType</c> members used — Builds, Crafts, ItemsPickedUp,
+    ///   • <c>PlayerStatType</c> members used — EnemyKills (0.4.5), Builds, Crafts, ItemsPickedUp,
     ///     DistanceTraveled, DistanceWalk, DistanceRun, DistanceSail, DistanceAir and
     ///     (0.4.4) FishCaught, FishHooked, FishLost, FishCaughtTier0..FishCaughtTier6 —
     ///     all present in the 1.0 enum (re-verified against the 1.0.12 hotfix assembly).
@@ -78,6 +78,16 @@ namespace EilifCompanionClient
 
         private static readonly StatKey[] StatMap =
         {
+            // 0.4.5: total enemy kills, back from the profile. Removed in 0.4.3 because a
+            // lifetime counter next to the stats mod's per-world weapon breakdown made the
+            // dashboard flip its zero-point every post. The dashboard now takes kills from
+            // THIS counter only (killsSource 'profile', 2026-09-13) and reads the weapon
+            // breakdown purely as the Feats of Arms table, because the weapon file resets
+            // whenever a player rebuilds their profile or changes PC and leaks across
+            // characters on a shared one. EnemyKills lives in the .fch, is monotonic, and
+            // is the character's own. Sent as a vh_ key, not entry-level `kills`, so a
+            // dashboard that predates the change ignores it instead of misreading it.
+            new StatKey("vh_EnemyKills", PlayerStatType.EnemyKills),
             new StatKey("vh_Builds", PlayerStatType.Builds),
             new StatKey("vh_Crafts", PlayerStatType.Crafts),
             new StatKey("vh_DistanceTraveled", PlayerStatType.DistanceTraveled),
@@ -135,14 +145,12 @@ namespace EilifCompanionClient
 
                 int counters = 0;
 
-                // Entry-level kills/deaths — parseSelfSnapshot reads self.kills /
-                // self.deaths, NOT a vh_ key. EnemyKills is the total-kills counter
-                // the dashboard's kill board + the "killsSource:'client'" path want.
-                // 0.4.3: kills and deaths are NO LONGER posted. The dashboard takes kills
-                // from the per-world weapon breakdown and deaths from its own death events;
-                // a lifetime profile counter next to those made the ingest flip its
-                // zero-point every five minutes on 2026-09-10. Builds, crafts and distance
-                // are what this reporter is for.
+                // Entry-level kills/deaths (self.kills / self.deaths) are NOT posted
+                // since 0.4.3: a lifetime counter beside the stats mod's per-world weapon
+                // breakdown made the ingest flip its zero-point every five minutes on
+                // 2026-09-10. 0.4.5 sends total kills again, but as the vh_EnemyKills
+                // profile key (see StatMap) so only a dashboard that knows the key reads it.
+                // Deaths stay with the dashboard's own death events.
 
                 // stats:{ "vh_...": n } — only keys we actually read.
                 var statsFrag = new StringBuilder();
