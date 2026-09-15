@@ -32,7 +32,7 @@
 // Gated behind VOICE_ENGINE=1 (see index.js), like GALLERY_INGEST.
 
 import { serviceClient } from './supabase.js';
-import { causeNoun, clipChars, defangLinks, nameMd, safeText } from './format.js';
+import { causeNoun, clipChars, defangLinks, nameMd, potyStoryLine, safeText } from './format.js';
 import { MENTION_STRICT } from './discord.js';
 import { isExcluded, isExcludedName } from './excluded.js';
 
@@ -1005,8 +1005,15 @@ export function createVoiceEngine({
   async function announcePoty(poty, worldDay = null) {
     if (!poty?.name) return;
     const name = String(poty.name).trim();
+    // The hall hears the STORY, not just the crown (Charlie, 2026-09-14): the
+    // same blurb the recap embed carries, rendered plain. If the blurb cannot be
+    // built (an unknown award key), the bare coronation still goes out.
+    const story = potyStoryLine(poty);
+    const line = story
+      ? `The crown goes to ${firstName(name)} tonight. ${story} Eilif will remember it come morning.`
+      : `The crown goes to ${firstName(name)} tonight. Eilif will remember it come morning.`;
     await enqueue(
-      `The crown goes to ${firstName(name)} tonight. Eilif will remember it come morning.`,
+      clipChars(line, 400),
       'event',
       { source: 'poty', poty: name, award: poty.key, world_day: worldDay },
     );

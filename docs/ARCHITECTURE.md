@@ -214,7 +214,7 @@ only component holding a Supabase key directly. Loops, with their intervals:
 | `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history`. Sticky since 2026-09-10: no demotion of an earned title, silent placeholder reshuffles, two-pass confirmation (`TITLE_CONFIRM_MS`), 24 h tenure (`TITLE_MIN_TENURE_MS`), max `TITLES_PER_DAY` (3) a rolling day |
 | `milestones` | `MILESTONES_INTERVAL_MS`, default 2 m | announces Great Deeds |
 | heartbeat | 60 s | POSTs to `/api/ops/heartbeat` with per-sub-loop status |
-| recap | one `node-cron` job, `RECAP_EVENING_HOUR` (default 23) America/Chicago | the evening recap and Player of the Day |
+| recap | one `node-cron` job, `RECAP_EVENING_HOUR` (default 23) America/Chicago | the evening recap and Player of the Day. Since 2026-09-14 the crown is a **notability** draw (personal spike × clan share, behind a 20-minute activity gate, with rotation read from `poty_history`) rather than a fixed priority list; rules of record in `services/discord-bot/README.md` and the header of `src/recap.js` |
 | `boss-polls` | `BOSS_POLLS_INTERVAL_MS`, default 60 s | watches `bosses` for a fresh kill and posts one native Discord poll naming who takes first blood on the next boss, plus a follow-up when it falls. **Off unless `BOSS_POLLS=1`** |
 | chronicle | one `node-cron` job, `0 <CHRONICLE_HOUR> * * 0` (Sunday, default 20:00) America/Chicago | the weekly Skald's Chronicle embed. **Off unless `WEEKLY_CHRONICLE=1`** |
 | `storyteller` | `STORYTELLER_INTERVAL_MS`, default 30 m | closes a due election ballot, then owes at most one nudge about a fallen boss no viking has told. **Off unless `STORYTELLER=1`** |

@@ -380,7 +380,15 @@ export interface GalleryPhoto {
 export interface PotyHistoryEntry {
   id: string;
   character_name: string;
-  /** category key, e.g. 'boss_kill' | 'most_deaths' | 'underdog' */
+  /**
+   * Category key. An OPEN set written by the bot, never an enum here: the site
+   * renders `award_label`, so a new angle needs no change on this side.
+   * Live since 2026-09-14: 'boss_kill' | 'most_explored' | 'builder' |
+   * 'woodcutter' | 'smith' | 'wayfarer' | 'angler' | 'hunter' | 'ironhide' |
+   * 'steadfast' | 'bold' | 'underdog'. Rows written before that date carry the
+   * retired keys 'most_deaths' | 'most_kills' | 'most_resources' |
+   * 'most_crafted' | 'most_hours'.
+   */
   award_category: string;
   /** display label, e.g. '👑 Bane of Beasts (Boss-Slayer)' | '🌟 Unsung Hero' */
   award_label: string;

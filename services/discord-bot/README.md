@@ -95,6 +95,59 @@ kills, who's online, the world day, the day boards and the Player of the Day —
 hours. The old 08:00 morning recap is retired; `postRecap('morning')` still exists for previews.
 Recaps stay silent until `RECAPS_START`.
 
+### Player of the Day — the rules of record
+
+Rewritten **2026-09-14**. The first cut ranked a fixed priority list against fixed thresholds, so
+💀 The Bold (3+ deaths) outranked every stat angle below it and the crown drifted to whoever died
+the most. Every angle now scores the **same** way, and the biggest score wins. The full formula,
+every knob and the reasoning live in the header block of `src/recap.js`; this is the summary.
+
+**What is scored is notability, not size.**
+
+```
+surprise = todayDelta / max(that viking's mean of the last ≤7 daily deltas, the angle floor)
+share    = todayDelta / (sum of every eligible viking's delta tonight)          0..1
+score    = surprise^0.6 × share^0.4 × activityNudge        (nudge ≤ +10%, never decisive)
+```
+
+Tuned so a 3× personal spike holding 30% of the clan's day beats a routine night holding 45%. With
+fewer than two days of history `surprise = 1` and clan share carries it.
+
+- **Activity gate.** 20 minutes on the world tonight, or no crown. Excluded characters are never
+  eligible, ever.
+- **Floors** (a minimum absolute delta, so trivia never wins, and the denominator floor for
+  `surprise`): kills 15 · builds 60 · crafts 15 · resources 150 · distance 3 km · sail 2 km ·
+  fish 3 · damage 2000 · map +0.4 pct.
+- **Tiers** — score only ranks *within* a tier: `3` 👑 Boss-Slayer · `2` 🧭 Trailblazer via a **new
+  biome** · `1` 🌄 The Steadfast · `0` everything else.
+- **The angles.** 👑 Boss-Slayer · 🧭 Trailblazer (a new biome, *or* a map delta ≥ 0.4 pct, which is
+  not epic) · 🏗️ The Builder · 🪓 The Woodcutter · 🔨 Master of the Forge · ⛵ The Wayfarer (sail
+  distance flavours the blurb and can qualify it on its own) · 🎣 The Angler · ⚔️ Monster-Hunter ·
+  🛡️ Ironhide (≥ 3 h, **zero** deaths, and ≥ 10 kills or ≥ 2000 damage) · 🌄 The Steadfast ·
+  💀 The Bold · 🌟 Unsung Hero (the unchanged weekly spotlight).
+- **The Steadfast** (perseverance): played ≥ 3 of the last 5 calendar days, sits in the **bottom
+  third** of clan progression (`map_explored_pct` + kills, normalised), and played tonight. At most
+  once per 7 days per viking and once per 3 nights overall, read from `poty_history`. It beats
+  routine stat wins and never an epic.
+- **The Bold** is on probation: it needs the **most** deaths tonight outright, ≥ 3 of them, a score
+  that beats every other angle by ≥ 20%, and it never crowns two evenings running.
+- **Rotation**, read from `poty_history` at recap time (`state.json` is the fallback when that read
+  fails): same viking in the last 3 nights ×0.5, same angle in the last 2 nights ×0.67. **Epics are
+  exempt from both.** `MAX_WIN_STREAK` (2) remains the hard backstop.
+- **The blurb is the story.** The selector passes the context it already computed down to
+  `format.js` — the spike multiple (`{surpriseX}` "5x"), the clan share (`{clanShare}` "a third"),
+  the attendance count (`{daysCount}` "4 of the last 5 days"), the standing (`{standing}`) — and
+  every blurb names the number. The same line, stripped of markdown, is what the Voice of the Hall
+  speaks in game (`potyStoryLine`). The context tokens are left undefined below their story
+  thresholds, so no blurb can ever read "1.0x a normal night".
+- **Per-day history** lives in `state.json` as `dayDeltas` — a 7-entry ring buffer of per-viking
+  deltas, appended **only** by the evening recap and deduped by date.
+- One operator line per evening, never posted:
+  `[recap] poty: Fjällhnot — hunter, surprise 1.0x, share 0.23, rot 1.00`.
+
+A replay of the last four evenings through both the old and the new draw is in
+[`docs/poty-dry-run-2026-09-14.md`](docs/poty-dry-run-2026-09-14.md).
+
 ## Photo gallery ingest (`GALLERY_INGEST=1`)
 Post an image in `CHANNEL_GALLERY` and @mention the bot: it re-hosts the image in the public
 `gallery` Supabase Storage bucket (Discord CDN URLs expire), inserts a `gallery_photos` row for the

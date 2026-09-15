@@ -1124,15 +1124,27 @@ const READS = {
 {
   const KNOWN = new Set(['name', 'boss', 'biome', 'deaths', 'cause', 'causeCap', 'hours', 'kills',
     'resources', 'items', 'newBiome', 'deathsTimes', 'gravesCount', 'killsCount', 'corpsesCount',
-    'piecesCount', 'worksCount']);
+    'piecesCount', 'worksCount',
+    // the 2026-09-14 notability angles + the story context tokens
+    'buildsCount', 'distanceKm', 'sailKm', 'fishCount', 'mapPct', 'daysCount', 'standing',
+    'surpriseX', 'clanShare']);
   const FIELDS = {
     boss_kill: { boss: 'Bonemass', biome: 'Swamp', deaths: 3 },
-    most_explored: { newBiome: 'Mistlands' },
+    most_explored: { newBiome: 'Mistlands', mapDelta: 0.9, surpriseX: 2.4 },
     most_deaths: { deaths: 5, cause: 'Tree' },
     most_kills: { kills: 60 },
     most_resources: { resources: 900 },
     most_crafted: { items: 70 },
     most_hours: { hours: 6.25 },
+    builder: { builds: 412, surpriseX: 5.1, clanShare: 0.34 },
+    woodcutter: { resources: 900, surpriseX: 2.2, clanShare: 0.52 },
+    smith: { items: 70, surpriseX: 3.4, clanShare: 0.61 },
+    wayfarer: { distance: 6300, sail: 2100, surpriseX: 1.9, clanShare: 0.29 },
+    angler: { fish: 4, surpriseX: 4.0, clanShare: 0.8 },
+    hunter: { kills: 60, surpriseX: 2.7, clanShare: 0.41 },
+    ironhide: { hours: 4.5, kills: 22, surpriseX: 2.0 },
+    steadfast: { attendanceDays: 4, hours: 1.5, progressRank: 9, progressTotal: 11 },
+    bold: { deaths: 5, cause: 'Tree', clanShare: 0.55 },
     underdog: {},
   };
   for (const [key, pool] of Object.entries(POTY_TEMPLATES)) {

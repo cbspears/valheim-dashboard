@@ -126,8 +126,21 @@ function joinCapped(lines, sep = ', ') {
 // COUNT TOKENS carry their own noun so a tally of one never reads "1 times":
 // {deathsTimes} "once / twice / 4 times", {gravesCount} "1 fresh grave",
 // {killsCount} "1 foe", {corpsesCount} "1 corpse", {piecesCount} "1 piece",
-// {worksCount} "1 work". Each is backed by a raw number in COUNT_TOKEN_SOURCE
-// below, so the missing/zero guard still sees the value behind the phrase.
+// {worksCount} "1 work", {buildsCount} "412 pieces", {fishCount} "4 fish",
+// {distanceKm} "6.3 km", {sailKm} "2.1 km", {mapPct} "0.8%",
+// {daysCount} "4 of the last 5 days". Each is backed by a raw number in
+// COUNT_TOKEN_SOURCE below, so the missing/zero guard still sees the value
+// behind the phrase.
+//
+// STORY TOKENS (added 2026-09-14, Charlie: "the crown should read like the story
+// of the day"). The selector scores notability, so it already knows WHY tonight
+// was remarkable and hands that context down in `fields`:
+//   {surpriseX} "5x"   how many times a normal night this was for that viking
+//   {clanShare} "a third"  how much of the clan's day they accounted for
+//   {standing}  "9th of 11 in the clan's reckoning"  (The Steadfast only)
+// recap.js leaves surpriseX/clanShare UNDEFINED when they are not actually
+// remarkable, so the missing/zero guard below falls back to a plain template
+// rather than ever printing "1.0x a normal night".
 export const POTY_TEMPLATES = {
   boss_kill: [
     '{name} stood over **{boss}** while the **{biome}** went quiet. Skål.',
@@ -135,10 +148,15 @@ export const POTY_TEMPLATES = {
     '**{boss}** is done, and {name} was there at the kill. The mead is on the gods tonight.',
     '{name} bled {deathsTimes} wrestling **{boss}** down and took its head anyway.',
   ],
+  // 🧭 Trailblazer wears two faces: an EPIC new biome, and the ordinary work of
+  // peeling fog off the map. Index 0 therefore reaches for neither, so both
+  // faces always have a blurb to fall back to.
   most_explored: [
+    '{name} pushed the edge of the map back today. The unknown blinked first.',
     '{name} put a prow into the **{newBiome}** for the first time and lived to tell it.',
     'The map grew today. {name} set boots in the **{newBiome}**, where no clansman had walked.',
-    '{name} crossed into the **{newBiome}** and the unknown blinked first.',
+    '{name} crossed into the **{newBiome}** and came back with the tale.',
+    '{name} peeled {mapPct} more of the world out of the fog today, {surpriseX} their usual roaming.',
   ],
   most_deaths: [
     '{name} died {deathsTimes} today and laughed off most of it.',
@@ -165,6 +183,63 @@ export const POTY_TEMPLATES = {
     '{name} held the hall for {hours}h while the rest slept. No glory in it. Somebody has to.',
     '{name} kept the longfire burning {hours}h.',
     '{hours}h of honest toil from {name} today. The longhouse grows because someone refuses to rest.',
+  ],
+  // ── The 2026-09-14 notability angles ─────────────────────────────────────
+  // One set per angle key in recap.js's ANGLES table. Index 0 is number-only
+  // (always present for the angle that won); the rest reach for the story.
+  builder: [
+    '{name} raised {buildsCount} before the fire went out. The hall grows by hands like these.',
+    '{name} raised {buildsCount} today, {surpriseX} a normal night for them.',
+    '{name} set {buildsCount} into the earth, {clanShare} of everything the clan built today.',
+    'Hammer, nail and stubbornness: {buildsCount} from {name} in one evening.',
+  ],
+  woodcutter: [
+    '{name} tore {piecesCount} out of the land today. The storehouse groans and gives thanks.',
+    '{name} hauled {piecesCount} home, {surpriseX} a normal day for them.',
+    '{name} gathered {piecesCount}, {clanShare} of everything the clan carried today.',
+    'The forest stands shorter tonight: {piecesCount} to {name}, and the axe never once rested.',
+  ],
+  smith: [
+    '{name} bent {worksCount} out of anvil and flame today. Even Brokkr the dwarf would nod.',
+    'The forge never cooled for {name}: {worksCount}, {surpriseX} a normal night at the anvil.',
+    "{worksCount} left {name}'s anvil, {clanShare} of everything forged in Eilif today.",
+    "Blades, nails and trinkets: {worksCount} off {name}'s anvil, and the clan walks better armed.",
+  ],
+  wayfarer: [
+    '{name} put {distanceKm} of the realm under their boots today.',
+    '{name} covered {distanceKm} today, {surpriseX} their usual wandering.',
+    '{distanceKm} for {name}, and {sailKm} of it under sail. The horizon keeps moving.',
+    '{name} ranged {distanceKm} across the world, {clanShare} of every step the clan took.',
+  ],
+  angler: [
+    '{name} pulled {fishCount} out of the water today. The hall eats well tonight.',
+    '{name} landed {fishCount}, {surpriseX} a normal day on the water for them.',
+    '{fishCount} to {name}, {clanShare} of everything the clan hooked today.',
+    'Patience and a good line: {name} took {fishCount} while the rest swung axes.',
+  ],
+  hunter: [
+    '{name} cut down {killsCount} today. The crows of the realm follow that name now, fat and grateful.',
+    '{name} felled {killsCount}, {surpriseX} a normal day of hunting for them.',
+    '{killsCount} fell to {name}, {clanShare} of everything the clan killed today.',
+    '{name} left {corpsesCount} in their wake and barely broke a sweat.',
+  ],
+  ironhide: [
+    '{name} held the field {hours}h today and never once fell.',
+    '{hours}h for {name}, {killsCount} put down, and not a single grave dug.',
+    '{name} stood {hours}h without falling, {surpriseX} their usual watch, and none of the blood was theirs.',
+    'Not one death for {name} in {hours}h of work. The Norns did not get a turn.',
+  ],
+  steadfast: [
+    '{name} has answered the horn {daysCount}, still climbing. The hall counts that.',
+    '{name} showed up {daysCount} and put in {hours}h tonight. Furthest behind, first to the bench.',
+    'Ahead of no one, {standing}, and yet {name} has been in the hall {daysCount}. That is its own kind of glory.',
+    '{daysCount} in the hall for {name}. The saga is not written by the swiftest alone.',
+  ],
+  bold: [
+    '{name} died {deathsTimes} today and laughed off most of it.',
+    '{name} met the void {deathsTimes}. {causeCap} had the last word, and the Allfather keeps a stool warm.',
+    "{name}'s name is on {gravesCount} tonight. Valhalla's doorman knows it by sight.",
+    '{name} fell {deathsTimes} today, {clanShare} of every death in Eilif, and went back for more.',
   ],
   // Unsung Hero (underdog spotlight). Every blurb uses ONLY {name} — a quiet
   // viking may have ~0 of every stat, so these must never reach for one.
@@ -222,6 +297,49 @@ function counted(n, one, many) {
   return `${v.toLocaleString()} ${v === 1 ? one : many}`;
 }
 
+/** metres -> "6.3 km". Distances arrive from the mod in metres. */
+function km(m) {
+  return `${((Number(m) || 0) / 1000).toFixed(1)} km`;
+}
+
+/** 4 -> "4 of the last 5 days" (the window recap.js's STEADFAST.windowDays sets). */
+const STEADFAST_WINDOW_DAYS = 5;
+function attendancePhrase(n) {
+  const v = Math.round(Number(n) || 0);
+  return `${v} of the last ${STEADFAST_WINDOW_DAYS} days`;
+}
+
+/**
+ * The personal-spike multiple as copy: "5x" once it is big enough to round, and
+ * one decimal below that so "2.4x a normal night" stays honest. recap.js only
+ * fills the field at all when the spike clears its story threshold.
+ */
+function spikePhrase(x) {
+  const v = Number(x) || 0;
+  return v >= 3 ? `${Math.round(v)}x` : `${v.toFixed(1)}x`;
+}
+
+/** A 0..1 clan share as a fraction anyone can hear: "a third", "most". */
+function sharePhrase(x) {
+  const v = Number(x) || 0;
+  if (v >= 0.9) return 'nearly all';
+  if (v >= 0.7) return 'most';
+  if (v >= 0.55) return 'over half';
+  if (v >= 0.45) return 'half';
+  if (v >= 0.36) return 'two fifths';
+  if (v >= 0.28) return 'a third';
+  if (v >= 0.22) return 'a quarter';
+  return 'a fifth';
+}
+
+/** 1 -> "1st", 9 -> "9th". Used for The Steadfast's progression standing. */
+function ordinal(n) {
+  const v = Math.round(Number(n) || 0);
+  const rest = v % 100;
+  if (rest >= 11 && rest <= 13) return `${v}th`;
+  return `${v}${['th', 'st', 'nd', 'rd'][v % 10] || 'th'}`;
+}
+
 // Which raw number backs each count token, so the missing/zero guard below can
 // still see the value behind the phrase it renders.
 const COUNT_TOKEN_SOURCE = {
@@ -232,6 +350,13 @@ const COUNT_TOKEN_SOURCE = {
   corpsesCount: 'kills',
   piecesCount: 'resources',
   worksCount: 'items',
+  buildsCount: 'builds',
+  distanceKm: 'distance',
+  sailKm: 'sail',
+  fishCount: 'fish',
+  mapPct: 'mapDelta',
+  daysCount: 'attendanceDays',
+  standing: 'progressRank',
 };
 
 // Deterministically pick + fill a POTY blurb from poty.{key,name,fields,seed}.
@@ -245,6 +370,11 @@ function renderPotyBlurb(poty) {
     boss: f.boss, biome: f.biome, deaths: f.deaths, cause: f.cause,
     hours: f.hours, kills: f.kills, resources: f.resources, items: f.items,
     newBiome: f.newBiome,
+    // The 2026-09-14 angles + the story context the selector hands down.
+    builds: f.builds, distance: f.distance, sail: f.sail, fish: f.fish,
+    damage: f.damage, mapDelta: f.mapDelta, attendanceDays: f.attendanceDays,
+    progressRank: f.progressRank,
+    surpriseX: f.surpriseX, clanShare: f.clanShare,
   };
   for (const [token, source] of Object.entries(COUNT_TOKEN_SOURCE)) raw[token] = raw[source];
   const intStr = (v) => (v == null ? '' : Math.round(v).toLocaleString());
@@ -270,6 +400,17 @@ function renderPotyBlurb(poty) {
     corpsesCount: counted(f.kills, 'corpse', 'corpses'),
     piecesCount: counted(f.resources, 'piece', 'pieces'),
     worksCount: counted(f.items, 'work', 'works'),
+    buildsCount: counted(f.builds, 'piece', 'pieces'),
+    fishCount: counted(f.fish, 'fish', 'fish'),
+    distanceKm: km(f.distance),
+    sailKm: km(f.sail),
+    mapPct: `${(Number(f.mapDelta) || 0).toFixed(1)}%`,
+    daysCount: attendancePhrase(f.attendanceDays),
+    standing: f.progressRank
+      ? `${ordinal(f.progressRank)} of ${Math.round(Number(f.progressTotal) || Number(f.progressRank))} in the clan's reckoning`
+      : '',
+    surpriseX: spikePhrase(f.surpriseX),
+    clanShare: sharePhrase(f.clanShare),
   };
 
   let idx = (hashString(poty.name) + (poty.seed || 0)) % templates.length;
@@ -284,6 +425,25 @@ function renderPotyBlurb(poty) {
   if (!ok) tpl = templates[0];
 
   return tpl.replace(/\{(\w+)\}/g, (_, k) => (disp[k] != null ? disp[k] : ''));
+}
+
+/**
+ * The crown's story as ONE plain-text line, for the in-game Voice of the Hall.
+ *
+ * The Companion prints the line center-screen, where Discord markdown reads as
+ * literal asterisks and backslashes, so the same blurb the recap embed carries
+ * is stripped of both. Exported (and rendered from the same templates) so the
+ * hall hears the SAME story Discord reads, not a second copy that drifts.
+ */
+export function potyStoryLine(poty) {
+  if (!poty || !poty.key) return '';
+  const blurb = renderPotyBlurb(poty);
+  if (!blurb) return '';
+  return blurb
+    .replace(/\*\*/g, '')
+    .replace(/\\([\\*_`~|])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // --- Death message copy -----------------------------------------------------
