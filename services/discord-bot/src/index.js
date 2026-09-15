@@ -544,7 +544,10 @@ async function runLive() {
     });
   };
   await heartbeatTick();
-  timers.push(setInterval(heartbeatTick, 60000));
+  // 2026-09-15: 60 s -> 150 s. The cockpit marks the bot stale at 300 s (lib/ops/health.ts),
+  // so 150 s keeps a 2x margin while halving the heartbeat's share of the Vercel Hobby
+  // invocation and CPU meters (it was the single busiest route at ~3.3k calls/day).
+  timers.push(setInterval(heartbeatTick, 150000));
 
   console.log(`[bot] live. relay every ${POLL}ms, boss check every 30s${extra}.`);
 
