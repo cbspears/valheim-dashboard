@@ -18,11 +18,21 @@
 //
 // So, in order, per viking, per pass:
 //
-//   1. NEVER DEMOTE. A viking wearing an EARNED title (a stat dimension or
-//      Treefoe) is never taken back to a placeholder, however long they hold it.
-//      The engine offering "of the Quiet Fjord" to the Bane of Beasts is noise,
-//      not news. (This replaces the 60-minute TITLE_HOLD_MS from launch night,
-//      which only delayed the demotion by an hour.)
+//   1. ONE HOLDER PER EARNED TITLE, ALWAYS (Charlie, 2026-09-16). An earned
+//      title is HELD by its wearer until the engine offers it to a DIFFERENT
+//      viking and that offer is CONFIRMED (rule 3, the 15-minute two-pass
+//      window). At that moment, in the SAME pass, the title changes hands: the
+//      challenger takes it, and the previous holder is re-assigned to whatever
+//      the engine currently offers them — their rank-2 title, another earned
+//      title, or a hall-name. Both halves are one proclamation of two lines, and
+//      cost ONE of the daily budget.
+//      Until that happens the wearer keeps what they have: the engine offering
+//      "of the Quiet Fjord" to the Bane of Beasts is noise, not news, and a
+//      viking is never quietly taken back to a placeholder on their own row.
+//      (This replaces the old "NEVER DEMOTE, indefinitely" rule, which is what
+//      let two vikings wear the same title: the engine crowned the new leader
+//      while the bot held the old one forever. Production carried three such
+//      pairs on 2026-09-16 — Bane of Beasts, Stonewright, the Heavy-Handed.)
 //   2. PLACEHOLDER -> PLACEHOLDER IS SILENT. The uniqueness reshuffle can move a
 //      no-standout viking from one hall-name to another; that is bookkeeping.
 //      The registry is updated so it stays unique, with NO title_history row, no
@@ -31,21 +41,27 @@
 //      a different earned title) must be offered by the engine on TWO passes at
 //      least TITLE_CONFIRM_MS (default 15 min) apart. A different offer resets
 //      the clock. This alone kills every flip-flop that resolves inside one tick.
-//   4. TENURE. Earned -> a different earned title additionally waits
-//      TITLE_MIN_TENURE_MS (default 24 h) from title_updated_at. A viking keeps
-//      the name the hall gave them for at least a day. Placeholder -> earned has
-//      NO tenure gate: a viking earning their first real title is the special
-//      moment the whole feature exists for.
-//   4b. ONE HOLDER PER EARNED TITLE. While a viking holds an earned title under
-//      tenure, the engine has usually already moved them on and handed that
-//      title to whoever is next on the dimension (2026-09-11: Kætiløy held "the
-//      Far-Seer" under tenure while the engine gave the map crown to Rosir, and
-//      the hall proclaimed a second Far-Seer). An offer of a title that another
-//      viking currently holds under tenure is HELD, not confirmed: the offer
-//      clock does not run, so when the tenure clears the challenger still has to
-//      be offered it twice, 15 min apart, like any other change.
+//   4. TENURE. A viking VOLUNTARILY moving from one earned title to another
+//      additionally waits TITLE_MIN_TENURE_MS (default 24 h) from
+//      title_updated_at: they keep the name the hall gave them for at least a
+//      day. Placeholder -> earned has NO tenure gate: a viking earning their
+//      first real title is the special moment the whole feature exists for.
+//      TENURE DOES NOT PROTECT A HOLDER AGAINST A CONFIRMED TAKEOVER of their
+//      own title (Charlie, 2026-09-16: uniqueness beats stickiness). It gates
+//      the viking who is moving, never the viking being passed.
+//   4b. NEVER CREATE A DUPLICATE. An offer of a title somebody else currently
+//      wears is not confirmed while that holder's OWN offer of a different
+//      EARNED title is itself still unconfirmed: the holder may yet move on
+//      their own, and a pass must resolve a takeover, never open one. Once the
+//      holder is settled (their move is confirmed, or the engine only offers
+//      them a hall-name), the challenger's confirmed offer takes the title and
+//      carries the holder with it. (2026-09-11: Kætiløy held "the Far-Seer"
+//      under tenure while the engine gave the map crown to Rosir, and the hall
+//      proclaimed a second Far-Seer. Under this rule Rosir takes it and Kætiløy
+//      is moved on in the same breath.)
 //   5. DAILY BUDGET. At most TITLES_PER_DAY (default 3) proclamations per rolling
-//      24 h, counted from title_history. When more qualify at once they are ranked
+//      24 h, counted from title_history. A handover is ONE proclamation (two
+//      lines, one history row), not two. When more qualify at once they are ranked
 //      deterministically — first titles first, then combat crowns (kills, damage,
 //      boss damage), then by name — and the rest simply stay pending and are
 //      re-evaluated next pass.
@@ -85,17 +101,20 @@ const ENV_PER_DAY = Number(process.env.TITLES_PER_DAY || 3);
 const QUIET_LOG_MS = HOUR_MS;
 
 /**
- * The EARNED titles — every dimension epithet in lib/epithets.ts DIMENSIONS plus
- * the Treefoe override. Anything else the engine can produce is a placeholder
- * from FLAVOR_POOL.
+ * The EARNED titles — both rungs of every ladder in lib/epithets.ts DIMENSIONS
+ * (the rank-1 crown and the rank-2 title for the clear runner-up), the five
+ * death-cause overrides, and "the Unslain". Thirty in all. Anything else the
+ * engine can produce is a placeholder from FLAVOR_POOL.
  *
  * The bot is plain JS and cannot import the TypeScript engine, so this list is a
  * MIRROR and must be kept in step: a missing entry here would read a real earned
- * title as a placeholder and let rule 1 demote it, which is the exact bug this
- * file exists to prevent. `scripts/epithets.test.mjs` in the repo root asserts
- * this array equals the engine's own set, so drift fails the root test suite.
+ * title as a placeholder and hand it out a second time, which is the exact bug
+ * this file exists to prevent. `scripts/epithets.test.mjs` in the repo root
+ * asserts this array equals the engine's own set, so drift fails the root test
+ * suite.
  */
 export const EARNED_TITLES = Object.freeze([
+  // rank 1 — the crowns
   'the Ever-Present',
   'Bane of Beasts',
   'the Heavy-Handed',
@@ -106,7 +125,28 @@ export const EARNED_TITLES = Object.freeze([
   'the Far-Strider',
   'Stonewright',
   'the Far-Seer',
+  'the Angler',
+  'the Sea-Wolf',
+  // rank 2 — the clear runner-up on each board
+  'the Hearth-Bound',
+  'Beast-Hewer',
+  'the Bone-Breaker',
+  'Thorn of the Forsaken',
+  'the Twice-Buried',
+  'the Gatherer',
+  'the Anvil-Sworn',
+  'the Road-Worn',
+  'the Timber-Wise',
+  'the Horizon-Chaser',
+  'the Line-Caster',
+  'the Salt-Sworn',
+  // the overrides
   'Treefoe',
+  'the Cliff-Kisser',
+  'the Half-Drowned',
+  'the Singed',
+  'the Sting-Struck',
+  'the Unslain',
 ]);
 const EARNED_SET = new Set(EARNED_TITLES);
 
@@ -217,7 +257,17 @@ export function createTitlesAnnouncer({
     }
   }
 
-  async function announce(row, title) {
+  /**
+   * Proclaim a change.
+   *
+   * `handover`, when present, means this title CHANGED HANDS: `{ name, title }`
+   * is the viking who wore it until now and the title the engine moves them to.
+   * It adds a second line to the same Discord message and folds the same fact
+   * into the one voice line, because the hall should hear a title being passed
+   * as one event and not as two unrelated ones. A plain new crown keeps the
+   * format it has always had, byte for byte.
+   */
+  async function announce(row, title, handover = null) {
     const name = (row.character_name || '').trim() || 'A viking';
     // THE ONE THAT GOT MISSED (red-team round 2, 2026-09-05). Every sibling
     // announcement path escapes the character name — chronicle.js, bosspoll.js,
@@ -228,22 +278,34 @@ export function createTitlesAnnouncer({
     // contains no markdown characters today; escaping it costs nothing and
     // keeps that from becoming load-bearing.
     const line = `⚔️ **${nameMd(name)}** has earned a new title: **${escapeMd(title)}**`;
+    const content = handover
+      ? `${line}\n**${nameMd(handover.name)}** passes **${escapeMd(title)}** to **${nameMd(name)}** and takes up **${escapeMd(handover.title)}**.`
+      : line;
+    const voice = handover
+      ? `From tonight, ${firstName(name)} goes by ${title}, and ${firstName(handover.name)} takes up ${handover.title}.`
+      : `From tonight, ${firstName(name)} goes by ${title}.`;
     if (dryRun) {
-      log.info?.(`[titles] (dry) would announce: ${name} -> "${title}"`);
+      log.info?.(
+        handover
+          ? `[titles] (dry) would announce: ${name} -> "${title}", ${handover.name} -> "${handover.title}"`
+          : `[titles] (dry) would announce: ${name} -> "${title}"`,
+      );
       return;
     }
     // Proclaim in the title channel, then let Eilif speak it in-game. Neither
     // failure should block the registry write below (the caller's try).
     try {
-      await post(channel, { content: line });
+      await post(channel, { content });
     } catch (e) {
       log.error?.(`[titles] #${channel} post failed for ${name}: ${e.message}`);
     }
     try {
       const { error: vErr } = await writeDb.from('voice_lines').insert({
-        text: `From tonight, ${firstName(name)} goes by ${title}.`,
+        text: voice,
         kind: 'event',
-        meta: { title, player_id: row.id },
+        meta: handover
+          ? { title, player_id: row.id, passedFrom: handover.name, passedTo: handover.title }
+          : { title, player_id: row.id },
         status: 'queued',
         queued_at: new Date(now()).toISOString(),
       });
@@ -319,19 +381,53 @@ export function createTitlesAnnouncer({
     // announcement, whatever upstream let them in.
     const handled = new Set();
 
-    // Rule 4b: earned title -> the name holding it under tenure right now. Built
-    // from the same players read the loop walks, so it is exactly what the hall
-    // currently proclaims. Excluded rows never hold anything (their crown is
-    // cleared once by db/2026-09-11_players_excluded.sql and never refreshed).
-    const heldUnderTenure = new Map();
+    // WHO WEARS WHAT, right now. Built from the same players read the loop walks,
+    // so it is exactly what the hall currently proclaims, and MUTATED as this
+    // pass writes — a title handed over earlier in the pass is already free by
+    // the time a later candidate looks at it. Excluded rows never hold anything
+    // (their crown is cleared once by db/2026-09-11_players_excluded.sql and
+    // never refreshed). Production can contain a DUPLICATE here (two vikings
+    // wearing one title, the bug this rewrite closes), so first-wins is not a
+    // judgement, only a deterministic choice: the other wearer's own row is
+    // moved on by the engine's offer like any other change.
+    const rowByName = new Map();
+    const wornBy = new Map(); // earned title -> character_name
+    // character_name -> the title they wear AS OF NOW IN THIS PASS. Kept beside
+    // the rows rather than written into them: the rows are the caller's data and
+    // a pass must not leave footprints in them.
+    const liveTitle = new Map();
     for (const row of data || []) {
       const holder = (row.character_name || '').trim();
+      if (!holder || isExcluded(row)) continue;
+      if (!rowByName.has(holder)) rowByName.set(holder, row);
       const held = String(row.current_title || '').trim();
-      if (!holder || !isEarnedTitle(held) || isExcluded(row)) continue;
-      const heldForMs = row.title_updated_at ? nowMs - Date.parse(row.title_updated_at) : NaN;
-      if (Number.isFinite(heldForMs) && heldForMs < minTenureMs && !heldUnderTenure.has(held)) {
-        heldUnderTenure.set(held, { name: holder, heldForMs });
-      }
+      if (!liveTitle.has(holder)) liveTitle.set(holder, held);
+      if (isEarnedTitle(held) && !wornBy.has(held)) wornBy.set(held, holder);
+    }
+
+    /** What the engine offers this viking right now, or null. */
+    const offerFor = (who) => computed.get(who) ?? null;
+    const isEarnedOffer = (entry) =>
+      entry ? (entry.source ? entry.source !== 'flavor' : isEarnedTitle(entry.title)) : false;
+
+    /**
+     * Rule 4b. `holder` wears the title `name` is being offered. Is the holder
+     * still mid-move of their own? An unconfirmed offer of a DIFFERENT EARNED
+     * title means they may yet step aside by themselves, so the challenger waits
+     * rather than forcing a handover the holder did not need. An offer of a
+     * hall-name (or no offer at all) is not a move: rule 1 would hold them on
+     * that title forever, and only a takeover can free it.
+     */
+    function holderStillMoving(holderName) {
+      if (!rowByName.has(holderName)) return false;
+      const entry = offerFor(holderName);
+      if (!entry) return false;
+      if (entry.title === (liveTitle.get(holderName) || '')) return false;
+      if (!isEarnedOffer(entry)) return false;
+      const p = pending.get(holderName);
+      const confirmed =
+        !!p && p.title === entry.title && nowMs - p.firstOfferedAt >= confirmMs;
+      return !confirmed;
     }
 
     for (const row of data || []) {
@@ -380,7 +476,9 @@ export function createTitlesAnnouncer({
       // mistaken for an earned crown.
       const offeredEarned = entry.source ? entry.source !== 'flavor' : isEarnedTitle(title);
 
-      // 1. NEVER DEMOTE an earned title to a placeholder. Indefinitely.
+      // 1. HOLD an earned title against a placeholder offer. The only thing that
+      //    takes it away is a CONFIRMED offer of it to somebody else, which is
+      //    handled from the challenger's row (the takeover below), never here.
       if (currentEarned && !offeredEarned) {
         quiet(nowMs, name, `holding "${current}" (earned; engine offers placeholder "${title}")`);
         pass.held++;
@@ -408,27 +506,28 @@ export function createTitlesAnnouncer({
       // Everything below is a change that WOULD be proclaimed.
       const kind = currentEarned ? 'earned' : 'promotion';
 
-      // 4b. ONE HOLDER PER EARNED TITLE. Someone else wears this title under
-      //     tenure: hold, and do NOT start the offer clock (see the header).
-      const holder = heldUnderTenure.get(title);
-      if (holder && holder.name !== name) {
-        quiet(
-          nowMs,
-          name,
-          `offered "${title}" but ${holder.name} holds it (${Math.floor(holder.heldForMs / HOUR_MS)} h of ${Math.round(minTenureMs / HOUR_MS)} h tenure); not confirming`,
-        );
-        pass.held++;
-        pending.delete(name);
-        continue;
-      }
-
       // Track the offer BEFORE the gates, so an offer that stands through a whole
-      // tenure window is already confirmed the moment tenure clears.
+      // tenure window (or through a holder's own unfinished move) is already
+      // confirmed the moment the way clears.
       const prior = pending.get(name);
       if (!prior || prior.title !== title) {
         pending.set(name, { title, firstOfferedAt: nowMs });
       }
       const offeredForMs = nowMs - pending.get(name).firstOfferedAt;
+
+      // 4b. NEVER CREATE A DUPLICATE. Somebody else wears this title and is
+      //     themselves mid-move: wait for them to land. The clock keeps running,
+      //     so the moment they settle this offer is already proven.
+      const holderName = wornBy.get(title);
+      if (holderName && holderName !== name && holderStillMoving(holderName)) {
+        quiet(
+          nowMs,
+          name,
+          `offered "${title}" but ${holderName} wears it and has an unconfirmed move of their own; waiting`,
+        );
+        pass.held++;
+        continue;
+      }
 
       // 4. TENURE — a viking keeps an earned title at least a day.
       if (kind === 'earned') {
@@ -470,7 +569,13 @@ export function createTitlesAnnouncer({
           a.name.localeCompare(b.name),
       );
 
+      // Vikings already moved by an earlier candidate's handover in this same
+      // pass: their registry row is written and their new title proclaimed, so
+      // their own entry below is spent.
+      const absorbed = new Set();
+
       for (const c of candidates) {
+        if (absorbed.has(c.name)) continue;
         if (remaining <= 0) {
           log.info?.(
             `[titles] ${c.name}: "${c.title}" deferred (daily budget ${perDay}/${perDay} used)`,
@@ -479,10 +584,35 @@ export function createTitlesAnnouncer({
           continue; // stays pending; re-evaluated next pass
         }
 
+        // THE TAKEOVER. If somebody still wears this title, the confirmed offer
+        // takes it off them, and they take up whatever the engine offers them
+        // instead. Resolved against `wornBy`, which this loop keeps current, so
+        // a holder who already moved earlier in the pass is not moved twice.
+        let handover = null;
+        const holderName = wornBy.get(c.title);
+        if (holderName && holderName !== c.name) {
+          const hRow = rowByName.get(holderName);
+          const hEntry = offerFor(holderName);
+          // Without a row to write or an engine offer to move them to, a takeover
+          // would strand the holder on a title somebody else now wears. Hold
+          // instead; the offer stays pending and the next pass tries again.
+          if (!hRow || !hEntry || hEntry.title === c.title) {
+            quiet(
+              nowMs,
+              c.name,
+              `offered "${c.title}" but ${holderName} wears it and the engine names them nothing else; waiting`,
+            );
+            pass.held++;
+            continue;
+          }
+          handover = { row: hRow, name: holderName, title: hEntry.title };
+        }
+
         if (dryRun) {
-          await announce(c.row, c.title);
+          await announce(c.row, c.title, handover);
           pass.announced++;
           remaining--;
+          if (handover) absorbed.add(handover.name);
           continue;
         }
 
@@ -492,16 +622,43 @@ export function createTitlesAnnouncer({
           log.error?.(`[titles] update failed for ${c.name}: ${upErr.message}`);
           continue;
         }
+        if (handover) {
+          const hErr = await record(handover.row, handover.title, nowIso);
+          if (hErr) {
+            log.error?.(
+              `[titles] handover write failed for ${handover.name}: ${hErr.message}`,
+            );
+          }
+        }
+        // ONE history row per proclamation, so the rolling-24h budget counts a
+        // handover as the single event the hall heard.
         await writeDb.from('title_history').insert({
           player_id: c.row.id,
           title: c.title,
           awarded_at: nowIso,
         });
-        await announce(c.row, c.title);
+        await announce(c.row, c.title, handover);
+
+        // Keep the in-pass picture of who wears what honest for later candidates.
+        if (isEarnedTitle(c.current) && wornBy.get(c.current) === c.name) {
+          wornBy.delete(c.current);
+        }
+        wornBy.set(c.title, c.name);
+        liveTitle.set(c.name, c.title);
         pending.delete(c.name);
+        if (handover) {
+          if (isEarnedTitle(handover.title)) wornBy.set(handover.title, handover.name);
+          liveTitle.set(handover.name, handover.title);
+          pending.delete(handover.name);
+          absorbed.add(handover.name);
+        }
         pass.announced++;
         remaining--;
-        log.info?.(`[titles] ${c.name}: "${c.current}" -> "${c.title}"`);
+        log.info?.(
+          handover
+            ? `[titles] ${c.name}: "${c.current}" -> "${c.title}" (taken from ${handover.name}, who takes up "${handover.title}")`
+            : `[titles] ${c.name}: "${c.current}" -> "${c.title}"`,
+        );
       }
     }
 

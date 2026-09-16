@@ -364,10 +364,40 @@ of quiet between them; `MILESTONES_INTERVAL_MS` sets how often the announcer loo
 below the gap, or the loop — not the gap — paces the drain). Nothing is ever silenced; rarity is the
 thresholds' job. Channel: `MILESTONE_CHANNEL` (default `valheim`).
 
-**Titles**: the loop polls `/api/titles` and, whenever a viking's computed title **changes**, posts a
-⚔️ line to `TITLE_CHANNEL` (default `server`, i.e. unchanged) and queues the matching voice line — no
-rate limiting, the API's hysteresis makes changes rare. A viking's first-ever title is recorded
-silently. Set `TITLE_CHANNEL=valheim` at launch if titles should follow deeds/oaths/recaps.
+**Titles**: the loop polls `/api/titles` and, when a viking's computed title **changes**, posts a
+⚔️ line to `TITLE_CHANNEL` (default `server`, i.e. unchanged) and queues the matching voice line.
+A viking's first-ever title is recorded silently. Set `TITLE_CHANNEL=valheim` at launch if titles
+should follow deeds/oaths/recaps.
+
+Sticky and rare since 2026-09-10, and **one holder per earned title** since 2026-09-16:
+
+- An earned title is **held** against an offer of a hall-name, indefinitely. It leaves its wearer
+  only when the engine offers it to somebody else and that offer is confirmed.
+- Hall-name to hall-name is the uniqueness reshuffle: recorded, never announced.
+- Any announced change must be offered on **two passes at least `TITLE_CONFIRM_MS` (15 min) apart**.
+- **`TITLE_MIN_TENURE_MS` (24 h)** gates a viking moving from one earned title to another of their
+  own accord. It does **not** protect a wearer from losing their title to a confirmed challenger:
+  uniqueness beats stickiness (Charlie, 2026-09-16).
+- **The handover.** When the confirmed offer is of a title somebody already wears, the pass resolves
+  the pair rather than opening a duplicate: the challenger takes it and the wearer takes up whatever
+  the engine currently names them (their rank-2 title, another earned title, or a hall-name). It
+  goes out as **one proclamation of two lines**, with one `title_history` row, and costs **one** of
+  the day's budget:
+
+  ```
+  ⚔️ **Mikael** has earned a new title: **Bane of Beasts**
+  **Thorfinn** passes **Bane of Beasts** to **Mikael** and takes up **Beast-Hewer**.
+  ```
+
+  and one voice line: `From tonight, Mikael goes by Bane of Beasts, and Thorfinn takes up Beast-Hewer.`
+- A challenger does **not** confirm while the current wearer has an unconfirmed move of their own:
+  the wearer may yet step aside by themselves. The challenger's clock keeps running meanwhile.
+- **`TITLES_PER_DAY` (3)** proclamations a rolling 24 h, counted from `title_history`, ranked first
+  titles > combat crowns > alphabetically.
+
+There are **30 earned titles** (both rungs of twelve stat ladders, five death-cause overrides and
+"the Unslain"); the list of record is `lib/epithets.ts`, mirrored in `src/titles.js EARNED_TITLES`,
+with the table in `docs/ARCHITECTURE.md` under *Living Titles*.
 
 **Puppet mode:** a member with **Administrator** or **Manage Server**, or any role id listed in
 `ADMIN_ROLE_IDS`, can say `@Eilif say: <line>` to queue a `manual` line (reacts **🗣️**). Anyone else

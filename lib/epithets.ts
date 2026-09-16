@@ -17,12 +17,18 @@
 // Titles are DEED-DRIVEN and RANK-AWARE: they reflect what a viking is actually
 // doing against the rest of the warband, and they CHANGE as standings shift.
 //
-// How the roster is titled:
-//   1. Treefoe — if a majority of a viking's deaths are to trees, the forest has
-//      clearly marked them. Treefoe is itself unique, so if several vikings qualify
-//      the mark goes to the one the forest has felled MOST (most tree-deaths, then
-//      highest fraction); the rest fall through to the deed scoring below.
-//   2. The most DISTINCTIVE stat dimension, scored so RANK counts:
+// THE LADDER (2026-09-16): every stat dimension now carries TWO titles — the
+// rank-1 crown it always had, and a rank-2 title for the clear runner-up — and
+// the board list gained fishing and sailing. With the death-cause overrides and
+// "the Unslain" alongside them that is 30 earned titles, enough for a hall of
+// thirty to be mostly earned rather than mostly hall-named. A rank-2 title is
+// only offered when the rank-1 of the SAME dimension is already worn by someone
+// else, and only to a viking who owns second place outright (see
+// `ownsSecondPlace`); nobody ever wears both rungs of one ladder.
+//
+// How the roster is titled, in strict priority order — rank-1 crowns, then the
+// crowns they vacate, then the overrides, then rank 2, then a hall-name:
+//   1. The most DISTINCTIVE stat dimension, scored so RANK counts:
 //        • gate on ratio-vs-median (a raw lead over the pack, so a 3-vs-2 nudge
 //          never counts) and on z-score (so "high because they simply played a
 //          lot" doesn't sneak in).
@@ -54,13 +60,26 @@
 //      over the next untitled viking, or being the only one on the board at all. The
 //      superlative ("the Ever-Present") never falls back — being there most is the
 //      whole meaning of it, and second place is simply not it.
+//   2. (see INHERITANCE below)
+//   3. THE OVERRIDES — a viking whose deaths tell a louder story than any board.
+//      Treefoe came first and sets the rule the rest follow: strictly more than
+//      half of a viking's deaths to one cause, at least three of them, and the
+//      title is unique (several qualifiers -> the one that cause has taken MOST;
+//      the rest fall through). The causes are trees, falls, drowning, fire and
+//      the deathsquito, and they are disjoint, so no viking is ever in the
+//      running for two. Alongside them sits "the Unslain": ten hours in the hall
+//      and not one death, to the longest-serving survivor. An override never
+//      outranks a crown — a qualifier who is already crowned keeps the crown and
+//      the override passes down the list.
+//   4. RANK 2, then 5. a personalized hall-name (below).
+//
 //      HYSTERESIS: when a viking already holds a title (`incumbent` / current_title),
 //      that dimension gets a small stickiness bonus, so a challenger must beat it by
 //      a genuine margin before the title flips. In a 4-8 player hall this kills the
 //      churn from 24-vs-23 kill noise while still yielding to a decisive change.
 //      Uniqueness does NOT churn: assignment is deterministic and stable, and an
 //      incumbent placeholder is kept as long as it stays free.
-//   3. No real standout → a personalized placeholder epithet, chosen from a pool by
+//      No real standout → a personalized placeholder epithet, chosen from a pool by
 //      a stable name-hash and de-duplicated against the rest of the roster, so even
 //      a full launch hall of no-standout newcomers stays unique.
 //
@@ -83,7 +102,16 @@
 //     distance  "the Far-Strider"        20,000 meters
 //     builds    "Stonewright"            250 structures
 //     map       "the Far-Seer"           5 percent explored
-//     treefoe   "Treefoe"                3 tree deaths (majority rule still applies)
+//     fish      "the Angler"             5 catches
+//     sail      "the Sea-Wolf"           5,000 metres under sail
+//   The RANK-2 rung of each ladder ("the Hearth-Bound", "Beast-Hewer", "the
+//   Bone-Breaker", "Thorn of the Forsaken", "the Twice-Buried", "the Gatherer",
+//   "the Anvil-Sworn", "the Road-Worn", "the Timber-Wise", "the Horizon-Chaser",
+//   "the Line-Caster", "the Salt-Sworn") meets the SAME floor as its crown, so a
+//   runner-up who has not done the work in raw terms stays hall-named.
+//   The overrides carry their own floors:
+//     every death cause         3 deaths to it (the majority rule still applies)
+//     "the Unslain"            10 hours played and zero deaths
 //   Floors change WHO may be crowned, never the distribution: roster medians, means
 //   and z-scores are still computed over everyone, so the relative gates behave the
 //   same and the engine stays deterministic.
@@ -93,6 +121,9 @@
 import type { PlayerWithStats } from './types';
 
 export type EpithetSource =
+  // stat dimensions — each one carries a LADDER: a rank-1 crown and a rank-2
+  // title for the clear runner-up. Both report the dimension as their source,
+  // so every surface that tints or ranks by source keeps working unchanged.
   | 'hours'
   | 'kills'
   | 'damage'
@@ -103,7 +134,15 @@ export type EpithetSource =
   | 'distance'
   | 'builds'
   | 'map'
+  | 'fish'
+  | 'sail'
+  // overrides — a majority death cause, or surviving everything
   | 'treefoe'
+  | 'cliff'
+  | 'drowning'
+  | 'fire'
+  | 'deathsquito'
+  | 'unslain'
   | 'flavor';
 
 export interface Epithet {
@@ -119,8 +158,11 @@ export interface Epithet {
 // standard deviations out (kills off "high because they simply played a lot").
 const MIN_LEAD = 1.4;
 const MIN_Z = 0.5;
-// A viking is Treefoe when strictly more than this fraction of their deaths are trees.
-const TREE_MAJORITY = 0.5;
+// A death-cause override fires when strictly more than this fraction of a
+// viking's deaths came from one cause (trees, falls, drowning, fire, a
+// deathsquito). A majority is strict, and the causes below are disjoint, so a
+// viking can qualify for at most one of them.
+const CAUSE_MAJORITY = 0.5;
 // Rank-awareness: a dimension is a "crown" when the viking is the SOLE roster
 // leader in it AND clears the runner-up by at least this factor. A crown adds
 // LEADER_BONUS to the dimension's score — enough to outweigh any non-crown
@@ -136,9 +178,32 @@ const COMBAT_BONUS = 0.75;
 // rival dimension must out-score it by a real margin before the title flips.
 const HYSTERESIS_BONUS = 0.6;
 
+type DimensionSource =
+  | 'hours'
+  | 'kills'
+  | 'damage'
+  | 'bossdmg'
+  | 'deaths'
+  | 'resources'
+  | 'crafts'
+  | 'distance'
+  | 'builds'
+  | 'map'
+  | 'fish'
+  | 'sail';
+
 interface Dimension {
-  source: Exclude<EpithetSource, 'treefoe' | 'flavor'>;
+  source: DimensionSource;
+  /** RANK 1 — the crown, worn by the board's owner. */
   epithet: string;
+  /**
+   * RANK 2 — the runner-up's own title, so a hall of thirty is mostly earned
+   * rather than mostly hall-named. It is offered only when the rank-1 crown of
+   * this same dimension is already worn by somebody else, and only to a viking
+   * who is the SOLE second place, clears third by LEADER_MARGIN, and meets the
+   * dimension's absolute floor. Never both rungs to the same viking.
+   */
+  second: string;
   /** pull the raw value off a viking, or null when the stat is absent */
   value: (p: PlayerWithStats) => number | null;
   /** hours is a superlative — only the single roster leader may claim it */
@@ -158,18 +223,86 @@ function bossDamageValue(p: PlayerWithStats): number | null {
   return sum > 0 ? sum : null;
 }
 
+/**
+ * Fish landed, read the way /players reads it: the GREATER of the per-species
+ * breakdown (`gs_stats.fish[]`, empty for everyone on Valheim 1.0) and the
+ * profile's own catch total (`gs_stats.fishCaught`, EilifCompanionClient
+ * >=0.4.4). Neither source is the whole story on its own, so whichever is
+ * richer wins and nothing is lost if the other comes back. See `totalCatches`
+ * in app/players/page.tsx — the two must not drift apart, or the Anglers board
+ * and the Angler's title would rank different numbers.
+ */
+function fishValue(p: PlayerWithStats): number | null {
+  const gs = p.stats?.gs_stats;
+  if (!gs) return null;
+  const list = Array.isArray(gs.fish) ? gs.fish : [];
+  const bySpecies = list.reduce(
+    (a, f) => a + (f && Number.isFinite(f.count) ? f.count : 0),
+    0,
+  );
+  const total = Number.isFinite(gs.fishCaught as number) ? (gs.fishCaught as number) : 0;
+  const best = Math.max(bySpecies, total);
+  return best > 0 ? best : null;
+}
+
+/** Metres sailed, from the .fch profile's per-mode distance counters. */
+function sailValue(p: PlayerWithStats): number | null {
+  const v = p.stats?.gs_stats?.distances?.sail;
+  return Number.isFinite(v as number) && (v as number) > 0 ? (v as number) : null;
+}
+
 const DIMENSIONS: Dimension[] = [
-  { source: 'hours', epithet: 'the Ever-Present', value: (p) => p.total_playtime_minutes ?? null, superlative: true },
-  { source: 'kills', epithet: 'Bane of Beasts', value: (p) => p.stats?.kills ?? null, combat: true },
-  { source: 'damage', epithet: 'the Heavy-Handed', value: (p) => p.stats?.damage_dealt ?? null, combat: true },
-  { source: 'bossdmg', epithet: 'Bane of the Forsaken', value: bossDamageValue, combat: true },
-  { source: 'deaths', epithet: 'the Oft-Slain', value: (p) => p.stats?.deaths ?? null },
-  { source: 'resources', epithet: 'the Provider', value: (p) => p.stats?.resources_harvested ?? null },
-  { source: 'crafts', epithet: 'the Forgehand', value: (p) => p.stats?.items_crafted ?? null },
-  { source: 'distance', epithet: 'the Far-Strider', value: (p) => p.stats?.distance_traveled ?? null },
-  { source: 'builds', epithet: 'Stonewright', value: (p) => p.stats?.structures_built ?? null },
-  { source: 'map', epithet: 'the Far-Seer', value: (p) => p.stats?.map_explored_pct ?? null },
+  { source: 'hours', epithet: 'the Ever-Present', second: 'the Hearth-Bound', value: (p) => p.total_playtime_minutes ?? null, superlative: true },
+  { source: 'kills', epithet: 'Bane of Beasts', second: 'Beast-Hewer', value: (p) => p.stats?.kills ?? null, combat: true },
+  { source: 'damage', epithet: 'the Heavy-Handed', second: 'the Bone-Breaker', value: (p) => p.stats?.damage_dealt ?? null, combat: true },
+  { source: 'bossdmg', epithet: 'Bane of the Forsaken', second: 'Thorn of the Forsaken', value: bossDamageValue, combat: true },
+  { source: 'deaths', epithet: 'the Oft-Slain', second: 'the Twice-Buried', value: (p) => p.stats?.deaths ?? null },
+  { source: 'resources', epithet: 'the Provider', second: 'the Gatherer', value: (p) => p.stats?.resources_harvested ?? null },
+  { source: 'crafts', epithet: 'the Forgehand', second: 'the Anvil-Sworn', value: (p) => p.stats?.items_crafted ?? null },
+  { source: 'distance', epithet: 'the Far-Strider', second: 'the Road-Worn', value: (p) => p.stats?.distance_traveled ?? null },
+  { source: 'builds', epithet: 'Stonewright', second: 'the Timber-Wise', value: (p) => p.stats?.structures_built ?? null },
+  { source: 'map', epithet: 'the Far-Seer', second: 'the Horizon-Chaser', value: (p) => p.stats?.map_explored_pct ?? null },
+  { source: 'fish', epithet: 'the Angler', second: 'the Line-Caster', value: fishValue },
+  { source: 'sail', epithet: 'the Sea-Wolf', second: 'the Salt-Sworn', value: sailValue },
 ];
+
+/**
+ * THE OVERRIDES — a viking whose deaths (or lack of them) tell a louder story
+ * than any leaderboard. Modelled on Treefoe, which came first and keeps its
+ * exact rule: strictly more than half of this viking's deaths came from that
+ * cause, at least CAUSE_FLOOR of them, and the title is UNIQUE — if several
+ * qualify it goes to whoever the cause has taken MOST, and the rest fall
+ * through to the ladder below.
+ *
+ * The input is the SAME `causesByName` every caller already builds from
+ * `events.metadata.cause` (app/api/titles, /players, the viking page, the ops
+ * horizon). A cause with no attacker is the lowercased HitType word ("fall",
+ * "drowning", "burning", "tree"); a cause with one is the creature's display
+ * name ("Deathsquito"). See lib/deaths.ts eilifCause + humanizeKiller — the
+ * patterns below read both spellings, which is why they are regexes and not
+ * equality.
+ *
+ * The patterns are DISJOINT, so a strict majority can only ever name one of
+ * them for a given viking; that is what keeps a viking from qualifying twice.
+ */
+interface CauseOverride {
+  source: Extract<EpithetSource, 'treefoe' | 'cliff' | 'drowning' | 'fire' | 'deathsquito'>;
+  title: string;
+  match: RegExp;
+}
+
+const CAUSE_OVERRIDES: readonly CauseOverride[] = [
+  { source: 'treefoe', title: 'Treefoe', match: /tree/i },
+  { source: 'cliff', title: 'the Cliff-Kisser', match: /fall/i },
+  { source: 'drowning', title: 'the Half-Drowned', match: /drown/i },
+  { source: 'fire', title: 'the Singed', match: /burn|fire|flame/i },
+  { source: 'deathsquito', title: 'the Sting-Struck', match: /deathsquito/i },
+];
+
+/** The one override that is about NOT dying. */
+const UNSLAIN_TITLE = 'the Unslain';
+/** Ten hours in the hall, same bar as the hours floor, and never once killed. */
+const UNSLAIN_MIN_MINUTES = 600;
 
 /**
  * ABSOLUTE floors, keyed by the same source keys as DIMENSIONS. A viking may only
@@ -190,21 +323,33 @@ const FLOORS: Record<Dimension['source'], number> = {
   distance: 20000, // metres
   builds: 250,
   map: 5, // percent explored
+  fish: 5, // catches
+  sail: 5000, // metres under sail
 };
 
-/** Treefoe's own floor: the forest must have felled a viking this many times. */
-const TREE_FLOOR = 3;
+/**
+ * An override's own floor: the cause must have taken a viking this many times
+ * before the majority means anything. One unlucky birch on day one is a story,
+ * not yet a title.
+ */
+const CAUSE_FLOOR = 3;
 
 // Reverse lookup so an incumbent title string maps back to the dimension it came
-// from — that dimension is the one hysteresis makes sticky. Treefoe/flavor titles
-// simply aren't here, so they carry no stickiness (a real deed replaces them, and
-// that's a genuine promotion worth announcing, not churn).
+// from — that dimension is the one hysteresis makes sticky. Overrides and flavor
+// titles simply aren't here, so they carry no stickiness (a real deed replaces
+// them, and that's a genuine promotion worth announcing, not churn). Nor are the
+// RANK-2 titles: stickiness on a dimension is what keeps a CROWN from flipping,
+// and lending it to the runner-up would bias them toward taking the crown off
+// its holder, which is exactly the churn this bonus exists to stop. Rank 2 is
+// stable for a different reason — "sole second, clearing third by the margin"
+// names at most one viking, so the pass has nothing to churn between.
 const SOURCE_BY_TITLE: ReadonlyMap<string, EpithetSource> = new Map(
   DIMENSIONS.map((d) => [d.epithet, d.source as EpithetSource]),
 );
 
 /**
- * Every title a viking EARNS — the dimension epithets plus the Treefoe override.
+ * Every title a viking EARNS — both rungs of all twelve dimension ladders, the
+ * five death-cause overrides, and "the Unslain". Thirty in all.
  * Anything else the engine can produce is a personalized placeholder from
  * FLAVOR_POOL, and the difference is load-bearing policy, not decoration: the
  * announcer never demotes an earned title to a placeholder, and the ops horizon
@@ -216,7 +361,9 @@ const SOURCE_BY_TITLE: ReadonlyMap<string, EpithetSource> = new Map(
  */
 export const EARNED_TITLES: readonly string[] = Object.freeze([
   ...DIMENSIONS.map((d) => d.epithet),
-  'Treefoe',
+  ...DIMENSIONS.map((d) => d.second),
+  ...CAUSE_OVERRIDES.map((o) => o.title),
+  UNSLAIN_TITLE,
 ]);
 const EARNED_TITLE_SET: ReadonlySet<string> = new Set(EARNED_TITLES);
 
@@ -290,6 +437,10 @@ interface DimStats {
   secondMax: number;
   /** how many vikings are tied at the max (a crown needs a SOLE leader) */
   leaderCount: number;
+  /** how many are tied at secondMax (a rank-2 title needs a SOLE second) */
+  secondCount: number;
+  /** the third-highest value — a rank-2 title must clear it by LEADER_MARGIN */
+  thirdMax: number;
 }
 
 /** Roster-wide distribution for a dimension (skips absent values). */
@@ -300,7 +451,7 @@ function statsFor(roster: PlayerWithStats[], dim: Dimension): DimStats {
     if (v != null && Number.isFinite(v)) values.push(v);
   }
   if (values.length === 0) {
-    return { median: 0, mean: 0, std: 0, max: 0, secondMax: 0, leaderCount: 0 };
+    return { median: 0, mean: 0, std: 0, max: 0, secondMax: 0, leaderCount: 0, secondCount: 0, thirdMax: 0 };
   }
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
@@ -308,19 +459,51 @@ function statsFor(roster: PlayerWithStats[], dim: Dimension): DimStats {
   const max = sorted[0];
   const leaderCount = sorted.filter((v) => v === max).length;
   const secondMax = sorted.find((v) => v < max) ?? 0;
-  return { median: median(values), mean, std: Math.sqrt(variance), max, secondMax, leaderCount };
+  const secondCount = secondMax > 0 ? sorted.filter((v) => v === secondMax).length : 0;
+  const thirdMax = secondMax > 0 ? sorted.find((v) => v < secondMax) ?? 0 : 0;
+  return {
+    median: median(values),
+    mean,
+    std: Math.sqrt(variance),
+    max,
+    secondMax,
+    leaderCount,
+    secondCount,
+    thirdMax,
+  };
+}
+
+/** How many of a viking's death causes match an override's pattern. */
+function causeCount(causes: string[], match: RegExp): number {
+  return causes.filter((c) => match.test(c)).length;
 }
 
 /**
- * True when a majority of a viking's deaths came from trees AND the forest has
- * felled them at least TREE_FLOOR times — one unlucky birch on day one is a story,
- * not yet a title.
+ * True when a MAJORITY of a viking's deaths came from one cause AND that cause
+ * has taken them at least CAUSE_FLOOR times. This is Treefoe's original rule,
+ * generalized to every override in CAUSE_OVERRIDES.
  */
-function isTreefoe(deathCauses: string[]): boolean {
-  if (deathCauses.length === 0) return false;
-  const trees = deathCauses.filter((c) => /tree/i.test(c)).length;
-  if (trees < TREE_FLOOR) return false;
-  return trees / deathCauses.length > TREE_MAJORITY;
+function causeMajority(causes: string[], match: RegExp): boolean {
+  if (causes.length === 0) return false;
+  const n = causeCount(causes, match);
+  if (n < CAUSE_FLOOR) return false;
+  return n / causes.length > CAUSE_MAJORITY;
+}
+
+/**
+ * "the Unslain" — ten hours in the hall and not one death. The only override
+ * that reads the absence of a fact, so it is checked against the roster row
+ * rather than against death causes: an empty cause list is also what a viking
+ * with no death events looks like, and `stats.deaths` is the number that is
+ * actually authoritative about whether they have ever fallen.
+ */
+function isUnslain(p: PlayerWithStats): boolean {
+  const minutes = p.total_playtime_minutes ?? 0;
+  if (!Number.isFinite(minutes) || minutes < UNSLAIN_MIN_MINUTES) return false;
+  // A MISSING stats row is unknown, not zero: only a row that really says zero
+  // counts, or a viking nothing has reported on yet would be crowned for it.
+  const deaths = p.stats?.deaths;
+  return typeof deaths === 'number' && deaths === 0;
 }
 
 /**
@@ -468,9 +651,27 @@ function fallbackWinner(
   return null;
 }
 
-/** How many of a viking's death causes were trees (for ranking Treefoe claimants). */
-function treeDeathCount(causes: string[]): number {
-  return causes.filter((c) => /tree/i.test(c)).length;
+/**
+ * Does this viking own the RANK-2 rung of a dimension?
+ *
+ * Rank 2 is a real title, not a participation prize, so it is gated exactly
+ * like a crown, one step down the board:
+ *   • SOLE second place on the roster (a tie for second names nobody), and
+ *   • clearing THIRD by LEADER_MARGIN, or being the only other viking on the
+ *     board at all, and
+ *   • meeting the dimension's own absolute floor, the same number rank 1 must
+ *     meet. A runner-up who has not done the work in raw terms stays hall-named.
+ *
+ * Because "sole second" is unique by construction, at most one viking can
+ * qualify per dimension, which is what makes this pass deterministic without a
+ * tie-break of its own. Whether the rank-1 crown is actually WORN, and whether
+ * this viking is still untitled, are the caller's checks.
+ */
+function ownsSecondPlace(value: number | null, dim: Dimension, s: DimStats): boolean {
+  if (value == null || !Number.isFinite(value) || value <= 0) return false;
+  if (value < FLOORS[dim.source]) return false;
+  if (!(s.secondMax > 0) || s.secondCount !== 1 || value !== s.secondMax) return false;
+  return s.thirdMax <= 0 || value >= s.thirdMax * LEADER_MARGIN;
 }
 
 /** Pick a personalized placeholder for `name` that isn't already `used`. */
@@ -550,26 +751,7 @@ export function epithetsFor(
   const dimStats = new Map<EpithetSource, DimStats>();
   for (const dim of DIMENSIONS) dimStats.set(dim.source, statsFor(roster, dim));
 
-  // ── 1. Treefoe — unique; goes to the viking the forest has felled most. ──
-  const treeClaimants = roster
-    .map((p) => ({ p, causes: causesOf(p) }))
-    .filter((x) => isTreefoe(x.causes))
-    .map((x) => ({
-      p: x.p,
-      count: treeDeathCount(x.causes),
-      frac: x.causes.length ? treeDeathCount(x.causes) / x.causes.length : 0,
-    }))
-    .sort(
-      (a, b) => b.count - a.count || b.frac - a.frac || byName(a.p.character_name, b.p.character_name),
-    );
-  if (treeClaimants.length > 0) {
-    const winner = treeClaimants[0].p;
-    result.set(winner.character_name, { title: 'Treefoe', source: 'treefoe' });
-    assigned.add(winner.character_name);
-    usedTitles.add('Treefoe');
-  }
-
-  // ── 2. Deed dimensions — score every pair, assign greedily by score. ──
+  // ── 1. Deed dimensions, RANK 1 — score every pair, assign greedily by score. ──
   const dimOrder = new Map(DIMENSIONS.map((d, i) => [d.source, i]));
   interface Edge {
     name: string;
@@ -599,7 +781,7 @@ export function epithetsFor(
     usedTitles.add(e.dim.epithet);
   }
 
-  // ── 2b. Inheritance — crowns vacated by a viking who tops several boards. ──
+  // ── 2. Inheritance — rank-1 crowns vacated by a viking who tops several boards. ──
   // One award per round, re-reading the field each time: taking a viking out of the
   // running changes who the next crown's heir is (and whether that crown has a clear
   // enough heir at all), so every round is judged on the roster as it now stands.
@@ -631,7 +813,94 @@ export function epithetsFor(
     usedTitles.add(best.dim.epithet);
   }
 
-  // ── 3. Personalized placeholders for the rest (stable, unique). ──
+  // ── 3. OVERRIDES — a majority death cause, or never having died at all. ──
+  // Each one is UNIQUE and each is handed to the viking the cause has taken
+  // MOST; a qualifier who is already crowned keeps the crown (rank 1 outranks an
+  // override) and the override passes to the next qualifier down. The patterns
+  // are disjoint and every one of them needs a strict majority, so no viking is
+  // ever in the running for two at once.
+  for (const ov of CAUSE_OVERRIDES) {
+    if (usedTitles.has(ov.title)) continue;
+    const claimants = roster
+      .map((p) => ({ p, causes: causesOf(p) }))
+      .filter((x) => causeMajority(x.causes, ov.match))
+      .map((x) => ({
+        p: x.p,
+        count: causeCount(x.causes, ov.match),
+        frac: x.causes.length ? causeCount(x.causes, ov.match) / x.causes.length : 0,
+      }))
+      .sort(
+        (a, b) =>
+          b.count - a.count || b.frac - a.frac || byName(a.p.character_name, b.p.character_name),
+      );
+    const winner = claimants.find((c) => !assigned.has(c.p.character_name));
+    if (!winner) continue;
+    result.set(winner.p.character_name, { title: ov.title, source: ov.source });
+    assigned.add(winner.p.character_name);
+    usedTitles.add(ov.title);
+  }
+
+  // "the Unslain" — ten hours and no deaths; the longest-serving survivor wins it.
+  if (!usedTitles.has(UNSLAIN_TITLE)) {
+    const survivors = roster
+      .filter((p) => isUnslain(p))
+      .sort(
+        (a, b) =>
+          (b.total_playtime_minutes ?? 0) - (a.total_playtime_minutes ?? 0) ||
+          byName(a.character_name, b.character_name),
+      );
+    const winner = survivors.find((p) => !assigned.has(p.character_name));
+    if (winner) {
+      result.set(winner.character_name, { title: UNSLAIN_TITLE, source: 'unslain' });
+      assigned.add(winner.character_name);
+      usedTitles.add(UNSLAIN_TITLE);
+    }
+  }
+
+  // ── 4. RANK 2 — the clear runner-up on a board whose crown is already worn. ──
+  // A hall of thirty has ten crowns and a lot of very good second places; this
+  // is what keeps those second places from all reading as hall-names. The rung is
+  // only offered when the rank-1 title of the SAME dimension is actually worn by
+  // somebody (a board with no crown has no runner-up worth naming), and only to a
+  // still-untitled viking — so the crown-holder can never take their own second
+  // place. `ownsSecondPlace` is unique per dimension, so the only contest here is
+  // a viking who is the runner-up on two boards at once: they take the one they
+  // own most distinctly (z-score, the same yardstick the greedy pass ranks by),
+  // ties broken by dimension order and then by name.
+  {
+    interface SecondEdge {
+      name: string;
+      dim: Dimension;
+      strength: number;
+    }
+    const seconds: SecondEdge[] = [];
+    for (const p of roster) {
+      if (assigned.has(p.character_name)) continue;
+      for (const dim of DIMENSIONS) {
+        if (!usedTitles.has(dim.epithet)) continue; // rank 1 unworn: no second place
+        if (usedTitles.has(dim.second)) continue;
+        const s = dimStats.get(dim.source)!;
+        const v = dim.value(p);
+        if (!ownsSecondPlace(v, dim, s)) continue;
+        const strength = s.std > 0 ? (v! - s.mean) / s.std : 0;
+        seconds.push({ name: p.character_name, dim, strength });
+      }
+    }
+    seconds.sort(
+      (a, b) =>
+        b.strength - a.strength ||
+        dimOrder.get(a.dim.source)! - dimOrder.get(b.dim.source)! ||
+        byName(a.name, b.name),
+    );
+    for (const e of seconds) {
+      if (assigned.has(e.name) || usedTitles.has(e.dim.second)) continue;
+      result.set(e.name, { title: e.dim.second, source: e.dim.source });
+      assigned.add(e.name);
+      usedTitles.add(e.dim.second);
+    }
+  }
+
+  // ── 5. Personalized placeholders for the rest (stable, unique). ──
   const remaining = roster
     .filter((p) => !assigned.has(p.character_name))
     .sort((a, b) => byName(a.character_name, b.character_name));

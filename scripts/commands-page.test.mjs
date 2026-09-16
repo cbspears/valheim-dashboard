@@ -990,11 +990,14 @@ const indexSrc = read(`${BOT}/index.js`);
 
 // ── 6. the glossary defines words the site really uses ─────────────────────
 {
-  // The nine the UX review named. Order is the page's reading order, and the
-  // list is exact in both directions: a word dropped fails, and a tenth word
-  // added without a decision fails too.
+  // The nine the UX review named, plus "title" (2026-09-16, Charlie's ladder:
+  // 30 earned titles and a one-holder rule that nothing else on the site
+  // states). Order is the page's reading order, and the list is exact in both
+  // directions: a word dropped fails, and an eleventh word added without a
+  // decision fails too.
   const NAMED_BY_THE_REVIEW = [
     'the hall',
+    'title',
     'rune',
     'telling',
     'tale',
@@ -1005,7 +1008,7 @@ const indexSrc = read(`${BOT}/index.js`);
     'board',
   ];
 
-  eq(GLOSSARY.length, NAMED_BY_THE_REVIEW.length, 'the glossary is the nine words the review named');
+  eq(GLOSSARY.length, NAMED_BY_THE_REVIEW.length, 'the glossary is the ten words the page defines');
   eq(
     GLOSSARY.map((g) => g.term).join(' | '),
     NAMED_BY_THE_REVIEW.join(' | '),

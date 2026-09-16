@@ -3,7 +3,7 @@ import { Card, CardBody, SectionHeader } from '@/components/ui';
 import { GLOSSARY } from '@/config/commands';
 
 /**
- * Nine words this site uses as if you already knew them.
+ * Ten words this site uses as if you already knew them.
  *
  * Same row shape as the page register directly above it, so the two read as
  * one reference block rather than two designs: the word in a narrow left

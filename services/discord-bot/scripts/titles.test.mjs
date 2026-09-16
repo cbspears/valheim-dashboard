@@ -1,10 +1,14 @@
 // Unit tests for the living-titles announcer.
 //
 // Covers the old contract (seed-silent, exact Discord/voice formats, no-op on a
-// match, graceful degrade, dry-run) AND the "sticky and rare" policy Charlie
-// asked for on 2026-09-10: never demote an earned title, silent placeholder
-// reshuffles, two-pass confirmation 15 min apart, 24 h tenure between earned
-// titles, and a 3-per-day proclamation budget with a deterministic ranking.
+// match, graceful degrade, dry-run), the "sticky and rare" policy Charlie asked
+// for on 2026-09-10 (hold an earned title against a hall-name, silent
+// placeholder reshuffles, two-pass confirmation 15 min apart, 24 h tenure
+// between earned titles, a 3-per-day budget with a deterministic ranking), and
+// the ONE HOLDER PER EARNED TITLE rule of 2026-09-16: a confirmed offer of a
+// title somebody already wears is a HANDOVER — the challenger takes it and the
+// wearer is carried to whatever the engine names them, in one proclamation of
+// two lines, for one of the day's three. Tests 8c, 8d, 8e and 10.
 //
 // Run: node scripts/titles.test.mjs   (from services/discord-bot)
 import { createTitlesAnnouncer, isEarnedTitle } from '../src/titles.js';
@@ -282,49 +286,138 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   ok(r.announced === 1, 'a first earned title needs confirmation but no tenure');
 }
 
-// ── 8c. ONE HOLDER PER EARNED TITLE: an offer of a title someone else holds
-//        under tenure is held, and its confirmation clock does not run ─────────
+// ── 8c. THE TAKEOVER: a confirmed offer moves the title AND its old wearer ──
+//        The 2026-09-11 shape: Kætiløy wears "the Far-Seer" under tenure while the
+//        engine has already given the map crown to Rosir. The old rules held both
+//        and the hall ended up with two Far-Seers. Now the confirmed challenger
+//        takes it and the wearer is carried to whatever the engine names them, in
+//        ONE proclamation of two lines.
 {
   const posts = [];
   const c = clock();
   const roster = [
-    // Kætiløy's shape on 2026-09-11: wearing the Far-Seer for 2 h, the engine
-    // has already moved her to a different earned title.
     { id: 'h1', character_name: 'Holder', current_title: 'the Far-Seer', title_updated_at: ago(2 * HOUR) },
-    // Rosir's shape: a placeholder wearer the engine now names the Far-Seer.
     { id: 'c1', character_name: 'Challenger', current_title: 'of the Quiet Fjord', title_updated_at: ago(3 * DAY) },
   ];
   const writeDb = fakeDb({ players: roster });
   const ann = announcer({
     db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
-    fetchImpl: fakeApi([['Holder', 'the Ever-Present', 'presence'], ['Challenger', 'the Far-Seer', 'map']]),
+    fetchImpl: fakeApi([['Holder', 'the Ever-Present', 'hours'], ['Challenger', 'the Far-Seer', 'map']]),
+    now: c.now,
+  });
+
+  // Pass 1: nothing moves. The wearer is inside tenure, and the challenger waits
+  // because the wearer's own offer has not proven itself yet (rule 4b).
+  const first = await ann.tick();
+  ok(first.held === 2 && first.announced === 0,
+    `first pass holds both, got ${JSON.stringify(first)}`);
+  ok(posts.length === 0 && writeDb.writes.updates.length === 0, 'and writes nothing');
+
+  // Pass 2, a confirm window later: the wearer's move is proven, so the
+  // challenger's own confirmed offer resolves the pair in one go. Tenure does
+  // NOT protect the wearer from losing their own title (uniqueness beats
+  // stickiness) even though 24 h has not passed.
+  c.advance(16 * MIN);
+  const second = await ann.tick();
+  ok(second.announced === 1, `the takeover is one proclamation, got ${JSON.stringify(second)}`);
+  ok(posts.length === 1, `and one Discord message, got ${posts.length}`);
+
+  const lines = posts[0].split('\n');
+  ok(lines.length === 2, `the proclamation is two lines, got ${lines.length}: ${posts[0]}`);
+  ok(lines[0] === '⚔️ **Challenger** has earned a new title: **the Far-Seer**',
+    `line one keeps the plain crown format, got: ${lines[0]}`);
+  ok(lines[1] === '**Holder** passes **the Far-Seer** to **Challenger** and takes up **the Ever-Present**.',
+    `line two is the handover, got: ${lines[1]}`);
+  ok(!posts[0].includes('—') && !posts[0].includes('–'), 'no em or en dash in the proclamation');
+
+  ok(writeDb.writes.voice.length === 1,
+    `one voice line for the handover, got ${writeDb.writes.voice.length}`);
+  ok(writeDb.writes.voice[0].text ===
+      'From tonight, Challenger goes by the Far-Seer, and Holder takes up the Ever-Present.',
+    `exact handover voice line, got: ${writeDb.writes.voice[0].text}`);
+
+  // Both registry rows are written, and the budget is charged ONCE.
+  const byId = Object.fromEntries(writeDb.writes.updates.map((u) => [u.id, u.current_title]));
+  ok(byId.c1 === 'the Far-Seer' && byId.h1 === 'the Ever-Present',
+    `both rows re-titled, got ${JSON.stringify(byId)}`);
+  ok(writeDb.writes.history.length === 1 && writeDb.writes.history[0].player_id === 'c1',
+    `a handover costs one proclamation, got ${JSON.stringify(writeDb.writes.history)}`);
+
+  // Mirror the registry writes the fake does not apply, then prove it settles.
+  roster[0].current_title = 'the Ever-Present';
+  roster[0].title_updated_at = new Date(c.now()).toISOString();
+  roster[1].current_title = 'the Far-Seer';
+  roster[1].title_updated_at = new Date(c.now()).toISOString();
+  c.advance(HOUR);
+  const third = await ann.tick();
+  ok(third.unchanged === 2 && third.announced === 0,
+    `the hall settles and stays settled, got ${JSON.stringify(third)}`);
+}
+
+// ── 8d. The old wearer takes up whatever the engine offers, hall-name included ──
+//        A demotion to a placeholder is still never spontaneous (rule 1), but it
+//        is exactly what a takeover does to a wearer the engine has nothing else
+//        for. Without this the title could never leave them at all.
+{
+  const posts = [];
+  const c = clock();
+  const roster = [
+    { id: 'h2', character_name: 'Oldtimer', current_title: 'Stonewright', title_updated_at: ago(9 * DAY) },
+    { id: 'c2', character_name: 'Upstart', current_title: 'the Unhurried', title_updated_at: ago(9 * DAY) },
+  ];
+  const writeDb = fakeDb({ players: roster });
+  const ann = announcer({
+    db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    // The engine has nothing earned left for Oldtimer: it offers a hall-name.
+    fetchImpl: fakeApi([['Oldtimer', 'the Quiet Flame', 'flavor'], ['Upstart', 'Stonewright', 'builds']]),
     now: c.now,
   });
   const first = await ann.tick();
-  ok(first.held === 2 && first.confirming === 0 && first.announced === 0,
-    `both hold: the wearer under tenure, the challenger because the title is taken, got ${JSON.stringify(first)}`);
+  ok(first.held === 1 && first.confirming === 1 && first.announced === 0,
+    `the wearer is held against the hall-name while the challenger confirms, got ${JSON.stringify(first)}`);
   c.advance(16 * MIN);
   const second = await ann.tick();
-  ok(second.held === 2 && second.announced === 0, 'a confirm window later the challenger is still not confirmed');
-  ok(posts.length === 0 && writeDb.writes.updates.length === 0, 'no second Far-Seer proclaimed, nothing written');
+  ok(second.announced === 1 && posts.length === 1, `one proclamation, got ${JSON.stringify(second)}`);
+  ok(posts[0].split('\n')[1] === '**Oldtimer** passes **Stonewright** to **Upstart** and takes up **the Quiet Flame**.',
+    `the wearer is named as taking up the hall-name, got: ${posts[0]}`);
+  const byId = Object.fromEntries(writeDb.writes.updates.map((u) => [u.id, u.current_title]));
+  ok(byId.c2 === 'Stonewright' && byId.h2 === 'the Quiet Flame',
+    `both rows written, got ${JSON.stringify(byId)}`);
+  ok(writeDb.writes.history.length === 1, 'still one history row');
+}
 
-  // Tenure clears (24 h from the holder's title_updated_at). The holder's own
-  // offer stood the whole time, so it goes out now; the challenger's clock only
-  // STARTS now.
-  c.advance(22 * HOUR);
-  const third = await ann.tick();
-  ok(third.announced === 1 && posts.length === 1 && posts[0].includes('**Holder**') && posts[0].includes('the Ever-Present'),
-    `the wearer moves on once tenure clears, got ${JSON.stringify(third)} / ${posts[0]}`);
-  ok(third.confirming === 1, `the challenger starts confirming only now, got ${JSON.stringify(third)}`);
-  // Mirror the registry write the fake does not apply.
-  roster[0].current_title = 'the Ever-Present';
-  roster[0].title_updated_at = new Date(c.now()).toISOString();
-
+// ── 8e. Rule 4b: no duplicate is ever opened while the wearer is mid-move ─────
+//        The wearer keeps being offered something new, so their own move never
+//        proves itself. The challenger's clock runs the whole time (so the moment
+//        the wearer settles it is already confirmed), but nothing is written.
+{
+  const posts = [];
+  const c = clock();
+  const roster = [
+    { id: 'h3', character_name: 'Wearer', current_title: 'the Provider', title_updated_at: ago(9 * DAY) },
+    { id: 'c3', character_name: 'Rival', current_title: 'the Unhurried', title_updated_at: ago(9 * DAY) },
+  ];
+  const writeDb = fakeDb({ players: roster });
+  let payload = fakeApi([['Wearer', 'Bane of Beasts', 'kills'], ['Rival', 'the Provider', 'resources']]);
+  const ann = announcer({
+    db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: (...a) => payload(...a), now: c.now,
+  });
+  await ann.tick();
   c.advance(16 * MIN);
-  const fourth = await ann.tick();
-  ok(fourth.announced === 1 && posts.length === 2 && posts[1].includes('**Challenger**') && posts[1].includes('the Far-Seer'),
-    `the challenger is confirmed 16 min later and takes the vacated title, got ${JSON.stringify(fourth)}`);
-  ok(writeDb.writes.history.length === 2, 'exactly two history rows: one Far-Seer at a time');
+  // The engine changes its mind about the wearer, restarting THEIR clock.
+  payload = fakeApi([['Wearer', 'the Forgehand', 'crafts'], ['Rival', 'the Provider', 'resources']]);
+  const second = await ann.tick();
+  ok(second.announced === 0 && second.held === 1,
+    `the rival waits while the wearer is unsettled, got ${JSON.stringify(second)}`);
+  ok(posts.length === 0 && writeDb.writes.updates.length === 0, 'and no second Provider is written');
+  // The wearer settles: their offer stands a whole window, so the pair resolves.
+  c.advance(16 * MIN);
+  const third = await ann.tick();
+  ok(third.announced === 1 && posts.length === 1, `then it resolves, got ${JSON.stringify(third)}`);
+  ok(posts[0].split('\n')[1] === '**Wearer** passes **the Provider** to **Rival** and takes up **the Forgehand**.',
+    `and it resolves as a handover, got: ${posts[0]}`);
+  ok(writeDb.writes.history.length === 1, 'one proclamation for the pair');
 }
 
 // ── 9. DAILY BUDGET caps the pass, in a deterministic order ───────────────
@@ -361,10 +454,16 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
     await ann.tick();
     c.advance(16 * MIN);
     const r = await ann.tick();
-    ok(r.announced === 3 && r.deferred === 2, `budget caps the pass at 3, got ${JSON.stringify(r)}`);
+    // Charleif is not deferred: Zulf's offer is of the very title Charleif wears,
+    // so Zulf's proclamation is a HANDOVER that carries Charleif to the Far-Seer
+    // he was already confirmed for. One proclamation, two vikings re-titled, and
+    // only Dvalinn is left waiting for tomorrow's budget.
+    ok(r.announced === 3 && r.deferred === 1, `budget caps the pass at 3, got ${JSON.stringify(r)}`);
     const named = posts.map((p) => p.split('**')[1]);
     ok(JSON.stringify(named) === JSON.stringify(['Alfvin', 'Zulf', 'Bjorn']),
       `ranking = first titles (alphabetical), then combat crowns, got ${JSON.stringify(named)}`);
+    ok(posts[1].includes('**Charleif** passes **the Forgehand** to **Zulf** and takes up **the Far-Seer**.'),
+      `and the handover is the second line of Zulf's proclamation, got: ${posts[1]}`);
     ok(writeDb.writes.history.length === 3, 'one title_history row per proclamation, and only those');
   }
 
@@ -407,6 +506,68 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
     c.advance(16 * MIN);
     ok((await ann2.tick()).announced === 3, 'the deferred changes are re-evaluated and go out when the budget frees up');
   }
+}
+
+// ── 10. RECONCILIATION: the three duplicates production carried on 2026-09-16 ──
+//        Bane of Beasts (Thorfinn, Mikael), Stonewright (S'aeien, Kætiløy) and
+//        the Heavy-Handed (Psifour, Yonk) were each worn by two vikings, because
+//        the old rule 1 kept an earned title on its holder forever while the
+//        engine crowned the new leader. No SQL is needed to clear them: the
+//        engine already names one wearer per title, so the other is offered their
+//        own rung and resolves through the ordinary confirm-then-proclaim path.
+{
+  const posts = [];
+  const c = clock();
+  const roster = [
+    { id: 't', character_name: 'Thorfinn', current_title: 'Bane of Beasts', title_updated_at: ago(6 * DAY) },
+    { id: 'm', character_name: 'Mikael', current_title: 'Bane of Beasts', title_updated_at: ago(2 * DAY) },
+    { id: 's', character_name: "S'aeien", current_title: 'Stonewright', title_updated_at: ago(6 * DAY) },
+    { id: 'k', character_name: 'Kætiløy', current_title: 'Stonewright', title_updated_at: ago(2 * DAY) },
+    { id: 'p', character_name: 'Psifour', current_title: 'the Heavy-Handed', title_updated_at: ago(2 * DAY) },
+    { id: 'y', character_name: 'Yonk', current_title: 'the Heavy-Handed', title_updated_at: ago(6 * DAY) },
+  ];
+  // What the engine says today: one wearer per title, the other on their rank-2.
+  const offers = fakeApi([
+    ['Thorfinn', 'Beast-Hewer', 'kills'],
+    ['Mikael', 'Bane of Beasts', 'kills'],
+    ["S'aeien", 'the Timber-Wise', 'builds'],
+    ['Kætiløy', 'Stonewright', 'builds'],
+    ['Psifour', 'the Heavy-Handed', 'damage'],
+    ['Yonk', 'the Bone-Breaker', 'damage'],
+  ]);
+  const writeDb = fakeDb({ players: roster, history: [] });
+  const ann = announcer({
+    db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: offers, now: c.now,
+  });
+
+  const first = await ann.tick();
+  ok(first.announced === 0 && first.confirming === 3 && first.unchanged === 3,
+    `the first pass only confirms the three movers, got ${JSON.stringify(first)}`);
+
+  c.advance(16 * MIN);
+  const second = await ann.tick();
+  ok(second.announced === 3 && second.deferred === 0,
+    `all three duplicates clear inside one day's budget, got ${JSON.stringify(second)}`);
+
+  // Apply the writes the fake records, then read the hall back.
+  const wrote = new Map(writeDb.writes.updates.map((u) => [u.id, u.current_title]));
+  for (const row of roster) if (wrote.has(row.id)) row.current_title = wrote.get(row.id);
+  const worn = roster.map((r) => r.current_title);
+  ok(new Set(worn).size === worn.length, `no title is worn twice any more, got [${worn.join(', ')}]`);
+  ok(wrote.get('t') === 'Beast-Hewer' && wrote.get('s') === 'the Timber-Wise' && wrote.get('y') === 'the Bone-Breaker',
+    `each runner-up takes their own rung, got ${JSON.stringify([...wrote])}`);
+  ok(!wrote.has('m') && !wrote.has('k') && !wrote.has('p'),
+    'and the wearer the engine kept is not written at all');
+  ok(writeDb.writes.history.length === 3, 'three proclamations, three history rows');
+  ok(posts.every((line) => !line.includes('\n')),
+    'none of them is a handover: the engine had already picked a wearer for each title');
+
+  // And it stays clean: the next pass has nothing to say.
+  c.advance(HOUR);
+  const third = await ann.tick();
+  ok(third.announced === 0 && third.unchanged === 6,
+    `the hall settles on six distinct titles, got ${JSON.stringify(third)}`);
 }
 
 console.log(`titles.test: ${passed} assertions passed`);

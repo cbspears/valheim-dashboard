@@ -211,7 +211,7 @@ only component holding a Supabase key directly. Loops, with their intervals:
 | `identity-confirm` | 30 s | confirms `/oath CODE` Discord links |
 | `voice` | 60 s | queues lines into `voice_lines` for the in-game speaker |
 | voice expiry | 5 m | ages out unspoken lines |
-| `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history`. Sticky since 2026-09-10: no demotion of an earned title, silent placeholder reshuffles, two-pass confirmation (`TITLE_CONFIRM_MS`), 24 h tenure (`TITLE_MIN_TENURE_MS`), max `TITLES_PER_DAY` (3) a rolling day |
+| `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history`. Sticky since 2026-09-10: an earned title is held against a hall-name offer, silent placeholder reshuffles, two-pass confirmation (`TITLE_CONFIRM_MS`), 24 h tenure (`TITLE_MIN_TENURE_MS`) on a viking's own move between earned titles, max `TITLES_PER_DAY` (3) a rolling day. **One holder per earned title since 2026-09-16**: a confirmed offer of a title somebody wears is a handover, not a duplicate, and it spends one proclamation (two lines) rather than two. See *Living Titles* below |
 | `milestones` | `MILESTONES_INTERVAL_MS`, default 2 m | announces Great Deeds |
 | heartbeat | 60 s | POSTs to `/api/ops/heartbeat` with per-sub-loop status |
 | recap | one `node-cron` job, `RECAP_EVENING_HOUR` (default 23) America/Chicago | the evening recap and Player of the Day. Since 2026-09-14 the crown is a **notability** draw (personal spike × clan share, behind a 20-minute activity gate, with rotation read from `poty_history`) rather than a fixed priority list; rules of record in `services/discord-bot/README.md` and the header of `src/recap.js` |
@@ -283,6 +283,47 @@ storyteller." line a week after a nudge went unanswered; that line is gated on t
 non-empty (`officeKnown`), so a hall that has never had the office never asks for one.
 `lib/epithets.ts` is untouched, because an office is a different kind of fact from a title someone
 earned.
+
+**Living Titles (`lib/epithets.ts`, `GET /api/titles`, `services/discord-bot/src/titles.js`).** The
+engine names the WHOLE warband at once and every viking's title is unique; the bot only decides what
+is worth proclaiming. Since 2026-09-16 there are **30 earned titles**, and **one viking wears each at
+a time** — when the engine gives a title to somebody new, the bot hands it over and moves the old
+wearer on in the same proclamation, rather than letting two vikings carry one name (which is what
+production did on 2026-09-16: Bane of Beasts, Stonewright and the Heavy-Handed were each worn twice).
+
+Every stat board carries a LADDER: rank 1 for the board's owner, rank 2 for a clear runner-up (sole
+second place, clearing third by `LEADER_MARGIN`, over the same absolute floor as the crown). Rank 2
+is offered only when rank 1 is actually worn, and never to the viking wearing it.
+
+| Board | Rank 1 | Rank 2 | Floor |
+|---|---|---|---|
+| hours (durable playtime) | the Ever-Present *(superlative: never inherited)* | the Hearth-Bound | 600 min |
+| kills | Bane of Beasts | Beast-Hewer | 50 |
+| damage dealt | the Heavy-Handed | the Bone-Breaker | 2,500 |
+| boss damage | Bane of the Forsaken | Thorn of the Forsaken | 500 |
+| deaths | the Oft-Slain | the Twice-Buried | 10 |
+| resources | the Provider | the Gatherer | 500 |
+| crafts | the Forgehand | the Anvil-Sworn | 100 |
+| distance | the Far-Strider | the Road-Worn | 20,000 m |
+| structures | Stonewright | the Timber-Wise | 250 |
+| map explored | the Far-Seer | the Horizon-Chaser | 5 % |
+| fish caught | the Angler | the Line-Caster | 5 |
+| metres sailed | the Sea-Wolf | the Salt-Sworn | 5,000 m |
+
+Fish is read the way `/players` reads it (the greater of `gs_stats.fishCaught` and the sum of
+`gs_stats.fish[]`), sailing from `gs_stats.distances.sail`.
+
+Alongside the ladders sit six **overrides**, each unique, each handed to the viking the cause has
+taken MOST: **Treefoe** (trees), **the Cliff-Kisser** (falls), **the Half-Drowned** (drowning),
+**the Singed** (fire), **the Sting-Struck** (deathsquitos) — all needing a strict majority of that
+viking's deaths and at least three of them — and **the Unslain**, for ten hours played with zero
+deaths. Overrides read the same `causesByName` map every caller already builds from
+`events.metadata.cause`.
+
+Assignment is greedy, unique and deterministic, in strict priority order: **rank-1 crowns, then the
+crowns they vacate (inheritance), then the overrides, then rank 2, then a hall-name** from
+`FLAVOR_POOL`. `EARNED_TITLES` is mirrored in the bot (plain JS, cannot import the engine) and
+`scripts/epithets.test.mjs` fails the root suite if the two drift.
 
 **Tales of the hall (`services/discord-bot/src/tales.js` and `lib/tales.ts`, always on).** A telling
 hangs off a boss, and most of what happens on this server is not a boss. A TALE hangs off a NIGHT:

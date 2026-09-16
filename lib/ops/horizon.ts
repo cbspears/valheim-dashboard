@@ -752,8 +752,13 @@ export interface TitleContest extends TitleContestInput {
  *             not one that is due this tick.
  *   held      the viking wears an EARNED title and the engine now offers a
  *             placeholder. Under the sticky policy (Charlie, 2026-09-10) that is
- *             never announced and never written, however long it stands. A
- *             deliberate, permanent disagreement, not a late write.
+ *             never announced and never written FROM THIS ROW, however long it
+ *             stands: a deliberate disagreement, not a late write. It ends only
+ *             when another viking is confirmed for the title this one wears, at
+ *             which point the handover moves them both in one proclamation
+ *             (services/discord-bot/src/titles.js, one holder per earned title,
+ *             Charlie 2026-09-16) — so a long-standing hold is normal, and a
+ *             hold that never ends is only a title nobody is challenging.
  *   contested hysteresis is the only thing holding the title: strip the
  *             incumbent bonus and a rival wins. Nothing is announced, but the
  *             title is one good night from moving.
@@ -776,8 +781,10 @@ export function titleContests(rows: TitleContestInput[]): TitleContest[] {
     }
     if (incumbent && stable && stable !== incumbent) {
       // An earned title the engine wants to trade for a placeholder is HELD, not
-      // flipped: services/discord-bot/src/titles.js refuses that demotion
-      // outright, so no amount of waiting turns this row into a proclamation.
+      // flipped: services/discord-bot/src/titles.js refuses that demotion on the
+      // wearer's own row, so no amount of waiting turns THIS row into a
+      // proclamation. The title can still change hands, but that proclamation is
+      // driven by the challenger's row, which shows up here as its own flip.
       out.push({ ...r, kind: isEarnedTitle(incumbent) && !isEarnedTitle(stable) ? 'held' : 'flipping' });
       continue;
     }

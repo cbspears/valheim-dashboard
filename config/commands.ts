@@ -543,8 +543,8 @@ export const NOTIFICATIONS: Notification[] = [
     id: 'titles',
     text: 'Title proclamations',
     where: 'Discord, in #valheim, and spoken in game',
-    trigger: 'Your standing against the warband shifts far enough to earn you a new epithet',
-    cadence: 'Checked every ten minutes, and rare by design',
+    trigger: 'Your standing against the warband shifts far enough to earn you a new epithet, or you overtake the viking who was carrying one',
+    cadence: 'Checked every ten minutes, at most three a night, and rare by design',
     channel: 'valheim',
     channelVar: 'TITLE_CHANNEL',
     source: 'services/discord-bot/src/titles.js createTitlesAnnouncer',
@@ -758,10 +758,15 @@ export const SITE_PAGES: SitePage[] = [
 ];
 
 // ── The words this site uses ───────────────────────────────────────────────
-// Nine words a reader meets on this site with no definition anywhere, gathered
+// Ten words a reader meets on this site with no definition anywhere, gathered
 // where a newcomer will read them: at the top of Resources, under the page
 // register. Every one of them is used in the copy today, which is the whole
 // test scripts/commands-page.test.mjs applies to this list.
+//
+// "title" is the tenth, added 2026-09-16 with the ladder (30 earned titles, a
+// fishing one among them). It earns its row because the rule changed and
+// nothing else on the site says it: one viking wears each title at a time, and
+// a title can pass from the viking who had it to the viking who overtook them.
 //
 // One plain line each, doctrine voice: the meaning says what the word means,
 // and the flavour stays in the section subtitle above it.
@@ -783,6 +788,13 @@ export const GLOSSARY: GlossaryTerm[] = [
     term: 'the hall',
     meaning: 'Eilif itself: this server and its Discord, taken as one place.',
     source: 'config/server.ts SERVER_NAME',
+  },
+  {
+    id: 'word-title',
+    term: 'title',
+    meaning:
+      'The name the hall gives you for what you do best. One viking wears each title at a time, so a title can pass to whoever now leads that board.',
+    source: 'lib/epithets.ts EARNED_TITLES, epithetsFor; services/discord-bot/src/titles.js createTitlesAnnouncer',
   },
   {
     id: 'word-rune',
