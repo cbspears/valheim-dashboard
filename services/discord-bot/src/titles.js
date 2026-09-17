@@ -33,6 +33,25 @@
 //      let two vikings wear the same title: the engine crowned the new leader
 //      while the bot held the old one forever. Production carried three such
 //      pairs on 2026-09-16 — Bane of Beasts, Stonewright, the Heavy-Handed.)
+//   1a. THE HANDOVER TARGET MUST BE FREE (Charlie, 2026-09-17). The title the
+//      outgoing holder takes up may not be worn by ANY other registry row once
+//      this pass's writes are in — including a title handed out earlier in the
+//      same pass. The engine's offer for them is used when it is free; when it
+//      is not, they take up their PLACEHOLDER, the hall-name /api/titles now
+//      publishes for every viking (the engine's own FLAVOR_POOL pick, already
+//      de-duplicated across the roster). If even that is worn — only possible
+//      against a stale registry — the bot falls back to the first free hall-name
+//      it has seen in this pass's payload and logs a warning. Nothing is ever
+//      appended to a title to force it unique.
+//      (2026-09-17: "Halldor takes Bane of the Forsaken, Charleif takes up the
+//      Forgehand" — which S'aeien was already wearing.)
+//   1b. EVERY HOLDER IS HANDED OFF (Charlie, 2026-09-17). A takeover re-assigns
+//      EVERY registry row wearing the title, not just the first one found: the
+//      pre-fix era could leave two vikings on one title, and moving one of them
+//      left the duplicate standing. Each gets their own handover line, all of it
+//      one proclamation and ONE of the daily budget.
+//      (2026-09-17: Asbjorn took Bane of Beasts from Mikael while Thorfinn, who
+//      also wore it, was never touched.)
 //   2. PLACEHOLDER -> PLACEHOLDER IS SILENT. The uniqueness reshuffle can move a
 //      no-standout viking from one hall-name to another; that is bookkeeping.
 //      The registry is updated so it stays unique, with NO title_history row, no
@@ -65,6 +84,17 @@
 //      deterministically — first titles first, then combat crowns (kills, damage,
 //      boss damage), then by name — and the rest simply stay pending and are
 //      re-evaluated next pass.
+//   7. TAKEOVER COOL-DOWN (Charlie, 2026-09-17). A title cannot be taken over
+//      within TITLE_TAKEOVER_COOLDOWN_MS (default 24 h) of its last change of
+//      holder — the title_updated_at of whoever wears it, or, for a row carrying
+//      no usable stamp, the challenger's own confirmed offer time. The
+//      CHALLENGER simply waits ("waiting: T changed hands N h ago"); the wearer
+//      is never disturbed and nothing is written, so a wait can never open a
+//      duplicate. There are no epic-style exemptions: a fighting crown waits like
+//      any other. This is what kills a flip-flop that outlives the 15-minute
+//      confirmation — "the Heavy-Handed" went Yonk -> Fjällhnot -> Yonk inside
+//      five hours on 2026-09-17, each hop confirmed, each hop legal under rules
+//      1-6. The confirmation window is unchanged and still applies first.
 //   6. SEEDING stays silent and free: a viking whose current_title is still NULL
 //      is recorded WITHOUT announcing and without spending budget, so the first
 //      pass after a migration or a wipe never dumps a storm on the channel.
@@ -95,6 +125,9 @@ const DAY_MS = 24 * HOUR_MS;
 const ENV_MIN_TENURE_MS = Number(process.env.TITLE_MIN_TENURE_MS || DAY_MS);
 const ENV_CONFIRM_MS = Number(process.env.TITLE_CONFIRM_MS || 15 * MINUTE_MS);
 const ENV_PER_DAY = Number(process.env.TITLES_PER_DAY || 3);
+// Rule 7: how long a title rests after changing hands before anyone may take it
+// off its new wearer.
+const ENV_TAKEOVER_COOLDOWN_MS = Number(process.env.TITLE_TAKEOVER_COOLDOWN_MS || DAY_MS);
 
 // A "hold" is the normal, permanent state of a well-titled hall, so its log line
 // would otherwise repeat every ten minutes forever. One per viking per hour.
@@ -193,6 +226,7 @@ export function createTitlesAnnouncer({
   minTenureMs = ENV_MIN_TENURE_MS,
   confirmMs = ENV_CONFIRM_MS,
   perDay = ENV_PER_DAY,
+  takeoverCooldownMs = ENV_TAKEOVER_COOLDOWN_MS,
 }) {
   let warnedMissing = false;
   let warnedNoWrite = false;
@@ -225,7 +259,16 @@ export function createTitlesAnnouncer({
     for (const p of players) {
       const name = String(p?.name || '').trim();
       const title = String(p?.title || '').trim();
-      if (name && title) map.set(name, { title, source: String(p?.source || '') });
+      if (!name || !title) continue;
+      map.set(name, {
+        title,
+        source: String(p?.source || ''),
+        // The hall-name the engine would give this viking if they earned nothing,
+        // de-duplicated across the roster (lib/epithets.ts `Epithet.placeholder`).
+        // Rule 1a lands a dethroned wearer on it. An older dashboard deploy omits
+        // the field; `freeTitleFor` then falls through to the names it has seen.
+        placeholder: String(p?.placeholder || '').trim(),
+      });
     }
     return map;
   }
@@ -260,14 +303,14 @@ export function createTitlesAnnouncer({
   /**
    * Proclaim a change.
    *
-   * `handover`, when present, means this title CHANGED HANDS: `{ name, title }`
-   * is the viking who wore it until now and the title the engine moves them to.
-   * It adds a second line to the same Discord message and folds the same fact
-   * into the one voice line, because the hall should hear a title being passed
-   * as one event and not as two unrelated ones. A plain new crown keeps the
-   * format it has always had, byte for byte.
+   * `handovers` is every viking who wore this title until now, each with the
+   * title they take up: `[{ name, title }, …]`. It adds ONE line per outgoing
+   * holder to the same Discord message and folds them all into the one voice
+   * line, because the hall should hear a title being passed as one event and not
+   * as several unrelated ones. A plain new crown, and a handover from a single
+   * holder, keep the formats they have always had, byte for byte.
    */
-  async function announce(row, title, handover = null) {
+  async function announce(row, title, handovers = []) {
     const name = (row.character_name || '').trim() || 'A viking';
     // THE ONE THAT GOT MISSED (red-team round 2, 2026-09-05). Every sibling
     // announcement path escapes the character name — chronicle.js, bosspoll.js,
@@ -278,16 +321,24 @@ export function createTitlesAnnouncer({
     // contains no markdown characters today; escaping it costs nothing and
     // keeps that from becoming load-bearing.
     const line = `⚔️ **${nameMd(name)}** has earned a new title: **${escapeMd(title)}**`;
-    const content = handover
-      ? `${line}\n**${nameMd(handover.name)}** passes **${escapeMd(title)}** to **${nameMd(name)}** and takes up **${escapeMd(handover.title)}**.`
-      : line;
-    const voice = handover
-      ? `From tonight, ${firstName(name)} goes by ${title}, and ${firstName(handover.name)} takes up ${handover.title}.`
+    const content = [
+      line,
+      ...handovers.map(
+        (h) =>
+          `**${nameMd(h.name)}** passes **${escapeMd(title)}** to **${nameMd(name)}** and takes up **${escapeMd(h.title)}**.`,
+      ),
+    ].join('\n');
+    const voice = handovers.length
+      ? `From tonight, ${firstName(name)} goes by ${title}${handovers
+          .map((h) => `, and ${firstName(h.name)} takes up ${h.title}`)
+          .join('')}.`
       : `From tonight, ${firstName(name)} goes by ${title}.`;
     if (dryRun) {
       log.info?.(
-        handover
-          ? `[titles] (dry) would announce: ${name} -> "${title}", ${handover.name} -> "${handover.title}"`
+        handovers.length
+          ? `[titles] (dry) would announce: ${name} -> "${title}", ${handovers
+              .map((h) => `${h.name} -> "${h.title}"`)
+              .join(', ')}`
           : `[titles] (dry) would announce: ${name} -> "${title}"`,
       );
       return;
@@ -303,9 +354,21 @@ export function createTitlesAnnouncer({
       const { error: vErr } = await writeDb.from('voice_lines').insert({
         text: voice,
         kind: 'event',
-        meta: handover
-          ? { title, player_id: row.id, passedFrom: handover.name, passedTo: handover.title }
-          : { title, player_id: row.id },
+        meta:
+          handovers.length === 1
+            ? {
+                title,
+                player_id: row.id,
+                passedFrom: handovers[0].name,
+                passedTo: handovers[0].title,
+              }
+            : handovers.length > 1
+              ? {
+                  title,
+                  player_id: row.id,
+                  passed: handovers.map((h) => ({ from: h.name, to: h.title })),
+                }
+              : { title, player_id: row.id },
         status: 'queued',
         queued_at: new Date(now()).toISOString(),
       });
@@ -391,24 +454,127 @@ export function createTitlesAnnouncer({
     // judgement, only a deterministic choice: the other wearer's own row is
     // moved on by the engine's offer like any other change.
     const rowByName = new Map();
-    const wornBy = new Map(); // earned title -> character_name
+    // title (earned OR hall-name) -> Set of character_names wearing it. A SET, not
+    // one name: production can carry two wearers of one title (the bug this file
+    // keeps closing), and rule 1b hands EVERY one of them off, so "who else wears
+    // this" has to be the whole list. Hall-names are tracked too, because rule 1a
+    // asks whether a placeholder is free before landing anybody on it.
+    const wornBy = new Map();
     // character_name -> the title they wear AS OF NOW IN THIS PASS. Kept beside
     // the rows rather than written into them: the rows are the caller's data and
     // a pass must not leave footprints in them.
     const liveTitle = new Map();
+    // title -> ms when it last changed holder, rule 7's clock. Seeded from the
+    // wearers' title_updated_at (the latest one, if the pre-fix era left two
+    // wearers on it) and kept current as this pass writes.
+    const handsAt = new Map();
+
+    const wear = (title, who) => {
+      const t = String(title || '').trim();
+      if (!t) return;
+      let set = wornBy.get(t);
+      if (!set) wornBy.set(t, (set = new Set()));
+      set.add(who);
+    };
+    const unwear = (title, who) => {
+      const t = String(title || '').trim();
+      const set = wornBy.get(t);
+      if (!set) return;
+      set.delete(who);
+      if (set.size === 0) wornBy.delete(t);
+    };
+    /** Everyone wearing `title` right now in this pass, in registry order. */
+    const holdersOf = (title) => [...(wornBy.get(String(title || '').trim()) || [])];
+
     for (const row of data || []) {
       const holder = (row.character_name || '').trim();
       if (!holder || isExcluded(row)) continue;
       if (!rowByName.has(holder)) rowByName.set(holder, row);
       const held = String(row.current_title || '').trim();
       if (!liveTitle.has(holder)) liveTitle.set(holder, held);
-      if (isEarnedTitle(held) && !wornBy.has(held)) wornBy.set(held, holder);
+      wear(held, holder);
+      const at = row.title_updated_at ? Date.parse(row.title_updated_at) : NaN;
+      if (held && Number.isFinite(at)) {
+        const prev = handsAt.get(held);
+        if (prev === undefined || at > prev) handsAt.set(held, at);
+      }
     }
 
     /** What the engine offers this viking right now, or null. */
     const offerFor = (who) => computed.get(who) ?? null;
     const isEarnedOffer = (entry) =>
       entry ? (entry.source ? entry.source !== 'flavor' : isEarnedTitle(entry.title)) : false;
+
+    /**
+     * Every hall-name this pass has SEEN, in the order /api/titles returned them:
+     * each entry's `placeholder`, plus any hall-name the engine is offering. The
+     * bot deliberately keeps no copy of the engine's FLAVOR_POOL — a stale mirror
+     * is exactly the failure EARNED_TITLES is warned about above — so this is its
+     * entire vocabulary for the last-resort landing spot in `freeTitleFor`. The
+     * roster order is deterministic, so the choice is too.
+     */
+    const seenFlavorNames = [];
+    {
+      const seen = new Set();
+      for (const entry of computed.values()) {
+        const cands = [entry.placeholder];
+        if (!isEarnedOffer(entry)) cands.push(entry.title);
+        for (const cand of cands) {
+          const t = String(cand || '').trim();
+          if (!t || seen.has(t) || isEarnedTitle(t)) continue;
+          seen.add(t);
+          seenFlavorNames.push(t);
+        }
+      }
+    }
+
+    /**
+     * 1a. WHERE AN OUTGOING HOLDER LANDS. The title they take up must be worn by
+     * nobody else once this pass's writes are in, so it is resolved against
+     * `wornBy` (which this pass keeps current) plus `reserved`, the titles already
+     * promised to earlier holders inside this same takeover. In order:
+     *   1. the engine's own offer for them — the old behaviour, and still the
+     *      right answer whenever it is free;
+     *   2. their PLACEHOLDER from /api/titles — the hall-name the engine would
+     *      give them with no deed at all, already de-duplicated across the roster,
+     *      so it is free unless the registry is stale;
+     *   3. failing both, the first free hall-name this pass has seen, with a
+     *      warning. Nothing is APPENDED to a title to force uniqueness: an
+     *      invented name reads worse in the hall than a plain one.
+     * Returns null when even that finds nothing; the caller then leaves the title
+     * where it is rather than write a duplicate.
+     */
+    function freeTitleFor(who, taking, reserved) {
+      const free = (t) => {
+        const title = String(t || '').trim();
+        if (!title || title === taking || reserved.has(title)) return false;
+        const holders = wornBy.get(title);
+        if (!holders) return true;
+        for (const h of holders) if (h !== who) return false;
+        return true;
+      };
+      const entry = offerFor(who);
+      if (entry && free(entry.title)) return { title: entry.title, via: 'offer' };
+      if (entry && free(entry.placeholder)) return { title: entry.placeholder, via: 'placeholder' };
+      const fallback = seenFlavorNames.find(free);
+      if (fallback) return { title: fallback, via: 'fallback' };
+      return null;
+    }
+
+    /**
+     * Rule 7's clock: when `title` last changed holder. The registry's answer is
+     * the title_updated_at of whoever wears it; a row carrying no usable stamp
+     * falls back to the challenger's own confirmed offer time, so an un-stamped
+     * row still rests a day instead of being taken over on sight. With neither,
+     * NaN — no cool-down at all — because a takeover is then the only thing that
+     * can clear the row, and a title nobody can date has not just changed hands.
+     */
+    const changedHandsAt = (title, challengerName) => {
+      const at = handsAt.get(String(title || '').trim());
+      if (Number.isFinite(at)) return at;
+      const p = pending.get(challengerName);
+      return p ? p.firstOfferedAt + confirmMs : NaN;
+    };
 
     /**
      * Rule 4b. `holder` wears the title `name` is being offered. Is the holder
@@ -466,6 +632,9 @@ export function createTitlesAnnouncer({
           log.error?.(`[titles] seed failed for ${name}: ${upErr.message}`);
           continue;
         }
+        wear(title, name);
+        liveTitle.set(name, title);
+        handsAt.set(title, nowMs);
         pass.seeded++;
         continue;
       }
@@ -499,6 +668,10 @@ export function createTitlesAnnouncer({
           log.error?.(`[titles] reshuffle failed for ${name}: ${upErr.message}`);
           continue;
         }
+        unwear(current, name);
+        wear(title, name);
+        liveTitle.set(name, title);
+        handsAt.set(title, nowMs);
         pass.reshuffled++;
         continue;
       }
@@ -518,12 +691,12 @@ export function createTitlesAnnouncer({
       // 4b. NEVER CREATE A DUPLICATE. Somebody else wears this title and is
       //     themselves mid-move: wait for them to land. The clock keeps running,
       //     so the moment they settle this offer is already proven.
-      const holderName = wornBy.get(title);
-      if (holderName && holderName !== name && holderStillMoving(holderName)) {
+      const unsettled = holdersOf(title).find((h) => h !== name && holderStillMoving(h));
+      if (unsettled) {
         quiet(
           nowMs,
           name,
-          `offered "${title}" but ${holderName} wears it and has an unconfirmed move of their own; waiting`,
+          `offered "${title}" but ${unsettled} wears it and has an unconfirmed move of their own; waiting`,
         );
         pass.held++;
         continue;
@@ -584,35 +757,82 @@ export function createTitlesAnnouncer({
           continue; // stays pending; re-evaluated next pass
         }
 
-        // THE TAKEOVER. If somebody still wears this title, the confirmed offer
-        // takes it off them, and they take up whatever the engine offers them
-        // instead. Resolved against `wornBy`, which this loop keeps current, so
-        // a holder who already moved earlier in the pass is not moved twice.
-        let handover = null;
-        const holderName = wornBy.get(c.title);
-        if (holderName && holderName !== c.name) {
-          const hRow = rowByName.get(holderName);
-          const hEntry = offerFor(holderName);
-          // Without a row to write or an engine offer to move them to, a takeover
-          // would strand the holder on a title somebody else now wears. Hold
-          // instead; the offer stays pending and the next pass tries again.
-          if (!hRow || !hEntry || hEntry.title === c.title) {
+        // THE TAKEOVER. EVERY viking still wearing this title steps off it — the
+        // pre-fix era could leave two of them on one title (rule 1b) — and each
+        // takes up a title nobody else wears (rule 1a). Resolved against
+        // `wornBy`, which this loop keeps current, so a holder who already moved
+        // earlier in the pass is not moved twice.
+        const handovers = [];
+        const holders = holdersOf(c.title).filter((h) => h !== c.name);
+        if (holders.length > 0) {
+          // 7. COOL-DOWN — a title may not change hands twice inside a day. The
+          //    challenger waits; the wearers are not disturbed and nothing is
+          //    written, so waiting can never open a duplicate.
+          const sinceMs = nowMs - changedHandsAt(c.title, c.name);
+          if (Number.isFinite(sinceMs) && sinceMs < takeoverCooldownMs) {
             quiet(
               nowMs,
               c.name,
-              `offered "${c.title}" but ${holderName} wears it and the engine names them nothing else; waiting`,
+              `waiting: "${c.title}" changed hands ${Math.floor(sinceMs / HOUR_MS)} h ago`,
             );
             pass.held++;
             continue;
           }
-          handover = { row: hRow, name: holderName, title: hEntry.title };
+          // The title being taken is reserved from the start: nobody steps off it
+          // and back onto it.
+          const reserved = new Set([c.title]);
+          let blocked = null;
+          for (const holderName of holders) {
+            const hRow = rowByName.get(holderName);
+            if (!hRow) {
+              blocked = `${holderName} has no registry row to write`;
+              break;
+            }
+            const landing = freeTitleFor(holderName, c.title, reserved);
+            // Without anywhere free to put them, a takeover would strand the
+            // holder on a title somebody else now wears. Hold instead; the offer
+            // stays pending and the next pass tries again.
+            if (!landing) {
+              blocked = `nothing free for ${holderName} to take up`;
+              break;
+            }
+            if (landing.via === 'fallback') {
+              log.warn?.(
+                `[titles] ${holderName}: the engine's offer and their placeholder are both worn already — taking up "${landing.title}" (first free hall-name in this pass's payload)`,
+              );
+            }
+            reserved.add(landing.title);
+            handovers.push({ row: hRow, name: holderName, title: landing.title });
+          }
+          if (blocked) {
+            quiet(nowMs, c.name, `offered "${c.title}" but it cannot change hands (${blocked}); waiting`);
+            pass.held++;
+            continue;
+          }
         }
 
+        // Keep the in-pass picture of who wears what honest for later candidates.
+        const commitPicture = () => {
+          unwear(c.current, c.name);
+          for (const h of handovers) unwear(c.title, h.name);
+          wear(c.title, c.name);
+          liveTitle.set(c.name, c.title);
+          handsAt.set(c.title, nowMs);
+          pending.delete(c.name);
+          for (const h of handovers) {
+            wear(h.title, h.name);
+            liveTitle.set(h.name, h.title);
+            handsAt.set(h.title, nowMs);
+            pending.delete(h.name);
+            absorbed.add(h.name);
+          }
+        };
+
         if (dryRun) {
-          await announce(c.row, c.title, handover);
+          await announce(c.row, c.title, handovers);
+          commitPicture();
           pass.announced++;
           remaining--;
-          if (handover) absorbed.add(handover.name);
           continue;
         }
 
@@ -622,41 +842,30 @@ export function createTitlesAnnouncer({
           log.error?.(`[titles] update failed for ${c.name}: ${upErr.message}`);
           continue;
         }
-        if (handover) {
-          const hErr = await record(handover.row, handover.title, nowIso);
+        for (const h of handovers) {
+          const hErr = await record(h.row, h.title, nowIso);
           if (hErr) {
-            log.error?.(
-              `[titles] handover write failed for ${handover.name}: ${hErr.message}`,
-            );
+            log.error?.(`[titles] handover write failed for ${h.name}: ${hErr.message}`);
           }
         }
         // ONE history row per proclamation, so the rolling-24h budget counts a
-        // handover as the single event the hall heard.
+        // handover — however many holders it moved — as the single event the hall
+        // heard.
         await writeDb.from('title_history').insert({
           player_id: c.row.id,
           title: c.title,
           awarded_at: nowIso,
         });
-        await announce(c.row, c.title, handover);
+        await announce(c.row, c.title, handovers);
 
-        // Keep the in-pass picture of who wears what honest for later candidates.
-        if (isEarnedTitle(c.current) && wornBy.get(c.current) === c.name) {
-          wornBy.delete(c.current);
-        }
-        wornBy.set(c.title, c.name);
-        liveTitle.set(c.name, c.title);
-        pending.delete(c.name);
-        if (handover) {
-          if (isEarnedTitle(handover.title)) wornBy.set(handover.title, handover.name);
-          liveTitle.set(handover.name, handover.title);
-          pending.delete(handover.name);
-          absorbed.add(handover.name);
-        }
+        commitPicture();
         pass.announced++;
         remaining--;
         log.info?.(
-          handover
-            ? `[titles] ${c.name}: "${c.current}" -> "${c.title}" (taken from ${handover.name}, who takes up "${handover.title}")`
+          handovers.length
+            ? `[titles] ${c.name}: "${c.current}" -> "${c.title}" (${handovers
+                .map((h) => `taken from ${h.name}, who takes up "${h.title}"`)
+                .join('; ')})`
             : `[titles] ${c.name}: "${c.current}" -> "${c.title}"`,
         );
       }

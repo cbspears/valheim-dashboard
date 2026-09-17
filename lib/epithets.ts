@@ -150,6 +150,20 @@ export interface Epithet {
   title: string;
   /** which dimension (or override/flavor) earned it — handy for tinting / debugging */
   source: EpithetSource;
+  /**
+   * The hall-name this viking would wear if they earned NOTHING: their
+   * FLAVOR_POOL pick, de-duplicated across the whole roster exactly like a real
+   * title. For a viking who IS hall-named this is the title itself, so the two
+   * can never disagree.
+   *
+   * It exists for the announcer (services/discord-bot/src/titles.js): when a
+   * title is taken off its wearer, the wearer has to land on something NOBODY
+   * else wears, and the engine's own offer for them may already be worn by a
+   * third viking. This is the guaranteed-free landing spot, computed by the one
+   * engine that knows the whole roster. Carried on every entry of GET
+   * /api/titles.
+   */
+  placeholder: string;
 }
 
 // ── tuning ────────────────────────────────────────────────────────────
@@ -731,6 +745,10 @@ export interface EpithetsOptions {
  *   3. Anyone still untitled gets a personalized placeholder — their incumbent one
  *      if it's still free (stability), else a name-hash pick de-duplicated against
  *      the roster.
+ *   4. Every entry is then given its `placeholder`: the hall-name it would carry
+ *      with no deed at all, unique across the roster (step 3 continued over the
+ *      vikings who earned something). GET /api/titles publishes it and the
+ *      announcer lands a dethroned wearer on it.
  */
 export function epithetsFor(
   roster: PlayerWithStats[],
@@ -743,7 +761,14 @@ export function epithetsFor(
   const causesOf = (p: PlayerWithStats): string[] =>
     causesByName?.get(p.character_name) ?? [];
 
-  const result = new Map<string, Epithet>();
+  // Entries are built WITHOUT their `placeholder` and completed in step 6, which
+  // needs the finished flavor assignment to dedupe against.
+  interface Draft {
+    title: string;
+    source: EpithetSource;
+    placeholder?: string;
+  }
+  const result = new Map<string, Draft>();
   const assigned = new Set<string>(); // character_name
   const usedTitles = new Set<string>();
 
@@ -922,7 +947,38 @@ export function epithetsFor(
     usedTitles.add(title);
   }
 
-  return result;
+  // ── 6. THE HALL-NAME EVERY VIKING WOULD CARRY IF THEY EARNED NOTHING. ──
+  // Every entry also reports a `placeholder` — see the field's doc comment. It is
+  // simply step 5 CONTINUED over the whole roster: a hall-named viking's
+  // placeholder is the name they already wear, and the earned ones are then dealt
+  // their own picks, in name order, against the same used-set. So placeholders are
+  // UNIQUE across the roster and agree with the assignment by construction, which
+  // is exactly what the announcer needs — a viking whose title is taken away can
+  // be put on their placeholder without ever colliding with another registry row.
+  {
+    const placeholderUsed = new Set<string>(usedTitles);
+    const earnedFolk: PlayerWithStats[] = [];
+    for (const p of roster) {
+      const ep = result.get(p.character_name);
+      if (!ep) continue;
+      if (ep.source === 'flavor') ep.placeholder = ep.title;
+      else if (ep.placeholder === undefined) earnedFolk.push(p);
+    }
+    earnedFolk.sort((a, b) => byName(a.character_name, b.character_name));
+    for (const p of earnedFolk) {
+      const ep = result.get(p.character_name)!;
+      if (ep.placeholder !== undefined) continue; // duplicate roster row
+      const pick = pickPlaceholder(p.character_name, placeholderUsed);
+      ep.placeholder = pick;
+      placeholderUsed.add(pick);
+    }
+  }
+
+  const out = new Map<string, Epithet>();
+  for (const [name, d] of result) {
+    out.set(name, { title: d.title, source: d.source, placeholder: d.placeholder ?? d.title });
+  }
+  return out;
 }
 
 /**
@@ -958,10 +1014,12 @@ export function epithetFor(
   if (incumbent !== undefined) incumbentByName.set(player.character_name, incumbent);
 
   const map = epithetsFor(list, { causesByName, incumbentByName });
+  const fallback = FLAVOR_POOL[hashName(player.character_name) % FLAVOR_POOL.length];
   return (
     map.get(player.character_name) ?? {
-      title: FLAVOR_POOL[hashName(player.character_name) % FLAVOR_POOL.length],
+      title: fallback,
       source: 'flavor',
+      placeholder: fallback,
     }
   );
 }

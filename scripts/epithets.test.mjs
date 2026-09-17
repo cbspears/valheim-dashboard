@@ -12,6 +12,7 @@
 import { BIO_LINES, EARNED_TITLES, epithetFor, epithetsFor, generatedBioLine, isEarnedTitle } from '../lib/epithets.ts';
 import { EARNED_TITLES as BOT_EARNED_TITLES } from '../services/discord-bot/src/titles.js';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 
 // Build a PlayerWithStats with sane zero defaults; override what a test needs.
 function mk(name, o = {}) {
@@ -971,6 +972,62 @@ const ok = (cond, msg) => { assert.ok(cond, msg); passed++; };
     if (ep.source !== 'flavor') continue;
     ok(!isEarnedTitle(ep.title), `${name}'s placeholder "${ep.title}" is not in the earned set`);
   }
+}
+
+// ── 35. THE PLACEHOLDER EVERY ENTRY CARRIES (2026-09-17) ──────────────────
+// GET /api/titles publishes `placeholder` on every player entry so the Discord
+// announcer has a guaranteed-FREE title to land a dethroned wearer on: when a
+// title changes hands, the outgoing holder's own offer may already be worn by a
+// third viking, and the hall must not grow another duplicate
+// (services/discord-bot/src/titles.js rule 1a).
+{
+  const roster = [
+    mk('Aud', { kills: 900, damage: 40000, hours: 5000 }),
+    mk('Bo', { builds: 4000 }),
+    mk('Cai', { resources: 9000 }),
+    mk('Dag'),
+    mk('Eir'),
+    mk('Fen'),
+    mk('Gro'),
+  ];
+  const titles = epithetsFor(roster);
+
+  for (const p of roster) {
+    const ep = titles.get(p.character_name);
+    ok(typeof ep.placeholder === 'string' && ep.placeholder.length > 0,
+      `${p.character_name} carries a placeholder, got ${JSON.stringify(ep.placeholder)}`);
+    ok(!isEarnedTitle(ep.placeholder),
+      `${p.character_name}'s placeholder "${ep.placeholder}" is a hall-name, never an earned title`);
+    if (ep.source === 'flavor') {
+      ok(ep.placeholder === ep.title,
+        `a hall-named viking's placeholder IS their title, got "${ep.placeholder}" vs "${ep.title}"`);
+    }
+  }
+
+  // THE PROPERTY THE ANNOUNCER RELIES ON: unique across the roster, so landing
+  // any one viking on their placeholder can never collide with another row.
+  const placeholders = roster.map((p) => titles.get(p.character_name).placeholder);
+  ok(new Set(placeholders).size === placeholders.length,
+    `placeholders are unique across the roster, got [${placeholders.join(', ')}]`);
+
+  // Deterministic, like every other output of the engine.
+  const again = epithetsFor(roster);
+  ok(roster.every((p) => again.get(p.character_name).placeholder === titles.get(p.character_name).placeholder),
+    'the same roster yields the same placeholders');
+
+  // A hall bigger than FLAVOR_POOL (24) still gets 30 distinct ones.
+  const big = Array.from({ length: 30 }, (_, i) => mk(`Viking${i}`));
+  const bigTitles = epithetsFor(big);
+  const bigPlaceholders = big.map((p) => bigTitles.get(p.character_name).placeholder);
+  ok(new Set(bigPlaceholders).size === 30,
+    `a hall of thirty gets thirty distinct placeholders, got ${new Set(bigPlaceholders).size}`);
+
+  // And the endpoint the bot reads actually publishes the field. Same spirit as
+  // the EARNED_TITLES mirror check above: the announcer cannot compute it, so a
+  // route that stops sending it would silently disarm rule 1a.
+  const route = readFileSync(new URL('../app/api/titles/route.ts', import.meta.url), 'utf8');
+  ok(/placeholder:\s*ep\?\.placeholder/.test(route),
+    'app/api/titles/route.ts sends `placeholder` on every player entry');
 }
 
 console.log(`epithets.test: ${passed} assertions passed`);

@@ -32,7 +32,23 @@ const CORS_HEADERS = {
  * bot uses to announce.
  */
 interface TitlesResponse {
-  players: { name: string; title: string; source: string }[];
+  players: {
+    name: string;
+    title: string;
+    source: string;
+    /**
+     * The hall-name the engine would give this viking if they earned nothing —
+     * their FLAVOR_POOL pick, de-duplicated across the roster like any other
+     * title (lib/epithets.ts, `Epithet.placeholder`).
+     *
+     * The announcer needs it: when a title changes hands, the outgoing wearer
+     * must land on something NO other registry row wears, and the engine's own
+     * offer for them can itself be worn by a third viking. This is the
+     * guaranteed-free landing spot, and only the engine — which sees the whole
+     * roster at once — can pick it. (services/discord-bot/src/titles.js)
+     */
+    placeholder: string;
+  }[];
   count: number;
   generatedAt: string;
 }
@@ -104,6 +120,7 @@ export async function GET(request: Request) {
       name: p.character_name,
       title: ep?.title ?? '',
       source: ep?.source ?? 'flavor',
+      placeholder: ep?.placeholder ?? '',
     };
   });
 

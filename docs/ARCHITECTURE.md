@@ -211,7 +211,7 @@ only component holding a Supabase key directly. Loops, with their intervals:
 | `identity-confirm` | 30 s | confirms `/oath CODE` Discord links |
 | `voice` | 60 s | queues lines into `voice_lines` for the in-game speaker |
 | voice expiry | 5 m | ages out unspoken lines |
-| `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history`. Sticky since 2026-09-10: an earned title is held against a hall-name offer, silent placeholder reshuffles, two-pass confirmation (`TITLE_CONFIRM_MS`), 24 h tenure (`TITLE_MIN_TENURE_MS`) on a viking's own move between earned titles, max `TITLES_PER_DAY` (3) a rolling day. **One holder per earned title since 2026-09-16**: a confirmed offer of a title somebody wears is a handover, not a duplicate, and it spends one proclamation (two lines) rather than two. See *Living Titles* below |
+| `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history`. Sticky since 2026-09-10: an earned title is held against a hall-name offer, silent placeholder reshuffles, two-pass confirmation (`TITLE_CONFIRM_MS`), 24 h tenure (`TITLE_MIN_TENURE_MS`) on a viking's own move between earned titles, max `TITLES_PER_DAY` (3) a rolling day. **One holder per earned title since 2026-09-16**: a confirmed offer of a title somebody wears is a handover, not a duplicate, and it spends one proclamation (one line per viking moved) rather than two. Since 2026-09-17 the handover target must itself be free (falling back to the `/api/titles` `placeholder`), every wearer of the title is handed off, and a takeover waits out `TITLE_TAKEOVER_COOLDOWN_MS` (24 h) since the title last changed hands. See *Living Titles* below |
 | `milestones` | `MILESTONES_INTERVAL_MS`, default 2 m | announces Great Deeds |
 | heartbeat | 60 s | POSTs to `/api/ops/heartbeat` with per-sub-loop status |
 | recap | one `node-cron` job, `RECAP_EVENING_HOUR` (default 23) America/Chicago | the evening recap and Player of the Day. Since 2026-09-14 the crown is a **notability** draw (personal spike × clan share, behind a 20-minute activity gate, with rotation read from `poty_history`) rather than a fixed priority list; rules of record in `services/discord-bot/README.md` and the header of `src/recap.js` |
@@ -290,6 +290,15 @@ is worth proclaiming. Since 2026-09-16 there are **30 earned titles**, and **one
 a time** — when the engine gives a title to somebody new, the bot hands it over and moves the old
 wearer on in the same proclamation, rather than letting two vikings carry one name (which is what
 production did on 2026-09-16: Bane of Beasts, Stonewright and the Heavy-Handed were each worn twice).
+
+Three rules of 2026-09-17 make that handover safe, after a night that produced three MORE duplicates
+and a flip-flop: (1) the title the outgoing wearer takes up must be worn by nobody else after the
+pass's writes — when the engine's offer for them is already worn, they land on the `placeholder`
+every `/api/titles` entry now carries (the hall-name the engine would give them if they earned
+nothing, de-duplicated across the roster); (2) EVERY registry row wearing the title is handed off,
+not just the first, each with its own line inside the one proclamation; (3) a title cannot change
+hands again within `TITLE_TAKEOVER_COOLDOWN_MS` (24 h) of its last change of holder — the challenger
+waits, the wearer is not disturbed, and waiting can never open a duplicate.
 
 Every stat board carries a LADDER: rank 1 for the board's owner, rank 2 for a clear runner-up (sole
 second place, clearing third by `LEADER_MARGIN`, over the same absolute floor as the crown). Rank 2

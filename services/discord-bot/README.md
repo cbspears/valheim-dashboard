@@ -390,6 +390,22 @@ Sticky and rare since 2026-09-10, and **one holder per earned title** since 2026
   ```
 
   and one voice line: `From tonight, Mikael goes by Bane of Beasts, and Thorfinn takes up Beast-Hewer.`
+- **The handover target must be FREE** (2026-09-17). The title the outgoing wearer takes up may not
+  be worn by any other registry row once the pass's writes are in. If the engine's offer for them is
+  already worn, they take up their **`placeholder`** — the hall-name `GET /api/titles` now publishes
+  for every viking (the engine's own de-duplicated FLAVOR pick). If even that is worn (a stale
+  registry), the bot logs a warning and uses the first free hall-name it saw in that payload; it
+  never appends anything to a title to force it unique.
+- **Every wearer is handed off** (2026-09-17). The pre-fix era could leave two vikings on one title,
+  so a takeover moves **all** of them, one handover line each, still one proclamation and one
+  `title_history` row.
+- **`TITLE_TAKEOVER_COOLDOWN_MS` (24 h)** — a title may not change hands again within a day of its
+  last change of holder (the `title_updated_at` of whoever wears it; for a row with no usable stamp,
+  the challenger's own confirmed offer time). The challenger just waits, logged as
+  `waiting: "T" changed hands N h ago`; the wearer is never disturbed, so a wait cannot open a
+  duplicate. No exemptions, not even for a combat crown. This is what stops a flip-flop that outlives
+  the 15-minute confirmation ("the Heavy-Handed" went Yonk → Fjällhnot → Yonk in five hours on
+  2026-09-17).
 - A challenger does **not** confirm while the current wearer has an unconfirmed move of their own:
   the wearer may yet step aside by themselves. The challenger's clock keeps running meanwhile.
 - **`TITLES_PER_DAY` (3)** proclamations a rolling 24 h, counted from `title_history`, ranked first

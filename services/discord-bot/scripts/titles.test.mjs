@@ -10,6 +10,12 @@
 // wearer is carried to whatever the engine names them, in one proclamation of
 // two lines, for one of the day's three. Tests 8c, 8d, 8e and 10.
 //
+// Tests 11a-11d cover the 2026-09-17 fix for the night the hall grew three more
+// duplicates and a flip-flop: the handover target must be FREE (11a, landing on
+// the /api/titles `placeholder`), EVERY holder is handed off (11b), a title
+// cannot change hands twice inside 24 h (11c), and the whole production shape of
+// 2026-09-17 11:55 CT replays to a registry with no title worn twice (11d).
+//
 // Run: node scripts/titles.test.mjs   (from services/discord-bot)
 import { createTitlesAnnouncer, isEarnedTitle } from '../src/titles.js';
 import assert from 'node:assert';
@@ -54,10 +60,33 @@ function fakeDb({ players, readError = null, history = [] }) {
   return client;
 }
 
-// [name, title, source] -> a fetch impl returning that /api/titles payload.
+// [name, title, source, placeholder] -> a fetch impl returning that /api/titles
+// payload. `placeholder` is the hall-name the engine would give that viking if
+// they earned nothing (lib/epithets.ts); rows that omit it mimic a dashboard
+// deploy from before the field existed.
 function fakeApi(rows) {
-  const players = rows.map(([name, title, source = 'flavor']) => ({ name, title, source }));
+  const players = rows.map(([name, title, source = 'flavor', placeholder]) =>
+    placeholder === undefined ? { name, title, source } : { name, title, source, placeholder },
+  );
   return async () => ({ ok: true, json: async () => ({ players }) });
+}
+
+// A log that remembers every line, for the tests that assert on one.
+function recordingLog() {
+  const lines = [];
+  return { lines, info: (m) => lines.push(m), warn: (m) => lines.push(m), error: (m) => lines.push(m) };
+}
+
+// Apply the registry writes the fake only RECORDS, so a multi-pass test reads
+// back the hall the announcer actually wrote.
+function applyWrites(roster, writeDb) {
+  for (const u of writeDb.writes.updates) {
+    const row = roster.find((r) => r.id === u.id);
+    if (!row) continue;
+    row.current_title = u.current_title;
+    if (u.title_updated_at) row.title_updated_at = u.title_updated_at;
+  }
+  writeDb.writes.updates.length = 0;
 }
 
 // A clock the tests drive by hand.
@@ -295,8 +324,13 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
 {
   const posts = [];
   const c = clock();
+  // (2026-09-17) The wearer's stamp moved from 2 h to 2 DAYS: rule 7 now rests a
+  // title for 24 h after it changes hands, and that stamp IS the title's last
+  // change of holder, so a two-hour-old crown can no longer be taken at all —
+  // test 11c owns that case. What this test still proves is that the wearer's own
+  // TENURE never shields them once the cool-down is served.
   const roster = [
-    { id: 'h1', character_name: 'Holder', current_title: 'the Far-Seer', title_updated_at: ago(2 * HOUR) },
+    { id: 'h1', character_name: 'Holder', current_title: 'the Far-Seer', title_updated_at: ago(2 * DAY) },
     { id: 'c1', character_name: 'Challenger', current_title: 'of the Quiet Fjord', title_updated_at: ago(3 * DAY) },
   ];
   const writeDb = fakeDb({ players: roster });
@@ -306,17 +340,17 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
     now: c.now,
   });
 
-  // Pass 1: nothing moves. The wearer is inside tenure, and the challenger waits
-  // because the wearer's own offer has not proven itself yet (rule 4b).
+  // Pass 1: nothing moves. The challenger waits because the wearer's own offer
+  // has not proven itself yet (rule 4b), and the wearer is only confirming.
   const first = await ann.tick();
-  ok(first.held === 2 && first.announced === 0,
-    `first pass holds both, got ${JSON.stringify(first)}`);
+  ok(first.held === 1 && first.confirming === 1 && first.announced === 0,
+    `first pass moves nobody, got ${JSON.stringify(first)}`);
   ok(posts.length === 0 && writeDb.writes.updates.length === 0, 'and writes nothing');
 
   // Pass 2, a confirm window later: the wearer's move is proven, so the
-  // challenger's own confirmed offer resolves the pair in one go. Tenure does
-  // NOT protect the wearer from losing their own title (uniqueness beats
-  // stickiness) even though 24 h has not passed.
+  // challenger's own confirmed offer resolves the pair in one go. Neither the
+  // wearer's tenure nor their own pending move protects the title (uniqueness
+  // beats stickiness).
   c.advance(16 * MIN);
   const second = await ann.tick();
   ok(second.announced === 1, `the takeover is one proclamation, got ${JSON.stringify(second)}`);
@@ -568,6 +602,235 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   const third = await ann.tick();
   ok(third.announced === 0 && third.unchanged === 6,
     `the hall settles on six distinct titles, got ${JSON.stringify(third)}`);
+}
+
+// ── 11a. The handover target must be FREE (rule 1a) ───────────────────────
+//        Production, 2026-09-17 19:23: "Halldor: the Cheerful Ballast ->
+//        Bane of the Forsaken (taken from Charleif, who takes up the Forgehand)"
+//        — and S'aeien was already wearing the Forgehand. The engine's offer for
+//        a dethroned wearer is only usable when nobody else wears it; here it is
+//        not, so Charleif lands on the PLACEHOLDER /api/titles publishes for him.
+{
+  const posts = [];
+  const c = clock();
+  const roster = [
+    { id: 'x1', character_name: 'Charleif', current_title: 'Bane of the Forsaken', title_updated_at: ago(5 * DAY) },
+    { id: 'x2', character_name: "S'aeien", current_title: 'the Forgehand', title_updated_at: ago(5 * DAY) },
+    { id: 'x3', character_name: 'Halldor', current_title: 'the Cheerful Ballast', title_updated_at: ago(5 * DAY) },
+  ];
+  const writeDb = fakeDb({ players: roster, history: [] });
+  const ann = announcer({
+    db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: fakeApi([
+      ['Halldor', 'Bane of the Forsaken', 'bossdmg', 'the Cheerful Ballast'],
+      // The engine wants to move Charleif onto a title a third viking wears.
+      ['Charleif', 'the Forgehand', 'crafts', 'the Quiet Flame'],
+      ["S'aeien", 'the Forgehand', 'crafts', 'Mead-Tested'],
+    ]),
+    now: c.now,
+  });
+
+  await ann.tick();
+  c.advance(16 * MIN);
+  const r = await ann.tick();
+  ok(r.announced === 1, `one proclamation, got ${JSON.stringify(r)}`);
+  ok(posts[0].split('\n')[1] ===
+      '**Charleif** passes **Bane of the Forsaken** to **Halldor** and takes up **the Quiet Flame**.',
+    `the dethroned wearer lands on their placeholder, not on the worn title, got: ${posts[0]}`);
+  ok(!posts[0].includes('takes up **the Forgehand**'),
+    'the Forgehand is never handed to a second viking');
+
+  applyWrites(roster, writeDb);
+  const worn = roster.map((x) => x.current_title);
+  ok(new Set(worn).size === worn.length, `no title is worn twice, got [${worn.join(', ')}]`);
+  ok(roster[1].current_title === 'the Forgehand', "and S'aeien keeps the title she was wearing");
+}
+
+// ── 11b. EVERY holder is handed off, for one budget slot (rule 1b) ────────
+//        Production, 2026-09-17 10:23: Asbjorn took Bane of Beasts from Mikael
+//        while Thorfinn, who ALSO wore it, was left on it. Now both step off, in
+//        one proclamation of three lines and one title_history row.
+{
+  const posts = [];
+  const c = clock();
+  const roster = [
+    { id: 'b1', character_name: 'Thorfinn', current_title: 'Bane of Beasts', title_updated_at: ago(6 * DAY) },
+    { id: 'b2', character_name: 'Mikael', current_title: 'Bane of Beasts', title_updated_at: ago(5 * DAY) },
+    { id: 'b3', character_name: 'Asbjorn', current_title: 'the Late-Rising', title_updated_at: ago(5 * DAY) },
+  ];
+  const writeDb = fakeDb({ players: roster, history: [] });
+  const ann = announcer({
+    db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: fakeApi([
+      ['Asbjorn', 'Bane of Beasts', 'kills', 'the Late-Rising'],
+      ['Thorfinn', 'Beast-Hewer', 'kills', 'Frost-Patient'],
+      ['Mikael', 'the Heavy-Handed', 'damage', 'the Unhurried'],
+    ]),
+    now: c.now,
+  });
+
+  await ann.tick();
+  c.advance(16 * MIN);
+  const r = await ann.tick();
+  ok(r.announced === 1 && r.deferred === 0,
+    `both holders move inside ONE budget slot, got ${JSON.stringify(r)}`);
+  ok(posts.length === 1, `one Discord message, got ${posts.length}`);
+  const lines = posts[0].split('\n');
+  ok(lines.length === 3, `three lines: the crown and one per outgoing holder, got ${lines.length}`);
+  ok(lines[0] === '⚔️ **Asbjorn** has earned a new title: **Bane of Beasts**', `line one, got: ${lines[0]}`);
+  ok(lines[1] === '**Thorfinn** passes **Bane of Beasts** to **Asbjorn** and takes up **Beast-Hewer**.',
+    `line two, got: ${lines[1]}`);
+  ok(lines[2] === '**Mikael** passes **Bane of Beasts** to **Asbjorn** and takes up **the Heavy-Handed**.',
+    `line three, got: ${lines[2]}`);
+  ok(writeDb.writes.voice.length === 1 &&
+     writeDb.writes.voice[0].text ===
+       'From tonight, Asbjorn goes by Bane of Beasts, and Thorfinn takes up Beast-Hewer, and Mikael takes up the Heavy-Handed.',
+    `one voice line names all three, got: ${writeDb.writes.voice[0]?.text}`);
+  ok(writeDb.writes.history.length === 1, 'and it costs one proclamation, not two');
+  ok(writeDb.writes.updates.length === 3, 'all three registry rows are written');
+
+  applyWrites(roster, writeDb);
+  const worn = roster.map((x) => x.current_title);
+  ok(new Set(worn).size === worn.length, `nobody is left on Bane of Beasts, got [${worn.join(', ')}]`);
+}
+
+// ── 11c. TAKEOVER COOL-DOWN: blocked at 5 h, allowed at 25 h (rule 7) ─────
+//        The Yonk -> Fjällhnot -> Yonk flip-flop of 2026-09-17: both hops were
+//        confirmed and legal, five hours apart. A title now rests a day after it
+//        changes hands; the challenger waits and the wearer is not disturbed.
+{
+  const posts = [];
+  const c = clock();
+  const rec = recordingLog();
+  const roster = [
+    { id: 'f1', character_name: 'Fjällhnot', current_title: 'the Heavy-Handed', title_updated_at: ago(5 * HOUR) },
+    { id: 'y1', character_name: 'Yonk', current_title: 'of the Spare Cloak', title_updated_at: ago(9 * DAY) },
+  ];
+  const writeDb = fakeDb({ players: roster, history: [] });
+  const ann = announcer({
+    db: writeDb, writeDb, log: rec, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: fakeApi([
+      ['Yonk', 'the Heavy-Handed', 'damage', 'of the Spare Cloak'],
+      ['Fjällhnot', 'the Quiet Flame', 'flavor', 'the Quiet Flame'],
+    ]),
+    now: c.now,
+  });
+
+  await ann.tick();
+  c.advance(16 * MIN); // the offer is confirmed, but the title changed hands 5 h ago
+  const blocked = await ann.tick();
+  ok(blocked.announced === 0 && blocked.held === 2,
+    `a confirmed challenger still waits out the cool-down, got ${JSON.stringify(blocked)}`);
+  ok(posts.length === 0 && writeDb.writes.updates.length === 0,
+    'nothing is proclaimed and nothing is written while the title rests');
+  ok(rec.lines.includes('[titles] Yonk: waiting: "the Heavy-Handed" changed hands 5 h ago'),
+    `the wait is logged with the title's age, got: ${JSON.stringify(rec.lines)}`);
+  ok(roster[0].current_title === 'the Heavy-Handed', 'the wearer is not disturbed');
+
+  c.advance(20 * HOUR); // 25 h 16 min after the title last changed hands
+  const allowed = await ann.tick();
+  ok(allowed.announced === 1, `past 24 h the takeover goes through, got ${JSON.stringify(allowed)}`);
+  ok(posts[0].split('\n')[1] ===
+      '**Fjällhnot** passes **the Heavy-Handed** to **Yonk** and takes up **the Quiet Flame**.',
+    `and it is an ordinary handover, got: ${posts[0]}`);
+}
+
+// ── 11d. The whole production shape of 2026-09-17, replayed ───────────────
+//        The registry as the bot journal left it at 11:55 CT (three titles worn
+//        twice), with the offers that produced that night's six proclamations.
+//        One pass now resolves it with no title worn twice, and the flip-flop
+//        that followed is refused for a day.
+{
+  const posts = [];
+  const c = clock();
+  const rec = recordingLog();
+  const roster = [
+    { id: 'p', character_name: 'Psifour', current_title: 'the Heavy-Handed', title_updated_at: ago(6 * DAY) },
+    { id: 'u', character_name: 'Yunter', current_title: 'the Provider', title_updated_at: ago(6 * DAY) },
+    { id: 's', character_name: "S'aeien", current_title: 'Stonewright', title_updated_at: ago(6 * DAY) },
+    { id: 'a', character_name: 'Asbjorn', current_title: 'the Forgehand', title_updated_at: ago(6 * DAY) },
+    { id: 'f', character_name: 'Fjällhnot', current_title: 'the Ever-Present', title_updated_at: ago(6 * DAY) },
+    { id: 'y', character_name: 'Yonk', current_title: 'the Heavy-Handed', title_updated_at: ago(6 * DAY) },
+    { id: 'h', character_name: 'Halldor', current_title: 'the Cheerful Ballast', title_updated_at: ago(6 * DAY) },
+    { id: 'c', character_name: 'Charleif', current_title: 'Bane of the Forsaken', title_updated_at: ago(6 * DAY) },
+    { id: 'm', character_name: 'Mikael', current_title: 'Bane of Beasts', title_updated_at: ago(6 * DAY) },
+    { id: 't', character_name: 'Thorfinn', current_title: 'Bane of Beasts', title_updated_at: ago(6 * DAY) },
+  ];
+  const writeDb = fakeDb({ players: roster, history: [] });
+  let payload = fakeApi([
+    ['Psifour', 'the Provider', 'resources', 'Mead-Tested'],
+    ['Yunter', 'the Sea-Wolf', 'sail', 'the Steady Oar'],
+    ["S'aeien", 'the Forgehand', 'crafts', 'the Soft-Spoken'],
+    ['Asbjorn', 'Bane of Beasts', 'kills', 'the Late-Rising'],
+    ['Fjällhnot', 'the Heavy-Handed', 'damage', 'Friend to Fog'],
+    ['Yonk', 'of the Spare Cloak', 'flavor', 'of the Spare Cloak'],
+    ['Halldor', 'Bane of the Forsaken', 'bossdmg', 'the Cheerful Ballast'],
+    ['Charleif', 'the Forgehand', 'crafts', 'the Quiet Flame'],
+    ['Mikael', 'the Bone-Breaker', 'damage', 'the Unbossed'],
+    ['Thorfinn', 'Beast-Hewer', 'kills', 'the Half-Heard'],
+  ]);
+  const ann = announcer({
+    db: writeDb, writeDb, log: rec, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: (...a) => payload(...a), now: c.now, perDay: 8,
+  });
+
+  const first = await ann.tick();
+  ok(first.announced === 0, `the first pass only confirms, got ${JSON.stringify(first)}`);
+  c.advance(16 * MIN);
+  const second = await ann.tick();
+  ok(second.announced === 5 && second.deferred === 0,
+    `the night resolves in five proclamations, got ${JSON.stringify(second)}`);
+  ok(writeDb.writes.history.length === 5, 'five proclamations, five history rows');
+
+  applyWrites(roster, writeDb);
+  const worn = roster.map((x) => x.current_title);
+  ok(new Set(worn).size === worn.length,
+    `ZERO duplicates across the whole registry, got [${worn.join(', ')}]`);
+  const by = Object.fromEntries(roster.map((x) => [x.id, x.current_title]));
+  ok(by.a === 'Bane of Beasts' && by.m === 'the Bone-Breaker' && by.t === 'Beast-Hewer',
+    `both Bane of Beasts wearers stepped off together, got ${JSON.stringify(by)}`);
+  ok(by.f === 'the Heavy-Handed' && by.p === 'Mead-Tested' && by.y === 'of the Spare Cloak',
+    `both Heavy-Handed wearers stepped off, and Psifour took his placeholder because Yunter still wore the Provider, got ${JSON.stringify(by)}`);
+  ok(by.h === 'Bane of the Forsaken' && by.c === 'the Quiet Flame' && by.s === 'the Forgehand',
+    `Charleif is NOT handed the Forgehand S'aeien wears, got ${JSON.stringify(by)}`);
+
+  // 13:35 -> 18:33 in the journal: the Heavy-Handed swaps back five hours later.
+  payload = fakeApi([
+    ['Psifour', 'Mead-Tested', 'flavor', 'Mead-Tested'],
+    ['Yunter', 'the Sea-Wolf', 'sail', 'the Steady Oar'],
+    ["S'aeien", 'the Forgehand', 'crafts', 'the Soft-Spoken'],
+    ['Asbjorn', 'Bane of Beasts', 'kills', 'the Late-Rising'],
+    ['Fjällhnot', 'Friend to Fog', 'flavor', 'Friend to Fog'],
+    ['Yonk', 'the Heavy-Handed', 'damage', 'of the Spare Cloak'],
+    ['Halldor', 'Bane of the Forsaken', 'bossdmg', 'the Cheerful Ballast'],
+    ['Charleif', 'the Quiet Flame', 'flavor', 'the Quiet Flame'],
+    ['Mikael', 'the Bone-Breaker', 'damage', 'the Unbossed'],
+    ['Thorfinn', 'Beast-Hewer', 'kills', 'the Half-Heard'],
+  ]);
+  c.advance(5 * HOUR);
+  await ann.tick();
+  c.advance(16 * MIN);
+  const flip = await ann.tick();
+  ok(flip.announced === 0, `the five-hour flip-flop is refused, got ${JSON.stringify(flip)}`);
+  ok(rec.lines.some((l) => l.startsWith('[titles] Yonk: waiting: "the Heavy-Handed" changed hands 5 h ago')),
+    'and the refusal says how long ago the title changed hands');
+
+  applyWrites(roster, writeDb);
+  const stillWorn = roster.map((x) => x.current_title);
+  ok(new Set(stillWorn).size === stillWorn.length,
+    `waiting never creates a duplicate, got [${stillWorn.join(', ')}]`);
+  ok(roster.find((x) => x.id === 'f').current_title === 'the Heavy-Handed',
+    'and the wearer keeps it until a day has passed');
+
+  // A day later the same offer is honoured — the cool-down delays a change of
+  // holder, it never forbids one.
+  c.advance(20 * HOUR);
+  const later = await ann.tick();
+  ok(later.announced === 1, `past the cool-down it goes through, got ${JSON.stringify(later)}`);
+  applyWrites(roster, writeDb);
+  const finalWorn = roster.map((x) => x.current_title);
+  ok(new Set(finalWorn).size === finalWorn.length,
+    `and the hall is still free of duplicates, got [${finalWorn.join(', ')}]`);
 }
 
 console.log(`titles.test: ${passed} assertions passed`);
