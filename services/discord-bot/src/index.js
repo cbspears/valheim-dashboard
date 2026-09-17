@@ -261,8 +261,10 @@ async function runLive() {
   // and announce when a viking's title changes — sparingly. Since 2026-09-10 the
   // announcer is deliberately sticky: never demote an earned title, silent
   // placeholder reshuffles, two-pass confirmation, 24 h tenure, and at most
-  // TITLES_PER_DAY (3) proclamations a rolling day. See src/titles.js. On by
-  // default (TITLES_ANNOUNCE=0 to disable); needs the service-role client.
+  // TITLES_PER_DAY (2) proclamations a rolling day, no two of them within
+  // TITLES_MIN_GAP_MS (4 h) of each other, so they never go out as a batch.
+  // See src/titles.js. On by default (TITLES_ANNOUNCE=0 to disable); needs the
+  // service-role client.
   if (process.env.TITLES_ANNOUNCE !== '0') {
     const titles = createTitlesAnnouncer({
       db,

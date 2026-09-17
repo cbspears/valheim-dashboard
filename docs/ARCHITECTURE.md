@@ -211,7 +211,7 @@ only component holding a Supabase key directly. Loops, with their intervals:
 | `identity-confirm` | 30 s | confirms `/oath CODE` Discord links |
 | `voice` | 60 s | queues lines into `voice_lines` for the in-game speaker |
 | voice expiry | 5 m | ages out unspoken lines |
-| `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history`. Sticky since 2026-09-10: an earned title is held against a hall-name offer, silent placeholder reshuffles, two-pass confirmation (`TITLE_CONFIRM_MS`), 24 h tenure (`TITLE_MIN_TENURE_MS`) on a viking's own move between earned titles, max `TITLES_PER_DAY` (3) a rolling day. **One holder per earned title since 2026-09-16**: a confirmed offer of a title somebody wears is a handover, not a duplicate, and it spends one proclamation (one line per viking moved) rather than two. Since 2026-09-17 the handover target must itself be free (falling back to the `/api/titles` `placeholder`), every wearer of the title is handed off, and a takeover waits out `TITLE_TAKEOVER_COOLDOWN_MS` (24 h) since the title last changed hands. A pre-existing duplicate the engine has already picked a side on is closed by the stale wearer **yielding** (rule 1c), one quiet line. See *Living Titles* below |
+| `titles` | `TITLES_INTERVAL_MS`, default 10 m | reads `/api/titles`, announces changes, writes `title_history`. Sticky since 2026-09-10: an earned title is held against a hall-name offer, silent placeholder reshuffles, two-pass confirmation (`TITLE_CONFIRM_MS`), 24 h tenure (`TITLE_MIN_TENURE_MS`) on a viking's own move between earned titles, max `TITLES_PER_DAY` (2) a rolling day, and since 2026-09-17 no two proclamations within `TITLES_MIN_GAP_MS` (4 h) of each other (rule 8), which also holds a pass to a single proclamation. **One holder per earned title since 2026-09-16**: a confirmed offer of a title somebody wears is a handover, not a duplicate, and it spends one proclamation (one line per viking moved) rather than two. Since 2026-09-17 the handover target must itself be free (falling back to the `/api/titles` `placeholder`), every wearer of the title is handed off, and a takeover waits out `TITLE_TAKEOVER_COOLDOWN_MS` (24 h) since the title last changed hands. A pre-existing duplicate the engine has already picked a side on is closed by the stale wearer **yielding** (rule 1c), one quiet line. See *Living Titles* below |
 | `milestones` | `MILESTONES_INTERVAL_MS`, default 2 m | announces Great Deeds |
 | heartbeat | 60 s | POSTs to `/api/ops/heartbeat` with per-sub-loop status |
 | recap | one `node-cron` job, `RECAP_EVENING_HOUR` (default 23) America/Chicago | the evening recap and Player of the Day. Since 2026-09-14 the crown is a **notability** draw (personal spike × clan share, behind a 20-minute activity gate, with rotation read from `poty_history`) rather than a fixed priority list; rules of record in `services/discord-bot/README.md` and the header of `src/recap.js` |
@@ -299,6 +299,12 @@ nothing, de-duplicated across the roster); (2) EVERY registry row wearing the ti
 not just the first, each with its own line inside the one proclamation; (3) a title cannot change
 hands again within `TITLE_TAKEOVER_COOLDOWN_MS` (24 h) of its last change of holder — the challenger
 waits, the wearer is not disturbed, and waiting can never open a duplicate.
+
+Rule **8** (2026-09-17) makes proclamations rare as well as safe: none goes out within
+`TITLES_MIN_GAP_MS` (4 h) of the last `title_history` row, and because the first proclamation of a
+pass sets that clock to now, every other candidate in the pass is deferred to a later one — so a
+budget that frees several slots at once can no longer empty as a batch, as it did at 12:51 that day.
+Deferred candidates stay pending; `TITLES_MIN_GAP_MS=0` restores the old behaviour.
 
 A duplicate that PREDATES all of this has no challenger to trigger a handover (the engine's wearer
 reads *unchanged*), so rule **1c** closes it from the other side: the wearer the engine does not name

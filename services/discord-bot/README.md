@@ -422,8 +422,14 @@ Sticky and rare since 2026-09-10, and **one holder per earned title** since 2026
   2026-09-17).
 - A challenger does **not** confirm while the current wearer has an unconfirmed move of their own:
   the wearer may yet step aside by themselves. The challenger's clock keeps running meanwhile.
-- **`TITLES_PER_DAY` (3)** proclamations a rolling 24 h, counted from `title_history`, ranked first
+- **`TITLES_PER_DAY` (2)** proclamations a rolling 24 h, counted from `title_history`, ranked first
   titles > combat crowns > alphabetically.
+- **`TITLES_MIN_GAP_MS` (4 h)** — rule 8, 2026-09-17: nothing goes out within four hours of the most
+  recent `title_history` row, logged as `"T" deferred (min gap: last proclamation N min ago)`. The
+  first proclamation of a pass moves that clock to now, so every other candidate in the pass is
+  deferred to a later one and a freed budget can no longer empty as a batch (four went out in one
+  pass at 12:51 that day). Deferred candidates stay pending, exactly as under the daily budget;
+  `TITLES_MIN_GAP_MS=0` turns the gap off.
 
 There are **30 earned titles** (both rungs of twelve stat ladders, five death-cause overrides and
 "the Unslain"); the list of record is `lib/epithets.ts`, mirrored in `src/titles.js EARNED_TITLES`,

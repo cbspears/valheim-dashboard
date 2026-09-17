@@ -8,7 +8,9 @@
 // the ONE HOLDER PER EARNED TITLE rule of 2026-09-16: a confirmed offer of a
 // title somebody already wears is a HANDOVER — the challenger takes it and the
 // wearer is carried to whatever the engine names them, in one proclamation of
-// two lines, for one of the day's three. Tests 8c, 8d, 8e and 10.
+// two lines, for one of the day's slots. Tests 8c, 8d, 8e and 10. (The budget
+// blocks pin `perDay: 3`, the value they were written against; the default is 2
+// since 2026-09-17.)
 //
 // Tests 11a-11d cover the 2026-09-17 fix for the night the hall grew three more
 // duplicates and a flip-flop: the handover target must be FREE (11a, landing on
@@ -18,6 +20,11 @@
 // is the follow-up from the first live pass: a PRE-EXISTING duplicate has no
 // challenger — the engine's wearer reads "unchanged" — so the stale wearer must
 // yield of their own accord (rule 1c).
+//
+// Tests 12a-12c cover rule 8, the MINIMUM GAP of 2026-09-17: proclamations are
+// spaced TITLES_MIN_GAP_MS apart and a pass therefore proclaims at most one
+// thing. The older blocks that deliberately batch several proclamations into one
+// pass pass `minGapMs: 0`, which is the documented way to turn the gap off.
 //
 // Run: node scripts/titles.test.mjs   (from services/discord-bot)
 import { createTitlesAnnouncer, isEarnedTitle } from '../src/titles.js';
@@ -31,6 +38,10 @@ const T0 = Date.parse('2026-09-10T20:00:00.000Z');
 const ago = (ms) => new Date(T0 - ms).toISOString();
 
 // A tiny fake supabase client that records writes and can inject a read result.
+// `history` doubles as the title_history TABLE: an insert lands in it as well as
+// in `writes.history`, because the budget read (and, since rule 8, the minimum
+// gap) is a real read of that table and a later pass must see what an earlier
+// one wrote. The `gte` window is not simulated; tests drive the clock instead.
 function fakeDb({ players, readError = null, history = [] }) {
   const writes = { updates: [], history: [], voice: [] };
   const client = {
@@ -42,7 +53,7 @@ function fakeDb({ players, readError = null, history = [] }) {
           select() {
             return { gte: () => Promise.resolve({ data: history, error: null }) };
           },
-          insert(obj) { writes.history.push(obj); return Promise.resolve({ error: null }); },
+          insert(obj) { writes.history.push(obj); history.push(obj); return Promise.resolve({ error: null }); },
         };
       }
       return {
@@ -486,7 +497,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
     const writeDb = fakeDb({ players: roster, history: [] });
     const ann = announcer({
       db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
-      fetchImpl: offers, now: c.now,
+      fetchImpl: offers, now: c.now, perDay: 3, minGapMs: 0,
     });
     await ann.tick();
     c.advance(16 * MIN);
@@ -511,7 +522,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
     const writeDb = fakeDb({ players: roster, history: [{ id: 1 }, { id: 2 }] });
     const ann = announcer({
       db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
-      fetchImpl: offers, now: c.now,
+      fetchImpl: offers, now: c.now, perDay: 3, minGapMs: 0,
     });
     await ann.tick();
     c.advance(16 * MIN);
@@ -527,7 +538,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
     const writeDb = fakeDb({ players: roster, history: [{ id: 1 }, { id: 2 }, { id: 3 }] });
     const ann = announcer({
       db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
-      fetchImpl: offers, now: c.now,
+      fetchImpl: offers, now: c.now, perDay: 3, minGapMs: 0,
     });
     await ann.tick();
     c.advance(16 * MIN);
@@ -537,7 +548,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
     const fresh = fakeDb({ players: roster, history: [] });
     const ann2 = announcer({
       db: fresh, writeDb: fresh, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
-      fetchImpl: offers, now: c.now,
+      fetchImpl: offers, now: c.now, perDay: 3, minGapMs: 0,
     });
     await ann2.tick();
     c.advance(16 * MIN);
@@ -577,7 +588,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   const writeDb = fakeDb({ players: roster, history: [] });
   const ann = announcer({
     db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
-    fetchImpl: offers, now: c.now,
+    fetchImpl: offers, now: c.now, perDay: 3, minGapMs: 0,
   });
 
   const first = await ann.tick();
@@ -674,6 +685,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
       ['Mikael', 'the Heavy-Handed', 'damage', 'the Unhurried'],
     ]),
     now: c.now,
+    minGapMs: 0,
   });
 
   await ann.tick();
@@ -778,7 +790,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   ]);
   const ann = announcer({
     db: writeDb, writeDb, log: rec, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
-    fetchImpl: (...a) => payload(...a), now: c.now, perDay: 8,
+    fetchImpl: (...a) => payload(...a), now: c.now, perDay: 8, minGapMs: 0,
   });
 
   const first = await ann.tick();
@@ -876,6 +888,8 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
       ['Charleif', 'the Anvil-Sworn', 'crafts', 'the Quiet Flame'],
     ]),
     now: c.now,
+    perDay: 3,
+    minGapMs: 0,
   });
 
   const first = await ann.tick();
@@ -886,7 +900,7 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   c.advance(16 * MIN);
   const r = await ann.tick();
   ok(r.announced === 3 && r.deferred === 0 && r.held === 0,
-    `all three yields go out inside the default 3-a-day budget, got ${JSON.stringify(r)}`);
+    `all three yields go out inside a 3-a-day budget, got ${JSON.stringify(r)}`);
   ok(writeDb.writes.history.length === 3, 'three yields, three budget slots');
   ok(posts.length === 3 && posts.every((p) => !p.includes('\n')),
     `each yield is ONE quiet line, got ${JSON.stringify(posts)}`);
@@ -918,6 +932,137 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   const third = await ann.tick();
   ok(third.announced === 0 && third.unchanged === 6,
     `the hall settles on six distinct titles, got ${JSON.stringify(third)}`);
+}
+
+// ── 12. MINIMUM GAP: proclamations are rare AND never a batch (rule 8) ────
+//        2026-09-17 12:51: the rolling-24h budget freed four slots at once and
+//        all four went out in a single pass. Charlie's rule: at most two a day,
+//        spaced out. The gap is measured from the newest title_history row, and
+//        the first proclamation of a pass sets it to NOW, so everybody else in
+//        that pass waits for a later one.
+
+// 12a. Two confirmed candidates, empty history: one goes out, the other is
+//      deferred until the gap has actually passed.
+{
+  const posts = [];
+  const c = clock();
+  const rec = recordingLog();
+  const roster = [
+    { id: 'g1', character_name: 'Alfvin', current_title: 'the Quiet Flame', title_updated_at: ago(5 * DAY) },
+    { id: 'g2', character_name: 'Bjorn', current_title: 'the Unhurried', title_updated_at: ago(5 * DAY) },
+  ];
+  const writeDb = fakeDb({ players: roster, history: [] });
+  const ann = announcer({
+    db: writeDb, writeDb, log: rec, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: fakeApi([
+      ['Alfvin', 'Bane of Beasts', 'kills', 'the Quiet Flame'],
+      ['Bjorn', 'the Provider', 'resources', 'the Unhurried'],
+    ]),
+    now: c.now, minGapMs: 4 * HOUR,
+  });
+
+  const first = await ann.tick();
+  ok(first.announced === 0 && first.confirming === 2, `both confirm first, got ${JSON.stringify(first)}`);
+
+  c.advance(16 * MIN);
+  const second = await ann.tick();
+  ok(second.announced === 1 && second.deferred === 1,
+    `only ONE of the two confirmed candidates goes out, got ${JSON.stringify(second)}`);
+  ok(posts.length === 1 && posts[0].includes('Alfvin'),
+    `and it is the top-ranked one, got ${JSON.stringify(posts)}`);
+  ok(writeDb.writes.history.length === 1, 'one proclamation, one history row');
+  ok(rec.lines.includes('[titles] Bjorn: "the Provider" deferred (min gap: last proclamation 0 min ago)'),
+    `the deferral names the gap, got ${JSON.stringify(rec.lines)}`);
+
+  // Ten minutes later the hall is still resting.
+  applyWrites(roster, writeDb);
+  c.advance(10 * MIN);
+  const soon = await ann.tick();
+  ok(soon.announced === 0 && soon.deferred === 1,
+    `ten minutes later the second is still deferred, got ${JSON.stringify(soon)}`);
+  ok(posts.length === 1, 'and nothing more is proclaimed');
+
+  // Four hours on, the gap has passed and the pending offer is honoured.
+  c.advance(4 * HOUR);
+  const later = await ann.tick();
+  ok(later.announced === 1, `past the gap it goes out, got ${JSON.stringify(later)}`);
+  ok(posts.length === 2 && posts[1].includes('Bjorn') && posts[1].includes('the Provider'),
+    `the deferred candidate is the one proclaimed, got ${JSON.stringify(posts)}`);
+  ok(writeDb.writes.history.length === 2, 'two proclamations in all, hours apart');
+}
+
+// 12b. The gap survives a restart: it is read from title_history, not memory.
+//      One row an hour old is enough to hold a confirmed candidate back.
+{
+  const posts = [];
+  const c = clock();
+  const rec = recordingLog();
+  const roster = [
+    { id: 'g3', character_name: 'Zulf', current_title: 'the Unhurried', title_updated_at: ago(5 * DAY) },
+  ];
+  const writeDb = fakeDb({
+    players: roster,
+    history: [{ id: 1, awarded_at: ago(HOUR) }],
+  });
+  const ann = announcer({
+    db: writeDb, writeDb, log: rec, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: fakeApi([['Zulf', 'the Forgehand', 'crafts', 'the Unhurried']]),
+    now: c.now, minGapMs: 4 * HOUR,
+  });
+
+  await ann.tick();
+  c.advance(16 * MIN);
+  const r = await ann.tick();
+  ok(r.announced === 0 && r.deferred === 1,
+    `a proclamation an hour ago holds the next one back, got ${JSON.stringify(r)}`);
+  ok(posts.length === 0 && writeDb.writes.updates.length === 0 && writeDb.writes.history.length === 0,
+    'nothing is posted and nothing is written inside the gap');
+  ok(rec.lines.some((l) => l.startsWith('[titles] Zulf: "the Forgehand" deferred (min gap: last proclamation 7')),
+    `the log says how long ago the last proclamation was, got ${JSON.stringify(rec.lines)}`);
+
+  // Past the four hours, the same standing offer is proclaimed.
+  c.advance(4 * HOUR);
+  const later = await ann.tick();
+  ok(later.announced === 1 && posts.length === 1,
+    `once the gap clears it goes out, got ${JSON.stringify(later)}`);
+}
+
+// 12c. A YIELD is a proclamation too, so the gap gates it like any other.
+//      The 11e roster, with one title_history row two hours old.
+{
+  const posts = [];
+  const c = clock();
+  const roster = [
+    { id: 'a', character_name: 'Asbjorn', current_title: 'Bane of Beasts', title_updated_at: ago(2 * DAY) },
+    { id: 't', character_name: 'Thorfinn', current_title: 'Bane of Beasts', title_updated_at: ago(6 * DAY) },
+  ];
+  const writeDb = fakeDb({
+    players: roster,
+    history: [{ id: 1, awarded_at: ago(2 * HOUR) }],
+  });
+  const ann = announcer({
+    db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: fakeApi([
+      ['Asbjorn', 'Bane of Beasts', 'kills', 'the Late-Rising'],
+      ['Thorfinn', 'the Cheerful Ballast', 'flavor', 'the Cheerful Ballast'],
+    ]),
+    now: c.now, minGapMs: 4 * HOUR,
+  });
+
+  await ann.tick();
+  c.advance(16 * MIN);
+  const blocked = await ann.tick();
+  ok(blocked.announced === 0 && blocked.deferred === 1,
+    `the yield waits out the gap like any proclamation, got ${JSON.stringify(blocked)}`);
+  ok(posts.length === 0 && writeDb.writes.updates.length === 0,
+    'and the stale wearer is left where they are meanwhile');
+
+  c.advance(3 * HOUR); // 5 h 16 min since the last proclamation
+  const r = await ann.tick();
+  ok(r.announced === 1 && posts.length === 1,
+    `past the gap the duplicate is closed, got ${JSON.stringify(r)}`);
+  ok(posts[0] === '**Thorfinn** yields **Bane of Beasts** to **Asbjorn** and takes up **the Cheerful Ballast**.',
+    `and it is still the one quiet yield line, got: ${posts[0]}`);
 }
 
 console.log(`titles.test: ${passed} assertions passed`);

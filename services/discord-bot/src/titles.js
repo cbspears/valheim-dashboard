@@ -78,7 +78,7 @@
 //      under tenure while the engine gave the map crown to Rosir, and the hall
 //      proclaimed a second Far-Seer. Under this rule Rosir takes it and Kætiløy
 //      is moved on in the same breath.)
-//   5. DAILY BUDGET. At most TITLES_PER_DAY (default 3) proclamations per rolling
+//   5. DAILY BUDGET. At most TITLES_PER_DAY (default 2) proclamations per rolling
 //      24 h, counted from title_history. A handover is ONE proclamation (two
 //      lines, one history row), not two. When more qualify at once they are ranked
 //      deterministically — first titles first, then combat crowns (kills, damage,
@@ -115,10 +115,23 @@
 //   6. SEEDING stays silent and free: a viking whose current_title is still NULL
 //      is recorded WITHOUT announcing and without spending budget, so the first
 //      pass after a migration or a wipe never dumps a storm on the channel.
+//   8. MINIMUM GAP (Charlie, 2026-09-17). A proclamation may not go out within
+//      TITLES_MIN_GAP_MS (default 4 h) of the most recent title_history row. The
+//      rolling-24h budget is not enough on its own: it freed several slots at
+//      once and the hall heard four proclamations in a single pass at 12:51.
+//      Titles are to be rarer, and they are never to arrive in a batch.
+//      Because the first proclamation of a pass sets that clock to NOW, every
+//      remaining candidate in the same pass is deferred by this same gate — one
+//      mechanism, and with a gap set a pass proclaims at most ONE thing, with
+//      rule 5's ranking deciding which. A deferred candidate stays pending and
+//      is re-evaluated next pass, exactly as a budget deferral is. Seeds and
+//      silent placeholder reshuffles write no history row, so the gap never
+//      touches them. TITLES_MIN_GAP_MS=0 turns it off and restores the old
+//      batching behaviour.
 //
 // Proclamations remain exempt from the voice engine's ambient min-gap
-// (VOICE_MIN_GAP_MS) and from the Great Deeds gap — with 2-3 a night there is
-// nothing left to rate-limit.
+// (VOICE_MIN_GAP_MS) and from the Great Deeds gap — at two a day, hours apart,
+// there is nothing left to rate-limit.
 //
 // Gated behind TITLES_ANNOUNCE (on by default; set 0 to disable). Degrades
 // gracefully before db/2026-07-05_titles.sql is applied: it detects the missing
@@ -141,10 +154,13 @@ const DAY_MS = 24 * HOUR_MS;
 // so the hall can be loosened for an event night without a deploy.
 const ENV_MIN_TENURE_MS = Number(process.env.TITLE_MIN_TENURE_MS || DAY_MS);
 const ENV_CONFIRM_MS = Number(process.env.TITLE_CONFIRM_MS || 15 * MINUTE_MS);
-const ENV_PER_DAY = Number(process.env.TITLES_PER_DAY || 3);
+const ENV_PER_DAY = Number(process.env.TITLES_PER_DAY || 2);
 // Rule 7: how long a title rests after changing hands before anyone may take it
 // off its new wearer.
 const ENV_TAKEOVER_COOLDOWN_MS = Number(process.env.TITLE_TAKEOVER_COOLDOWN_MS || DAY_MS);
+// Rule 8: how long the hall rests after a proclamation before the next one may
+// go out. This is what keeps a freed budget from emptying in one pass.
+const ENV_MIN_GAP_MS = Number(process.env.TITLES_MIN_GAP_MS || 4 * HOUR_MS);
 
 // A "hold" is the normal, permanent state of a well-titled hall, so its log line
 // would otherwise repeat every ten minutes forever. One per viking per hour.
@@ -244,6 +260,7 @@ export function createTitlesAnnouncer({
   confirmMs = ENV_CONFIRM_MS,
   perDay = ENV_PER_DAY,
   takeoverCooldownMs = ENV_TAKEOVER_COOLDOWN_MS,
+  minGapMs = ENV_MIN_GAP_MS,
 }) {
   let warnedMissing = false;
   let warnedNoWrite = false;
@@ -295,9 +312,14 @@ export function createTitlesAnnouncer({
    * budget survives a bot restart because it is not kept in memory. Seeds and
    * silent reshuffles write no history row and so cost nothing.
    *
-   * Unreadable history returns 0 (fail open): the confirmation and tenure gates
-   * above already make a storm impossible, and freezing every title because one
-   * read failed would be the worse failure.
+   * Returns `{ used, lastAt }`: how many were spent, and WHEN the most recent
+   * one went out (ms, 0 if none), which is rule 8's clock. A row carrying no
+   * parseable awarded_at still counts against the budget but contributes
+   * nothing to `lastAt` — an undatable proclamation cannot open a gap.
+   *
+   * Unreadable history returns zeroes (fail open): the confirmation and tenure
+   * gates above already make a storm impossible, and freezing every title
+   * because one read failed would be the worse failure.
    */
   async function announcedInLastDay(nowMs) {
     const since = new Date(nowMs - DAY_MS).toISOString();
@@ -308,12 +330,18 @@ export function createTitlesAnnouncer({
         .gte('awarded_at', since);
       if (error) {
         log.warn?.(`[titles] title_history read failed, budget assumed free: ${error.message}`);
-        return 0;
+        return { used: 0, lastAt: 0 };
       }
-      return Array.isArray(data) ? data.length : 0;
+      const rows = Array.isArray(data) ? data : [];
+      let lastAt = 0;
+      for (const r of rows) {
+        const at = Date.parse(r?.awarded_at);
+        if (Number.isFinite(at) && at > lastAt) lastAt = at;
+      }
+      return { used: rows.length, lastAt };
     } catch (e) {
       log.warn?.(`[titles] title_history read failed, budget assumed free: ${e.message}`);
-      return 0;
+      return { used: 0, lastAt: 0 };
     }
   }
 
@@ -812,11 +840,14 @@ export function createTitlesAnnouncer({
       candidates.push({ row, name, title, current, kind, source: entry.source, yieldTo });
     }
 
-    // 5. DAILY BUDGET. Rank first, so the same three changes win regardless of
-    //    row order: first titles, then combat crowns, then alphabetically.
+    // 5. DAILY BUDGET. Rank first, so the same changes win regardless of row
+    //    order: first titles, then combat crowns, then alphabetically.
     if (candidates.length > 0) {
-      const used = await announcedInLastDay(nowMs);
+      const { used, lastAt: lastProclaimedAt } = await announcedInLastDay(nowMs);
       let remaining = Math.max(0, perDay - used);
+      // Rule 8's clock. It starts at the newest history row and moves to NOW the
+      // moment anything goes out, which is what makes a batch impossible.
+      let lastAt = lastProclaimedAt;
       // Yields go first: they close a duplicate the hall can currently SEE, which
       // is worth more than any new crown. Then first titles, then the rest.
       const KIND_ORDER = { yield: 0, promotion: 1, earned: 2 };
@@ -839,6 +870,17 @@ export function createTitlesAnnouncer({
         if (remaining <= 0) {
           log.info?.(
             `[titles] ${c.name}: "${c.title}" deferred (daily budget ${perDay}/${perDay} used)`,
+          );
+          pass.deferred++;
+          continue; // stays pending; re-evaluated next pass
+        }
+
+        // 8. MINIMUM GAP. Nothing goes out within minGapMs of the last
+        //    proclamation — including one made moments ago, earlier in THIS
+        //    pass, which is how a pass is held to a single proclamation.
+        if (minGapMs > 0 && lastAt > 0 && nowMs - lastAt < minGapMs) {
+          log.info?.(
+            `[titles] ${c.name}: "${c.title}" deferred (min gap: last proclamation ${Math.round((nowMs - lastAt) / MINUTE_MS)} min ago)`,
           );
           pass.deferred++;
           continue; // stays pending; re-evaluated next pass
@@ -886,6 +928,7 @@ export function createTitlesAnnouncer({
           pending.delete(c.name);
           pass.announced++;
           remaining--;
+          lastAt = nowMs;
           log.info?.(
             `[titles] ${c.name}: yields "${c.current}" to ${c.yieldTo} and takes up "${takes}"`,
           );
@@ -968,6 +1011,7 @@ export function createTitlesAnnouncer({
           commitPicture();
           pass.announced++;
           remaining--;
+          lastAt = nowMs;
           continue;
         }
 
@@ -996,6 +1040,7 @@ export function createTitlesAnnouncer({
         commitPicture();
         pass.announced++;
         remaining--;
+        lastAt = nowMs;
         log.info?.(
           handovers.length
             ? `[titles] ${c.name}: "${c.current}" -> "${c.title}" (${handovers
