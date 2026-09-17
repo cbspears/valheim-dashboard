@@ -84,6 +84,23 @@
 //      deterministically — first titles first, then combat crowns (kills, damage,
 //      boss damage), then by name — and the rest simply stay pending and are
 //      re-evaluated next pass.
+//   1c. THE STALE WEARER YIELDS (Charlie, 2026-09-17, from the first live pass
+//      after 1a/1b shipped). A takeover only fires from a CHALLENGER's row, and a
+//      duplicate left over from the pre-fix era has none: the engine already
+//      names one of the two wearers, so that wearer's row reads "unchanged" and
+//      the OTHER is held forever by rule 1 ("Thorfinn: holding \"Bane of Beasts\"
+//      (earned; engine offers placeholder \"the Cheerful Ballast\")", 12:15).
+//      So: a viking who wears an earned title that ANOTHER registry row also
+//      wears, while the engine's offer names that other row as its holder and
+//      names this viking something else, is the STALE wearer and must YIELD.
+//      After the ordinary 15-minute confirmation of their own offer they are
+//      written to it (or, if it is worn, to a free title per rule 1a) and the
+//      hall hears ONE quiet line:
+//        **Thorfinn** yields **Bane of Beasts** to **Asbjorn** and takes up **the Cheerful Ballast**.
+//      It costs one of the daily budget. It is NOT subject to rule 7's cool-down:
+//      nothing changes hands, a duplicate is being closed. Tenure does not gate
+//      it either — the title was never really theirs. A viking who IS the
+//      engine's holder never yields.
 //   7. TAKEOVER COOL-DOWN (Charlie, 2026-09-17). A title cannot be taken over
 //      within TITLE_TAKEOVER_COOLDOWN_MS (default 24 h) of its last change of
 //      holder — the title_updated_at of whoever wears it, or, for a row carrying
@@ -378,6 +395,41 @@ export function createTitlesAnnouncer({
     }
   }
 
+  /**
+   * Proclaim a YIELD (rule 1c): a stale wearer stepping off a title the engine
+   * has already given to somebody else. ONE quiet line — no "has earned a new
+   * title" fanfare, because nothing was earned and nothing changed hands; a
+   * duplicate the hall should never have seen is being closed.
+   */
+  async function announceYield(row, vacated, toName, takes) {
+    const name = (row.character_name || '').trim() || 'A viking';
+    const content = `**${nameMd(name)}** yields **${escapeMd(vacated)}** to **${nameMd(toName)}** and takes up **${escapeMd(takes)}**.`;
+    const voice = `${firstName(name)} yields ${vacated} to ${firstName(toName)} and takes up ${takes}.`;
+    if (dryRun) {
+      log.info?.(
+        `[titles] (dry) would announce: ${name} yields "${vacated}" to ${toName}, takes up "${takes}"`,
+      );
+      return;
+    }
+    try {
+      await post(channel, { content });
+    } catch (e) {
+      log.error?.(`[titles] #${channel} post failed for ${name}: ${e.message}`);
+    }
+    try {
+      const { error: vErr } = await writeDb.from('voice_lines').insert({
+        text: voice,
+        kind: 'event',
+        meta: { title: takes, player_id: row.id, yielded: vacated, yieldedTo: toName },
+        status: 'queued',
+        queued_at: new Date(now()).toISOString(),
+      });
+      if (vErr) log.error?.(`[titles] voice enqueue failed for ${name}: ${vErr.message}`);
+    } catch (e) {
+      log.error?.(`[titles] voice enqueue failed for ${name}: ${e.message}`);
+    }
+  }
+
   /** Write the registry without announcing (seeds and silent reshuffles). */
   async function record(row, title, nowIso) {
     const { error } = await writeDb
@@ -562,6 +614,29 @@ export function createTitlesAnnouncer({
     }
 
     /**
+     * 1c. IS THIS VIKING THE STALE WEARER OF `current`? True when somebody else
+     * on the registry also wears it AND the engine's offer names that other row
+     * as its holder, while naming this viking something else. Returns the
+     * engine's holder (so the proclamation can name them), or null.
+     *
+     * The narrow shape is deliberate: a duplicate is only closed here when the
+     * engine has actually picked a side. Two wearers whom the engine names
+     * neither of (a roster it cannot see, an excluded row) stay held by rule 1
+     * rather than both stepping off a title nobody would then wear.
+     */
+    function staleDuplicateOf(name, current) {
+      if (!isEarnedTitle(current)) return null;
+      const mine = offerFor(name);
+      if (!mine || mine.title === current) return null; // the engine still names them
+      for (const other of holdersOf(current)) {
+        if (other === name) continue;
+        const theirs = offerFor(other);
+        if (theirs && theirs.title === current) return other;
+      }
+      return null;
+    }
+
+    /**
      * Rule 7's clock: when `title` last changed holder. The registry's answer is
      * the title_updated_at of whoever wears it; a row carrying no usable stamp
      * falls back to the challenger's own confirmed offer time, so an un-stamped
@@ -645,10 +720,16 @@ export function createTitlesAnnouncer({
       // mistaken for an earned crown.
       const offeredEarned = entry.source ? entry.source !== 'flavor' : isEarnedTitle(title);
 
+      // 1c. STALE DUPLICATE. Another row wears this title and the engine names
+      //     THEM its holder: this viking is wearing a leftover and yields it.
+      //     Checked before rule 1, because a stale wearer offered a hall-name is
+      //     exactly the case rule 1 would hold forever.
+      const yieldTo = staleDuplicateOf(name, current);
+
       // 1. HOLD an earned title against a placeholder offer. The only thing that
       //    takes it away is a CONFIRMED offer of it to somebody else, which is
       //    handled from the challenger's row (the takeover below), never here.
-      if (currentEarned && !offeredEarned) {
+      if (!yieldTo && currentEarned && !offeredEarned) {
         quiet(nowMs, name, `holding "${current}" (earned; engine offers placeholder "${title}")`);
         pass.held++;
         pending.delete(name);
@@ -677,7 +758,7 @@ export function createTitlesAnnouncer({
       }
 
       // Everything below is a change that WOULD be proclaimed.
-      const kind = currentEarned ? 'earned' : 'promotion';
+      const kind = yieldTo ? 'yield' : currentEarned ? 'earned' : 'promotion';
 
       // Track the offer BEFORE the gates, so an offer that stands through a whole
       // tenure window (or through a holder's own unfinished move) is already
@@ -691,7 +772,10 @@ export function createTitlesAnnouncer({
       // 4b. NEVER CREATE A DUPLICATE. Somebody else wears this title and is
       //     themselves mid-move: wait for them to land. The clock keeps running,
       //     so the moment they settle this offer is already proven.
-      const unsettled = holdersOf(title).find((h) => h !== name && holderStillMoving(h));
+      // A yield takes nothing over — rule 1a picks it a free landing spot at
+      // write time — so it waits for nobody.
+      const unsettled =
+        kind === 'yield' ? null : holdersOf(title).find((h) => h !== name && holderStillMoving(h));
       if (unsettled) {
         quiet(
           nowMs,
@@ -725,7 +809,7 @@ export function createTitlesAnnouncer({
         continue;
       }
 
-      candidates.push({ row, name, title, current, kind, source: entry.source });
+      candidates.push({ row, name, title, current, kind, source: entry.source, yieldTo });
     }
 
     // 5. DAILY BUDGET. Rank first, so the same three changes win regardless of
@@ -733,7 +817,10 @@ export function createTitlesAnnouncer({
     if (candidates.length > 0) {
       const used = await announcedInLastDay(nowMs);
       let remaining = Math.max(0, perDay - used);
-      const kindRank = (c) => (c.kind === 'promotion' ? 0 : 1);
+      // Yields go first: they close a duplicate the hall can currently SEE, which
+      // is worth more than any new crown. Then first titles, then the rest.
+      const KIND_ORDER = { yield: 0, promotion: 1, earned: 2 };
+      const kindRank = (c) => KIND_ORDER[c.kind] ?? 2;
       const combatRank = (c) => (COMBAT_SOURCES.has(c.source) ? 0 : 1);
       candidates.sort(
         (a, b) =>
@@ -755,6 +842,54 @@ export function createTitlesAnnouncer({
           );
           pass.deferred++;
           continue; // stays pending; re-evaluated next pass
+        }
+
+        // 1c. THE YIELD. No takeover, no cool-down, nothing changes hands: the
+        //     stale wearer simply steps off a title the engine gave to somebody
+        //     else. The landing spot is resolved HERE rather than reused from the
+        //     offer, because an earlier candidate in this same pass may have taken
+        //     it in the meantime (rule 1a decides, in the same order it always
+        //     does: the offer, their placeholder, then the first free hall-name).
+        if (c.kind === 'yield') {
+          const landing = freeTitleFor(c.name, c.current, new Set([c.current]));
+          if (!landing) {
+            quiet(nowMs, c.name, `should yield "${c.current}" to ${c.yieldTo} but has nowhere free to go; waiting`);
+            pass.held++;
+            continue;
+          }
+          if (landing.via === 'fallback') {
+            log.warn?.(
+              `[titles] ${c.name}: the engine's offer and their placeholder are both worn already — taking up "${landing.title}" (first free hall-name in this pass's payload)`,
+            );
+          }
+          const takes = landing.title;
+          if (!dryRun) {
+            const yErr = await record(c.row, takes, nowIso);
+            if (yErr) {
+              log.error?.(`[titles] yield write failed for ${c.name}: ${yErr.message}`);
+              continue;
+            }
+            // One history row, so the yield spends one of the day's budget.
+            await writeDb.from('title_history').insert({
+              player_id: c.row.id,
+              title: takes,
+              awarded_at: nowIso,
+            });
+          }
+          await announceYield(c.row, c.current, c.yieldTo, takes);
+          // The title stays where the engine put it; only this row moves off it,
+          // so `handsAt` for the vacated title is deliberately NOT touched.
+          unwear(c.current, c.name);
+          wear(takes, c.name);
+          liveTitle.set(c.name, takes);
+          handsAt.set(takes, nowMs);
+          pending.delete(c.name);
+          pass.announced++;
+          remaining--;
+          log.info?.(
+            `[titles] ${c.name}: yields "${c.current}" to ${c.yieldTo} and takes up "${takes}"`,
+          );
+          continue;
         }
 
         // THE TAKEOVER. EVERY viking still wearing this title steps off it — the

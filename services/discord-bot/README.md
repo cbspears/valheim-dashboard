@@ -399,6 +399,20 @@ Sticky and rare since 2026-09-10, and **one holder per earned title** since 2026
 - **Every wearer is handed off** (2026-09-17). The pre-fix era could leave two vikings on one title,
   so a takeover moves **all** of them, one handover line each, still one proclamation and one
   `title_history` row.
+- **The stale wearer yields** (2026-09-17, rule 1c). A duplicate left over from before the one-holder
+  rule has no challenger: the engine already names one of the two wearers, so that row reads
+  *unchanged* and the other used to be held forever. When a viking wears an earned title another row
+  also wears, and the engine's offer names that other row as its holder while naming this viking
+  something else, this viking is the stale wearer. After the ordinary 15-minute confirmation they are
+  written to their offer (or to a free title, rule 1a) and the hall hears **one quiet line**:
+
+  ```
+  **Thorfinn** yields **Bane of Beasts** to **Asbjorn** and takes up **the Cheerful Ballast**.
+  ```
+
+  voice: `Thorfinn yields Bane of Beasts to Asbjorn and takes up the Cheerful Ballast.` It costs one
+  of the day's budget, ignores tenure and the takeover cool-down (nothing changes hands — a duplicate
+  is being closed), and never fires for the viking the engine names as the holder.
 - **`TITLE_TAKEOVER_COOLDOWN_MS` (24 h)** — a title may not change hands again within a day of its
   last change of holder (the `title_updated_at` of whoever wears it; for a row with no usable stamp,
   the challenger's own confirmed offer time). The challenger just waits, logged as

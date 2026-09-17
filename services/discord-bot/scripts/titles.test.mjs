@@ -14,7 +14,10 @@
 // duplicates and a flip-flop: the handover target must be FREE (11a, landing on
 // the /api/titles `placeholder`), EVERY holder is handed off (11b), a title
 // cannot change hands twice inside 24 h (11c), and the whole production shape of
-// 2026-09-17 11:55 CT replays to a registry with no title worn twice (11d).
+// 2026-09-17 11:55 CT replays to a registry with no title worn twice (11d). 11e
+// is the follow-up from the first live pass: a PRE-EXISTING duplicate has no
+// challenger — the engine's wearer reads "unchanged" — so the stale wearer must
+// yield of their own accord (rule 1c).
 //
 // Run: node scripts/titles.test.mjs   (from services/discord-bot)
 import { createTitlesAnnouncer, isEarnedTitle } from '../src/titles.js';
@@ -548,7 +551,9 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
 //        the old rule 1 kept an earned title on its holder forever while the
 //        engine crowned the new leader. No SQL is needed to clear them: the
 //        engine already names one wearer per title, so the other is offered their
-//        own rung and resolves through the ordinary confirm-then-proclaim path.
+//        own rung and resolves through the confirm-then-proclaim path — as a
+//        YIELD since rule 1c (2026-09-17), which is what finally makes it fire
+//        even when the engine offers the stale wearer a hall-name (see 11e).
 {
   const posts = [];
   const c = clock();
@@ -596,6 +601,8 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   ok(writeDb.writes.history.length === 3, 'three proclamations, three history rows');
   ok(posts.every((line) => !line.includes('\n')),
     'none of them is a handover: the engine had already picked a wearer for each title');
+  ok(posts.every((line) => / yields \*\*/.test(line)),
+    `each is a one-line yield naming the wearer the engine kept, got ${JSON.stringify(posts)}`);
 
   // And it stays clean: the next pass has nothing to say.
   c.advance(HOUR);
@@ -831,6 +838,86 @@ const ok = (c, m) => { assert.ok(c, m); passed++; };
   const finalWorn = roster.map((x) => x.current_title);
   ok(new Set(finalWorn).size === finalWorn.length,
     `and the hall is still free of duplicates, got [${finalWorn.join(', ')}]`);
+}
+
+// ── 11e. RULE 1c: the stale wearer YIELDS ────────────────────────────────
+//        The registry at 12:15 CT on 2026-09-17, the first live pass after the
+//        handover fix: three titles worn twice, and in each pair the engine
+//        already names ONE of them its holder. That wearer's row reads
+//        "unchanged", so no challenger exists and no takeover can fire — the
+//        other was held forever ("Thorfinn: holding "Bane of Beasts" (earned;
+//        engine offers placeholder "the Cheerful Ballast")"). Now the stale
+//        wearer yields.
+{
+  const posts = [];
+  const c = clock();
+  const roster = [
+    // Bane of Beasts: Asbjorn is the engine's, Thorfinn is the leftover.
+    { id: 'a', character_name: 'Asbjorn', current_title: 'Bane of Beasts', title_updated_at: ago(2 * DAY) },
+    { id: 't', character_name: 'Thorfinn', current_title: 'Bane of Beasts', title_updated_at: ago(6 * DAY) },
+    // the Heavy-Handed: Mikael is the engine's, Yonk is the leftover.
+    { id: 'm', character_name: 'Mikael', current_title: 'the Heavy-Handed', title_updated_at: ago(2 * DAY) },
+    { id: 'y', character_name: 'Yonk', current_title: 'the Heavy-Handed', title_updated_at: ago(6 * DAY) },
+    // the Forgehand: S'aeien is the engine's, Charleif is the leftover — and his
+    // crown is TWO HOURS old, so this also proves tenure never gates a yield.
+    { id: 's', character_name: "S'aeien", current_title: 'the Forgehand', title_updated_at: ago(6 * DAY) },
+    { id: 'x', character_name: 'Charleif', current_title: 'the Forgehand', title_updated_at: ago(2 * HOUR) },
+  ];
+  const writeDb = fakeDb({ players: roster, history: [] });
+  const ann = announcer({
+    db: writeDb, writeDb, post: (ch, p) => { posts.push(p.content); return Promise.resolve(); },
+    fetchImpl: fakeApi([
+      ['Asbjorn', 'Bane of Beasts', 'kills', 'the Late-Rising'],
+      ['Thorfinn', 'the Cheerful Ballast', 'flavor', 'the Cheerful Ballast'],
+      ['Mikael', 'the Heavy-Handed', 'damage', 'the Unbossed'],
+      ['Yonk', 'the Bench-Warmer', 'flavor', 'the Bench-Warmer'],
+      ["S'aeien", 'the Forgehand', 'crafts', 'the Soft-Spoken'],
+      // A yield does not have to land on a hall-name: Charleif's own rung is free.
+      ['Charleif', 'the Anvil-Sworn', 'crafts', 'the Quiet Flame'],
+    ]),
+    now: c.now,
+  });
+
+  const first = await ann.tick();
+  ok(first.announced === 0 && first.confirming === 3 && first.unchanged === 3,
+    `the three stale wearers confirm first, and nobody is "held", got ${JSON.stringify(first)}`);
+  ok(writeDb.writes.updates.length === 0, 'nothing is written while they confirm');
+
+  c.advance(16 * MIN);
+  const r = await ann.tick();
+  ok(r.announced === 3 && r.deferred === 0 && r.held === 0,
+    `all three yields go out inside the default 3-a-day budget, got ${JSON.stringify(r)}`);
+  ok(writeDb.writes.history.length === 3, 'three yields, three budget slots');
+  ok(posts.length === 3 && posts.every((p) => !p.includes('\n')),
+    `each yield is ONE quiet line, got ${JSON.stringify(posts)}`);
+  ok(posts.includes('**Thorfinn** yields **Bane of Beasts** to **Asbjorn** and takes up **the Cheerful Ballast**.'),
+    `exact yield line, got ${JSON.stringify(posts)}`);
+  ok(posts.includes('**Yonk** yields **the Heavy-Handed** to **Mikael** and takes up **the Bench-Warmer**.'),
+    `exact yield line, got ${JSON.stringify(posts)}`);
+  ok(posts.includes("**Charleif** yields **the Forgehand** to **S'aeien** and takes up **the Anvil-Sworn**."),
+    `a yield inside tenure still goes, got ${JSON.stringify(posts)}`);
+  ok(posts.every((p) => !p.includes('has earned a new title')),
+    'a yield never claims the viking earned something');
+  ok(writeDb.writes.voice.some((v) =>
+      v.text === 'Thorfinn yields Bane of Beasts to Asbjorn and takes up the Cheerful Ballast.'),
+    `exact yield voice line, got ${JSON.stringify(writeDb.writes.voice.map((v) => v.text))}`);
+  ok(posts.every((p) => !p.includes('—') && !p.includes('–')), 'no em or en dash in a yield line');
+
+  applyWrites(roster, writeDb);
+  const worn = roster.map((x) => x.current_title);
+  ok(new Set(worn).size === worn.length,
+    `ZERO duplicates once the three yields land, got [${worn.join(', ')}]`);
+  const by = Object.fromEntries(roster.map((x) => [x.id, x.current_title]));
+  ok(by.a === 'Bane of Beasts' && by.m === 'the Heavy-Handed' && by.s === 'the Forgehand',
+    `the wearer the engine kept is never written, got ${JSON.stringify(by)}`);
+  ok(writeDb.writes.updates.length === 0 || !writeDb.writes.updates.some((u) => ['a', 'm', 's'].includes(u.id)),
+    'and only the stale rows are updated');
+
+  // And it settles: nothing left to say on the next pass.
+  c.advance(HOUR);
+  const third = await ann.tick();
+  ok(third.announced === 0 && third.unchanged === 6,
+    `the hall settles on six distinct titles, got ${JSON.stringify(third)}`);
 }
 
 console.log(`titles.test: ${passed} assertions passed`);
