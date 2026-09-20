@@ -89,7 +89,7 @@ export const ALL_MODS: Mod[] = [
     author: 'Grantapher (fork of the ValheimPlus team)',
     description:
       'The all-round comfort mod, the source of most of the small kindnesses you feel every session. Craft and build straight out of the chests around you, out to 30 metres from the workbench area. Rain no longer wears down what you have built, one hammer swing repairs everything damaged within 7.5 metres, you can place pieces from 12 metres away, taking a piece back down refunds every resource it cost, and pieces can be placed freely rather than only where the game usually allows. Fires and furnishings warm you out to 20 metres. Workbenches and other stations reach 30 metres and need no roof, and upgrades attach from 20 metres out. Fires, ovens and torches burn without fuel. Gathering and picking run 30% richer. Dropped items float instead of sinking and wait an hour before they fade. The map is shared, so exploration and pins spread to everyone, and carts and boats show on it too. The camera pulls back to 100 metres with a wider view. You can sleep in any bed nobody has claimed. Hold LeftAlt to snap building pieces to a grid, F7 turns snapping on and off, F6 sets the default. The server checks the version, so everyone needs exactly this one. Ships in the modpack.',
-    version: '10.1.2', // 2026-09-14 04:00 CT: auto-deposit-on-arrival fix, AutoStack message fix, inventory-rows mod compat, cultivator GridAlignment, procreation fixes; pack v20 pins it; on the box since the 07:53 CT window (boot 07:54 clean). r2modman installs the newest V+ on every profile update and V+ refuses a client newer than the server, so the box follows every V+ release the same hour. Same cfg schema as 10.0.2 (only a description string changed).
+    version: '10.2.0', // 2026-09-19 20:47 CT: Grantapher's 0.10.2.0 (Valheim 1.0.15 build: FrigidKiln/FrostFoundry sections, noHeavySnowDamage/noLavaDamage, day-length sync fix, shareAllPins removed, UI bundle dropped); box on Valheim 1.0.15 + V+ 10.2.0 since the 20:47 CT boot; pack v22 pins it. Previous: 10.1.2 — 2026-09-14 04:00 CT: auto-deposit-on-arrival fix, AutoStack message fix, inventory-rows mod compat, cultivator GridAlignment, procreation fixes; pack v20 pins it; on the box since the 07:53 CT window (boot 07:54 clean). r2modman installs the newest V+ on every profile update and V+ refuses a client newer than the server, so the box follows every V+ release the same hour. Same cfg schema as 10.0.2 (only a description string changed).
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Grantapher/ValheimPlus_Grantapher_Temporary/',
@@ -204,7 +204,7 @@ name: 'Unshamed',
     author: 'Azumatt',
     description:
       'Valheim 1.0 switches Steam achievements off for anyone running mods, whatever the mods actually do. This turns them back on for a modded client, and only that. Cheat commands, spawned items and cheated worlds are still recorded by the game exactly as in plain Valheim, and nothing here hides or clears those marks; they simply no longer block achievements. If you already earned achievements while they were blocked, type unshamed retro in the console to see the list and claim them. Ships in the modpack.',
-    version: '1.0.2',
+    version: '1.0.5', // 2026-09-19: folded into pack v22 (drift noted since 09-14; not version-enforced, r2modman installs the newest anyway).
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Azumatt/Unshamed/',
