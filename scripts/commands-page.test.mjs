@@ -288,7 +288,17 @@ const offersVerb = (verb) =>
     const y = [...b].sort();
     return x.length === y.length && x.every((v, i) => v === y[i]);
   };
-  ok(same(fallbackOf('FallbackAll'), allKeys), 'BoardKeys.FallbackAll matches lib/boards.ts BOARD_KEYS');
+  // The fallback is allowed to LAG the feed in one direction only. A key the feed
+  // publishes and the fallback has never heard of is claimable one poll later, which
+  // is precisely what "the feed decides the vocabulary" bought in EilifBoards 0.3.0
+  // (`day`, added 2026-09-25, is in that state until the next plugin build). A key
+  // the FALLBACK names and the feed no longer carries is the failure worth catching:
+  // a marker written during an outage that then resolves to nothing.
+  const subsetOf = (a, b) => [...a].every((v) => b.includes(v));
+  ok(
+    subsetOf(fallbackOf('FallbackAll'), allKeys),
+    'BoardKeys.FallbackAll names only boards lib/boards.ts BOARD_KEYS still carries',
+  );
   ok(same(fallbackOf('FallbackLeaders'), statKeys), 'BoardKeys.FallbackLeaders matches lib/boards.ts STAT_KEYS');
 
   const signs = GAME_SHOUTS.filter((e) => e.how === 'sign');

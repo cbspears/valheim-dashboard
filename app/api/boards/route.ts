@@ -21,8 +21,8 @@
 // only auth, IO, and the cache.
 //
 // COVERAGE: the feed carries one board per leaderboard /players shows (ten stat
-// boards), plus Living Titles and Great Deeds — twelve in `boards`, and a leader
-// plaque for each of the ten ranked ones in `leaders`.
+// boards), plus Living Titles, Great Deeds and the world day — thirteen in
+// `boards`, and a leader plaque for each of the ten ranked ones in `leaders`.
 //
 // `keys`: the marker vocabulary, top-level and flat (lib/boards BOARD_KEYS). It
 // lists EVERY board key this payload carries, stat boards first, so a plugin can
@@ -36,6 +36,7 @@
 import {
   getPlayersWithStats,
   getMilestones,
+  getServerStatus,
   getSessionsSince,
   playtimeMinutesByCharacter,
 } from '@/lib/data';
@@ -101,6 +102,28 @@ function totalCatches(stats: { gs_stats?: { fish?: { count: number }[]; fishCaug
   return Math.max(bySpecies, gs?.fishCaught ?? 0);
 }
 
+/**
+ * The world day for the Day board — `server_status.world_day`, the same single row
+ * /api/status reads, through the same lib/data accessor (anon key + the retrying
+ * fetch wrapper every read on this route already goes through).
+ *
+ * NEVER fatal. The Day board is one plank; the other twelve are the reason the plugin
+ * polls, so a status row that is missing, unreadable or mid-outage returns null and
+ * renders the board's empty state instead of taking the whole feed down with a 500.
+ * One console.warn per request says which of the two happened.
+ */
+async function readWorldDay(): Promise<number | null> {
+  try {
+    const day = (await getServerStatus())?.world_day;
+    if (typeof day === 'number' && Number.isFinite(day)) return day;
+    console.warn('[boards] world day unavailable: no usable server_status row');
+    return null;
+  } catch (err) {
+    console.warn('[boards] world day read failed:', err instanceof Error ? err.message : 'error');
+    return null;
+  }
+}
+
 /** Flatten players + player_stats (+ sessions, for hours) into the shape lib/boards renders from. */
 async function compute(): Promise<BoardsResponse> {
   // `sessions` is the third read, and only the Hours board needs it: the real
@@ -108,10 +131,12 @@ async function compute(): Promise<BoardsResponse> {
   // hours live from session rows and this feed has to derive them the same way or
   // the sign and the site would disagree. Behind the same 30 s cache as the rest,
   // and already filtered of excluded vikings inside getSessionsSince.
-  const [withStats, milestones, sessions] = await Promise.all([
+  const [withStats, milestones, sessions, worldDay] = await Promise.all([
     getPlayersWithStats(),
     getMilestones(),
     getSessionsSince(70),
+    // Fourth read, and the only one that swallows its own failure — see readWorldDay.
+    readWorldDay(),
   ]);
 
   // Who is online comes off the roster rows already in hand — an open session only
@@ -152,7 +177,7 @@ async function compute(): Promise<BoardsResponse> {
 
   return {
     generatedAt: new Date().toISOString(),
-    boards: buildBoards(players, deeds),
+    boards: buildBoards(players, deeds, worldDay),
     leaders: buildLeaders(players),
     keys: [...BOARD_KEYS],
     data: { players, deeds },

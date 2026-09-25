@@ -443,6 +443,18 @@ export const GAME_SHOUTS: GameShout[] = [
     source:
       'lib/boards.ts BOARD_KEYS, deedsBoard, DeedsSummary; plugins/eilif-boards/src/BoardsFeed.cs FallbackAll',
   },
+  {
+    kind: 'in-game',
+    how: 'sign',
+    id: 'board-day',
+    text: '[board:day]',
+    who: 'any member',
+    what: 'The current world day, the number the Hall page shows, on a plank you can read without leaving the hall.',
+    example: '[board:day]',
+    note: 'Written on a sign, never shouted. A day in Valheim is about thirty real minutes, so this is the one board that turns over on its own. A world that has not seen its first day yet says there is nothing on it.',
+    source:
+      'lib/boards.ts BOARD_KEYS, dayBoard; app/api/boards/route.ts readWorldDay',
+  },
 ];
 
 // ── What the hall says to you ──────────────────────────────────────────────

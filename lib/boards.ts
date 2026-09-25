@@ -81,8 +81,9 @@ export interface DeedsSummary {
 }
 
 /**
- * The twelve ready-to-paste sign strings: ten ranked stat boards (one per
- * leaderboard the dashboard shows on /players) plus Living Titles and Great Deeds.
+ * The thirteen ready-to-paste sign strings: ten ranked stat boards (one per
+ * leaderboard the dashboard shows on /players), plus Living Titles, Great Deeds
+ * and the world day.
  *
  * The six original keys never change spelling — `builds`, not `built`; a rename
  * would blank every sign already claimed with `[board:builds]` in the world.
@@ -100,14 +101,16 @@ export interface Boards {
   fish: string;
   titles: string;
   deeds: string;
+  day: string;
 }
 
 /**
  * The leader-only plaques: the same ten RANKED stat boards, each cut down to its top row.
  *
- * Ten, not twelve, on purpose. Living Titles is alphabetical (colouring a first name would
- * invent a winner) and Great Deeds is a warband total, not a race — neither has a leader to
- * put on a plaque, so neither gets one here or in the marker vocabulary.
+ * Ten, not thirteen, on purpose. Living Titles is alphabetical (colouring a first name would
+ * invent a winner), Great Deeds is a warband total, not a race, and the world day belongs to
+ * the world — none of the three has a leader to put on a plaque, so none gets one here or in
+ * the marker vocabulary.
  */
 export interface Leaders {
   kills: string;
@@ -253,7 +256,7 @@ export const STAT_KEYS = Object.keys(STATS) as (keyof Leaders)[];
  * code change the next time a board is added. Order is stable and append-only; a key is
  * never re-spelled, because a sign in the world is already claimed with the old one.
  */
-export const BOARD_KEYS: readonly string[] = [...STAT_KEYS, 'titles', 'deeds'];
+export const BOARD_KEYS: readonly string[] = [...STAT_KEYS, 'titles', 'deeds', 'day'];
 
 /**
  * The top `limit` rows of one ranked stat, rendered.
@@ -314,8 +317,31 @@ function deedsBoard(deeds: DeedsSummary): string {
   return fitBudget(lines);
 }
 
-/** Build all twelve sign strings from an already-flattened roster. */
-export function buildBoards(players: BoardPlayer[], deeds: DeedsSummary): Boards {
+/**
+ * The world day, on its own plank.
+ *
+ * Here because a viking asked for one (Sködir, 2026-09-25): the number is already on
+ * the Hall page and in the recaps, and he wanted it readable without leaving the hall.
+ * It is the only board that moves on its own — a Valheim day is about thirty real
+ * minutes — so it costs roughly two sign rewrites an hour, which is less than any stat
+ * board asks for on a busy night.
+ *
+ * Anything that is not a real day (null, NaN, a pre-day-one 0) renders the empty state
+ * rather than a number: a plank reading "Day 0" reads as a broken feed, which is the
+ * same reason a stat at 0 is skipped rather than shown.
+ */
+export function dayBoard(worldDay: number | null): string {
+  const day = Number(worldDay);
+  if (!Number.isFinite(day) || day < 1) return renderBoard('Day', [], false);
+  // Bare digits, NOT formatCount: this world passes day 1000 in about a week of real
+  // time, and the Hall page and the game's own counter both say "Day 1042". A sign
+  // reading "Day 1,042" beside them would look like a different number.
+  // The day IS the value, so it takes the board's one accent whole (same as Great Deeds).
+  return fitBudget(['<b>Day</b>', accent(String(Math.round(day)))]);
+}
+
+/** Build all thirteen sign strings from an already-flattened roster. */
+export function buildBoards(players: BoardPlayer[], deeds: DeedsSummary, worldDay: number | null): Boards {
   return {
     kills: statBoard(players, STATS.kills),
     deaths: statBoard(players, STATS.deaths),
@@ -329,6 +355,7 @@ export function buildBoards(players: BoardPlayer[], deeds: DeedsSummary): Boards
     fish: statBoard(players, STATS.fish),
     titles: titlesBoard(players),
     deeds: deedsBoard(deeds),
+    day: dayBoard(worldDay),
   };
 }
 

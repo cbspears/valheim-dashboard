@@ -18,12 +18,14 @@ in the world is already claimed with the old spelling.
 [board:kills]      [board:deaths]     [board:builds]     [board:resources]
 [board:explored]   [board:distance]   [board:damage]     [board:hours]
 [board:crafts]     [board:fish]       [board:titles]     [board:deeds]
+[board:day]
 
 [board:kills:leader]   <- any of the TEN stat markers, with ":leader" added
 ```
 
-`titles` and `deeds` have no `:leader` form — Living Titles is alphabetical (colouring a
-first name would invent a winner) and Great Deeds is a warband total, not a race.
+`titles`, `deeds` and `day` have no `:leader` form — Living Titles is alphabetical
+(colouring a first name would invent a winner), Great Deeds is a warband total, not a
+race, and the world day belongs to the world.
 
 ## The ten ranked stat boards
 
@@ -53,6 +55,14 @@ Four of those are new (2026-09-13), one line each:
   GREATER of the per-species `gs_stats.fish` sum and the profile's own
   `gs_stats.fishCaught`. The key is `fish`, the header word is **Catches**.
 
+`day` → **"Day"** (2026-09-25, asked for by a player) is `server_status.world_day`, the
+same number the Hall page shows, rendered as the accented value with no name beside it
+and with no thousands separator (the Hall page and the game both say `Day 1042`).
+It is the only board that changes without anyone playing: a Valheim day is about thirty
+real minutes, so it costs roughly two sign rewrites an hour. A day under 1 (or an
+unreadable `server_status`) renders `no entries yet` rather than "Day 0", and the feed
+never fails over it — the read is guarded in the route and passes null.
+
 Two notes the same as for the original six: a metric at 0 / null is skipped rather than
 printed (an untouched board says `no entries yet` instead of listing five zeros), and
 every board string is capped at `BOARD_CHAR_BUDGET` (200 chars) by dropping whole
@@ -65,7 +75,7 @@ trailing rows.
   "generatedAt": "2026-09-13T18:04:11.204Z",
   "boards": { "kills": "…", "hours": "<b>Hours</b>\nAstrid <color=#f2c14e>12.5 h</color>\nBjorn 5.0 h", "…": "…" },
   "leaders": { "kills": "…", "hours": "<b>Hours</b>\nAstrid <color=#f2c14e>12.5 h</color>", "…": "…" },
-  "keys": ["kills","deaths","builds","resources","explored","distance","damage","hours","crafts","fish","titles","deeds"],
+  "keys": ["kills","deaths","builds","resources","explored","distance","damage","hours","crafts","fish","titles","deeds","day"],
   "data": { "players": [ /* … + playtimeMin, fishCaught */ ], "deeds": { "achieved": 7, "total": 36, "latest": { "…": "…" } } }
 }
 ```
