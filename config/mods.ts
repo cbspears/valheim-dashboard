@@ -73,7 +73,7 @@ export const ALL_MODS: Mod[] = [
     author: 'denikson',
     description:
       'The mod loader everything else runs on. A mod manager installs it for you automatically, so you rarely touch it directly.',
-    version: '5.4.2350',
+    version: '5.4.2351', // 2026-09-25: BepInExPack 5.4.2351 = BepInEx core 5.4.23.5 (PlantEverything 1.21.3 depends on it, so r2modman installs it anyway); the BOX still runs core 5.4.23.3 — not enforced, works. Previous: 5.4.2350.
     category: 'Core',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/',
@@ -224,7 +224,7 @@ name: 'Unshamed',
     author: 'Advize',
     description:
       'Plant and harvest every flower, sapling, and crop with the cultivator, so you can raise proper farms and managed forests. Yields stay vanilla. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
-    version: '1.21.2', // 2026-09-12 15:19 CT: Advize's 1.21.2 ("Fixed seed drops for poteitrs") on the box; pack v19 pins it (v16–v18 pinned 1.21.0, r2modman installed the newest anyway).
+    version: '1.21.3', // 2026-09-25 09:34 CT: Advize's 1.21.3 (Valheim 1.0.15 + BepInEx 5.4.2351 build; init-during-config-sync fix) on the box, boot verified; pack v23 pins it. Previous: 1.21.2 — 2026-09-12 15:19 CT: Advize's 1.21.2 ("Fixed seed drops for poteitrs") on the box; pack v19 pins it (v16–v18 pinned 1.21.0, r2modman installed the newest anyway).
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
