@@ -131,6 +131,71 @@ function db() {
   );
 }
 
+/**
+ * One page of a PostgREST read, as `fetchAllRows` needs to see it: something
+ * awaitable that resolves to the `{ data, error }` every query in this file
+ * already destructures. Deliberately structural rather than an import of
+ * postgrest-js's builder type, so a test can hand this a plain fake.
+ */
+type RowPage<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
+
+/**
+ * Read EVERY row a query matches, a page at a time, instead of trusting one
+ * `.limit()` to fetch them.
+ *
+ * POSTGREST CAPS A RESPONSE AT 1000 ROWS, AND SAYS NOTHING (2026-09-27).
+ * `db-max-rows` is a server-side ceiling, so `.limit(2000)` is a wish: the
+ * request comes back with a thousand rows and a perfectly ordinary 200, no
+ * error, nothing in the client to read. Measured against this very project —
+ * a 2000-row session read with `Prefer: count=exact` answered
+ * `Content-Range: 0-999/1173`.
+ *
+ * THAT SILENCE IS WHAT BROKE THE SAGA. The windowed reads below ask for their
+ * window OLDEST FIRST (callers bucket by day and walk forwards), so the
+ * thousand rows that survive the cap are the thousand OLDEST and the nights
+ * that vanish are the most recent ones — the worst possible half to lose. On
+ * 2026-09-27 the 70-day window held 1173 sessions and 3225 events, and the
+ * Story page (lib/episodes.ts buildEpisodes) simply stopped on 24 September
+ * while vikings had sailed on the 25th, 26th and 27th.
+ *
+ * So: page with `.range(from, to)` and concatenate until a short page comes
+ * back. Each read keeps its own ordering exactly as it was — ascending stays
+ * ascending, because callers assume it — but the ordering no longer decides
+ * what gets dropped, because nothing gets dropped.
+ *
+ * ON ERROR THIS RETURNS NOTHING, NOT WHAT IT HAD. A failed page abandons the
+ * whole read and yields `[]`, which is precisely what the single-shot reads
+ * already did (`(data as T[]) ?? []` — a failed query has null data). Handing
+ * back the pages that did arrive would be a silently truncated list that no
+ * caller could tell from a complete one, i.e. the bug this helper exists to
+ * kill, wearing a different hat. Callers that distinguish "empty" from
+ * "missing table" (getPhotosByPin) are unaffected: both still render empty.
+ *
+ * `maxRows` is the real ceiling the old `.limit()` pretended to be. It bounds
+ * the walk so a runaway producer cannot turn one render into an unbounded
+ * transfer, and it is a multiple of nothing — the last page is trimmed to land
+ * exactly on it.
+ */
+export async function fetchAllRows<T>(
+  build: (from: number, to: number) => RowPage<T>,
+  pageSize = 1000,
+  maxRows = 20_000
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; from < maxRows; from += pageSize) {
+    // `.range()` is inclusive at both ends, and the last page is clipped so the
+    // walk stops ON maxRows rather than one page past it.
+    const want = Math.min(pageSize, maxRows - from);
+    const { data, error } = await build(from, from + want - 1);
+    if (error || !data) return [];
+    rows.push(...data);
+    // A short page is the end of the table. An exactly-full last page costs one
+    // more (empty) round trip, which is the honest price of not guessing.
+    if (data.length < want) break;
+  }
+  return rows;
+}
+
 // Explicit column list for public player reads — every players column EXCEPT
 // `steam_id`, which is a real external Steam account id the public site never
 // uses. Paired with a REVOKE SELECT (steam_id) ... FROM anon migration so a
@@ -585,6 +650,13 @@ export interface LivePin {
  * number, and it exists only so a runaway producer (a /pin loop, a spammer)
  * cannot turn every /map and /viking render into an unbounded transfer. Oldest
  * first, so the cap drops the newest pins rather than rewriting the atlas.
+ *
+ * DELIBERATELY NOT PAGED (2026-09-27), unlike its windowed neighbours. The
+ * thousand here is the guard itself, not an estimate of how many pins exist:
+ * reaching it means something is spamming /pin, and the atlas draws a marker
+ * per row. Paging it would faithfully fetch the flood. If honest pins ever
+ * approach a thousand, raise this cap or switch to fetchAllRows then — with
+ * eyes open, not by accident.
  */
 export const getPins = cache(async (): Promise<LivePin[]> => {
   const { data } = await db()
@@ -619,15 +691,20 @@ export const getPinsForEpisodes = cache(async (days = 70): Promise<
   { name: string; kind: string | null; by_character_name: string | null; created_at: string }[]
 > => {
   const since = windowStartIso(days);
-  const { data } = await db()
-    .from('pins')
-    .select('name, kind, by_character_name, created_at')
-    .gte('created_at', since)
-    .order('created_at', { ascending: true })
-    .limit(2000);
-  return (
-    (data as { name: string; kind: string | null; by_character_name: string | null; created_at: string }[]) ??
-    []
+  // Paged (see fetchAllRows): the `.limit(2000)` this replaced could only ever
+  // have returned a thousand, and the saga reads this window oldest-first.
+  return fetchAllRows<{
+    name: string;
+    kind: string | null;
+    by_character_name: string | null;
+    created_at: string;
+  }>((from, to) =>
+    db()
+      .from('pins')
+      .select('name, kind, by_character_name, created_at')
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .range(from, to)
   );
 });
 
@@ -657,16 +734,23 @@ export const getOaths = cache(async (): Promise<Oath[]> => {
  */
 export const getSessionsSince = cache(async (days = 70): Promise<GameSession[]> => {
   const since = windowStartIso(days);
-  const [{ data }, excluded] = await Promise.all([
-    db()
-      .from('sessions')
-      .select('*')
-      .gte('joined_at', since)
-      .order('joined_at', { ascending: true })
-      .limit(2000),
+  const [rows, excluded] = await Promise.all([
+    // PAGED (see fetchAllRows). The `.limit(2000)` this replaced never got past
+    // a thousand, and 70 days already holds 1173 sessions — while the 400-day
+    // call in loadMilestoneAggregates asks for far more than that. Oldest first,
+    // so what the cap ate was the newest evenings: the Story page's missing
+    // nights of 2026-09-25..27.
+    fetchAllRows<GameSession>((from, to) =>
+      db()
+        .from('sessions')
+        .select('*')
+        .gte('joined_at', since)
+        .order('joined_at', { ascending: true })
+        .range(from, to)
+    ),
     getExcludedRoster(),
   ]);
-  return ((data as GameSession[]) ?? []).filter((s) => {
+  return rows.filter((s) => {
     const nm = s.character_name ?? '';
     return !excluded.names.has(nm) && !isExcludedName(nm);
   });
@@ -763,13 +847,21 @@ export function durablePlaytimeMinutesByCharacter(
   return totals;
 }
 
-/** Events from the last `days` days, oldest first; optionally filtered by type. */
+/**
+ * Events from the last `days` days, oldest first; optionally filtered by type.
+ *
+ * PAGED (see fetchAllRows): 3225 events sat in the 70-day window on 2026-09-27
+ * and the old `.limit(2000)` was returning the oldest thousand of them.
+ */
 export const getEventsSince = cache(async (days = 70, types?: string[]): Promise<GameEvent[]> => {
   const since = windowStartIso(days);
-  let q = db().from('events').select('*').gte('created_at', since);
-  if (types?.length) q = q.in('type', types);
-  const { data } = await q.order('created_at', { ascending: true }).limit(2000);
-  return (data as GameEvent[]) ?? [];
+  return fetchAllRows<GameEvent>((from, to) => {
+    // The filter is rebuilt per page: a PostgREST builder is a one-shot thenable,
+    // so the pages cannot share one.
+    let q = db().from('events').select('*').gte('created_at', since);
+    if (types?.length) q = q.in('type', types);
+    return q.order('created_at', { ascending: true }).range(from, to);
+  });
 });
 
 /**
@@ -1077,17 +1169,25 @@ export interface PinPhoto {
 /**
  * Photos linked to a map pin, keyed by pin_id — powers the map's place panel.
  * Returns an empty map if the pin_id column isn't live yet (pre-migration).
+ *
+ * PAGED (see fetchAllRows), unlike getPins above. This is the whole collection
+ * with no window on it: every screenshot anyone ever pins keeps counting, so
+ * the 1000 here was a number the gallery grows through rather than a guard, and
+ * the row it would have dropped first is the newest photo of the newest place.
+ * A failed page still yields no rows, which lands on the same `{}` the
+ * pre-migration branch returned.
  */
 export const getPhotosByPin = cache(async (): Promise<Record<string, PinPhoto[]>> => {
-  const { data, error } = await db()
-    .from('gallery_photos')
-    .select('id, url, caption, posted_by, posted_at, pin_id')
-    .not('pin_id', 'is', null)
-    .order('posted_at', { ascending: true })
-    .limit(1000);
-  if (error || !data) return {};
+  const data = await fetchAllRows<PinPhoto & { pin_id: string }>((from, to) =>
+    db()
+      .from('gallery_photos')
+      .select('id, url, caption, posted_by, posted_at, pin_id')
+      .not('pin_id', 'is', null)
+      .order('posted_at', { ascending: true })
+      .range(from, to)
+  );
   const byPin: Record<string, PinPhoto[]> = {};
-  for (const row of data as (PinPhoto & { pin_id: string })[]) {
+  for (const row of data) {
     (byPin[row.pin_id] ??= []).push({
       id: row.id,
       url: row.url,
