@@ -1139,23 +1139,24 @@ export const getNextEvent = unstable_cache(
   { revalidate: 300, tags: ['discord-events'] }
 );
 
-export const getGalleryPhotos = cache(async (limit = 60): Promise<GalleryPhoto[]> => {
+export const getGalleryPhotos = cache(async (limit?: number): Promise<GalleryPhoto[]> => {
   // Embed the linked map pin (place name) so the Gallery can show a place tag.
   // Falls back to a plain select if the pin_id column/FK isn't live yet
   // (db/2026-07-04_gallery_pin_link.sql not applied), so pages never crash.
-  const withPin = await db()
-    .from('gallery_photos')
-    .select('*, pin:pins(name, kind)')
-    .order('posted_at', { ascending: false })
-    .limit(limit);
-  if (!withPin.error) return (withPin.data as GalleryPhoto[]) ?? [];
-
-  const { data } = await db()
-    .from('gallery_photos')
-    .select('*')
-    .order('posted_at', { ascending: false })
-    .limit(limit);
-  return (data as GalleryPhoto[]) ?? [];
+  //
+  // PAGED, whole collection (2026-09-27). This used to be `.limit(60)`, which was
+  // fine for a gallery of forty and quietly became "the 60 newest" once the crew
+  // passed it (113 photos, and the /gallery page is the one place every screenshot
+  // is meant to be findable). `limit` is kept for a caller that wants a teaser and
+  // is applied AFTER the walk, newest first, so it means what it says.
+  // A dynamic column string types as GenericStringError in supabase-js; the rows are
+  // the same GalleryPhoto shape either way, so widen through unknown once here.
+  const page = (from: number, to: number, cols: string): RowPage<GalleryPhoto> =>
+    db().from('gallery_photos').select(cols).order('posted_at', { ascending: false }).range(from, to) as unknown as RowPage<GalleryPhoto>;
+  const probe = await page(0, 0, '*, pin:pins(name, kind)');
+  const cols = probe.error ? '*' : '*, pin:pins(name, kind)';
+  const rows = await fetchAllRows<GalleryPhoto>((from, to) => page(from, to, cols));
+  return typeof limit === 'number' ? rows.slice(0, limit) : rows;
 });
 
 export interface PinPhoto {
