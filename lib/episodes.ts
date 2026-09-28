@@ -343,11 +343,20 @@ export function buildEpisodes(
     finishEpisode(buckets.get(key)!, i + 1, events, oaths, pins, talesForDay.get(key) ?? [], prepared)
   );
   const tiers = assignTiers(cores, days);
+  // Deaths may lead a night only when it was the deadliest of its own week,
+  // which is another thing that can only be known from the whole list.
+  const deathPeaks = assignDeathPeaks(cores, days);
 
   return cores.map((core, i) => {
     const seed = hashString(days[i]);
     const tier = tiers[i];
-    return { ...core, tier, title: titleFor(core, tier), description: describeEpisode(core, seed, tier) };
+    const peak = deathPeaks[i];
+    return {
+      ...core,
+      tier,
+      title: titleFor(core, tier, peak),
+      description: describeEpisode(core, seed, tier, peak),
+    };
   });
 }
 
@@ -619,22 +628,181 @@ const OATH_TITLES = ['Oaths by Firelight', 'Vows Before the Hall', 'The Swearing
  */
 type EpisodeCore = Omit<Episode, 'title' | 'description' | 'tier'>;
 
-function titleFor(e: EpisodeCore, tier: EpisodeTier): string {
-  const seed = hashString(e.date.slice(0, 10));
-  // A NOTABLE NIGHT MAY NAME ITS HEADLINE. Everything below this branch is the
-  // original ladder, unchanged, and an ordinary night never reaches the branch
-  // at all — so the titles the season already carries do not move.
-  if (tier === 'expressive') {
-    const headline = expressiveTitle(e);
-    if (headline) return headline;
+// ══ WHAT LEADS A NIGHT ════════════════════════════════════════════════════
+//
+// WHY THIS EXISTS (Charlie, on the shipped page): "The story each day seems to
+// over index on deaths." He was right, and the numbers were embarrassing: 13
+// of the season's 19 nights carried a title of the form "The Day of N Deaths",
+// and the death sentence led most descriptions. Deaths were never chosen as
+// the most interesting thing that happened; they were simply second in an old
+// ladder and they are the one thing that happens every single night.
+//
+// So there is now ONE ladder, shared by the title and by both renderers, and
+// deaths are one colour in it rather than the default. The order is
+//
+//   a boss fell > a Great Deed landed > somebody's first night > [deaths, but
+//   only if this was the deadliest night of its week] > new country >
+//   a raid > places named > oaths sworn > titles conferred
+//
+// and below that the title adds turnout/hours and then, last, a death count.
+//
+// THE TWO WAYS DEATHS MAY STILL LEAD, both deliberately narrow:
+//   • `deathsPeak` — this night had more deaths than any other night within
+//     three calendar days either side. That is the honest "this was the bad
+//     one" signal, and it is computed over the list (assignDeathPeaks) for
+//     exactly the reason the tier is: a count only means something next to
+//     the counts around it.
+//   • thirty or more deaths with nothing else at all to report.
+//
+// A night with one death and nothing else still leads with that death rather
+// than with "wood was chopped, mead was drunk": filler must never displace a
+// real event. That is the one place this ladder bottoms out differently from
+// the literal reading, and it is why the pre-existing death-phrasing tests
+// still pass unchanged.
+type HeadlineKind =
+  | 'boss' | 'deed' | 'newcomer' | 'deaths' | 'discovery'
+  | 'raid' | 'places' | 'oaths' | 'titles' | 'none';
+
+function leadKind(e: EpisodeCore, deathsPeak: boolean): HeadlineKind {
+  if (e.bossKills.length > 0) return 'boss';
+  if (e.milestones.length > 0) return 'deed';
+  if (e.newcomers.length > 0) return 'newcomer';
+  if (e.deaths.length > 0 && deathsPeak) return 'deaths';
+  if (e.discoveries.length > 0) return 'discovery';
+  if (e.raids.length > 0) return 'raid';
+  if (e.places.length > 0) return 'places';
+  if (e.oaths.length > 0) return 'oaths';
+  if (e.titleAwards.length > 0) return 'titles';
+  return 'none';
+}
+
+/**
+ * Which nights were the deadliest of their own week.
+ *
+ * Same seven-calendar-night window as assignTiers, same reason: a raw count
+ * says nothing on its own. Ties go to the earlier date, and a night with no
+ * neighbours is NOT a peak — being the only night in the list is not an
+ * achievement, and treating it as one would make every single-night render
+ * (every test, every one-off) a death story again.
+ */
+function assignDeathPeaks(cores: EpisodeCore[], dayKeys: string[]): boolean[] {
+  const day = dayKeys.map(dayNumber);
+  const counts = cores.map((c) => c.deaths.length);
+  return cores.map((_, i) => {
+    if (counts[i] === 0) return false;
+    let neighbours = 0;
+    for (let j = 0; j < cores.length; j++) {
+      if (j === i || Math.abs(day[j] - day[i]) > TIER_WINDOW_RADIUS_DAYS) continue;
+      neighbours += 1;
+      if (counts[j] > counts[i] || (counts[j] === counts[i] && day[j] < day[i])) return false;
+    }
+    return neighbours > 0;
+  });
+}
+
+// ── the new title pools ───────────────────────────────────────────────────
+
+// Six of the season's 19 nights land a Great Deed, so the deed rung needs more
+// than one shape or the rebalance simply swaps one repeated headline for
+// another. A leading "The" is lowercased inside "The Night of ..." the same
+// way the boss rung does it.
+const DEED_TITLES = ['{title}, Achieved', 'The Night of {title}', '{title}, At Last'];
+
+const NEWCOMER_TITLES = ["{name}'s First Night", '{name} Came to the Realm', '{name} at the Gate'];
+const TURNOUT_TITLES = ['{n} at the Benches', 'A Hall of {n}', '{n} Answered the Horn'];
+const HOURS_TITLES = ['{h} Hours by the Fire', '{h} Hours Between Them'];
+const TITLE_AWARD_TITLES_ONE = ['{name} Took Up {title}', 'A New Name for {name}'];
+const TITLE_AWARD_TITLES_MANY = ['{n} Titles Changed Hands', 'New Names by Firelight'];
+
+/** "Grimbly's First Night", "Grimbly and Ravena Arrive", "Five New Vikings". */
+function newcomerTitle(newcomers: string[], seed: number): string {
+  const names = [...new Set(newcomers.map(firstName))];
+  if (names.length === 1) return fill(pick(NEWCOMER_TITLES, seed, 20), { name: names[0] });
+  if (names.length === 2) return `${names[0]} and ${names[1]} Arrive`;
+  return `${numTitle(names.length)} New Vikings`;
+}
+
+function titleAwardTitle(awards: EpisodeTitleAward[], seed: number): string | null {
+  if (awards.length === 0) return null;
+  if (awards.length === 1) {
+    const t = plainText(awards[0].title);
+    if (!t) return null;
+    return fill(pick(TITLE_AWARD_TITLES_ONE, seed, 21), { name: firstName(awards[0].name), title: t });
   }
-  if (e.bossKills.length > 0) return `The Fall of ${e.bossKills[0]}`;
-  if (e.deaths.length >= 3) return `The Day of ${e.deaths.length} Deaths`;
-  if (e.raids.length > 0) return raidTitle(e.raids[0]);
-  if (e.discoveries.length > 0) return discoveryTitle(e.discoveries[0]);
-  if (e.places.length > 0) return pick(FIRST_PIN_TITLES, seed);
-  if (e.oaths.length > 0) return pick(OATH_TITLES, seed);
-  if (e.participants.length >= 6) return 'A Full Hall';
+  return fill(pick(TITLE_AWARD_TITLES_MANY, seed, 21), { n: numTitle(awards.length) });
+}
+
+/** The turnout rung: how many came, or how long they stayed. */
+function turnoutTitle(e: EpisodeCore, seed: number): string | null {
+  const heads = e.participants.length;
+  const hours = Math.round(e.totalVikingHours);
+  if (heads < 6) return null;
+  // Two shapes, chosen by the day's seed so a run of full halls does not read
+  // as the same headline five nights running.
+  if (hours >= 40 && (seed & 1) === 0) return fill(pick(HOURS_TITLES, seed, 22), { h: numTitle(hours) });
+  if (heads >= 8) return fill(pick(TURNOUT_TITLES, seed, 22), { n: numTitle(heads) });
+  return 'A Full Hall';
+}
+
+/** The death-count rung, in each tier's own register. */
+function deathTitle(e: EpisodeCore, tier: EpisodeTier): string {
+  if (tier === 'expressive') {
+    const horde = dominantCreature(e.deaths);
+    if (horde) return `The Night of the ${horde} Horde`;
+    return `The Night of ${numTitle(e.deaths.length)} Deaths`;
+  }
+  return `The Day of ${e.deaths.length} Deaths`;
+}
+
+function titleFor(e: EpisodeCore, tier: EpisodeTier, deathsPeak: boolean): string {
+  const seed = hashString(e.date.slice(0, 10));
+  const loud = tier === 'expressive';
+
+  // THE SHARED LADDER (leadKind), in each tier's own register. An expressive
+  // night gets the louder phrasing of the same fact; a terse night keeps the
+  // wording the season already carries.
+  switch (leadKind(e, deathsPeak)) {
+    case 'boss': {
+      const boss = plainText(e.bossKills[0]);
+      if (boss) return loud ? `The Night ${boss.replace(/^The\s+/, 'the ')} Fell` : `The Fall of ${boss}`;
+      break;
+    }
+    case 'deed': {
+      const t = plainText(e.milestones[0].title);
+      if (t) {
+        const shape = pick(DEED_TITLES, seed, 23);
+        // "The Night of The Five Hundred" and "...of A Hundred Hours" both
+        // read as a typo; the article is lowercased mid-sentence.
+        const inner = t.replace(/^(The|An|A)\s+/, (_m, a) => `${a.toLowerCase()} `);
+        return fill(shape, { title: shape.startsWith('The Night of') ? inner : t });
+      }
+      break;
+    }
+    case 'newcomer':
+      return newcomerTitle(e.newcomers, seed);
+    case 'deaths':
+      return deathTitle(e, tier);
+    case 'discovery':
+      return discoveryTitle(e.discoveries[0]);
+    case 'raid':
+      return raidTitle(e.raids[0]);
+    case 'places':
+      return pick(FIRST_PIN_TITLES, seed);
+    case 'oaths':
+      return pick(OATH_TITLES, seed);
+    case 'titles': {
+      const t = titleAwardTitle(e.titleAwards, seed);
+      if (t) return t;
+      break;
+    }
+  }
+
+  // Nothing happened that names itself. Who turned up, then how deadly it was,
+  // then the quiet pool, which is still the right answer for a genuinely quiet
+  // night and is reached the same way it always was.
+  const turnout = turnoutTitle(e, seed);
+  if (turnout) return turnout;
+  if (e.deaths.length >= 30) return deathTitle(e, tier);
   if (e.participants.length === 1) return `${firstName(e.participants[0]?.name)}'s Lone Vigil`;
   return QUIET_TITLES[(e.number - 1) % QUIET_TITLES.length];
 }
@@ -835,12 +1003,18 @@ function daySpanClause(range: [number, number] | null): string {
  * in. The score is still read here, but only to choose between the two closing
  * pools, never to decide the tier a second time.
  */
-function describeEpisode(e: EpisodeCore, seed: number, tier: EpisodeTier): string {
-  if (tier !== 'expressive') return describeTerse(e, seed);
-  return describeExpressive(e, seed, notability(e).score);
+function describeEpisode(
+  e: EpisodeCore,
+  seed: number,
+  tier: EpisodeTier,
+  deathsPeak: boolean
+): string {
+  const kind = leadKind(e, deathsPeak);
+  if (tier !== 'expressive') return describeTerse(e, seed, kind);
+  return describeExpressive(e, seed, notability(e).score, kind);
 }
 
-function describeTerse(e: EpisodeCore, seed: number): string {
+function describeTerse(e: EpisodeCore, seed: number, kind: HeadlineKind): string {
   const names = e.participants.map((p) => p.name);
   const day = daySpanClause(e.worldDayRange);
 
@@ -859,40 +1033,61 @@ function describeTerse(e: EpisodeCore, seed: number): string {
     day,
   });
 
-  // Primary headline clause — highest-priority happening of the day. `kind` is
-  // kept so the color clause below never tells the same event a second time
-  // ("The warband stood against a siege. A raid tested the walls, and the walls
+  // Primary headline clause, from the shared ladder (leadKind). `kind` is kept
+  // so the colour clause below never tells the same event a second time ("The
+  // warband stood against a siege. A raid tested the walls, and the walls
   // won." was two sentences about one raid).
   let primary: string | null = null;
-  let kind = 'quiet';
-  if (e.bossKills.length > 0) {
-    primary = fill(pick(BOSS_DESC, seed, 1), { boss: e.bossKills[0] });
-    kind = 'boss';
-  } else if (e.deaths.length > 0) {
-    primary = deathSentence(e.deaths, seed);
-    kind = 'death';
-  } else if (e.discoveries.length > 0) {
-    primary = pick(DISCOVERY_DESC, seed, 1);
-    kind = 'discovery';
-  } else if (e.raids.length > 0) {
-    primary = pick(RAID_DESC, seed, 1);
-    kind = 'raid';
-  } else if (e.places.length > 0) {
-    primary = placesClause(e.places, seed);
-    kind = 'places';
-  } else if (e.oaths.length > 0) {
-    primary = oathsClause(e.oaths, seed);
-    kind = 'oaths';
-  } else {
-    primary = pick(QUIET_DESC, seed, 1);
+  switch (kind) {
+    case 'boss':
+      primary = fill(pick(BOSS_DESC, seed, 1), { boss: e.bossKills[0] });
+      break;
+    case 'deed': {
+      const t = plainText(e.milestones[0].title);
+      primary = t ? sentence(fill(pick(EXPR_DEED, seed, 1), { title: t })) : null;
+      break;
+    }
+    case 'newcomer':
+      primary = newcomerSentence(e.newcomers, seed);
+      break;
+    case 'deaths':
+      primary = deathSentence(e.deaths, seed);
+      break;
+    case 'discovery':
+      primary = pick(DISCOVERY_DESC, seed, 1);
+      break;
+    case 'raid':
+      primary = pick(RAID_DESC, seed, 1);
+      break;
+    case 'places':
+      primary = placesClause(e.places, seed);
+      break;
+    case 'oaths':
+      primary = oathsClause(e.oaths, seed);
+      break;
+    case 'titles':
+      primary = titleAwardsSentence(e.titleAwards);
+      break;
   }
+  // NOTHING NAMED ITSELF. A night with deaths and nothing else still leads
+  // with the death rather than with "wood was chopped, mead was drunk":
+  // generic filler must never displace a real event, which is also why the
+  // pre-existing death-phrasing tests read the same as they always did.
+  if (!primary) primary = e.deaths.length > 0 ? deathSentence(e.deaths, seed) : pick(QUIET_DESC, seed, 1);
 
-  // One "color" clause — a different flavor than the headline, when present.
+  // ONE colour clause, a different flavour from the headline. A death is one
+  // of the candidates here rather than the automatic headline it used to be,
+  // and as a colour it is the single most notable death, never a count.
   const secondaries: string[] = [];
-  const placeS = e.places.length > 0 && kind !== 'places' ? placesClause(e.places, seed) : null;
-  const oathS = e.oaths.length > 0 && kind !== 'oaths' ? oathsClause(e.oaths, seed) : null;
-  const raidS = e.raids.length > 0 && kind !== 'raid' ? pick(RAID_DESC, seed, 3) : null;
-  for (const s of [oathS, placeS, raidS]) {
+  const candidates = [
+    kind !== 'oaths' && e.oaths.length > 0 ? oathsClause(e.oaths, seed) : null,
+    kind !== 'places' && e.places.length > 0 ? placesClause(e.places, seed) : null,
+    kind !== 'raid' && e.raids.length > 0 ? pick(RAID_DESC, seed, 3) : null,
+    kind !== 'discovery' && e.discoveries.length > 0 ? discoveryClause(e.discoveries, seed) : null,
+    kind !== 'titles' && e.titleAwards.length > 0 ? titleAwardsSentence(e.titleAwards) : null,
+    kind !== 'deaths' ? notableDeathSentence(e.deaths, seed, e.newcomers) : null,
+  ];
+  for (const s of candidates) {
     if (s && s !== primary && !secondaries.includes(s)) secondaries.push(s);
   }
   const secondary = secondaries.length ? secondaries[seed % secondaries.length] : null;
@@ -1358,24 +1553,69 @@ function expressiveOpener(e: EpisodeCore, seed: number): string {
 /** boss kill > Great Deed > a newcomer's first night > raid > discovery. */
 function expressiveHeadline(
   e: EpisodeCore,
-  seed: number
-): { text: string; kind: string } | null {
-  if (e.bossKills.length > 0) {
-    const boss = plainText(e.bossKills[0]);
-    const who = plainText(e.bossParty);
-    if (who) return { text: fill(pick(EXPR_BOSS_PARTY, seed, 1), { boss, who }), kind: 'boss' };
-    return { text: fill(pick(BOSS_DESC, seed, 1), { boss }), kind: 'boss' };
+  seed: number,
+  kind: HeadlineKind
+): string | null {
+  switch (kind) {
+    case 'boss': {
+      const boss = plainText(e.bossKills[0]);
+      const who = plainText(e.bossParty);
+      if (who) return fill(pick(EXPR_BOSS_PARTY, seed, 1), { boss, who });
+      return fill(pick(BOSS_DESC, seed, 1), { boss });
+    }
+    case 'deed': {
+      const title = plainText(e.milestones[0].title);
+      if (title) return sentence(fill(pick(EXPR_DEED, seed, 1), { title }));
+      return null;
+    }
+    case 'newcomer':
+      return newcomerSentence(e.newcomers, seed);
+    case 'deaths':
+      return deathGroupSentence(e.deaths) ?? deathSentence(e.deaths, seed);
+    case 'discovery':
+      return discoveryClause(e.discoveries, seed);
+    case 'raid':
+      return pick(RAID_DESC, seed, 1);
+    case 'places':
+      return placesClause(e.places, seed);
+    case 'oaths':
+      return oathsClause(e.oaths, seed);
+    case 'titles':
+      return titleAwardsSentence(e.titleAwards);
+    default:
+      return null;
   }
-  if (e.milestones.length > 0) {
-    const title = plainText(e.milestones[0].title);
-    if (title) return { text: sentence(fill(pick(EXPR_DEED, seed, 1), { title })), kind: 'deed' };
+}
+
+// ── "what people were doing", which is what the freed budget is for ───────
+
+const EXPR_DISCOVERY = [
+  'The warband pushed into {where}.',
+  '{where} was charted for the first time.',
+  'New country: {where}.',
+];
+
+/** "entered the Swamp" → "the Swamp", so a discovery names itself. */
+function discoveryPlace(detail: string): string | null {
+  const d = detail.toLowerCase();
+  if (d.includes('trader') || d.includes('haldor')) return "the trader's camp";
+  if (d.includes('crypt')) return 'a sunken crypt';
+  if (d.includes('tar pit')) return 'the tar pits';
+  for (const biome of BIOMES) {
+    if (d.includes(biome.toLowerCase())) return `the ${biome === 'Mountains' ? 'Mountain' : biome}`;
   }
-  if (e.newcomers.length > 0) {
-    return { text: newcomerSentence(e.newcomers, seed), kind: 'newcomer' };
-  }
-  if (e.raids.length > 0) return { text: pick(RAID_DESC, seed, 1), kind: 'raid' };
-  if (e.discoveries.length > 0) return { text: pick(DISCOVERY_DESC, seed, 1), kind: 'discovery' };
   return null;
+}
+
+function discoveryClause(discoveries: string[], seed: number): string {
+  const where = discoveryPlace(plainText(discoveries[0]));
+  if (!where) return pick(DISCOVERY_DESC, seed, 10);
+  const rest = discoveries.length - 1;
+  const base = fill(pick(EXPR_DISCOVERY, seed, 10), { where });
+  if (rest <= 0) return base;
+  return sentence(
+    `${base.replace(/\.$/, '')}, and ${numProse(rest)} more ${rest === 1 ? 'stretch' : 'stretches'} of new country besides`
+  );
 }
 
 function newcomerSentence(newcomers: string[], seed: number): string {
@@ -1436,19 +1676,48 @@ function mostDeathsSentence(deaths: EpisodeDeath[], seed: number): string | null
   return fill(pick(EXPR_MOST_DEATHS, seed, 7), { name: firstName(top[0]), n: numProse(top[1]) });
 }
 
-/** The one death worth its own beat: a boss took them, or the world did. */
-function notableDeathSentence(deaths: EpisodeDeath[], seed: number): string | null {
-  const boss = deaths.find((d) => isBossCause(d.cause.toLowerCase()));
-  if (boss) return `${firstName(boss.name)} was felled by ${plainText(boss.cause)}.`;
-  const env = deaths.find((d) => {
+/**
+ * The ONE death worth a sentence: a boss took them, the world did, or it
+ * happened to somebody on their very first night.
+ *
+ * Never a count. A count is what the grouped picture is for, and the whole
+ * point of the rebalance is that most nights do not get one.
+ */
+function notableDeathSentence(
+  deaths: EpisodeDeath[],
+  seed: number,
+  newcomers: string[] = []
+): string | null {
+  const chosen = mostNotableDeath(deaths, newcomers);
+  if (!chosen) return null;
+  const low = chosen.cause.toLowerCase();
+  const nm = firstName(chosen.name);
+  if (isBossCause(low)) return `${nm} was felled by ${plainText(chosen.cause)}.`;
+  const pool = lookup(ENV_DESC, low);
+  if (pool) return fill(pick(pool, seed, 8), { name: nm });
+  return fill(pick(CREATURE_DESC, seed, 8), {
+    name: nm,
+    cause: plainText(chosen.cause),
+    Cause: cap(plainText(chosen.cause)),
+    article: article(chosen.cause),
+  });
+}
+
+/** Boss cause, then the world, then a first-timer, then the most colourful. */
+function mostNotableDeath(deaths: EpisodeDeath[], newcomers: string[]): EpisodeDeath | null {
+  const named = deaths.filter((d) => d.cause && d.cause.toLowerCase() !== 'the wilds');
+  if (named.length === 0) return null;
+  const boss = named.find((d) => isBossCause(d.cause.toLowerCase()));
+  if (boss) return boss;
+  const env = named.find((d) => {
     const low = d.cause.toLowerCase();
     return ENV_KEYS.has(low) && low !== 'enemyhit' && low !== 'undefined';
   });
-  if (env) {
-    const pool = lookup(ENV_DESC, env.cause.toLowerCase());
-    if (pool) return fill(pick(pool, seed, 8), { name: firstName(env.name) });
-  }
-  return null;
+  if (env) return env;
+  const fresh = new Set(newcomers);
+  const firstTimer = named.find((d) => fresh.has(d.name));
+  if (firstTimer) return firstTimer;
+  return featuredDeath(named);
 }
 
 function titleAwardsSentence(awards: EpisodeTitleAward[]): string | null {
@@ -1526,43 +1795,60 @@ function beatCost(text: string): number {
   return (text.match(/\.(\s|$)/g) ?? []).length || 1;
 }
 
-function describeExpressive(e: EpisodeCore, seed: number, score: number): string {
+/**
+ * How much of the night's dying is worth telling.
+ *
+ * THE GROUPED DEATH PICTURE IS NOW RARE. It is three sentences about one
+ * subject and it used to run on any night with five deaths, which on this
+ * server is every night. It now runs only when the night really was about
+ * dying: twenty or more deaths, or the deadliest night of its week. Otherwise
+ * the night gets at most ONE death sentence, ranked low enough that a place
+ * named or new country charted beats it.
+ */
+const DEATH_PICTURE_MIN = 20;
+
+function describeExpressive(
+  e: EpisodeCore,
+  seed: number,
+  score: number,
+  kind: HeadlineKind
+): string {
   const beats: Beat[] = [];
   const push = (text: string | null, keep: number) => {
     if (text && !beats.some((b) => b.text === text)) beats.push({ text, keep });
   };
 
   push(expressiveOpener(e, seed), 100);
-
-  const headline = expressiveHeadline(e, seed);
-  push(headline?.text ?? null, 95);
+  push(expressiveHeadline(e, seed, kind), 95);
 
   // A newcomer that lost the headline still gets said: it happens to each
   // viking exactly once and it is never the same fact as a boss or a deed.
-  if (e.newcomers.length > 0 && headline?.kind !== 'newcomer') {
+  if (e.newcomers.length > 0 && kind !== 'newcomer') {
     push(newcomerSentence(e.newcomers, seed), 80);
   }
 
-  push(deathGroupSentence(e.deaths), 75);
-  push(mostDeathsSentence(e.deaths, seed), 55);
-  push(notableDeathSentence(e.deaths, seed), 65);
+  const picture = kind === 'deaths' || e.deaths.length >= DEATH_PICTURE_MIN;
+  if (picture) {
+    if (kind !== 'deaths') push(deathGroupSentence(e.deaths), 74);
+    push(mostDeathsSentence(e.deaths, seed), 50);
+    push(notableDeathSentence(e.deaths, seed, e.newcomers), 56);
+  } else {
+    // One sentence at most, and only if nothing better wants the room.
+    push(notableDeathSentence(e.deaths, seed, e.newcomers), 42);
+  }
 
-  const titles = titleAwardsSentence(e.titleAwards);
+  const titles = kind === 'titles' ? null : titleAwardsSentence(e.titleAwards);
   push(titles ?? potySentence(e.potyAwards), 70);
 
-  push(watchSentence(e, seed), 45);
+  // WHAT PEOPLE WERE DOING. This is where the budget freed from the death
+  // picture goes, and it ranks above the lone death sentence on purpose.
+  if (e.places.length > 0 && kind !== 'places') push(placesClause(e.places, seed), 62);
+  if (e.discoveries.length > 0 && kind !== 'discovery') push(discoveryClause(e.discoveries, seed), 58);
+  if (e.raids.length > 0 && kind !== 'raid') push(pick(RAID_DESC, seed, 3), 54);
+  if (e.oaths.length > 0 && kind !== 'oaths') push(oathsClause(e.oaths, seed), 52);
+  if (e.tales.length > 0) push(pick(EXPR_TALE, seed, 11), 44);
 
-  // Colour: whatever the headline did not already spend.
-  let colourKeep = 40;
-  const colour = (text: string | null) => {
-    push(text, colourKeep);
-    colourKeep -= 1;
-  };
-  if (e.places.length > 0) colour(placesClause(e.places, seed));
-  if (e.oaths.length > 0) colour(oathsClause(e.oaths, seed));
-  if (e.raids.length > 0 && headline?.kind !== 'raid') colour(pick(RAID_DESC, seed, 3));
-  if (e.discoveries.length > 0 && headline?.kind !== 'discovery') colour(pick(DISCOVERY_DESC, seed, 10));
-  if (e.tales.length > 0) colour(pick(EXPR_TALE, seed, 11));
+  push(watchSentence(e, seed), 40);
 
   const quote = e.chatLines.length > 0 ? quoteSentence(pick(e.chatLines, seed, 12)) : null;
   push(quote, 72);
@@ -1606,26 +1892,6 @@ function describeExpressive(e: EpisodeCore, seed: number, score: number): string
 // A notable night may name its headline in the title. Everything here is still
 // a pure function of the day's data plus the day's seed, and every rule that
 // does not fire falls through to the ordinary titleFor ladder below.
-function expressiveTitle(e: EpisodeCore): string | null {
-  if (e.bossKills.length > 0) {
-    // "The Elder" → "The Night the Elder Fell", not "...The Elder Fell".
-    const boss = plainText(e.bossKills[0]).replace(/^The\s+/, 'the ');
-    if (boss) return `The Night ${boss} Fell`;
-  }
-  if (e.milestones.length > 0) {
-    const t = plainText(e.milestones[0].title);
-    if (t) return `${t}, Achieved`;
-  }
-  if (e.deaths.length >= 15) {
-    const horde = dominantCreature(e.deaths);
-    if (horde) return `The Night of the ${horde} Horde`;
-    return `The Night of ${numTitle(e.deaths.length)} Deaths`;
-  }
-  if (e.participants.length >= 14) return `${numTitle(e.participants.length)} at the Benches`;
-  if (e.newcomers.length === 1) return `${firstName(e.newcomers[0])} Came to the Realm`;
-  return null;
-}
-
 /** The creature behind a third or more of the night's deaths, if there is one. */
 function dominantCreature(deaths: EpisodeDeath[]): string | null {
   const byCause = new Map<string, { n: number; label: string }>();

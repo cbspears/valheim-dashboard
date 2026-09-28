@@ -7,10 +7,8 @@
 // ones — and, just as importantly, an ORDINARY night still renders exactly
 // what it rendered before, byte for byte.
 //
-// The quiet-night expectation below is a SNAPSHOT of the real output captured
-// from the unmodified code before this change landed. If it ever has to move,
-// that is a decision about the season's existing cards, not a test that needs
-// updating.
+// The quiet-night expectation below is a SNAPSHOT of real output. It has moved
+// ONCE, deliberately, and the reason is recorded beside it.
 //
 // THE TIER IS A RANK, NOT A THRESHOLD (2026-09-27, second pass). A night is
 // expressive when it is one of the top two scores among the nights within
@@ -50,8 +48,21 @@ const QUIET_EVENTS = [
 ];
 
 const QUIET_TITLE = 'Into the Swamp';
+// SNAPSHOT MOVED 2026-09-27, ON PURPOSE. Charlie, on the shipped page: "The
+// story each day seems to over index on deaths." It did: the death sentence
+// was second in the old ladder and deaths are the one thing that happens every
+// night, so 13 of 19 nights led with one. Under the rebalanced ladder the
+// discovery leads this night and the single death is the colour clause after
+// it, which is exactly the intended change. The FIRST snapshot, captured from
+// the code before any of this work, was:
+//
+//   'Bjorn, Ingrid and Sven gathered at the longfire, the world at day 120.
+//    Sven learned to fear the Greydwarf.'
+//
+// Note what did NOT change: the opener, and the fact that the death is still
+// told with its cause and never as a count.
 const QUIET_DESCRIPTION =
-  'Bjorn, Ingrid and Sven gathered at the longfire, the world at day 120. Sven learned to fear the Greydwarf.';
+  'Bjorn, Ingrid and Sven gathered at the longfire, the world at day 120. New country was charted this day. Sven will not soon forget the Greydwarf that felled them.';
 
 {
   const [ep] = buildEpisodes(QUIET_SESSIONS, QUIET_EVENTS);
@@ -187,7 +198,8 @@ const EXPECTED_QUOTE = '"we found 6 crypts under the swamp," said Yosh.';
   ok(d.trim().endsWith('.'), `and closes a sentence, got: ${d}`);
 
   // The title names the headline rather than counting deaths.
-  eq(ep.title, 'The First Marathon, Achieved', 'the Great Deed names the night');
+  ok(/The First Marathon/.test(ep.title), `the Great Deed names the night, got: ${ep.title}`);
+  ok(!/Death/i.test(ep.title), `and 41 deaths do not, got: ${ep.title}`);
 
   // The inputs landed where they should have.
   eq(ep.newcomers.join(','), NEWCOMER, 'the newcomer was detected from first_seen_at');
@@ -360,9 +372,21 @@ const EXPECTED_QUOTE = '"we found 6 crypts under the swamp," said Yosh.';
   // as "The Night The Elder Fell".
   eq(buildEpisodes([session('Bjorn')], [ev('boss', { boss: 'Bonemass' })])[0].title, 'The Night Bonemass Fell');
   eq(buildEpisodes([session('Bjorn')], [ev('boss', { boss: 'The Elder' })])[0].title, 'The Night the Elder Fell');
-  // Fourteen vikings alone is under the floor; an oath and a place named take
-  // it over, and with no deaths and no deed the benches name the night.
-  eq(buildEpisodes(crew(14), [], [oath], [pin])[0].title, 'Fourteen at the Benches');
+  // Places named now outrank turnout, so the oath-and-pin night is named for
+  // its map rather than its benches.
+  eq(buildEpisodes(crew(14), [], [oath], [pin])[0].title, 'New Ground, Newly Named');
+
+  // The turnout rung is reached only when nothing named itself: fourteen
+  // vikings, fifteen deaths (not a peak, not thirty) and nothing else at all.
+  {
+    const deaths = Array.from({ length: 15 }, (_, i) => ev('death', { cause: 'Fuling' }, CREW[i % 14]));
+    const t = buildEpisodes(crew(14), deaths)[0].title;
+    ok(
+      /Benches|A Hall of|Answered the Horn|Hours by the Fire|Hours Between Them/.test(t),
+      `turnout names the night when nothing else does, got: ${t}`
+    );
+    ok(!/Death/i.test(t), `and fifteen deaths do not, got: ${t}`);
+  }
 }
 
 // ═══ 4b. THE RANK RULE OVER A REAL RUN OF NIGHTS ════════════════════════
@@ -580,6 +604,129 @@ const EXPECTED_QUOTE = '"we found 6 crypts under the swamp," said Yosh.';
     ok(!/\{|\}/.test(`${e.title} ${e.description}`), `${iso}: no brace, got: ${e.description}`);
     ok(!/\s{2}/.test(e.description) && !/\s[.,]/.test(e.description), `${iso}: no stray spacing, got: ${e.description}`);
     ok(e.description.trim().endsWith('.'), `${iso}: closes a sentence, got: ${e.description}`);
+  }
+}
+
+// ═══ 7. DEATHS ARE ONE COLOUR, NOT THE DEFAULT HEADLINE ═════════════════
+// Charlie, on the shipped page: "The story each day seems to over index on
+// deaths." Thirteen of nineteen nights carried a death-count title. The ladder
+// now puts a boss, a Great Deed, a newcomer, new country, a raid, places, oaths
+// and titles above deaths, and deaths only lead when the night really was the
+// deadliest of its week (or when 30-plus deaths are genuinely all there was).
+{
+  const CAUSES = ['Fuling', 'Greydwarf', 'Deathsquito', 'Draugr'];
+  const nightOf = (date, { vikings = 20, deaths = 0, minutes = 300, extra = [] } = {}) => {
+    const roster = CREW.slice(0, vikings);
+    return {
+      sessions: roster.map((n) => ({
+        character_name: n,
+        joined_at: `${date}T22:00:00Z`,
+        left_at: `${date}T23:00:00Z`,
+        duration_minutes: minutes,
+      })),
+      events: [
+        ...Array.from({ length: deaths }, (_, i) => ({
+          type: 'death',
+          character_name: roster[i % roster.length],
+          // Four causes in rotation, so no single creature owns a third of the
+          // night and the horde title cannot fire.
+          created_at: `${date}T22:${String(5 + (i % 50)).padStart(2, '0')}:00Z`,
+          metadata: { cause: CAUSES[i % CAUSES.length], biome: 'Plains' },
+        })),
+        ...extra.map((ev) => ({ ...ev, created_at: `${date}T22:02:00Z` })),
+      ],
+    };
+  };
+
+  const noDeathCount = (d, label) => {
+    ok(!/\b\d+ (deaths|lives)\b/i.test(d), `${label}: no death count, got: ${d}`);
+    ok(!/Blood was spilled/i.test(d), `${label}: no blood tally, got: ${d}`);
+    ok(!/deaths darkened/i.test(d), `${label}: no death tally, got: ${d}`);
+    ok(!/took (\w+|\d+) of them/i.test(d), `${label}: no grouped death picture, got: ${d}`);
+  };
+
+  // (a) TWENTY VIKINGS, TWELVE DEATHS, ONE NEW PLACE. The place names the
+  //     night on both tiers, and the description never counts the dead.
+  {
+    const pin = { name: 'Boss Stones', kind: 'landmark', by_character_name: 'Mikael', created_at: '2026-02-10T23:00:00Z' };
+    const n = nightOf('2026-02-10', { vikings: 20, deaths: 12 });
+
+    const [terseEp] = buildEpisodes(n.sessions, n.events, [], [pin]);
+    eq(terseEp.tier, 'terse', 'twelve deaths and a pin is an ordinary night');
+    ok(!/Death/i.test(terseEp.title), `terse: a non-death title, got: ${terseEp.title}`);
+    eq(terseEp.title, 'New Ground, Newly Named', 'terse: the place names it');
+    noDeathCount(terseEp.description, 'terse');
+
+    // The same night with a tale told about it clears the floor and goes loud.
+    const [loudEp] = buildEpisodes(n.sessions, n.events, [], [pin], [
+      { id: 't1', title: 'A quiet map', text: 'We walked the shore.', told_for: '2026-02-10', created_at: '2026-02-10T23:30:00Z' },
+    ]);
+    eq(loudEp.tier, 'expressive', 'a tale takes it over the floor');
+    ok(!/Death/i.test(loudEp.title), `expressive: a non-death title, got: ${loudEp.title}`);
+    noDeathCount(loudEp.description, 'expressive');
+    ok(/Boss Stones/.test(loudEp.description), `expressive: the place is in the prose, got: ${loudEp.description}`);
+  }
+
+  // (b) FORTY-ONE DEATHS AND NOTHING ELSE still leads with the dying, by
+  //     either of the two routes that are left open to it.
+  {
+    // Route one: the deadliest night of its week, among nights that exist.
+    const quietA = nightOf('2026-02-17', { deaths: 5 });
+    const bad = nightOf('2026-02-18', { deaths: 41 });
+    const quietB = nightOf('2026-02-19', { deaths: 5 });
+    const eps = buildEpisodes(
+      [...quietA.sessions, ...bad.sessions, ...quietB.sessions],
+      [...quietA.events, ...bad.events, ...quietB.events]
+    );
+    eq(eps.length, 3, 'three nights');
+    eq(eps[1].title, 'The Night of Forty-One Deaths', 'the deadliest night of the week is named for it');
+    ok(!/Death/i.test(eps[0].title), `and its quiet neighbour is not, got: ${eps[0].title}`);
+    ok(
+      /took \d+ of them|did most of the work/i.test(eps[1].description),
+      `the peak night leads with the death picture, got: ${eps[1].description}`
+    );
+
+    // Route two: thirty or more with nothing above it at all, turnout
+    // included, which on a four-viking night means the count is all there is.
+    const lonely = nightOf('2026-02-24', { vikings: 4, deaths: 41 });
+    const [only] = buildEpisodes(lonely.sessions, lonely.events);
+    eq(only.title, 'The Day of 41 Deaths', 'thirty-plus deaths and nothing else, not even a hall');
+  }
+
+  // (c) A BOSS, A GREAT DEED AND A NEWCOMER EACH OUTRANK THE DEADLIEST NIGHT.
+  //     Same 41-death peak, one extra event at a time.
+  {
+    const build = (extra, firstSeen) => {
+      const quietA = nightOf('2026-02-17', { deaths: 5 });
+      const bad = nightOf('2026-02-18', { deaths: 41, extra });
+      const quietB = nightOf('2026-02-19', { deaths: 5 });
+      return buildEpisodes(
+        [...quietA.sessions, ...bad.sessions, ...quietB.sessions],
+        [...quietA.events, ...bad.events, ...quietB.events],
+        [], [], [],
+        firstSeen ? { firstSeen } : {}
+      )[1];
+    };
+
+    const boss = build([{ type: 'boss', character_name: 'Mikael', metadata: { boss: 'Bonemass', players: '12 vikings' } }]);
+    eq(boss.title, 'The Night Bonemass Fell', 'a boss outranks the deadliest night of the week');
+    ok(/Bonemass/.test(boss.description), `and leads the prose, got: ${boss.description}`);
+
+    const deed = build([{ type: 'milestone', metadata: { title: 'The Long Haul', line: 'a hundred trees felled' } }]);
+    // The deed rung has three shapes (DEED_TITLES); all of them name the deed
+    // and none of them counts the dead.
+    ok(
+      /Long Haul/.test(deed.title) && !/Death/i.test(deed.title),
+      `a Great Deed outranks it too, got: ${deed.title}`
+    );
+    ok(/The Long Haul/.test(deed.description), `and leads the prose, got: ${deed.description}`);
+
+    const newcomer = build([], [{ characterName: 'Mikael', firstSeenAt: '2026-02-18T22:00:00Z' }]);
+    ok(
+      /Mikael/.test(newcomer.title) && !/Death/i.test(newcomer.title),
+      `a first night outranks it as well, got: ${newcomer.title}`
+    );
+    ok(/Mikael/.test(newcomer.description), `and leads the prose, got: ${newcomer.description}`);
   }
 }
 
