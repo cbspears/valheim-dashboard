@@ -330,7 +330,11 @@ const telling = (over = {}) => ({
   ok(/export const revalidate = 60;/.test(page), 'the Saga keeps its sixty seconds');
   ok(/<StorytellerToggle active="all"/.test(page) && /<StorytellerToggle active="storyteller"/.test(view),
     'both views carry the toggle, so neither is a dead end');
-  ok(/buildEpisodes\(sessions, sagaEvents, oaths, pins, tales\)/.test(page),
+  // The trailing `,` rather than `)`: buildEpisodes grew an optional SIXTH
+  // argument on 2026-09-27 (the expressive-night inputs), so the call now runs
+  // over several lines. What this still proves is the thing it always proved,
+  // that `tales` is the fifth argument and reaches the builder.
+  ok(/buildEpisodes\(sessions, sagaEvents, oaths, pins, tales[,)]/.test(page),
     'the episode builder is handed the tales');
   ok(/getTales\(\{ sinceDay: daysAgoCtKey\(WINDOW_DAYS\)/.test(page),
     'over the same window as the sessions beside them');

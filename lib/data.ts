@@ -116,6 +116,12 @@ import type {
   Tale,
 } from './types';
 import { AGGREGATE_STAT_COLUMNS, computeAggregates, type Aggregates } from './milestones';
+import type {
+  EpisodeChatLineInput,
+  EpisodeFirstSeenInput,
+  EpisodePotyAwardInput,
+  EpisodeTitleAwardInput,
+} from './episodes';
 import {
   filterExcluded,
   filterExcludedByPlayerId,
@@ -706,6 +712,163 @@ export const getPinsForEpisodes = cache(async (days = 70): Promise<
       .order('created_at', { ascending: true })
       .range(from, to)
   );
+});
+
+// ══ THE STORY PAGE'S EXTRA INPUTS (2026-09-27) ════════════════════════════
+//
+// Four reads that exist for one caller: app/events/page.tsx, which hands them
+// to buildEpisodes' optional sixth argument so a notable night can be narrated
+// with specifics (lib/episodes.ts). Every one of them is WINDOWED and PAGED —
+// PostgREST caps a response at 1000 rows and says nothing about it, which is
+// the bug that ate the Story page's last three nights on 2026-09-27 (see
+// fetchAllRows). Every one of them also degrades to [] rather than throwing:
+// the Story must render without a quote or without titles, never not at all.
+
+/**
+ * Living titles conferred inside the window, oldest first.
+ *
+ * `title_history` stores a `player_id`, so the character name comes from an
+ * embedded `players` read. That embed is the reason this can legitimately
+ * return nothing: the table is created by a hand-applied migration
+ * (db/2026-07-05_titles.sql) and a PostgREST embed against a missing table or
+ * a missing grant fails the whole query. fetchAllRows already turns that into
+ * an empty list, which is the correct story: no titles to report.
+ */
+export const getTitleAwardsSince = cache(async (days = 70): Promise<EpisodeTitleAwardInput[]> => {
+  const since = windowStartIso(days);
+  type Row = {
+    title: string | null;
+    awarded_at: string;
+    players: { character_name: string | null } | { character_name: string | null }[] | null;
+  };
+  const [rows, excluded] = await Promise.all([
+    fetchAllRows<Row>((from, to) =>
+      db()
+        .from('title_history')
+        .select('title, awarded_at, players ( character_name )')
+        .gte('awarded_at', since)
+        .order('awarded_at', { ascending: true })
+        .range(from, to)
+    ),
+    getExcludedRoster(),
+  ]);
+  const out: EpisodeTitleAwardInput[] = [];
+  for (const r of rows) {
+    // supabase-js types a to-one embed as either the object or a one-element
+    // array depending on how it inferred the relationship; take both.
+    const joined = Array.isArray(r.players) ? r.players[0] : r.players;
+    const name = (joined?.character_name ?? '').trim();
+    const title = (r.title ?? '').trim();
+    if (!name || !title) continue;
+    if (excluded.names.has(name) || isExcludedName(name)) continue;
+    out.push({ characterName: name, title, awardedAt: r.awarded_at });
+  }
+  return out;
+});
+
+/** Player-of-the-Day crowns inside the window, oldest first. */
+export const getPotyAwardsSince = cache(async (days = 70): Promise<EpisodePotyAwardInput[]> => {
+  const since = windowStartIso(days);
+  const [rows, excluded] = await Promise.all([
+    fetchAllRows<{ character_name: string | null; award_label: string | null; awarded_at: string }>(
+      (from, to) =>
+        db()
+          .from('poty_history')
+          .select('character_name, award_label, awarded_at')
+          .gte('awarded_at', since)
+          .order('awarded_at', { ascending: true })
+          .range(from, to)
+    ),
+    getExcludedRoster(),
+  ]);
+  return rows
+    .filter((r) => {
+      const nm = (r.character_name ?? '').trim();
+      return nm && (r.award_label ?? '').trim() && !excluded.names.has(nm) && !isExcludedName(nm);
+    })
+    .map((r) => ({
+      characterName: (r.character_name ?? '').trim(),
+      awardLabel: (r.award_label ?? '').trim(),
+      awardedAt: r.awarded_at,
+    }));
+});
+
+/**
+ * Every viking's `first_seen_at`, so a night can be called somebody's first.
+ *
+ * Not windowed: the whole point is to know whether a first sighting is OLDER
+ * than the window, and the roster caps at twenty-odd rows anyway.
+ */
+export const getFirstSeenByCharacter = cache(async (): Promise<EpisodeFirstSeenInput[]> => {
+  const [rows, excluded] = await Promise.all([
+    fetchAllRows<{ character_name: string | null; first_seen_at: string | null }>((from, to) =>
+      db()
+        .from('players')
+        .select('character_name, first_seen_at')
+        .order('first_seen_at', { ascending: true })
+        .range(from, to)
+    ),
+    getExcludedRoster(),
+  ]);
+  return rows
+    .filter((r) => {
+      const nm = (r.character_name ?? '').trim();
+      return nm && r.first_seen_at && !excluded.names.has(nm) && !isExcludedName(nm);
+    })
+    .map((r) => ({ characterName: (r.character_name ?? '').trim(), firstSeenAt: r.first_seen_at! }));
+});
+
+/**
+ * Mirrored in-game SHOUTS inside the window, oldest first.
+ *
+ * READ WITH THE SERVICE ROLE, DELIBERATELY. `chat_lines` lost its public read
+ * policy in db/2026-07-11_security_hardening.sql: the anon key must not be
+ * able to query the chat log, and that has not changed. What Charlie asked for
+ * on 2026-09-27 is narrower and does not reopen it — ONE line per notable
+ * night, chosen by lib/episodes.ts and baked into a server-rendered page. The
+ * rows never leave the server, the table stays unreadable to the anon key, and
+ * the only lines eligible are SHOUTS, which already mirror publicly to Discord
+ * #server (the 2026-07-07 decision that created this table).
+ *
+ * With no service-role key in the environment this returns [] and the Story
+ * simply carries no quotes, which is how it renders in any local checkout that
+ * only has the public keys.
+ */
+export const getChatLinesSince = cache(async (days = 70): Promise<EpisodeChatLineInput[]> => {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!key || !url) return [];
+  const since = windowStartIso(days);
+  const admin = createClient(url, key, {
+    auth: { persistSession: false },
+    global: { fetch: retryingFetch() },
+  });
+  const [rows, excluded] = await Promise.all([
+    // Bounded at 5000 rather than the helper's 20000: this is the chattiest
+    // table on the site and the renderer needs at most one line per night.
+    fetchAllRows<{ character_name: string | null; message: string | null; created_at: string }>(
+      (from, to) =>
+        admin
+          .from('chat_lines')
+          .select('character_name, message, created_at')
+          .gte('created_at', since)
+          .order('created_at', { ascending: true })
+          .range(from, to),
+      1000,
+      5000
+    ),
+    getExcludedRoster(),
+  ]);
+  return rows
+    .filter((r) => {
+      const nm = (r.character_name ?? '').trim();
+      return nm && (r.message ?? '').trim() && !excluded.names.has(nm) && !isExcludedName(nm);
+    })
+    .map((r) => ({
+      characterName: (r.character_name ?? '').trim(),
+      message: (r.message ?? '').trim(),
+      createdAt: r.created_at,
+    }));
 });
 
 /** The sworn oaths, oldest first (the Oath page + Hall teaser). */
