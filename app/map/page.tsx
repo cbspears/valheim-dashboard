@@ -51,12 +51,18 @@ export const metadata: Metadata = {
 // not only the caption. ISR is stale-while-revalidate — the first request after
 // the window expires is served the OLD render and only triggers the new one, so
 // on a quiet route the staleness is bounded by the gap between visitors rather
-// than by the window. And LiveWorld builds the composite's `src` as
-// `current.webp?t=<liveMap.updatedAt>`, so the freshness value doubles as the
-// image cache-buster: a frozen render pins the picture too, not just the "last
-// charted" line under it. Busy nights are unaffected; the quiet hours and the
-// first look after a world wipe are the cases to know about — see the ISR note
-// at the top of lib/data.ts for the launch-morning consequence.
+// than by the window. The composite's `src` carries the same freshness value
+// (`/api/map/current?v=<capturedAt>`, built by getLiveMap), so a frozen render
+// pins the picture too, not just the "last charted" line under it. Busy nights
+// are unaffected; the quiet hours and the first look after a world wipe are the
+// cases to know about — see the ISR note at the top of lib/data.ts for the
+// launch-morning consequence.
+//
+// That value used to be appended by the component as `?t=` against the raw
+// Supabase object, which made it a cache-buster rather than a version: every
+// view, refresh and /tv tick pulled the full ~156 kB from Storage. Since the
+// 2026-10-02 egress incident it is a cache KEY on a same-origin route that the
+// Vercel edge can serve (app/api/map/current, lib/map-image).
 export const revalidate = 60;
 
 export default async function MapPage() {
@@ -104,8 +110,8 @@ export default async function MapPage() {
           <CardBody>
             <LiveWorld
               currentUrl={liveMap.url}
-              updatedLabel={liveMap.updatedAt}
               frames={liveMap.frames}
+              archivedDays={liveMap.archivedDays}
               pins={pins}
               photosByPin={photosByPin}
               stale={liveMap.stale}
@@ -121,7 +127,7 @@ export default async function MapPage() {
                 <p className="mt-1.5 text-center text-xs text-muted">
                   What you see is the last chart the warband sent home.
                   {liveMap.frames.length >= 2
-                    ? ' The season replay above still walks every archived day.'
+                    ? ' The season replay above still walks the archived days.'
                     : ''}
                 </p>
               </>

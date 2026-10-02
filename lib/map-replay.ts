@@ -75,3 +75,54 @@ export function pinPhaseAt(
   if (at === undefined || at > pos) return null;
   return at === pos ? 'new' : 'established';
 }
+
+/**
+ * How many frames one replay is allowed to pull, at most.
+ *
+ * WHY THERE IS A CEILING AT ALL (2026-10-02, egress incident). The replay used
+ * to walk EVERY archived day, one `<img src>` swap per position, and the
+ * manifest had quietly grown to 951 of them at ~100 kB each. One press of play
+ * was therefore on the order of ninety megabytes off Supabase Storage — from a
+ * single visitor, on a bucket with no cache headers, repeated in full on the
+ * next press. That is the single most expensive thing the site could do, and
+ * nobody watching a season replay can see 951 distinct frames anyway: at the
+ * scrubber's 700 ms cadence it would run for eleven minutes.
+ *
+ * 120 is chosen to be about a minute and a half of watching, which is what the
+ * replay was always really showing, and to bound a play at roughly 12 MB
+ * before the edge cache gets involved (and ~0 after it).
+ */
+export const MAX_REPLAY_FRAMES = 120;
+
+/**
+ * Thin `frames` down to at most `max`, evenly spaced, keeping the ends.
+ *
+ * STABLE, NOT RANDOM, and that is the load-bearing property. The sampled days
+ * become the URLs the replay asks for (`/api/map/frame/0412`), so the same
+ * manifest must always yield the same set — otherwise every play would miss
+ * the edge cache on a fresh set of frames and we would be back to paying
+ * Supabase for all of them.
+ *
+ * The first and last frames are always kept: the first is where the world
+ * starts dark and the last is the day before Now, and losing either one is the
+ * only way the replay can read wrong.
+ *
+ * `frames` is expected sorted by day ascending (getLiveMap does this); the
+ * sample preserves whatever order it is given.
+ */
+export function sampleReplayFrames<T extends ReplayFrame>(
+  frames: readonly T[],
+  max: number = MAX_REPLAY_FRAMES,
+): T[] {
+  if (max <= 0) return [];
+  const n = frames.length;
+  if (n <= max) return frames.slice();
+  if (max === 1) return [frames[n - 1]];
+  const out: T[] = [];
+  for (let i = 0; i < max; i++) {
+    // Rounded, so the step is as even as an integer index allows; i=0 → 0 and
+    // i=max-1 → n-1 exactly, which is what pins the two ends.
+    out.push(frames[Math.round((i * (n - 1)) / (max - 1))]);
+  }
+  return out;
+}

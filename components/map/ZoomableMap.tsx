@@ -1,12 +1,31 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import Image from 'next/image';
 import { Camera, Minus, Plus, RotateCcw, X } from 'lucide-react';
 import { VikingLink } from '@/components/ui';
 import { timeAgo } from '@/lib/format';
 import type { PinPhase } from '@/lib/map-replay';
 
 const MAX_ZOOM = 6;
+
+/**
+ * The place panel's photo thumbnails, through Vercel's image optimizer rather
+ * than straight off Supabase Storage (2026-10-02 egress incident — see
+ * next.config.ts). The panel is `max-w-md` (448 px) in a two-column grid, so a
+ * tile is about 215 px and has no business pulling a 1600 px screenshot.
+ *
+ * `aspect-video` + `object-cover` already govern the rendered box, so the
+ * width/height below are only the ratio hint next/image requires; PinPhoto
+ * carries no intrinsic size and does not need to.
+ */
+const PANEL_PHOTO_SIZES = '(min-width: 640px) 224px, 45vw';
+
+/** Same allow-list guard as the gallery: a URL the optimizer would reject is
+ *  passed through untouched instead of 400-ing into a broken tile. */
+function isOptimizable(url: string): boolean {
+  return /^https:\/\/[^/]+\.supabase\.co\/storage\/v1\/object\/public\/gallery\/[^?]+$/.test(url);
+}
 
 /** A real gallery photo linked to this pin (via caption ↔ place matching). */
 export interface MarkerPhoto {
@@ -293,12 +312,15 @@ export function ZoomableMap({
                           : undefined
                       }
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <Image
                         src={photo.url}
                         alt={photo.caption ?? `${selected.name}, from the gallery`}
+                        width={1600}
+                        height={900}
+                        sizes={PANEL_PHOTO_SIZES}
                         loading="lazy"
-                        className="aspect-video w-full rounded-md border border-rune object-cover"
+                        unoptimized={!isOptimizable(photo.url)}
+                        className="aspect-video h-auto w-full rounded-md border border-rune object-cover"
                       />
                       <figcaption className="mt-1 flex items-baseline justify-between gap-2 px-0.5">
                         <span className="truncate text-xs text-ash-dim">

@@ -110,7 +110,13 @@ export default async function TvPage({
         <section className="flex min-h-0 items-center justify-center">
           {liveMap ? (
             <TvMap
-              src={`${liveMap.url}?t=${liveMap.updatedAt ?? 'now'}`}
+              // VERBATIM, no `?t=` (2026-10-02 egress incident). getLiveMap now
+              // hands back `/api/map/current?v=<capturedAt>` — same-origin, edge
+              // cached, and stamped with the snapshot's own time. The old
+              // cache-buster made this page's 60 s router.refresh() re-pull the
+              // full composite from Supabase every single minute, around the
+              // clock, from whatever TV was left running.
+              src={liveMap.url}
               pins={pins}
               players={playerDots}
               updatedLabel={liveMap.updatedAt}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { Camera, User, Clock, MapPin, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { EmptyState, VikingLink } from '@/components/ui';
@@ -11,6 +12,47 @@ import { MAP_ENABLED } from '@/config/server';
 /** A gallery photo, with its "posted by" credit already resolved (or not) to
  *  a real viking — see `matchVikingName` in lib/slug.ts, applied by the page. */
 type CreditedPhoto = GalleryPhoto & { matchedViking: string | null };
+
+/**
+ * GRID AND LIGHTBOX `sizes`, AND WHY THEY MATTER MORE THAN THEY LOOK.
+ *
+ * These strings are what stop the browser assuming each photo is viewport-wide
+ * and pulling the biggest rung in the srcset. The grid is a 1/2/3-column
+ * masonry (the `columns-*` classes below), so a tile is roughly a third of the
+ * page on a desktop and lands on the 640–1080 px rungs instead of the 1600 px
+ * source. The lightbox is capped by `max-w-5xl` (1024 px), so it asks for about
+ * that and tops out at the source's own width.
+ */
+const GRID_SIZES = '(min-width: 1024px) 30vw, (min-width: 640px) 48vw, 94vw';
+const LIGHTBOX_SIZES = '(min-width: 1024px) 1024px, 100vw';
+
+/**
+ * How many tiles load eagerly. Three is the first row on a desktop and more
+ * than the first row anywhere narrower; everything after it is lazy, which on
+ * a wall of 132 photos is the difference between a page view costing three
+ * images and a page view costing all of them.
+ */
+const EAGER_TILES = 3;
+
+/**
+ * Supabase serves every gallery photo today, but a row could in principle
+ * carry some other URL (an older ingest, a hand-inserted link). next/image
+ * answers 400 for a src outside `images.remotePatterns`, which would be a
+ * broken tile rather than an expensive one, so anything unrecognised is passed
+ * through unoptimized — exactly the behaviour this file had before.
+ */
+function isOptimizable(url: string): boolean {
+  return /^https:\/\/[^/]+\.supabase\.co\/storage\/v1\/object\/public\/gallery\/[^?]+$/.test(url);
+}
+
+/** Intrinsic size for the aspect-ratio reservation. gallery_photos carries the
+ *  real width/height for every row the bot has ever written (it resizes to a
+ *  1600 px edge and records what came out); the fallback is only for a row that
+ *  predates those columns. */
+const dims = (p: { width?: number | null; height?: number | null }) => ({
+  width: p.width && p.width > 0 ? p.width : 1600,
+  height: p.height && p.height > 0 ? p.height : 900,
+});
 
 /** A small "linked to a map place" tag → the map. Rendered when the photo's
  *  caption named a pinned place (gallery ↔ map link). */
@@ -91,12 +133,14 @@ export function PhotoGrid({ photos }: { photos: CreditedPhoto[] }) {
               className="gold-ring block w-full cursor-zoom-in"
               aria-label={`Expand photo${p.posted_by ? ` by ${p.posted_by}` : ''}`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <Image
                 src={p.url}
                 alt={p.caption ?? `Photo by ${p.posted_by ?? 'a viking'}`}
-                loading="lazy"
-                className="w-full transition-opacity hover:opacity-95"
+                {...dims(p)}
+                sizes={GRID_SIZES}
+                loading={i < EAGER_TILES ? 'eager' : 'lazy'}
+                unoptimized={!isOptimizable(p.url)}
+                className="h-auto w-full transition-opacity hover:opacity-95"
               />
             </button>
             <figcaption className="space-y-2 p-4">
@@ -174,11 +218,13 @@ export function PhotoGrid({ photos }: { photos: CreditedPhoto[] }) {
             onClick={(e) => e.stopPropagation()}
             className="flex max-h-full max-w-5xl cursor-default flex-col items-center"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Image
               src={active.url}
               alt={active.caption ?? `Photo by ${active.posted_by ?? 'a viking'}`}
-              className="max-h-[80vh] w-auto max-w-full rounded-[var(--radius-card)] border border-rune object-contain"
+              {...dims(active)}
+              sizes={LIGHTBOX_SIZES}
+              unoptimized={!isOptimizable(active.url)}
+              className="h-auto max-h-[80vh] w-auto max-w-full rounded-[var(--radius-card)] border border-rune object-contain"
             />
             <figcaption className="mt-3 max-w-2xl text-center">
               {active.caption && <p className="text-sm text-ash">{active.caption}</p>}

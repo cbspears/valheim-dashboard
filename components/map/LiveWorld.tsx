@@ -12,15 +12,26 @@ const FRAME_MS = 700; // real days are few (for now) — let each one breathe
  *  frame per in-game day. The last position is always "Now" (current.webp). */
 export function LiveWorld({
   currentUrl,
-  updatedLabel,
   frames,
+  archivedDays,
   pins = [],
   photosByPin = {},
   stale = false,
 }: {
+  /**
+   * The live composite, already a same-origin, version-stamped path
+   * (`/api/map/current?v=...`, built by lib/data getLiveMap). It is used
+   * VERBATIM. This component used to take the freshness value as a separate
+   * `updatedLabel` prop and append it as `?t=`, which made every render, every
+   * scrub back to Now and every /tv refresh a fresh ~156 kB off Storage. That
+   * cache-buster is part of what the 2026-10-02 egress incident was made of;
+   * the same value is now the version key INSIDE this path. See lib/map-image.
+   */
   currentUrl: string;
-  updatedLabel: string | null;
+  /** Already sampled to at most MAX_REPLAY_FRAMES by getLiveMap. */
   frames: LiveMapFrame[];
+  /** True number of archived in-game days, for copy that counts them. */
+  archivedDays?: number;
   pins?: LivePin[];
   photosByPin?: Record<string, PinPhoto[]>;
   /** The composite has stopped refreshing (lib/data getLiveMap → stale). The
@@ -56,7 +67,10 @@ export function LiveWorld({
 
   const atNow = pos >= nowIndex;
   const paused = stale && atNow;
-  const src = atNow ? `${currentUrl}?t=${updatedLabel ?? 'now'}` : frames[pos].url;
+  // ONE FRAME IN THE DOM AT A TIME, which is what keeps "never fetch a frame
+  // nobody is looking at" true: the replay swaps this single `src` and no
+  // off-screen frame is ever requested, prefetched or warmed.
+  const src = atNow ? currentUrl : frames[pos].url;
   const label = atNow ? (stale ? 'Last chart' : 'Now') : `Day ${frames[pos].day}`;
   const replayReady = frames.length >= 2;
 
@@ -159,7 +173,7 @@ export function LiveWorld({
             ? 'No day has been archived yet.'
             : frames.length === 1
               ? 'One day archived so far.'
-              : `${frames.length} days archived so far.`}
+              : `${archivedDays ?? frames.length} days archived so far.`}
         </p>
       )}
     </div>

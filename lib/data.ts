@@ -116,6 +116,8 @@ import type {
   Tale,
 } from './types';
 import { AGGREGATE_STAT_COLUMNS, computeAggregates, type Aggregates } from './milestones';
+import { MAX_REPLAY_FRAMES, sampleReplayFrames } from './map-replay';
+import { MAP_FRAME_PREFIX, mapCurrentSrc, mapFrameSrc, mapStorageUrl } from './map-image';
 import type {
   EpisodeBossFightInput,
   EpisodeChatLineInput,
@@ -505,10 +507,26 @@ export interface LiveMapFrame {
 export const MAP_STALE_AFTER_MS = 6 * 60 * 60 * 1000;
 
 export interface LiveMap {
+  /**
+   * Where to point an `<img src>` at the live composite.
+   *
+   * SAME-ORIGIN AND VERSION-STAMPED since the 2026-10-02 egress incident:
+   * `/api/map/current?v=<capturedAt>`, not the raw Supabase object. See
+   * lib/map-image for why (short version: Storage sends `no-cache` on every
+   * public object, so the old direct URL could not be cached by anything, and
+   * the `?t=<updatedAt>` the callers appended made sure of it).
+   */
   url: string;
   /** `last-modified` of current.webp, i.e. when the composite was last charted. */
   updatedAt: string | null;
+  /**
+   * The replay's frames, EVENLY SAMPLED down to at most MAX_REPLAY_FRAMES
+   * (lib/map-replay). The manifest itself is unchanged and still lists every
+   * archived day — see `archivedDays` for the true count.
+   */
   frames: LiveMapFrame[];
+  /** How many in-game days the manifest actually lists, before sampling. */
+  archivedDays: number;
   /** True when the composite is older than MAP_STALE_AFTER_MS, or its age is unknown. */
   stale: boolean;
   /** Age of the composite in ms; null when `last-modified` is missing or unreadable. */
@@ -532,7 +550,7 @@ export function mapFreshness(
 
 /** The live fog-masked world map snapshot + the per-in-game-day frame archive. */
 export const getLiveMap = cache(async (): Promise<LiveMap | null> => {
-  const bucket = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/map`;
+  const bucket = mapStorageUrl('').replace(/\/$/, '');
   const url = `${bucket}/current.webp`;
   try {
     // THREE OBJECTS, ONE ROUND TRIP'S WORTH OF WALL CLOCK (2026-09-06). These
@@ -565,17 +583,34 @@ export const getLiveMap = cache(async (): Promise<LiveMap | null> => {
     if (headR.status !== 'fulfilled' || !headR.value.ok) return null;
     const head = headR.value;
 
+    // THE MANIFEST FORMAT IS UNCHANGED. It is still read exactly as before —
+    // `days` plus an optional `prefix` — and nothing writes it from here.
+    // What changed (2026-10-02 egress incident) is what the days are turned
+    // INTO: a same-origin `/api/map/frame/NNNN` path with an edge cache behind
+    // it instead of an uncacheable Supabase object URL, and at most
+    // MAX_REPLAY_FRAMES of them instead of all 951. See lib/map-replay
+    // sampleReplayFrames for the ninety-megabytes-per-play arithmetic.
     let frames: LiveMapFrame[] = [];
+    let archivedDays = 0;
     if (mfR.status === 'fulfilled' && mfR.value.ok) {
       try {
         const m = (await mfR.value.json()) as { days?: number[]; prefix?: string };
-        frames = (m.days ?? [])
-          .filter((d) => Number.isFinite(d))
-          .sort((a, b) => a - b)
-          .map((day) => ({
-            day,
-            url: `${bucket}/${m.prefix ?? 'frames-by-day/day-'}${String(day).padStart(4, '0')}.webp`,
-          }));
+        const days = (m.days ?? []).filter((d) => Number.isFinite(d)).sort((a, b) => a - b);
+        archivedDays = days.length;
+        // The frame route rebuilds the object path from the day number and the
+        // known prefix, so a manifest that ever declared a DIFFERENT prefix
+        // could not be proxied. That has never happened (the snapshotter writes
+        // the constant), but if it does, fall back to the direct storage URL
+        // rather than serving 404s: a costly replay beats a broken one.
+        const prefix = m.prefix ?? MAP_FRAME_PREFIX;
+        const src =
+          prefix === MAP_FRAME_PREFIX
+            ? mapFrameSrc
+            : (day: number) => `${bucket}/${prefix}${String(day).padStart(4, '0')}.webp`;
+        frames = sampleReplayFrames(
+          days.map((day) => ({ day, url: src(day) })),
+          MAX_REPLAY_FRAMES,
+        );
       } catch {
         /* unreadable manifest — live-only */
       }
@@ -599,7 +634,16 @@ export const getLiveMap = cache(async (): Promise<LiveMap | null> => {
       }
     }
     if (!updatedAt) updatedAt = head.headers.get('last-modified');
-    return { url, updatedAt, frames, ...mapFreshness(updatedAt) };
+    // `url` is the same-origin proxied path, stamped with the freshness value
+    // we just resolved. That value used to be appended by the CALLERS as
+    // `?t=…`, where it defeated caching; here it is the edge cache key.
+    return {
+      url: mapCurrentSrc(updatedAt),
+      updatedAt,
+      frames,
+      archivedDays,
+      ...mapFreshness(updatedAt),
+    };
   } catch {
     return null;
   }

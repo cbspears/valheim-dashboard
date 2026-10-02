@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
@@ -224,11 +225,25 @@ export default async function BossPage({ params }: { params: Promise<{ slug: str
           <CardHeader title="Screenshots" icon={<Camera size={16} />} />
           {depiction ? (
             <CardBody>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              {/* Through Vercel's image optimizer, not straight off Supabase
+                  Storage (2026-10-02 egress incident — see next.config.ts). The
+                  card is inside the page's content column, so it never needs
+                  more than about its own width; `w-full h-auto` keeps the
+                  rendered box exactly what it was. A row whose URL the
+                  optimizer would not accept falls back to the raw source
+                  rather than 400-ing, as on /gallery. */}
+              <Image
                 src={depiction.url}
                 alt={depiction.caption ?? boss.name}
-                className="w-full rounded-[var(--radius-card)] border border-rune object-cover"
+                width={depiction.width && depiction.width > 0 ? depiction.width : 1600}
+                height={depiction.height && depiction.height > 0 ? depiction.height : 900}
+                sizes="(min-width: 1024px) 720px, 94vw"
+                unoptimized={
+                  !/^https:\/\/[^/]+\.supabase\.co\/storage\/v1\/object\/public\/gallery\/[^?]+$/.test(
+                    depiction.url,
+                  )
+                }
+                className="h-auto w-full rounded-[var(--radius-card)] border border-rune object-cover"
               />
               {depiction.posted_by && (
                 <p className="mt-2 text-xs text-muted">
