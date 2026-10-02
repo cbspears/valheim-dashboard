@@ -56,6 +56,8 @@ const {
   getPotyAwardsSince,
   getFirstSeenByCharacter,
   getChatLinesSince,
+  getKilledBosses,
+  getBossFightSeconds,
 } = await import('../lib/data.ts');
 const { buildEpisodes, notability, BIG_NIGHT_SCORE } = await import('../lib/episodes.ts');
 const { daysAgoCtKey } = await import('../lib/tales.ts');
@@ -63,8 +65,10 @@ const { daysAgoCtKey } = await import('../lib/tales.ts');
 const WINDOW_DAYS = 70;
 const nights = Number(process.argv[2] ?? 7) || 7;
 
-const [sessions, sagaEvents, oaths, pins, tales, titleAwards, potyAwards, firstSeen, chatLines] =
-  await Promise.all([
+const [
+  sessions, sagaEvents, oaths, pins, tales,
+  titleAwards, potyAwards, firstSeen, chatLines, bossFights, bossFightSeconds,
+] = await Promise.all([
     getSessionsSince(WINDOW_DAYS),
     getEventsSince(WINDOW_DAYS),
     getOaths(),
@@ -74,11 +78,14 @@ const [sessions, sagaEvents, oaths, pins, tales, titleAwards, potyAwards, firstS
     getPotyAwardsSince(WINDOW_DAYS).catch(() => []),
     getFirstSeenByCharacter().catch(() => []),
     getChatLinesSince(WINDOW_DAYS).catch(() => []),
+    getKilledBosses().catch(() => []),
+    getBossFightSeconds().catch(() => ({})),
   ]);
 
 console.log(
   `reads: ${sessions.length} sessions, ${sagaEvents.length} events, ${titleAwards.length} title awards, ` +
-    `${potyAwards.length} crowns, ${firstSeen.length} first sightings, ${chatLines.length} shouts\n`
+    `${potyAwards.length} crowns, ${firstSeen.length} first sightings, ${chatLines.length} shouts, ` +
+    `${bossFights.length} felled bosses\n`
 );
 
 const episodes = buildEpisodes(sessions, sagaEvents, oaths, pins, tales, {
@@ -86,6 +93,8 @@ const episodes = buildEpisodes(sessions, sagaEvents, oaths, pins, tales, {
   potyAwards,
   firstSeen,
   chatLines,
+  bossFights,
+  bossFightSeconds,
 });
 
 const CT = new Intl.DateTimeFormat('en-CA', {

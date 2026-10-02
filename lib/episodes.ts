@@ -14,7 +14,7 @@
 //
 // Pure and dependency-free (aside from the Oath row type) so it can be
 // unit-tested in isolation.
-import type { GameSession, GameEvent, Oath } from './types';
+import type { GameSession, GameEvent, Oath, Boss } from './types';
 import { taleByline } from './tales';
 
 export interface EpisodeParticipant {
@@ -31,6 +31,11 @@ export interface EpisodeDeath {
    * because only the expressive death picture reads it.
    */
   biome?: string | null;
+  /**
+   * Who did it, when the death row named them separately from the cause
+   * (`events.metadata.attacker`). Read only to count a boss's toll.
+   */
+  attacker?: string | null;
 }
 
 export interface EpisodePlace {
@@ -77,12 +82,52 @@ export interface EpisodeFirstSeenInput {
   firstSeenAt: string;
 }
 
+/**
+ * A felled forsaken's own record of its fight (the `bosses` row), as the
+ * episode builder needs it. Added 2026-10-02 for Moder's inaugural kill: the
+ * `events` row the Story has always used carries the boss name and a COUNT,
+ * and everything that makes a boss night worth reading was in this table.
+ */
+export interface EpisodeBossFightInput {
+  name: string;
+  killedAt: string;
+  playersPresent: string[];
+  fightStats: Boss['fight_stats'];
+  /** when the Skald wrote the retelling, or null — the card links, never renders it */
+  retellingAt: string | null;
+}
+
+/** The same fight, resolved and bucketed onto the night it happened. */
+export interface EpisodeBossFight {
+  name: string;
+  killedAt: string;
+  /** everyone who landed a blow, best-known order (damage desc, then listed order) */
+  fighters: string[];
+  /** fighter → damage, sorted hardest first; empty when the fight kept no ledger */
+  damage: { name: string; amount: number }[];
+  topDamagePlayer: string | null;
+  topDamage: number | null;
+  /** how many were still in the realm when it dropped */
+  onlineAtKill: number;
+  /** how long the fight ran, in seconds, when anyone clocked it */
+  fightSec: number | null;
+  /** the vikings this boss killed on the way down, that same night */
+  toll: string[];
+  /** the world day it fell on, from the kill event */
+  worldDay: number | null;
+  retellingAt: string | null;
+}
+
 /** The optional sixth argument of buildEpisodes. */
 export interface EpisodeExtras {
   titleAwards?: EpisodeTitleAwardInput[];
   potyAwards?: EpisodePotyAwardInput[];
   chatLines?: EpisodeChatLineInput[];
   firstSeen?: EpisodeFirstSeenInput[];
+  /** the `bosses` rows for every forsaken already felled */
+  bossFights?: EpisodeBossFightInput[];
+  /** boss name → the longest fight anyone clocked, seconds (gs_stats fallback) */
+  bossFightSeconds?: Record<string, number>;
 }
 
 /** A Great Deed achieved on this night (events of type 'milestone'). */
@@ -183,6 +228,10 @@ export interface Episode {
   milestones: EpisodeMilestone[];
   /** `events.metadata.players` from the day's boss kill, when it carried one */
   bossParty: string | null;
+  /** the world day the boss fell on, from the kill event */
+  bossWorldDay: number | null;
+  /** the `bosses` record of any forsaken felled this night, newest last */
+  bossFights: EpisodeBossFight[];
   /** living titles conferred this day (title_history) */
   titleAwards: EpisodeTitleAward[];
   /** Player-of-the-Day crowns awarded for this day (poty_history) */
@@ -333,6 +382,8 @@ export function buildEpisodes(
     potyAwards: extras.potyAwards ?? [],
     chatLines: extras.chatLines ?? [],
     firstSeenDay,
+    bossFights: extras.bossFights ?? [],
+    bossFightSeconds: extras.bossFightSeconds ?? {},
   };
 
   // TWO PASSES, AND IT HAS TO BE TWO. A night's tier depends on the nights
@@ -366,6 +417,8 @@ interface PreparedExtras {
   potyAwards: EpisodePotyAwardInput[];
   chatLines: EpisodeChatLineInput[];
   firstSeenDay: Map<string, string>;
+  bossFights: EpisodeBossFightInput[];
+  bossFightSeconds: Record<string, number>;
 }
 
 function finishEpisode(
@@ -375,14 +428,22 @@ function finishEpisode(
   oaths: Oath[],
   pins: EpisodePinInput[],
   dayTales: EpisodeTaleInput[] = [],
-  prepared: PreparedExtras = { titleAwards: [], potyAwards: [], chatLines: [], firstSeenDay: new Map() }
+  prepared: PreparedExtras = {
+    titleAwards: [], potyAwards: [], chatLines: [], firstSeenDay: new Map(),
+    bossFights: [], bossFightSeconds: {},
+  }
 ): EpisodeCore {
-  const deaths: EpisodeDeath[] = [];
+  // Collected with their instants so the list can be put in the order they
+  // HAPPENED rather than the order the caller handed the events over.
+  // buildEpisodes promises callers may pass data in any order, and the boss's
+  // toll ("Æymundr and Yunter paid for it") was reading that promise back.
+  const deathRows: { at: number; death: EpisodeDeath }[] = [];
   const raids: string[] = [];
   const discoveries: string[] = [];
   const bossKills: string[] = [];
   const milestones: EpisodeMilestone[] = [];
   let bossParty: string | null = null;
+  let bossWorldDay: number | null = null;
   const worldDays: number[] = [];
 
   for (const e of events) {
@@ -393,10 +454,14 @@ function finishEpisode(
 
     switch (e.type) {
       case 'death':
-        deaths.push({
-          name: e.character_name ?? 'A viking',
-          cause: str(e.metadata, 'cause') ?? 'the wilds',
-          biome: str(e.metadata, 'biome') ?? null,
+        deathRows.push({
+          at: ms(e.created_at),
+          death: {
+            name: e.character_name ?? 'A viking',
+            cause: str(e.metadata, 'cause') ?? 'the wilds',
+            biome: str(e.metadata, 'biome') ?? null,
+            attacker: str(e.metadata, 'attacker') ?? null,
+          },
         });
         break;
       case 'raid': {
@@ -416,6 +481,7 @@ function finishEpisode(
           // Who was standing there when it dropped, exactly as the feed says it
           // (lib/events.ts reads the same key).
           if (!bossParty) bossParty = str(e.metadata, 'players') ?? null;
+          if (bossWorldDay === null) bossWorldDay = num(e.metadata, 'world_day') ?? null;
         }
         break;
       }
@@ -428,6 +494,12 @@ function finishEpisode(
       }
     }
   }
+
+  // Chronological. Array.prototype.sort is stable, so two deaths recorded at
+  // the same instant keep the order they arrived in, exactly as before.
+  const deaths: EpisodeDeath[] = deathRows
+    .sort((a, c) => (Number.isNaN(a.at) ? 0 : a.at) - (Number.isNaN(c.at) ? 0 : c.at))
+    .map((r) => r.death);
 
   const places: EpisodePlace[] = pins
     .filter((p) => ctDayKey(ms(p.created_at)) === b.key && p.name?.trim())
@@ -485,6 +557,11 @@ function finishEpisode(
   const fromPresent = dayChat.filter((c) => present.has(c.name));
   const chatLines = fromPresent.length > 0 ? fromPresent : dayChat;
 
+  // ── the night's boss fights, from the `bosses` row rather than the event ──
+  const bossFights: EpisodeBossFight[] = prepared.bossFights
+    .filter((f) => (f?.name ?? '').trim() && onDay(f?.killedAt))
+    .map((f) => resolveBossFight(f, deaths, bossWorldDay, prepared.bossFightSeconds));
+
   const totalMinutes = participants.reduce((sum, p) => sum + p.minutes, 0);
   const totalVikingHours = Math.round((totalMinutes / 60) * 10) / 10;
 
@@ -523,6 +600,8 @@ function finishEpisode(
     tales: episodeTales,
     milestones,
     bossParty,
+    bossWorldDay,
+    bossFights,
     titleAwards,
     potyAwards,
     newcomers,
@@ -763,6 +842,13 @@ function titleFor(e: EpisodeCore, tier: EpisodeTier, deathsPeak: boolean): strin
   // wording the season already carries.
   switch (leadKind(e, deathsPeak)) {
     case 'boss': {
+      // The richer pool needs the fight's own record; without one the night
+      // keeps the title it has always had.
+      const fight = e.bossFights[0];
+      if (fight) {
+        const t = bossNightTitle(fight, seed);
+        if (t) return t;
+      }
       const boss = plainText(e.bossKills[0]);
       if (boss) return loud ? `The Night ${boss.replace(/^The\s+/, 'the ')} Fell` : `The Fall of ${boss}`;
       break;
@@ -1764,6 +1850,295 @@ function worldDaySentence(range: [number, number] | null): string | null {
   return lo === hi ? `The world stood at day ${lo}.` : `The world turned from day ${lo} to day ${hi}.`;
 }
 
+// ══ THE BOSS NIGHT ════════════════════════════════════════════════════════
+//
+// A boss falls eight times in a season. Until 2026-10-02 the Story told each
+// one in a single sentence built from an `events` row that knew the boss's
+// name and how many people were there, while the `bosses` row beside it held
+// the war party, a per-fighter damage ledger, the fight's length and the
+// online roster at the moment it dropped. Moder's inaugural kill is the
+// occasion for spending that.
+//
+// A boss night gets a BLOCK of five to seven sentences in place of the one
+// headline line, and the night's budget widens from seven sentences to twelve
+// to make room for it. Everything is seeded and deterministic exactly like the
+// rest of this file, and when there is no `bosses` row (an old kill, a kill
+// the ingest missed) the single original line is still what renders.
+
+/** fold a name/boss for tolerant comparison, the same spirit as lib/slug. */
+function foldish(s: string | null | undefined): string {
+  return (s ?? '')
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/æ/g, 'ae')
+    .replace(/ø/g, 'o')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+/** 9713 → "9,713". Fixed separator, never toLocaleString: this must not move. */
+function groupDigits(n: number): string {
+  return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function resolveBossFight(
+  input: EpisodeBossFightInput,
+  deaths: EpisodeDeath[],
+  bossWorldDay: number | null,
+  fightSeconds: Record<string, number>
+): EpisodeBossFight {
+  const name = plainText(input.name);
+  const fs = input.fightStats ?? {};
+
+  const damageMap = fs.damage && typeof fs.damage === 'object' ? fs.damage : {};
+  const damage = Object.entries(damageMap)
+    .filter(([who, amount]) => who.trim() && typeof amount === 'number' && Number.isFinite(amount) && amount > 0)
+    .map(([who, amount]) => ({ name: who.trim(), amount: amount as number }))
+    // Hardest first; ties by name so the order never depends on key insertion.
+    .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
+
+  // The war party, best known order: the damage ledger first (hardest hitters
+  // lead the march), then anyone the fight listed but never credited, then
+  // whoever the row merely recorded as present.
+  const seen = new Set<string>();
+  const fighters: string[] = [];
+  const addFighter = (who: string | null | undefined) => {
+    const n = (who ?? '').trim();
+    if (!n || seen.has(foldish(n))) return;
+    seen.add(foldish(n));
+    fighters.push(n);
+  };
+  for (const d of damage) addFighter(d.name);
+  for (const f of Array.isArray(fs.fighters) ? fs.fighters : []) addFighter(f);
+  for (const p of input.playersPresent) addFighter(p);
+
+  // The toll: who this boss killed that same night. A death names its killer
+  // in `cause` and sometimes separately in `attacker`; either counts.
+  const target = foldish(name);
+  const toll: string[] = [];
+  for (const d of deaths) {
+    if (foldish(d.cause) !== target && foldish(d.attacker) !== target) continue;
+    const who = firstName(d.name);
+    if (!toll.includes(who)) toll.push(who);
+  }
+
+  // The fight's own number first; the warband's clocks only as a fallback.
+  const ownSec = typeof fs.fightSec === 'number' && Number.isFinite(fs.fightSec) && fs.fightSec > 0 ? fs.fightSec : null;
+  const clocked = Object.entries(fightSeconds).find(([boss]) => foldish(boss) === target)?.[1] ?? null;
+
+  const online = Array.isArray(fs.onlineAtKill) ? fs.onlineAtKill.length : 0;
+  const topName = typeof fs.topDamagePlayer === 'string' && fs.topDamagePlayer.trim()
+    ? fs.topDamagePlayer.trim()
+    : (damage[0]?.name ?? null);
+  const topAmount = typeof fs.topDamage === 'number' && Number.isFinite(fs.topDamage) && fs.topDamage > 0
+    ? fs.topDamage
+    : (damage[0]?.amount ?? null);
+
+  return {
+    name,
+    killedAt: input.killedAt,
+    fighters,
+    damage,
+    topDamagePlayer: topName,
+    topDamage: topAmount,
+    onlineAtKill: online,
+    fightSec: ownSec ?? (clocked && clocked > 0 ? clocked : null),
+    toll,
+    worldDay: bossWorldDay,
+    retellingAt: input.retellingAt,
+  };
+}
+
+// ── boss-night pools ──────────────────────────────────────────────────────
+
+// A by-name epithet for the title pool's third shape. Keyed on the folded
+// name so "The Elder" and "the elder" are the same forsaken.
+const BOSS_EPITHETS: Record<string, string> = {
+  eikthyr: 'The Horned Stag',
+  theelder: 'The Ancient of the Forest',
+  bonemass: 'The Reeking Mass',
+  moder: "The Mountain's Dragon",
+  yagluth: 'The Last of the Fallen Kings',
+  thequeen: 'The Queen of the Mist',
+  fader: 'The Father of the North',
+};
+
+const MARCH_LINES = [
+  'A warband of {n} marched on {boss}: {names}.',
+  '{names} went up against {boss}, {n} in all.',
+  'The warband that went for {boss} was {n} strong: {names}.',
+];
+
+const FIGHT_LENGTH_LINES = [
+  'It took {len}.',
+  '{Len}, start to finish.',
+  'The whole thing ran {len}.',
+];
+
+const HARDEST_ONE = [
+  '{top} struck hardest, {amount} of it.',
+  'Nobody hit it like {top}, {amount} of damage.',
+];
+
+const HARDEST_MANY = [
+  '{top} struck hardest, {amount} of it; {rest} close behind.',
+  '{top} did the most damage at {amount}, with {rest} not far back.',
+];
+
+const TOLL_LINES = [
+  '{boss} took {names} down with it.',
+  'It did not go quietly: {names} fell to it.',
+  '{names} paid for it on the way.',
+];
+
+// None of these may say the boss went DOWN: the kill line is the very next
+// sentence and "It went down without taking a viking. Bonemass fell." tells
+// the same thing twice.
+const NO_TOLL_LINES = [
+  'It took nobody with it.',
+  'Not one of them fell to it.',
+  'Not a single viking was lost to it.',
+];
+
+const KILL_LINES_DAY = [
+  '{boss} fell on day {day}.',
+  'On day {day} it went down.',
+  'Day {day} is when it dropped.',
+];
+
+const KILL_LINES = [
+  '{boss} fell.',
+  'And then it was down.',
+  'It went down.',
+];
+
+// Same rule as MARCH_LINES: never open on a numeral.
+const STANDING_LINES = [
+  'There were {n} still in the realm when it dropped.',
+  'Some {n} vikings were there to see it.',
+  'The hall counted {n} in the realm at the end.',
+];
+
+const BOSS_DEED_LINES = [
+  'A great deed landed with it: {title}.',
+  'And {title} came with the kill.',
+];
+
+const BOSS_NIGHT_TITLES = [
+  'The Night {boss} Fell',
+  '{boss} Falls to the Warband',
+  '{epithet}, Brought Down',
+  '{n} Against {boss}',
+  '{boss} Is Felled at Last',
+];
+
+/** "253" → "four minutes"; short fights keep their seconds. */
+function fightLength(sec: number): string {
+  const s = Math.round(sec);
+  if (s < 90) return `${numProse(s)} seconds`;
+  const m = Math.round(s / 60);
+  return `${numProse(m)} ${m === 1 ? 'minute' : 'minutes'}`;
+}
+
+/**
+ * The title of a night a boss fell, when the fight left a record.
+ *
+ * Five shapes; the two that need data the fight may not carry (an epithet for
+ * this forsaken, a fighter count) drop out when it does not, so the pool never
+ * renders a hole.
+ */
+function bossNightTitle(fight: EpisodeBossFight, seed: number): string | null {
+  const boss = fight.name;
+  if (!boss) return null;
+  const epithet = BOSS_EPITHETS[foldish(boss)] ?? null;
+  const n = fight.fighters.length;
+  const shapes = BOSS_NIGHT_TITLES.filter((t) => {
+    if (t.includes('{epithet}')) return Boolean(epithet);
+    if (t.includes('{n}')) return n >= 2;
+    return true;
+  });
+  return fill(pick(shapes, seed, 24), {
+    boss,
+    epithet: epithet ?? '',
+    n: numTitle(n),
+  });
+}
+
+/**
+ * FIVE TO SEVEN SENTENCES about the fight, in the order a saga would tell it:
+ * who marched, how long it took, who hit hardest, what it cost, that it fell,
+ * who was standing there, and the deed that landed with it.
+ *
+ * Each clause appears only when the fight's record supports it, so a kill with
+ * nothing but a name and a date still produces two or three honest sentences
+ * rather than a paragraph of hedging.
+ */
+function bossBlock(e: EpisodeCore, fight: EpisodeBossFight, seed: number): Beat[] {
+  const out: Beat[] = [];
+  // Keeps run from 99 downwards so the block survives any trim ahead of every
+  // ordinary beat, and so its own sentences drop from the back if they must.
+  let keep = 99;
+  const add = (text: string | null) => {
+    if (text) out.push({ text, keep });
+    keep -= 1;
+  };
+  const boss = fight.name;
+
+  // 1. the march
+  if (fight.fighters.length > 0) {
+    const shown = fight.fighters.slice(0, 6).map(firstName);
+    const rest = fight.fighters.length - shown.length;
+    const names = rest > 0 ? `${shown.join(', ')} and ${numProse(rest)} more` : andList(shown);
+    add(fill(pick(MARCH_LINES, seed, 25), { boss, names, n: numProse(fight.fighters.length) }));
+  }
+
+  // 2. how long it ran
+  if (fight.fightSec && fight.fightSec > 0) {
+    const len = fightLength(fight.fightSec);
+    add(fill(pick(FIGHT_LENGTH_LINES, seed, 26), { len, Len: cap(len) }));
+  }
+
+  // 3. the hardest blows
+  if (fight.topDamagePlayer && fight.topDamage) {
+    const top = firstName(fight.topDamagePlayer);
+    const amount = groupDigits(fight.topDamage);
+    const others = fight.damage
+      .filter((d) => foldish(d.name) !== foldish(fight.topDamagePlayer))
+      .slice(0, 2)
+      .map((d) => firstName(d.name));
+    add(
+      others.length > 0
+        ? fill(pick(HARDEST_MANY, seed, 27), { top, amount, rest: andList(others) })
+        : fill(pick(HARDEST_ONE, seed, 27), { top, amount })
+    );
+  }
+
+  // 4. what it cost
+  add(
+    fight.toll.length > 0
+      ? fill(pick(TOLL_LINES, seed, 28), { boss, names: andList(fight.toll.slice(0, 4)) })
+      : pick(NO_TOLL_LINES, seed, 28)
+  );
+
+  // 5. the kill itself
+  add(
+    fight.worldDay !== null
+      ? fill(pick(KILL_LINES_DAY, seed, 29), { boss, day: String(fight.worldDay) })
+      : fill(pick(KILL_LINES, seed, 29), { boss })
+  );
+
+  // 6. who was standing there at the end
+  if (fight.onlineAtKill >= 2) {
+    add(fill(pick(STANDING_LINES, seed, 30), { n: numProse(fight.onlineAtKill) }));
+  }
+
+  // 7. and the deed, if one landed the same night
+  const deed = e.milestones[0] ? plainText(e.milestones[0].title) : '';
+  if (deed) add(sentence(fill(pick(BOSS_DEED_LINES, seed, 31), { title: deed })));
+
+  return out;
+}
+
 // ── assembly ──────────────────────────────────────────────────────────────
 //
 // FOUR TO SEVEN SENTENCES, always. The closing line is one of them and is
@@ -1776,6 +2151,12 @@ function worldDaySentence(range: [number, number] | null): string | null {
 // fixed order rather than anything being invented.
 const MAX_BODY_SENTENCES = 6;
 const MIN_BODY_SENTENCES = 3;
+// A BOSS NIGHT IS WIDER, and only a boss night. The block alone is five to
+// seven sentences, so an ordinary budget would spend the whole card on it and
+// leave no room for the rest of the evening. Eight to twelve sentences total,
+// which is the opener, the block, two or three ordinary beats and the closer.
+const MAX_BOSS_BODY_SENTENCES = 11;
+const MIN_BOSS_BODY_SENTENCES = 7;
 
 interface Beat {
   text: string;
@@ -1819,7 +2200,17 @@ function describeExpressive(
   };
 
   push(expressiveOpener(e, seed), 100);
-  push(expressiveHeadline(e, seed, kind), 95);
+
+  // A BOSS NIGHT WITH A RECORD replaces the single headline line with the
+  // block. Without a `bosses` row (an old kill, or one the ingest missed) the
+  // original one-liner is still exactly what renders.
+  const fight = e.bossFights[0] ?? null;
+  const blockBeats = fight ? bossBlock(e, fight, seed) : [];
+  if (blockBeats.length > 0) {
+    for (const b of blockBeats) push(b.text, b.keep);
+  } else {
+    push(expressiveHeadline(e, seed, kind), 95);
+  }
 
   // A newcomer that lost the headline still gets said: it happens to each
   // viking exactly once and it is never the same fact as a boss or a deed.
@@ -1827,13 +2218,17 @@ function describeExpressive(
     push(newcomerSentence(e.newcomers, seed), 80);
   }
 
-  const picture = kind === 'deaths' || e.deaths.length >= DEATH_PICTURE_MIN;
+  const boss = blockBeats.length > 0;
+  const picture = !boss && (kind === 'deaths' || e.deaths.length >= DEATH_PICTURE_MIN);
   if (picture) {
     if (kind !== 'deaths') push(deathGroupSentence(e.deaths), 74);
     push(mostDeathsSentence(e.deaths, seed), 50);
     push(notableDeathSentence(e.deaths, seed, e.newcomers), 56);
-  } else {
-    // One sentence at most, and only if nothing better wants the room.
+  } else if (!boss || (fight?.toll.length ?? 0) === 0) {
+    // One sentence at most, and only if nothing better wants the room. On a
+    // boss night the block's toll line has already named who the forsaken
+    // took, and "Æymundr and Yunter paid for it on the way. Æymundr was felled
+    // by Moder." is one death told twice.
     push(notableDeathSentence(e.deaths, seed, e.newcomers), 42);
   }
 
@@ -1855,11 +2250,13 @@ function describeExpressive(
 
   // Too many: take the most valuable beats that fit the sentence budget, then
   // put them back in render order.
+  const maxBody = boss ? MAX_BOSS_BODY_SENTENCES : MAX_BODY_SENTENCES;
+  const minBody = boss ? MIN_BOSS_BODY_SENTENCES : MIN_BODY_SENTENCES;
   const taken: { b: Beat; i: number }[] = [];
   let spent = 0;
   for (const cand of beats.map((b, i) => ({ b, i })).sort((x, y) => y.b.keep - x.b.keep || x.i - y.i)) {
     const cost = beatCost(cand.b.text);
-    if (spent + cost > MAX_BODY_SENTENCES) continue;
+    if (spent + cost > maxBody) continue;
     taken.push(cand);
     spent += cost;
   }
@@ -1868,7 +2265,7 @@ function describeExpressive(
   // Too few: true, quiet filler in a fixed order. Nothing here is invented —
   // a night with no deaths really had none, and the world really was on that
   // day — it is simply the least interesting true thing left to say.
-  if (spent < MIN_BODY_SENTENCES) {
+  if (spent < minBody) {
     const filler: (string | null)[] = [
       e.deaths.length === 0 ? pick(EXPR_NO_DEATHS, seed, 13) : null,
       worldDaySentence(e.worldDayRange),
@@ -1876,7 +2273,7 @@ function describeExpressive(
       pick(QUIET_DESC, seed, 15),
     ];
     for (const f of filler) {
-      if (spent >= MIN_BODY_SENTENCES) break;
+      if (spent >= minBody) break;
       if (!f || kept.some((b) => b.text === f)) continue;
       kept.push({ text: f, keep: 10 });
       spent += beatCost(f);

@@ -730,4 +730,157 @@ const EXPECTED_QUOTE = '"we found 6 crypts under the swamp," said Yosh.';
   }
 }
 
+// ═══ 8. THE BOSS NIGHT ══════════════════════════════════════════════════
+// A forsaken falls eight times in a season. The `events` row the Story used to
+// read carries the boss name and a COUNT of players; the `bosses` row beside
+// it carries the war party, a per-fighter damage ledger, how long the fight
+// ran and who was still in the realm when it dropped. Built 2026-10-02 for
+// Moder's inaugural kill.
+{
+  const WARBAND = [
+    "S'aeien", 'Asbjorn', 'Yosh', 'Mikael', 'Kætiløy', 'Lóa', 'Psifour', 'Æymundr',
+    'Fjällhnot', 'Yunter', 'Bren', 'Skarde',
+  ];
+  const DAMAGE = {
+    "S'aeien": 9713, Asbjorn: 7368, Yosh: 6688, Mikael: 5682, 'Kætiløy': 5196,
+    'Lóa': 4100, Psifour: 3900, 'Æymundr': 3200, 'Fjällhnot': 2800, Yunter: 2400,
+    Bren: 1900, Skarde: 1200,
+  };
+  const DAY = '2026-10-02';
+  const at = (m) => new Date(Date.parse(`${DAY}T22:00:00Z`) + m * 60_000).toISOString();
+
+  // Distinct minutes on purpose: with every session the same length the
+  // participant order IS the input order (a stable sort on first-seen order),
+  // and the determinism check below would be testing the fixture rather than
+  // the renderer.
+  const sessions = WARBAND.map((n, i) => ({
+    character_name: n, joined_at: at(0), left_at: at(420 - i * 20), duration_minutes: 420 - i * 20,
+  }));
+  const bossEvent = {
+    type: 'boss', character_name: 'Mikael', created_at: at(40),
+    metadata: { boss: 'Moder', players: '12 vikings', world_day: 221 },
+  };
+  // Two of them died to Moder itself, one to something else: only the first
+  // two are the boss's toll.
+  const deaths = [
+    { type: 'death', character_name: 'Æymundr', created_at: at(38), metadata: { cause: 'Moder', biome: 'Mountain' } },
+    { type: 'death', character_name: 'Yunter', created_at: at(39), metadata: { cause: 'wolf', attacker: 'Moder', biome: 'Mountain' } },
+    { type: 'death', character_name: 'Bren', created_at: at(20), metadata: { cause: 'Fuling', biome: 'Plains' } },
+  ];
+  const bossFights = [
+    {
+      name: 'Moder',
+      killedAt: at(40),
+      playersPresent: WARBAND,
+      fightStats: {
+        fighters: WARBAND,
+        damage: DAMAGE,
+        topDamagePlayer: "S'aeien",
+        topDamage: 9713,
+        onlineAtKill: WARBAND.slice(0, 11),
+        source: 'gs',
+      },
+      retellingAt: at(42),
+    },
+  ];
+  const extras = { bossFights, bossFightSeconds: { Moder: 253 } };
+
+  const [ep] = buildEpisodes(sessions, [bossEvent, ...deaths], [], [], [], extras);
+
+  eq(ep.tier, 'expressive', 'a boss night is always told loudly');
+  eq(ep.bossFights.length, 1, 'the fight was bucketed onto its night');
+  eq(ep.bossFights[0].fightSec, 253, 'the warband clock supplied the length');
+  eq(ep.bossFights[0].onlineAtKill, 11, 'and the roster at the kill');
+  eq(ep.bossFights[0].toll.join(','), 'Æymundr,Yunter', 'cause and attacker both count toward the toll');
+  eq(ep.bossFights[0].retellingAt, at(42), 'the card knows there is a retelling to link to');
+  eq(ep.bossFights[0].worldDay, 221, 'the kill event supplied the world day');
+
+  const d = ep.description;
+  const n = sentences(d);
+  ok(n >= 8 && n <= 12, `a boss night runs eight to twelve sentences, got ${n}: ${d}`);
+
+  // The block says who marched, how long, who hit hardest and what it cost.
+  ok(/Moder/.test(d), `the boss is named, got: ${d}`);
+  // Twelve fighters, spelled out because the house style spells anything
+  // under thirteen.
+  ok(/twelve in all|of twelve|twelve strong/.test(d), `the war party is counted, got: ${d}`);
+  ok(/S'aeien/.test(d), `the hardest hitter is named, got: ${d}`);
+  ok(/9,713/.test(d), `with the number, grouped, got: ${d}`);
+  ok(/Asbjorn/.test(d) && /Yosh/.test(d), `and the two behind them, got: ${d}`);
+  ok(/four minutes/.test(d), `the fight length is told in words, got: ${d}`);
+  ok(/Æymundr/.test(d) && /Yunter/.test(d), `the toll is named, got: ${d}`);
+  // And named ONCE: the block's toll line replaces the lone death sentence.
+  eq((d.match(/Æymundr/g) ?? []).length, 1, `the toll is not told twice, got: ${d}`);
+  ok(/day 221/.test(d), `the kill carries its world day, got: ${d}`);
+  ok(/eleven/.test(d), `and who was standing there at the end, got: ${d}`);
+
+  // The title comes from the boss-night pool.
+  ok(
+    /Moder|Mountain's Dragon/.test(ep.title),
+    `the title names the forsaken, got: ${ep.title}`
+  );
+
+  // It reads as prose, by the same rules every other night is held to.
+  ok(!/[\u2014\u2013]/.test(`${ep.title} ${d}`), `no dash on a boss night, got: ${d}`);
+  ok(!/\{|\}/.test(`${ep.title} ${d}`), `every token is filled, got: ${d}`);
+  ok(!/\s{2}/.test(d) && !/\s[.,]/.test(d), `no stray spacing, got: ${d}`);
+  ok(!/\.\s+[a-z0-9]/.test(d), `every sentence opens with a capital, got: ${d}`);
+  ok(d.trim().endsWith('.'), `and the last one closes, got: ${d}`);
+
+  // DETERMINISM, including against re-ordered input.
+  const again = buildEpisodes(sessions, [bossEvent, ...deaths], [], [], [], extras)[0];
+  eq(again.description, d, 'the boss block is deterministic');
+  eq(again.title, ep.title, 'and so is its title');
+  const shuffled = buildEpisodes(
+    [...sessions].reverse(),
+    [...deaths].reverse().concat(bossEvent),
+    [], [], [],
+    { ...extras, bossFights: [...bossFights] }
+  )[0];
+  eq(shuffled.description, d, 'input order does not change the telling');
+
+  // NO `bosses` ROW, SAME EVENT: the single line the Story has always had.
+  const [plain] = buildEpisodes(sessions, [bossEvent, ...deaths]);
+  eq(plain.tier, 'expressive', 'still a boss night');
+  eq(plain.bossFights.length, 0, 'but with no record of the fight');
+  const pn = sentences(plain.description);
+  ok(pn >= 4 && pn <= 7, `so it keeps the ordinary budget, got ${pn}: ${plain.description}`);
+  ok(/Moder/.test(plain.description), `and still says the boss fell, got: ${plain.description}`);
+  ok(!/9,713/.test(plain.description), `without inventing a ledger, got: ${plain.description}`);
+  ok(/^The (Night Moder Fell|Fall of Moder)$/.test(plain.title), `and keeps the old title, got: ${plain.title}`);
+
+  // A FIGHT THAT KEPT ALMOST NO RECORD still produces honest sentences rather
+  // than a paragraph of hedging.
+  const [bare] = buildEpisodes(sessions, [bossEvent], [], [], [], {
+    bossFights: [{ name: 'Moder', killedAt: at(40), playersPresent: [], fightStats: null, retellingAt: null }],
+  });
+  ok(!/\{|\}/.test(bare.description), `no holes in a recordless fight, got: ${bare.description}`);
+  const bn = sentences(bare.description);
+  ok(bn >= 4 && bn <= 12, `and a sane length, got ${bn}: ${bare.description}`);
+
+  // EVERY SEED, because the pools are seeded per calendar day.
+  for (let day = 1; day <= 28; day++) {
+    const key = `2026-11-${String(day).padStart(2, '0')}`;
+    const t = (m) => new Date(Date.parse(`${key}T22:00:00Z`) + m * 60_000).toISOString();
+    const [e] = buildEpisodes(
+      WARBAND.map((nm) => ({ character_name: nm, joined_at: t(0), left_at: t(300), duration_minutes: 300 })),
+      [
+        { type: 'boss', character_name: 'Mikael', created_at: t(40), metadata: { boss: 'Moder', world_day: 221 } },
+        { type: 'death', character_name: 'Æymundr', created_at: t(38), metadata: { cause: 'Moder' } },
+      ],
+      [], [], [],
+      {
+        bossFights: [{ ...bossFights[0], killedAt: t(40) }],
+        bossFightSeconds: { Moder: 253 },
+      }
+    );
+    const c = sentences(e.description);
+    ok(c >= 8 && c <= 12, `${key}: eight to twelve on a boss night, got ${c}: ${e.description}`);
+    ok(!/[\u2014\u2013]/.test(`${e.title} ${e.description}`), `${key}: no dash, got: ${e.description}`);
+    ok(!/\{|\}/.test(`${e.title} ${e.description}`), `${key}: no brace, got: ${e.title} / ${e.description}`);
+    ok(!/\.\s+[a-z0-9]/.test(e.description), `${key}: every sentence opens with a capital, got: ${e.description}`);
+    ok(!/\s{2}/.test(e.description) && !/\s[.,]/.test(e.description), `${key}: no stray spacing, got: ${e.description}`);
+  }
+}
+
 console.log(`OK — all expressive-episode assertions passed (${checks} checks)`);

@@ -114,6 +114,25 @@ function EpisodeCard({ ep }: { ep: Episode }) {
         <p className="mt-2 text-sm leading-relaxed text-ash-dim">{ep.description}</p>
       )}
 
+      {/* THE SKALD'S RETELLING, when a boss fell this night and the bot has
+          written one. The retelling itself is three to five paragraphs and
+          lives on the war room; the Story page never fetches a word of it
+          (lib/data.ts getKilledBosses leaves the column out on purpose) and
+          only links when `retelling_generated_at` says there is something to
+          link to. */}
+      {ep.bossFights
+        .filter((f) => f.retellingAt)
+        .map((f) => (
+          <p key={f.name} className="mt-2 text-sm">
+            <Link
+              href={bossPath(f.name)}
+              className="gold-ring rounded-sm text-gold transition-colors hover:text-gold-light"
+            >
+              Read the Skald&rsquo;s retelling of {f.name}
+            </Link>
+          </p>
+        ))}
+
       {/* what the Storyteller wrote about this night, when anyone did */}
       <EpisodeTales tales={ep.tales} />
 

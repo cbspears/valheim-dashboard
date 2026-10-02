@@ -117,6 +117,7 @@ import type {
 } from './types';
 import { AGGREGATE_STAT_COLUMNS, computeAggregates, type Aggregates } from './milestones';
 import type {
+  EpisodeBossFightInput,
   EpisodeChatLineInput,
   EpisodeFirstSeenInput,
   EpisodePotyAwardInput,
@@ -869,6 +870,84 @@ export const getChatLinesSince = cache(async (days = 70): Promise<EpisodeChatLin
       message: (r.message ?? '').trim(),
       createdAt: r.created_at,
     }));
+});
+
+// ══ THE BOSS NIGHT'S OWN RECORD (2026-10-02) ══════════════════════════════
+//
+// The Story page has always known a boss fell from an `events` row that
+// carries the name and a COUNT of players. Everything that makes a boss night
+// worth reading — who marched, who struck hardest and for how much, how long
+// it took, who it killed on the way down — has been sitting in `bosses` the
+// whole time and never reached a card. These two reads hand it to
+// lib/episodes.ts (the boss block), for Moder's inaugural kill.
+
+/**
+ * Every forsaken that has fallen, with the fight's own record.
+ *
+ * DELIBERATELY WITHOUT `retelling`. That column is three to five paragraphs of
+ * Skald prose per boss and the Story page does not render a word of it; it
+ * links to the war room instead. Only `retelling_generated_at` comes back, so
+ * the card knows whether there is anything to link TO.
+ *
+ * Bounded by the chain itself (eight forsaken), so no paging: `fetchAllRows`
+ * would be ceremony around a list that cannot grow. Fails open to [].
+ */
+export const getKilledBosses = cache(async (): Promise<EpisodeBossFightInput[]> => {
+  const { data, error } = await db()
+    .from('bosses')
+    .select('name, killed_at, players_present, fight_stats, retelling_generated_at')
+    .eq('is_killed', true)
+    .order('killed_at', { ascending: true })
+    .limit(50);
+  if (error || !data) return [];
+  type Row = {
+    name: string | null;
+    killed_at: string | null;
+    players_present: string[] | null;
+    fight_stats: Boss['fight_stats'];
+    retelling_generated_at: string | null;
+  };
+  return (data as unknown as Row[])
+    .filter((b) => (b.name ?? '').trim() && b.killed_at)
+    .map((b) => ({
+      name: (b.name ?? '').trim(),
+      killedAt: b.killed_at!,
+      playersPresent: Array.isArray(b.players_present) ? b.players_present : [],
+      fightStats: b.fight_stats ?? null,
+      retellingAt: b.retelling_generated_at ?? null,
+    }));
+});
+
+/**
+ * The longest fight anyone clocked against each boss, in seconds.
+ *
+ * `bosses.fight_stats.fightSec` is the fight's own number and is preferred by
+ * the renderer; this is the fallback for the kills that never got one. Each
+ * viking's client keeps its own `gs_stats.bossDamage[]` of
+ * `{ boss, damageDealt, fightSec }`, and the MAX across the warband is the
+ * closest thing to "how long the fight lasted" that data can give: a viking
+ * who joined late clocks less, and nobody clocks more than the fight.
+ *
+ * A NARROW SELECT, not getAllStats(). `gs_stats` is the widest column in the
+ * schema (2.56 KB a viking) and this needs one array out of it, so asking for
+ * the single column keeps the Story page off the other half of the row.
+ * Bounded at 500 like its neighbour, and fails open to {}.
+ */
+export const getBossFightSeconds = cache(async (): Promise<Record<string, number>> => {
+  const { data, error } = await db().from('player_stats').select('gs_stats').limit(500);
+  if (error || !data) return {};
+  const out: Record<string, number> = {};
+  for (const row of data as unknown as { gs_stats: { bossDamage?: unknown } | null }[]) {
+    const list = row?.gs_stats?.bossDamage;
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      const boss = typeof entry?.boss === 'string' ? entry.boss.trim() : '';
+      const sec = typeof entry?.fightSec === 'number' && Number.isFinite(entry.fightSec) ? entry.fightSec : 0;
+      if (!boss || sec <= 0) continue;
+      if (!(boss in out) || out[boss] < sec) out[boss] = sec;
+    }
+  }
+  return out;
 });
 
 /** The sworn oaths, oldest first (the Oath page + Hall teaser). */

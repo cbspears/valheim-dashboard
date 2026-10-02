@@ -16,6 +16,8 @@ import {
   getPotyAwardsSince,
   getFirstSeenByCharacter,
   getChatLinesSince,
+  getKilledBosses,
+  getBossFightSeconds,
 } from '@/lib/data';
 import { buildEpisodes } from '@/lib/episodes';
 import { daysAgoCtKey } from '@/lib/tales';
@@ -62,6 +64,8 @@ export default async function EventsPage() {
     potyAwards,
     firstSeen,
     chatLines,
+    bossFights,
+    bossFightSeconds,
   ] = await Promise.all([
     getAllEvents(200),
     getSessionsSince(WINDOW_DAYS),
@@ -82,6 +86,11 @@ export default async function EventsPage() {
     getPotyAwardsSince(WINDOW_DAYS).catch(() => []),
     getFirstSeenByCharacter().catch(() => []),
     getChatLinesSince(WINDOW_DAYS).catch(() => []),
+    // THE BOSS NIGHT'S OWN RECORD (2026-10-02). Eight rows and one narrow
+    // stats column, both fail-open: a boss night without them renders the
+    // single line it always did rather than nothing at all.
+    getKilledBosses().catch(() => []),
+    getBossFightSeconds().catch(() => ({})),
   ]);
 
   const episodes = buildEpisodes(sessions, sagaEvents, oaths, pins, tales, {
@@ -89,6 +98,8 @@ export default async function EventsPage() {
     potyAwards,
     firstSeen,
     chatLines,
+    bossFights,
+    bossFightSeconds,
   });
 
   return (
