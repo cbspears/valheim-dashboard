@@ -683,6 +683,243 @@ if (!oathOk) ok = false;
     ]);
   }
 
+  // --- The last viking out, and the leave that wasn't (2026-10-02/03) -----
+  // Imogen: a "Closing socket" leave at 21:46:20 that was not hers, a pos-join
+  // two seconds later with no binding, positions until 01:52 — and then
+  // nothing, all night, because the silence that proved she had gone was the
+  // very thing that disarmed the sweep. 1,435 minutes "played".
+
+  // (i) The last viking out. Her positions were the only ones, so the emitter
+  //     goes silent with her; the server's own headcount is what gets her off
+  //     the roster.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Imogen : 12345:1'));
+    p.processLine(POS('Imogen'));
+    const now = Date.now();
+    p.lastAnyPosAt = now - 10 * MIN; // 01:52: she logged off
+    p.posSeen.set('Imogen', now - 10 * MIN);
+
+    const noServerWord = p.sweepStale(now, STALE); // no heartbeat read at all
+    p.lastConnectionCount = 0;
+    p.lastConnectionCountAt = now - 30 * MIN; // …and one from half an hour ago
+    const staleWord = p.sweepStale(now, STALE);
+    p.lastConnectionCountAt = now - MIN; // a fresh reading
+    const swept = p.sweepStale(now, STALE);
+
+    presenceChecks.push(
+      ['emitter silence alone still sweeps nobody', noServerWord.length === 0],
+      ['a stale "Connections 0" is not evidence about now', staleWord.length === 0],
+      ['a FRESH "Connections 0" sweeps the last viking out', swept.length === 1 && swept[0].characterName === 'Imogen'],
+      ['the leave is a pos-stale leave carrying her pairing',
+        swept[0].type === 'leave' && swept[0].metadata.source === 'pos-stale' && swept[0].steamId === STEAM_A],
+      ['and it names the count that carried it', swept[0].metadata.serverCount === 0],
+      ['the roster is empty afterwards', p.roster().length === 0]
+    );
+  }
+
+  // (i2) …and the heartbeat line itself no longer empties the roster in
+  //      silence, which is how the session stayed open all night.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Imogen : 12345:1'));
+    const evs = p.processLine(P(' Connections 0 ZDOS:140  sent:0 recv:0'));
+    presenceChecks.push(
+      ['a "Connections 0" line says goodbye instead of just forgetting her',
+        evs.some((e) => e.type === 'leave' && e.characterName === 'Imogen' && e.steamId === STEAM_A)],
+      ['it still emits the heartbeat, with the emptied roster',
+        evs.some((e) => e.type === 'heartbeat' && e.count === 0 && e.metadata.online.length === 0)],
+      ['the leave comes before the heartbeat', evs[0].type === 'leave'],
+      ['and the roster really is empty', p.roster().length === 0]
+    );
+  }
+
+  // (j) Roster longer than the server's headcount: the count says HOW MANY are
+  //     wrong, never which, so the longest-silent go first — and a name the
+  //     emitter spoke for inside staleMs is never one of them.
+  {
+    const p = new LogParser();
+    for (const [steam, name, zdo] of [
+      [STEAM_A, 'Imogen', '111'],
+      [STEAM_B, 'Bjorn', '222'],
+      ['76561198000000033', 'Astrid', '333'],
+      ['76561198000000044', 'Hel', '444'],
+    ]) {
+      p.processLine(P(`Got connection SteamID ${steam}`));
+      p.processLine(P(`Got character ZDOID from ${name} : ${zdo}:1`));
+    }
+    const now = Date.now();
+    p.lastAnyPosAt = now - 10 * MIN; // the emitter is silent overall
+    p.posSeen.set('Imogen', now - 12 * MIN);
+    p.posSeen.set('Bjorn', now - 7 * MIN);
+    p.posSeen.set('Astrid', now - 6 * MIN);
+    p.posSeen.set('Hel', now - 10 * 1000); // just arrived
+    p.lastConnectionCount = 2;
+    p.lastConnectionCountAt = now - 30 * 1000;
+    const swept = p.sweepStale(now, STALE);
+
+    presenceChecks.push(
+      ['roster 4 vs server 2 sweeps exactly two', swept.length === 2],
+      ['and they are the two longest-silent', swept.map((e) => e.characterName).join(',') === 'Imogen,Bjorn'],
+      ['each names the count that justified it', swept.every((e) => e.metadata.serverCount === 2)],
+      ['the roster is now the size the server reports', p.roster().length === 2],
+      ['the freshly-arrived name is never a candidate', p.roster().includes('Hel')],
+      ['a roster that agrees with the count is left alone', p.sweepStale(now, STALE).length === 0]
+    );
+  }
+
+  // (k) Defect B: the socket close that was wrong. A position two seconds
+  //     later must cancel it outright — no leave, no second join, no torn
+  //     binding, one continuous session.
+  {
+    const logged = [];
+    const p = new LogParser({}, { info: (m) => logged.push(m) });
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Imogen : 12345:1'));
+    p.processLine(POS('Imogen')); // the emitter vouches for her
+    const closeEvs = p.processLine(P(`Closing socket ${STEAM_A}`));
+    const heldAsPending = p.leavePending.has('Imogen');
+    const posEvs = p.processLine(POS('Imogen', 'Swamp')); // …two seconds later
+    const afterWindow = p.flushPendingLeaves(Date.now() + 5 * MIN);
+
+    presenceChecks.push(
+      ['a socket close for a freshly-seen name emits nothing yet', closeEvs.length === 0],
+      ['it is held as a pending leave', heldAsPending],
+      ['she never left the roster', p.roster().includes('Imogen')],
+      ['the next position is just a position — no leave, no duplicate join',
+        posEvs.map((e) => e.type).join(',') === 'pos'],
+      ['the cancellation is narrated',
+        logged.includes('[presence] Imogen socket closed but positions continue; leave cancelled')],
+      ['the steam binding survived the scare', p.steamIdFor('Imogen') === STEAM_A],
+      ['and nothing surfaces when the window would have expired', afterWindow.length === 0]
+    );
+  }
+
+  // (l) The same close with no position behind it: the leave still happens,
+  //     once, at the end of the window — and filed under the socket close.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Imogen : 12345:1'));
+    p.processLine(POS('Imogen'));
+    const closedAt = Date.now();
+    const closeEvs = p.processLine(P(`Closing socket ${STEAM_A}`));
+    const tooEarly = p.flushPendingLeaves(closedAt + 30 * 1000); // inside the 90 s
+    const stillOnlineInsideWindow = p.roster().includes('Imogen');
+    const flushAt = closedAt + 2 * MIN;
+    const flushed = p.flushPendingLeaves(flushAt);
+    const again = p.flushPendingLeaves(flushAt + 5 * MIN);
+
+    presenceChecks.push(
+      ['the close is still silent at first', closeEvs.length === 0],
+      ['nothing leaves inside the grace window', tooEarly.length === 0 && stillOnlineInsideWindow],
+      ['exactly one leave once it expires', flushed.length === 1 && flushed[0].characterName === 'Imogen'],
+      ['it is an ordinary leave, like a prompt one',
+        flushed[0].type === 'leave' && Object.keys(flushed[0].metadata).length === 0],
+      ['filed at the socket close, not at the flush',
+        Math.abs(flushed[0].occurredAtMs - closedAt) < 1000 && flushAt - flushed[0].occurredAtMs >= 2 * MIN - 1000],
+      ['it carries the closing socket’s SteamID', flushed[0].steamId === STEAM_A],
+      ['the pairing is gone both ways',
+        p.steamIdFor('Imogen') === null && !p.snapshot().connections.some(([s]) => s === STEAM_A)],
+      ['the roster is empty', p.roster().length === 0],
+      ['and it is never emitted a second time', again.length === 0]
+    );
+  }
+
+  // (m) A pending leave must survive the snapshot/restore round-trip — the
+  //     poller takes it on every failed batch, and state.json takes it across
+  //     a restart — without being lost or emitted twice, and with its own
+  //     clock, so the window expires when the socket closed said it would.
+  {
+    const p = new LogParser();
+    p.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    p.processLine(P('Got character ZDOID from Imogen : 12345:1'));
+    p.processLine(POS('Imogen'));
+    const closedAt = Date.now();
+    p.processLine(P(`Closing socket ${STEAM_A}`));
+    const snap = p.snapshot();
+    // Through JSON, exactly as state.json stores it.
+    const resumed = new LogParser(JSON.parse(JSON.stringify(snap)));
+    const restoredOnline = resumed.roster().includes('Imogen') && resumed.steamIdFor('Imogen') === STEAM_A;
+    const restoredVouch = Number.isFinite(resumed.posVouchedAt.get('Imogen'));
+    const flushed = resumed.flushPendingLeaves(closedAt + 2 * MIN);
+
+    presenceChecks.push(
+      ['snapshot() carries the pending leave as [name, record] pairs',
+        Array.isArray(snap.leavePending) &&
+          snap.leavePending.length === 1 &&
+          snap.leavePending[0][0] === 'Imogen' &&
+          Number.isFinite(snap.leavePending[0][1].at) &&
+          snap.leavePending[0][1].steamId === STEAM_A],
+      ['snapshot() carries the server headcount with its timestamp',
+        snap.lastConnectionCount === null && snap.lastConnectionCountAt === null],
+      ['a resumed parser still holds her, on the roster and bound', restoredOnline],
+      ['the emitter’s vouch round-trips too, so a later close still gets its grace', restoredVouch],
+      ['the window is not restarted by the round-trip — it expires on the original close',
+        flushed.length === 1 && Math.abs(flushed[0].occurredAtMs - closedAt) < 1000],
+      ['and the resumed parser emits it exactly once', resumed.flushPendingLeaves(closedAt + 9 * MIN).length === 0]
+    );
+  }
+
+  // (n) The call site for both halves of the fix: a tick with no new bytes
+  //     must flush a confirmed socket-close leave AND sweep on the server's
+  //     headcount, both through the ordinary webhook path.
+  {
+    const { Poller } = await import('./src/poller.js');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const posted = [];
+    const logged = [];
+    const logger = { info: (m) => logged.push(m), warn: (m) => logged.push(m), error: (m) => logged.push(m) };
+    const poller = new Poller(
+      {
+        webhookUrl: 'stub',
+        webhookSecret: 'stub',
+        posStaleMs: STALE,
+        syncEveryMs: 3_600_000,
+        statePath: join(tmpdir(), `eilif-poller-pending-test-${process.pid}.json`),
+      },
+      logger
+    );
+    poller.postEvent = async (payload) => (posted.push(payload), {});
+    poller.saveState = async () => {};
+
+    // Imogen's socket closed two minutes ago, right after a position, and no
+    // position followed — the grace window has run out.
+    poller.parser.processLine(P(`Got connection SteamID ${STEAM_A}`));
+    poller.parser.processLine(P('Got character ZDOID from Imogen : 12345:1'));
+    poller.parser.processLine(POS('Imogen'));
+    poller.parser.processLine(P(`Closing socket ${STEAM_A}`));
+    poller.parser.leavePending.get('Imogen').at = Date.now() - 2 * MIN;
+    // Meanwhile Hel is on the roster, the emitter has been quiet for ten
+    // minutes, and the server says nobody is connected.
+    poller.parser.online.add('Hel');
+    poller.parser.posSeen.set('Hel', Date.now() - 10 * MIN);
+    poller.parser.lastAnyPosAt = Date.now() - 10 * MIN;
+    poller.parser.lastConnectionCount = 0;
+    poller.parser.lastConnectionCountAt = Date.now() - 30 * 1000;
+
+    await poller.tickAfterFetch({ text: '', size: 0, mtimeMs: Date.now() });
+
+    const leaves = posted.filter((e) => e.type === 'leave');
+    presenceChecks.push(
+      ['a tick flushes the confirmed socket-close leave',
+        leaves.some((e) => e.characterName === 'Imogen' && e.steamId === STEAM_A)],
+      ['and it reaches the webhook stamped with the socket close',
+        Number.isFinite(Date.parse(leaves.find((e) => e.characterName === 'Imogen')?.occurredAt ?? ''))],
+      ['the confirmation is logged as presence, not as a silence',
+        logged.some((m) =>
+          m === '[presence] Imogen socket close confirmed — no [EILIF_POS] during the grace window -> leave')],
+      ['the same tick sweeps the roster the server says is empty',
+        leaves.some((e) => e.characterName === 'Hel' && e.metadata?.serverCount === 0)],
+      ['and says which evidence carried it',
+        logged.some((m) => /^\[presence\] Hel silent for 10 min \(no \[EILIF_POS\]\) \(server reports 0 connected\) -> leave$/.test(m))],
+      ['nobody is left on the roster', poller.parser.roster().length === 0]
+    );
+  }
+
   let presenceOk = true;
   console.log('\nPresence via [EILIF_POS]:');
   for (const [label, pass] of presenceChecks) {

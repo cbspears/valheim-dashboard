@@ -235,7 +235,7 @@ export class Poller {
     this.log = logger;
     this.offset = 0;
     this.partial = '';
-    this.parser = new LogParser();
+    this.parser = new LogParser({}, this.log);
     this.lastSyncAt = 0;
     this.stopped = false;
     // Recently-mirrored chat, key -> posted-at ms. The same shout can surface
@@ -296,8 +296,19 @@ export class Poller {
         // roster it just inherited; lastAnyPosAt is restored as-is, which keeps
         // the sweep disarmed until the emitter is heard from again.
         posSeen: s.posSeen || [],
+        // Kept apart from posSeen on purpose: only the emitter's own word
+        // opens a leave's grace window (see parser.js posVouchedAt).
+        posVouchedAt: s.posVouchedAt || [],
         lastAnyPosAt: s.lastAnyPosAt,
-      });
+        // An unconfirmed socket-close leave outlives a restart: it is the
+        // only record that somebody's socket closed, and its grace window
+        // keeps its original clock so the leave lands at the right time.
+        // The server's own headcount comes back with its timestamp, which is
+        // what lets the sweep lean on it (and what makes an old one harmless).
+        leavePending: s.leavePending || [],
+        lastConnectionCount: s.lastConnectionCount,
+        lastConnectionCountAt: s.lastConnectionCountAt,
+      }, this.log);
       this.liveness = normalizeLiveness(s.liveness);
       this.log.info?.(
         `[state] resumed at offset ${this.offset}, ${this.parser.online.size} online` +
@@ -549,7 +560,7 @@ export class Poller {
     } catch (err) {
       this.offset = prev.offset;
       this.partial = prev.partial;
-      this.parser = new LogParser(prev.parser);
+      this.parser = new LogParser(prev.parser, this.log);
       throw err;
     }
   }
@@ -706,9 +717,26 @@ export class Poller {
     // sweep is simply retaken next tick (at-least-once, see tick()).
     if (!this.liveness.serverDown) {
       const staleMs = Number.isFinite(this.cfg.posStaleMs) ? this.cfg.posStaleMs : DEFAULT_POS_STALE_MS;
+      // First, the socket closes that have waited out their grace window with
+      // no position to contradict them (parser.js, defect B of the 10-02
+      // incident). They are ordinary leaves, already stamped with the moment
+      // the socket closed, so they go out through the same path — only the
+      // journal line says they were held.
+      for (const ev of this.parser.flushPendingLeaves()) {
+        this.log.info?.(
+          `[presence] ${ev.characterName} socket close confirmed — no [EILIF_POS] during the grace window -> leave`
+        );
+        await this.dispatch(ev);
+      }
       for (const ev of this.parser.sweepStale(Date.now(), staleMs)) {
         const mins = Math.round((ev.metadata?.silentMs ?? staleMs) / 60000);
-        this.log.info?.(`[presence] ${ev.characterName} silent for ${mins} min (no [EILIF_POS]) -> leave`);
+        // `serverCount` is set only when the emitter was silent overall and the
+        // server's own headcount is what carried the sweep — say so, because
+        // that is the case the old guard used to refuse outright.
+        const why = Number.isFinite(ev.metadata?.serverCount)
+          ? ` (server reports ${ev.metadata.serverCount} connected)`
+          : '';
+        this.log.info?.(`[presence] ${ev.characterName} silent for ${mins} min (no [EILIF_POS])${why} -> leave`);
         await this.dispatch(ev);
       }
     }
@@ -756,7 +784,7 @@ export class Poller {
       // The host is gone: nobody is connected, and none of the parser's
       // in-flight connection correlations survive a server restart. Reset so
       // the replayed (truncated) log rebuilds the roster from scratch.
-      this.parser = new LogParser();
+      this.parser = new LogParser({}, this.log);
       await this.dispatch({ type: 'sync', metadata: { online: [], serverOnline: false } })
         .catch((e) => this.log.warn?.(`[liveness sync] ${e.message}`));
       this.lastSyncAt = Date.now();

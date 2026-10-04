@@ -207,6 +207,40 @@ export function isPlausibleCharacterName(name) {
 // the deliberate price of never phantoming again.
 const DEFAULT_POS_STALE_MS = 5 * 60 * 1000;
 
+// --- The last viking out (2026-10-02/03, Imogen) ---------------------------
+// The sweep's own guard had a hole shaped exactly like an empty server. When
+// the LAST player in the world logs off, the emitter stops emitting — and the
+// guard above reads that silence as "the plugin died", disarms, and the one
+// name still on the roster can never be swept. Imogen's socket close was
+// mis-attributed at 21:46:20, her next position re-added her two seconds later
+// with no pairing, her positions stopped at 01:52 when she really left, and
+// nothing removed her until the next evening's join closed the session at
+// 1,435 minutes "played". Same shape as Fjällhnot on 09-15.
+//
+// The way out is that the silence is not our only evidence: the server itself
+// writes "Connections N ZDOS:" every ~10 minutes whether anyone is playing or
+// not, and N comes from the server's own socket table, not from the plugin. So
+// when the emitter is silent overall we fall back on N — but only while it is
+// FRESH, because a heartbeat from an hour ago says nothing about now and a
+// server that has stopped writing the log entirely (the liveness path's job)
+// must not be mistaken for an empty one.
+const SERVER_COUNT_FRESH_MS = 3 * 60 * 1000;
+
+// --- The leave that wasn't (same incident, defect B) -----------------------
+// "Closing socket <steamId>" is NOT proof that the named viking left: the id
+// may be mis-bound (FIFO pairing under a join burst — see above), or the
+// server may simply be closing a duplicate socket for a player who is still in
+// the world. Imogen's 21:46:20 leave was one of these, and her [EILIF_POS] two
+// seconds later re-opened the session as a pos-join with no steam binding at
+// all, splitting one evening in two and leaving nothing that a later socket
+// close could ever match.
+//
+// So a socket-close leave for a name the emitter has just vouched for waits
+// this long before it is believed. One more position line inside the window
+// cancels it outright; silence confirms it, and the leave is then emitted with
+// the time of the socket close, not the time the window ran out.
+const DEFAULT_LEAVE_GRACE_MS = 90 * 1000;
+
 export class LogParser {
   /**
    * @param {object} [initial] persisted state to resume from
@@ -215,8 +249,14 @@ export class LogParser {
    * @param {string[]} [initial.pending] persisted unresolved-connection steamIds, oldest first
    * @param {[string, number][]} [initial.posSeen] persisted name->last [EILIF_POS] ms
    * @param {number} [initial.lastAnyPosAt] persisted ms of the last POS line from anyone
+   * @param {[string, object][]} [initial.leavePending] persisted name->unconfirmed socket-close leave
+   * @param {number} [initial.lastConnectionCount] persisted last "Connections N" reading
+   * @param {number} [initial.lastConnectionCountAt] persisted ms that reading was taken
+   * @param {object} [log] optional logger (`info`/`warn`); presence decisions the
+   *   event stream cannot carry (a cancelled leave) are narrated through it.
    */
-  constructor(initial = {}) {
+  constructor(initial = {}, log = null) {
+    this.log = log;
     // SteamIDs that have connected but not yet resolved to a character name,
     // oldest first. Used to correlate the next ZDOID spawn to a connection.
     // Persisted across restarts (see snapshot()) — without this, a restart
@@ -239,8 +279,15 @@ export class LogParser {
     // null for it, so the webhook allows the write without binding or refusing.
     this.ambiguous = new Set(Array.isArray(initial.ambiguous) ? initial.ambiguous : []);
     this.contestedLeft = Number.isInteger(initial.contestedLeft) ? initial.contestedLeft : 0;
-    // Last value seen on a "Connections N" heartbeat (null until first seen).
-    this.lastConnectionCount = null;
+    // Last value seen on a "Connections N" heartbeat (null until first seen),
+    // and when we read it. The timestamp is what makes the count usable as
+    // evidence: see SERVER_COUNT_FRESH_MS and sweepStale.
+    this.lastConnectionCount = Number.isInteger(initial.lastConnectionCount)
+      ? initial.lastConnectionCount
+      : null;
+    this.lastConnectionCountAt = Number.isFinite(initial.lastConnectionCountAt)
+      ? initial.lastConnectionCountAt
+      : null;
     // name -> wall-clock ms of the last liveness evidence for that name: an
     // [EILIF_POS] line, or the moment the name entered `online` if it has not
     // been seen in a position emit yet. Only names in `online` are kept.
@@ -252,6 +299,23 @@ export class LogParser {
     // when this is stale: silence from the emitter means the PLUGIN died, not
     // that the server emptied, and sweeping on that would evict everyone.
     this.lastAnyPosAt = Number.isFinite(initial.lastAnyPosAt) ? initial.lastAnyPosAt : null;
+    // name -> { at, steamId } for a "Closing socket" leave that is waiting out
+    // its grace window (see DEFAULT_LEAVE_GRACE_MS). The name is still on the
+    // roster and still carries its binding while it sits here. Persisted like
+    // posSeen so the in-memory snapshot/restore tick() does on a failed batch
+    // — and a real restart — neither loses the leave nor emits it twice.
+    //
+    // Unlike posSeen the clock is NOT re-stamped on restore: `at` is when the
+    // socket actually closed and is the time the leave will be filed under, so
+    // a window that expired while we were down must expire, not restart.
+    this.leavePending = new Map(Array.isArray(initial.leavePending) ? initial.leavePending : []);
+    // name -> ms of the last [EILIF_POS] line for that name, and ONLY that.
+    // posSeen above answers "how long since we had any reason to believe this
+    // name is here", which markOnline also stamps; this one answers the
+    // narrower question the grace window asks — "did the emitter itself vouch
+    // for her just now?" — so a name that has never been in a position line
+    // (no plugin, a join burst, a fixture replay) gets the old prompt leave.
+    this.posVouchedAt = new Map(Array.isArray(initial.posVouchedAt) ? initial.posVouchedAt : []);
     // A restart (or the in-memory snapshot/restore tick() does on a failed
     // batch) must not evict the roster it just inherited: every restored name
     // gets a full staleMs of grace, and stamps for anyone no longer online are
@@ -261,6 +325,12 @@ export class LogParser {
       if (!this.online.has(name)) this.posSeen.delete(name);
     }
     for (const name of this.online) this.posSeen.set(name, restoredAt);
+    for (const name of [...this.leavePending.keys()]) {
+      if (!this.online.has(name)) this.leavePending.delete(name);
+    }
+    for (const name of [...this.posVouchedAt.keys()]) {
+      if (!this.online.has(name)) this.posVouchedAt.delete(name);
+    }
   }
 
   /**
@@ -279,7 +349,23 @@ export class LogParser {
   /** Take a name off the roster and forget its liveness stamp. */
   markOffline(name) {
     this.posSeen.delete(name);
+    this.posVouchedAt.delete(name);
+    // A name that is leaving for any other reason has no unconfirmed leave to
+    // confirm later — dropping it here is what keeps the map from outliving
+    // the roster (every removal path funnels through this method).
+    this.leavePending.delete(name);
     return this.online.delete(name);
+  }
+
+  /**
+   * Call off a socket-close leave that is still inside its grace window,
+   * because something just proved the viking is in the world after all.
+   * Returns true if there really was one. `why` names the proof for the log.
+   */
+  cancelPendingLeave(name, why) {
+    if (!this.leavePending.delete(name)) return false;
+    this.log?.info?.(`[presence] ${name} socket closed but ${why}; leave cancelled`);
+    return true;
   }
 
   /** Names currently online, sorted for stable output. */
@@ -459,6 +545,14 @@ export class LogParser {
         const now = Date.now();
         this.lastAnyPosAt = now;
         this.posSeen.set(name, now);
+        this.posVouchedAt.set(name, now);
+        // THE CANCELLATION (2026-10-03). A position for a name whose socket
+        // just closed says the close was not hers: she is still in the world.
+        // She never left the roster (that is the whole point of the grace
+        // window), so there is nothing to re-add and no join to fire — the
+        // session simply continues, binding and all, instead of being torn in
+        // two by a leave and a pairing-less pos-join two seconds apart.
+        this.cancelPendingLeave(name, 'positions continue');
         // A name the socket bookkeeping lost (wrongly paired SteamID, missed
         // ZDOID, poller started mid-session) is put back on the roster HERE,
         // and the webhook opens a session for it. Deliberately no SteamID
@@ -484,6 +578,14 @@ export class LogParser {
     if (z) {
       const name = z[1].trim();
       const isDead = z[2] === '0' && z[3] === '0';
+      // A ZDOID line of either kind is the server still talking about this
+      // character, which contradicts a socket-close leave inside its grace
+      // window just as a position does (a corpse cannot have disconnected
+      // before it died). Cancel it.
+      const hadPendingLeave = this.cancelPendingLeave(
+        name,
+        isDead ? 'the character died in-world' : 'the character spawned'
+      );
       if (isDead) {
         // Valheim's dedicated-server log records THAT a character died (the
         // ZDOID reset to 0:0) but never HOW — the vanilla log carries no
@@ -508,6 +610,15 @@ export class LogParser {
         //      for everyone after.
         const alreadyOnline = this.online.has(name);
         const alreadyMapped = this.nameToSteam.has(name);
+        if (hadPendingLeave) {
+          // A relog inside the grace window comes back on the SAME Steam
+          // account, so the handshake that just landed is already bound to
+          // this name and needs no correlation — but left in the queue it
+          // would be FIFO-stolen by the next unrelated joiner, which is the
+          // very corruption case 3 below exists to prevent.
+          const bound = this.nameToSteam.get(name);
+          if (bound) this.pendingConnections = this.pendingConnections.filter((s) => s !== bound);
+        }
         if (!alreadyOnline || !alreadyMapped) {
           // Correlate to the oldest unresolved connection, if any.
           // A queue holding more than one handshake is a burst, and EVERY name
@@ -567,6 +678,23 @@ export class LogParser {
       // Drop any matching pending (unresolved) connection too.
       this.pendingConnections = this.pendingConnections.filter((s) => s !== steamId);
       if (name) {
+        // THE GRACE WINDOW (2026-10-03, defect B above). If the position
+        // emitter vouched for this name within the last 90 s, this close is as
+        // likely to be a mis-bound id or a duplicate socket as a real
+        // departure — so do not tear anything down yet. The name stays on the
+        // roster WITH its binding, and flushPendingLeaves() either emits the
+        // leave when the window runs out (stamped with the close, not with the
+        // flush) or never, because a position cancelled it.
+        //
+        // A name with no recent position is handled exactly as before: the
+        // emitter has nothing to say about her, so the socket is all we have.
+        if (this.leavePending.has(name)) return events; // already waiting one out
+        const closedAt = Date.now();
+        const vouchedAt = this.posVouchedAt.get(name);
+        if (this.online.has(name) && Number.isFinite(vouchedAt) && closedAt - vouchedAt < DEFAULT_LEAVE_GRACE_MS) {
+          this.leavePending.set(name, { at: closedAt, steamId });
+          return events;
+        }
         this.steamToName.delete(steamId);
         this.nameToSteam.delete(name);
         this.ambiguous.delete(name);
@@ -583,13 +711,34 @@ export class LogParser {
     const n = line.match(RE.connections);
     if (n) {
       const count = parseInt(n[1], 10);
+      // Stamped, not just stored: the sweep uses this as evidence about NOW
+      // when the position emitter has nothing to say, and a reading from an
+      // hour ago is not evidence about now (SERVER_COUNT_FRESH_MS).
       this.lastConnectionCount = count;
+      this.lastConnectionCountAt = Date.now();
       // If the server reports zero, force the roster empty (self-heals any
       // join/leave we missed). Otherwise just emit a reconcile signal carrying
       // our current roster.
       if (count === 0 && this.online.size > 0) {
+        // SAY SO (2026-10-03). This used to empty the roster in silence, and
+        // that silence is how Imogen's session stayed open for 1,435 minutes:
+        // the next `sync` listed nobody, but no `leave` ever told the webhook
+        // to close her session, so it was still open when she rejoined the
+        // following evening. The server's headcount is the same evidence
+        // sweepStale leans on when the emitter has gone quiet (see
+        // SERVER_COUNT_FRESH_MS), so it produces the same leaves — here, on
+        // the line itself, which carries the log's own clock and so dates them
+        // correctly even in a replay.
+        const now = Date.now();
+        for (const name of [...this.online]) {
+          const seen = this.posSeen.get(name);
+          const silentMs = Number.isFinite(seen) ? Math.max(0, now - seen) : 0;
+          events.push(this.evictStale(name, silentMs, { serverCount: 0 }));
+        }
         this.online.clear();
         this.posSeen.clear();
+        this.posVouchedAt.clear();
+        this.leavePending.clear();
         this.steamToName.clear();
         this.nameToSteam.clear();
         this.pendingConnections = [];
@@ -615,12 +764,27 @@ export class LogParser {
    * `staleMs` — and return the `leave` events for them. Called once per tick by
    * the poller; see DEFAULT_POS_STALE_MS above for why this exists.
    *
-   * THE GUARD: this only runs while the position emitter is demonstrably alive
-   * (SOMEBODY's position within the last staleMs/2). If the plugin crashes, is
-   * unloaded, or the server is rebuilt without it, every name goes silent at
-   * once — and sweeping then would mark the whole server offline on the
-   * strength of our own missing input. Silence from everyone means "no
-   * evidence", not "no players".
+   * THE GUARD, AND ITS HOLE (2026-10-03). The per-name path only runs while
+   * the position emitter is demonstrably alive (SOMEBODY's position within the
+   * last staleMs/2). If the plugin crashes, is unloaded, or the server is
+   * rebuilt without it, every name goes silent at once — and sweeping then
+   * would mark the whole server offline on the strength of our own missing
+   * input. Silence from everyone means "no evidence", not "no players".
+   *
+   * But it also means "the last player logged off", and under the old guard
+   * that was unreachable: the silence that proves the server emptied was the
+   * very thing that disarmed the sweep, so the LAST viking out could never be
+   * swept (Imogen, 1,435 minutes — see SERVER_COUNT_FRESH_MS above). So when
+   * the emitter has been silent for longer than staleMs we stop treating our
+   * own input as the only witness and ask the SERVER, through the fresh
+   * "Connections N" count it writes with or without the plugin:
+   *
+   *   N = 0  -> nobody is connected at all; every name on the roster goes.
+   *   N > 0  -> the roster may still be too long; drop the longest-silent
+   *             names (and only names silent past staleMs) until it is N.
+   *
+   * No fresh count, or a count that agrees with the roster, still means no
+   * sweep — the guard holds everywhere it used to.
    *
    * The SteamID pairing of a swept name is torn down with it (both maps and the
    * ambiguous set), exactly as a real "Closing socket" would, so a later
@@ -629,34 +793,121 @@ export class LogParser {
   sweepStale(nowMs = Date.now(), staleMs = DEFAULT_POS_STALE_MS) {
     const events = [];
     if (!Number.isFinite(staleMs) || staleMs <= 0) return events;
-    if (!Number.isFinite(this.lastAnyPosAt) || nowMs - this.lastAnyPosAt > staleMs / 2) {
-      return events; // emitter silent (or never heard from) — no evidence, no sweep
-    }
-    for (const name of [...this.online]) {
-      const seen = this.posSeen.get(name);
-      if (!Number.isFinite(seen)) {
-        // Should not happen (markOnline stamps every entry), but a name with no
-        // stamp must start its clock now rather than be swept on sight.
-        this.posSeen.set(name, nowMs);
-        continue;
-      }
-      const silentMs = nowMs - seen;
-      if (silentMs <= staleMs) continue;
 
-      const steamId = this.nameToSteam.get(name) ?? null;
+    // --- The emitter is live: per-name silence is the whole story ---------
+    if (Number.isFinite(this.lastAnyPosAt) && nowMs - this.lastAnyPosAt <= staleMs / 2) {
+      for (const name of [...this.online]) {
+        const seen = this.posSeen.get(name);
+        if (!Number.isFinite(seen)) {
+          // Should not happen (markOnline stamps every entry), but a name with
+          // no stamp must start its clock now rather than be swept on sight.
+          this.posSeen.set(name, nowMs);
+          continue;
+        }
+        const silentMs = nowMs - seen;
+        if (silentMs <= staleMs) continue;
+        events.push(this.evictStale(name, silentMs));
+      }
+      return events;
+    }
+
+    // --- The emitter is silent overall: ask the server --------------------
+    // Between staleMs/2 and staleMs the emitter is merely late, which is not
+    // yet evidence of anything; wait for it as before.
+    if (Number.isFinite(this.lastAnyPosAt) && nowMs - this.lastAnyPosAt <= staleMs) return events;
+    if (!Number.isInteger(this.lastConnectionCount) || !Number.isFinite(this.lastConnectionCountAt)) {
+      return events; // the server has not told us a count we can lean on
+    }
+    if (nowMs - this.lastConnectionCountAt > SERVER_COUNT_FRESH_MS) {
+      return events; // …and a stale count says nothing about now
+    }
+    const connected = this.lastConnectionCount;
+
+    if (connected === 0) {
+      for (const name of [...this.online]) {
+        const seen = this.posSeen.get(name);
+        const silentMs = Number.isFinite(seen) ? nowMs - seen : staleMs;
+        events.push(this.evictStale(name, silentMs, { serverCount: 0 }));
+      }
+      return events;
+    }
+
+    if (this.online.size <= connected) return events;
+    // Longest-silent first, and never a name the emitter spoke for inside
+    // staleMs: the server's count is a headcount, not a list of names, so it
+    // can only tell us HOW MANY are wrong, never which.
+    const silent = [...this.online]
+      .map((name) => [name, this.posSeen.get(name)])
+      .filter(([, seen]) => Number.isFinite(seen) && nowMs - seen > staleMs)
+      .sort((a, b) => a[1] - b[1]);
+    let excess = this.online.size - connected;
+    for (const [name, seen] of silent) {
+      if (excess <= 0) break;
+      excess -= 1;
+      events.push(this.evictStale(name, nowMs - seen, { serverCount: connected }));
+    }
+    return events;
+  }
+
+  /**
+   * Take one name off the roster as a stale-presence `leave`, tearing its
+   * SteamID pairing down with it. Shared by every sweep path so they can never
+   * drift apart. `extra` rides along in the event metadata.
+   */
+  evictStale(name, silentMs, extra = {}) {
+    const steamId = this.nameToSteam.get(name) ?? null;
+    this.markOffline(name);
+    this.ambiguous.delete(name);
+    if (steamId) {
+      this.nameToSteam.delete(name);
+      this.steamToName.delete(steamId);
+    }
+    const ev = {
+      type: 'leave',
+      characterName: name,
+      metadata: { source: 'pos-stale', silentMs, ...extra },
+    };
+    // Stamped here, like the other two leave paths, because the pairing this
+    // leave belongs to has just been torn down.
+    if (steamId) ev.steamId = steamId;
+    return ev;
+  }
+
+  /**
+   * Emit the `leave` events for socket closes whose grace window has run out
+   * with no position to contradict them (see DEFAULT_LEAVE_GRACE_MS). Called
+   * once per tick by the poller, immediately before sweepStale.
+   *
+   * The event is filed under the time the SOCKET CLOSED, not the moment the
+   * window expired — `occurredAtMs` is set here, so the webhook records the
+   * departure where it really happened rather than 90 s late. (Like posSeen,
+   * that clock is our own: the poller drags the log by ~20 s and never replays
+   * it, so parse time is log time within one tick. A socket close caught in a
+   * long REPLAY is the documented exception and lands at replay time.)
+   */
+  flushPendingLeaves(nowMs = Date.now(), graceMs = DEFAULT_LEAVE_GRACE_MS) {
+    const events = [];
+    for (const [name, pending] of [...this.leavePending]) {
+      const at = Number.isFinite(pending?.at) ? pending.at : nowMs;
+      if (nowMs - at < graceMs) continue; // still inside its window
+      this.leavePending.delete(name);
+      if (!this.online.has(name)) continue; // already left by another path
+      const steamId = pending?.steamId ?? this.nameToSteam.get(name) ?? null;
       this.markOffline(name);
       this.ambiguous.delete(name);
       if (steamId) {
-        this.nameToSteam.delete(name);
         this.steamToName.delete(steamId);
+        if (this.nameToSteam.get(name) === steamId) this.nameToSteam.delete(name);
       }
       const ev = {
         type: 'leave',
         characterName: name,
-        metadata: { source: 'pos-stale', silentMs },
+        // Deliberately the same metadata a prompt socket-close leave carries:
+        // this IS that leave, only confirmed late. Nothing downstream should
+        // have to know it waited.
+        metadata: {},
+        occurredAtMs: at,
       };
-      // Stamped here, like the other two leave paths, because the pairing this
-      // leave belongs to has just been torn down.
       if (steamId) ev.steamId = steamId;
       events.push(ev);
     }
@@ -673,7 +924,16 @@ export class LogParser {
       // `now` by the constructor, so this round-trips the shape, never a grace
       // period that has already expired.
       posSeen: [...this.posSeen.entries()],
+      posVouchedAt: [...this.posVouchedAt.entries()],
       lastAnyPosAt: this.lastAnyPosAt,
+      // Socket closes still waiting out their grace window, and the server's
+      // own headcount with the moment we read it — both are evidence the
+      // sweep needs and neither survives a restart any other way. The window
+      // keeps its original clock on restore (see the constructor), so a leave
+      // is never lost and never emitted twice.
+      leavePending: [...this.leavePending.entries()],
+      lastConnectionCount: this.lastConnectionCount,
+      lastConnectionCountAt: this.lastConnectionCountAt,
       // steamId->characterName correlation + unresolved-connection queue,
       // so a restart mid-session doesn't forget who's connected to what
       // (see the constructor/relog comments for why this matters).
@@ -691,4 +951,6 @@ export {
   MAX_PIN_NAME_LEN,
   MAX_CHAT_LEN,
   DEFAULT_POS_STALE_MS,
+  DEFAULT_LEAVE_GRACE_MS,
+  SERVER_COUNT_FRESH_MS,
 };
