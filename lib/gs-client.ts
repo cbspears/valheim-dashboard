@@ -530,6 +530,12 @@ export function parseSelfSnapshot(body: Obj): ParsedSelf | null {
 
   // Built UNCAPPED first (records are derived from every weapon), then capped for
   // storage by capGsStats — the baseline layer needs the uncapped lists.
+  // ⚠️ These `records` are RAW (lifetime, pre-baseline, pre-sentinel-guard) and
+  // must never reach a column, a title or a board: lib/gs-baseline recomputes
+  // topWeapon/topWeaponDamage/hardestHit/biggestSwing from the EFFECTIVE weapons
+  // (computeEffective) and again from the MERGED stored weapons (mergeGsStats),
+  // and nothing persists `gsStats`/`gsStatsFull.records` from here. Kept only so
+  // the parsed blob is a complete GsClientStats (scripts/gs-client.test.mjs).
   const top = weapons[0];
   const gsStatsFull: GsClientStats = {
     weapons,

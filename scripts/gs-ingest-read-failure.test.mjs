@@ -272,6 +272,63 @@ function check(name, fn) {
   });
 }
 
+// ── 7. SENTINEL DAMAGE: refused for weapons, surfaced in the response + log ──
+// Not a read failure, but this is the rig that drives the real POST handler end
+// to end. Yosh's 09-24 incident: one 9,999,999 hit must not reach damage_dealt.
+{
+  fail = null;
+  statsRows = [];
+  const first = await post();
+  const stored = JSON.parse(first.upserts[0].body);
+  // A normal cycle on top of the capture, so the row holds real effective damage.
+  statsRows = [stored];
+  const grown = snapshot();
+  grown.players[0].weapons = [{ weapon: 'Axes', kills: 132, damageDealt: 42000, hardestHit: 320, biggestSwing: 320 }];
+  grown.players[0].stats = { ...grown.players[0].stats, vh_Builds: 910 };
+  const second = await post(grown);
+  const row2 = JSON.parse(second.upserts[0].body);
+  // The upsert only carries gs_baseline when it changed; the stored row keeps it.
+  statsRows = [{ ...stored, ...row2, gs_baseline: row2.gs_baseline ?? stored.gs_baseline }];
+
+  const bad = snapshot();
+  bad.players[0].weapons = [{ weapon: 'Axes', kills: 133, damageDealt: 42000 + 9_999_999, hardestHit: 9_999_999, biggestSwing: 9_999_999 }];
+  bad.players[0].stats = { ...bad.players[0].stats, vh_Builds: 925 };
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.map(String).join(' '));
+  let r;
+  try {
+    r = await post(bad);
+  } finally {
+    console.warn = realWarn;
+  }
+  check('a normal 2,000-damage cycle credits and answers a plain { status }', () => {
+    assert.deepEqual(second.json, { status: 'inserted' });
+    assert.equal(row2.damage_dealt, 2000);
+  });
+  check('a sentinel snapshot is refused for weapons and says so in the response', () => {
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(r.json.status, 'inserted');
+    assert.deepEqual(r.json.quarantined.weapons.map((w) => w.weapon), ['Axes']);
+    assert.equal(r.json.quarantined.threshold, 99_999);
+  });
+  check('damage_dealt and topWeaponDamage are unchanged; builds still credit', () => {
+    const row = JSON.parse(r.upserts[0].body);
+    assert.equal(row.damage_dealt, 2000);
+    assert.equal(row.gs_stats.records.topWeaponDamage, 2000);
+    assert.equal(row.gs_stats.records.hardestHit, 320);
+    assert.equal(row.structures_built, 25, 'builds 925 − 900 still credit');
+    assert.ok(row.gs_stats._flags.some((f) => f.kind === 'sentinelDamage' && f.field === 'weapon:Axes'));
+  });
+  check('and the refusal is logged as a SENTINEL DAMAGE warning', () => {
+    assert.ok(
+      warnings.some((w) => w.includes('[gs-ingest] SENTINEL DAMAGE refused for "Yunter"')),
+      `expected the sentinel warning, got: ${warnings.join(' | ')}`,
+    );
+  });
+  statsRows = [];
+}
+
 server.close();
 
 if (failures > 0) {

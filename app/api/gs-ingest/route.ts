@@ -20,6 +20,8 @@ import {
   baseColumnsOnly,
   POISON_CAPS,
   MIGRATION_REQUIRED,
+  SENTINEL_HIT_THRESHOLD,
+  type WeaponQuarantine,
 } from '@/lib/gs-baseline';
 import {
   bossDamageDeltas,
@@ -564,7 +566,7 @@ async function warnOnWeaponCollision(
  * baseline and therefore contributes exactly zero — which is the point: a
  * veteran import starts level with everyone else.
  */
-async function ingestPlayerStats(body: Obj): Promise<boolean> {
+async function ingestPlayerStats(body: Obj, report: { quarantined?: WeaponQuarantine[] } = {}): Promise<boolean> {
   const s = parseSelfSnapshot(body);
   if (!s) return false;
 
@@ -647,7 +649,34 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
   const dist = parseSelfDistances(body);
 
   // ── world baseline: raw lifetime snapshot → what was earned HERE ───────────
-  const { effective, nextBaseline, change, reason, deferred } = applyBaseline(s, dist, prev?.gs_baseline, now);
+  // `prevGsStats` (the last ACCEPTED effective values) lets the sentinel-damage
+  // guard measure each weapon's per-post delta; null on a first-ever row.
+  const { effective, nextBaseline, change, reason, deferred, quarantined } = applyBaseline(
+    s,
+    dist,
+    prev?.gs_baseline,
+    now,
+    { prevGsStats: prev ? (prev.gs_stats ?? null) : undefined },
+  );
+
+  // SENTINEL DAMAGE (lib/gs-baseline SENTINEL_HIT_THRESHOLD). Refused, not
+  // merged: the weapons group credits nothing this post, the offending weapons'
+  // jump is absorbed into their zero-points, the refusal is stamped into
+  // gs_stats._flags (mergeIntoRow) and echoed in the ingest response. Logged
+  // the same way the boss-damage ceiling is: one warn line naming who, what,
+  // how much and what was done instead.
+  if (quarantined.length > 0) {
+    report.quarantined = quarantined;
+    console.warn(
+      `[gs-ingest] SENTINEL DAMAGE refused for "${s.reporter}": ` +
+        quarantined
+          .map((w) => `${w.weapon} ${w.why.join(', ')} (stored ${Math.round(w.storedDamage)}, raw ${w.raw.damageDealt})`)
+          .join('; ') +
+        `. No single Valheim hit reaches ${SENTINEL_HIT_THRESHOLD}; a number like this is a broken mod or a ` +
+        `forged payload. Weapons credited nothing this post (other groups credited normally); the jump was ` +
+        `absorbed into those weapons' zero-points and flagged in gs_stats._flags.`,
+    );
+  }
 
   // An incomplete / bystander-derived snapshot is not trusted to seed a
   // zero-point OR to be credited from — writing nothing is the whole point, so
@@ -727,6 +756,7 @@ async function ingestPlayerStats(body: Obj): Promise<boolean> {
     world: s.world,
     now,
     nextBaseline,
+    quarantined,
   });
 
   // ── VALHEIM 1.0 STOPGAP (2026-09-09) ──────────────────────────────────────
@@ -1843,7 +1873,8 @@ async function ingest(req: Request) {
     }
 
     await ingestDeathEvents(db(), body.deathEvents, reporter);
-    const merged = await ingestPlayerStats(body as Record<string, unknown>);
+    const statsReport: { quarantined?: WeaponQuarantine[] } = {};
+    const merged = await ingestPlayerStats(body as Record<string, unknown>, statsReport);
 
     // Observed (bystander) per-boss damage → bosses.fight_stats. Deliberately
     // NOT gated on `merged`: that flag is about the REPORTER's own cumulative
@@ -1879,7 +1910,14 @@ async function ingest(req: Request) {
         console.error('[milestones]', e instanceof Error ? e.message : e);
       }
     }
-    return Response.json({ status: 'inserted' });
+    // A sentinel-damage refusal is told to the sender too (only when one
+    // happened, so every ordinary response stays exactly `{ status }`).
+    const q = statsReport.quarantined ?? [];
+    return Response.json(
+      q.length > 0
+        ? { status: 'inserted', quarantined: { weapons: q.map((w) => ({ weapon: w.weapon, why: w.why })), threshold: SENTINEL_HIT_THRESHOLD } }
+        : { status: 'inserted' },
+    );
   }
 
   const client = db();

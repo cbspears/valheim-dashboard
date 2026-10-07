@@ -391,6 +391,12 @@ export interface BaselineResult {
    * all-zero, nothing is persisted, and the caller should skip the write.
    */
   deferred: boolean;
+  /**
+   * Weapons the sentinel-damage guard refused this post (empty = none). When
+   * non-empty the weapons group credited nothing and the offending weapons'
+   * jump was absorbed into `nextBaseline` (see SENTINEL_HIT_THRESHOLD).
+   */
+  quarantined: WeaponQuarantine[];
 }
 
 // ── small defensive readers ──────────────────────────────────────────────────
@@ -1269,6 +1275,160 @@ function zeroEffective(s: ParsedSelf): EffectiveStats {
   };
 }
 
+// ── sentinel-damage guard (2026-10-07) ───────────────────────────────────────
+//
+// THE INCIDENT. On 09-24 Yosh posted a snapshot carrying 21 per-weapon hits of
+// exactly 9,999,999 damage (20 Spears + 1 Unarmed) — a mod's sentinel value,
+// landed off the box but filed under `World = Eilif`, which the GS client uses
+// for every world. raw − zero-point credited all of it: damage_dealt 210 M, the
+// per-weapon maps, the records, and the Heavy-Handed title the same evening. It
+// was repaired by hand on 09-25 by raising the zero-points.
+//
+// THE GUARD. A single legitimate Valheim hit never reaches SENTINEL_HIT_THRESHOLD
+// (the game itself treats anything past it as cheat-tier), so a weapon whose
+// EFFECTIVE hardest hit / biggest swing reaches it, or whose effective damage
+// jumps by that much over what the row already holds for it in one post, is a
+// broken counter, not play.
+//
+// WHY THIS MECHANISM (zero-point offset, not a hole, not a cap):
+//   • The weapons GROUP is refused for this post exactly the way an untrusted
+//     group is everywhere else in this module: it credits NOTHING (weapons[]
+//     and the damageDealt counter contribute zero; GREATEST keeps every stored
+//     value), and the rest of the snapshot credits normally (rule 5).
+//   • The offending weapons' jump is then absorbed into their ZERO-POINT — the
+//     very repair that was done by hand on 09-25: zero-point := raw − what the
+//     row already holds, record thresholds := the raw record. The sentinel sits
+//     in the client's weapons file permanently, so a plain per-post refusal
+//     would refuse that viking's weapons forever (rule 6: never mute a viking),
+//     and a HOLE would re-take the zero-point at the raw value and make them
+//     re-earn every point of damage they already have before the GREATEST
+//     columns moved again. The offset costs exactly the refused delta, nothing
+//     more, and the next post credits normal growth.
+//   • A cap (credit at most N) would still hand a sentinel post N damage per
+//     weapon and leave the sentinel in the raw, re-tripping every post.
+// Weapons that did not trip keep their zero-points, so their growth this cycle
+// is simply credited on the next post rather than lost.
+
+/**
+ * One hit of this much is not Valheim. The strongest vanilla hits land in the
+ * low thousands; Valheim's own cheat heuristics treat anything over 99,999 as
+ * impossible; the mod's sentinel is 9,999,999. Applies per weapon to the
+ * effective hardest hit / biggest swing and to the per-post damage delta.
+ */
+export const SENTINEL_HIT_THRESHOLD = 99_999;
+
+/** One weapon the guard refused, for the ingest log, response and _flags. */
+export interface WeaponQuarantine {
+  weapon: string;
+  /** Effective damage the stored row already held for this weapon. */
+  storedDamage: number;
+  /** Effective damage this post would have added over the stored value. */
+  damageDelta: number;
+  /** Effective (gated) records this post would have surfaced. */
+  hardestHit: number;
+  biggestSwing: number;
+  /** The raw tuple the zero-point offset was taken from. */
+  raw: { damageDealt: number; hardestHit: number; biggestSwing: number };
+  /** Which rule tripped. */
+  why: string[];
+}
+
+/** Per-weapon damage the stored row already holds (the last ACCEPTED effective values). */
+export function storedWeaponDamage(prevGsStats: unknown): Map<string, number> {
+  const stored = new Map<string, number>();
+  const prev = plainObj(prevGsStats);
+  if (Array.isArray(prev?.weapons)) {
+    for (const row of prev.weapons as unknown[]) {
+      const o = plainObj(row);
+      if (o && typeof o.weapon === 'string') stored.set(o.weapon, Math.max(stored.get(o.weapon) ?? 0, num(o.damageDealt)));
+    }
+  }
+  return stored;
+}
+
+/**
+ * Which effective weapons look like a sentinel. `stored` is storedWeaponDamage()
+ * of the row being merged into; null when the caller has no row to measure a
+ * delta against, in which case only the per-hit records are checked.
+ */
+export function findSentinelWeapons(
+  effective: EffectiveStats,
+  s: ParsedSelf,
+  stored: ReadonlyMap<string, number> | null,
+): WeaponQuarantine[] {
+  const raw = new Map(s.gsStatsFull.weapons.map((w) => [w.weapon, w]));
+  const out: WeaponQuarantine[] = [];
+  for (const w of effective.gsStats.weapons) {
+    const storedDamage = stored?.get(w.weapon) ?? 0;
+    const damageDelta = num(w.damageDealt) - storedDamage;
+    const why: string[] = [];
+    if (stored && damageDelta >= SENTINEL_HIT_THRESHOLD) why.push(`damage +${Math.round(damageDelta)} in one post`);
+    if (num(w.hardestHit) >= SENTINEL_HIT_THRESHOLD) why.push(`hardest hit ${Math.round(w.hardestHit)}`);
+    if (num(w.biggestSwing) >= SENTINEL_HIT_THRESHOLD) why.push(`biggest swing ${Math.round(w.biggestSwing)}`);
+    if (why.length === 0) continue;
+    const r = raw.get(w.weapon);
+    out.push({
+      weapon: w.weapon,
+      storedDamage,
+      damageDelta,
+      hardestHit: num(w.hardestHit),
+      biggestSwing: num(w.biggestSwing),
+      raw: { damageDealt: num(r?.damageDealt), hardestHit: num(r?.hardestHit), biggestSwing: num(r?.biggestSwing) },
+      why,
+    });
+  }
+  // effective.gsStats is capped at the top 12 weapons by damage. A sentinel
+  // weapon always ranks inside it — its damage IS the sentinel — so the capped
+  // list is enough.
+  return out;
+}
+
+/**
+ * Absorb the quarantined weapons' jump into a COPY of the zero-point and zero
+ * the weapons group's credit for this post. Returns the baseline to persist.
+ */
+function quarantineWeapons(
+  base: GsBaseline,
+  effective: EffectiveStats,
+  stored: ReadonlyMap<string, number> | null,
+  q: WeaponQuarantine[],
+): { baseline: GsBaseline; effective: EffectiveStats } {
+  const counters = { ...base.counters };
+  const counterMaps = { ...base.counterMaps, weaponDamage: { ...(base.counterMaps.weaponDamage ?? {}) } };
+  const recordMaps = {
+    ...base.recordMaps,
+    weaponHardestHit: { ...(base.recordMaps.weaponHardestHit ?? {}) },
+    weaponBiggestSwing: { ...(base.recordMaps.weaponBiggestSwing ?? {}) },
+  };
+  let bump = 0;
+  for (const w of q) {
+    const before = num(counterMaps.weaponDamage[w.weapon]);
+    // zero-point := raw − what the row already holds, never lowered.
+    const after = Math.max(before, w.raw.damageDealt - (stored?.get(w.weapon) ?? 0));
+    counterMaps.weaponDamage[w.weapon] = after;
+    bump += after - before;
+    recordMaps.weaponHardestHit[w.weapon] = Math.max(num(recordMaps.weaponHardestHit[w.weapon]), w.raw.hardestHit);
+    recordMaps.weaponBiggestSwing[w.weapon] = Math.max(num(recordMaps.weaponBiggestSwing[w.weapon]), w.raw.biggestSwing);
+  }
+  // The scalar damage counter is the sum of the per-weapon raws (lib/gs-client),
+  // so it moves by exactly what the weapon zero-points moved by.
+  if (!(base.holes ?? []).includes('counters.damageDealt')) counters.damageDealt = num(counters.damageDealt) + bump;
+  const baseline: GsBaseline = { ...base, counters, counterMaps, recordMaps };
+  delete baseline.unusable; // in-memory bookkeeping is never persisted
+  return {
+    baseline,
+    effective: {
+      ...effective,
+      damageDealt: 0,
+      gsStats: {
+        ...effective.gsStats,
+        weapons: [],
+        records: { topWeapon: null, topWeaponDamage: 0, hardestHit: 0, biggestSwing: 0 },
+      },
+    },
+  };
+}
+
 /**
  * Turn one raw cumulative snapshot into the server-earned values to store.
  *
@@ -1293,6 +1453,14 @@ export function applyBaseline(
   dist: ParsedDistances | null,
   stored: unknown,
   at: string = new Date().toISOString(),
+  opts: {
+    /**
+     * The stored row's gs_stats — the last ACCEPTED effective values — so the
+     * sentinel guard can measure each weapon's per-post delta. Omit (undefined)
+     * when there is no row to compare against; the per-hit record check still runs.
+     */
+    prevGsStats?: unknown;
+  } = {},
 ): BaselineResult {
   const qual = captureQualification(s, dist);
   const existing = readBaseline(stored, at);
@@ -1314,6 +1482,7 @@ export function applyBaseline(
       change: 'defer',
       reason: `snapshot is not a usable own-character report — missing ${qual.missing.join(', ')}; credited nothing and wrote nothing (the next own-entry snapshot heals it)`,
       deferred: true,
+      quarantined: [],
     };
   }
 
@@ -1428,12 +1597,33 @@ export function applyBaseline(
     }
   }
 
+  let effective = creditNothing ? zeroEffective(s) : computeEffective(s, dist, base);
+
+  // ── sentinel-damage guard (see SENTINEL_HIT_THRESHOLD) ─────────────────────
+  // Runs on the EFFECTIVE values, after every other rule: a capture, a
+  // re-baseline or a held reset already credits zero and can't trip it, and a
+  // zero-point that was repaired by hand (records gated at the sentinel) no
+  // longer surfaces the sentinel, so it never re-trips on the same raw.
+  const storedDamage = opts.prevGsStats === undefined ? null : storedWeaponDamage(opts.prevGsStats);
+  const quarantined = creditNothing ? [] : findSentinelWeapons(effective, s, storedDamage);
+  if (quarantined.length > 0) {
+    const q = quarantineWeapons(nextBaseline ?? base, effective, storedDamage, quarantined);
+    effective = q.effective;
+    nextBaseline = q.baseline;
+    const note =
+      `SENTINEL DAMAGE refused for ${quarantined.map((w) => `${w.weapon} (${w.why.join(', ')})`).join('; ')} — ` +
+      `the weapons group credits nothing this post; the jump was absorbed into those weapons' zero-points`;
+    reason = reason ? `${reason}; ${note}` : note;
+    if (!change) change = 'repair';
+  }
+
   return {
-    effective: creditNothing ? zeroEffective(s) : computeEffective(s, dist, base),
+    effective,
     nextBaseline,
     change,
     reason,
     deferred: false,
+    quarantined,
   };
 }
 
@@ -1950,6 +2140,8 @@ export interface PoisonFlag {
   prev: number;
   next: number;
   at: string;
+  /** Absent = a counter jump (merged anyway); 'sentinelDamage' = refused by the guard. */
+  kind?: 'sentinelDamage';
 }
 
 /**
@@ -1973,6 +2165,8 @@ export interface MergeContext {
   now: string;
   /** Baseline to persist this cycle, or null/undefined to leave the stored one. */
   nextBaseline?: GsBaseline | null;
+  /** Weapons the sentinel guard refused this post (BaselineResult.quarantined). */
+  quarantined?: WeaponQuarantine[];
 }
 
 export interface MergeResult {
@@ -2021,6 +2215,20 @@ export function mergeIntoRow(
       const priorFlags = Array.isArray(gsStats._flags) ? (gsStats._flags as unknown[]) : [];
       gsStats._flags = [...priorFlags, ...flags];
     }
+  }
+  // Sentinel-damage refusals are recorded in the same reversible _flags list
+  // (the ops page's stat-poison check reads it), but NOT returned in `flags`:
+  // those say "merged anyway", and these were refused.
+  const refused: PoisonFlag[] = (ctx.quarantined ?? []).map((w) => ({
+    field: `weapon:${w.weapon}`,
+    kind: 'sentinelDamage',
+    prev: w.storedDamage,
+    next: w.storedDamage + w.damageDelta,
+    at: ctx.now,
+  }));
+  if (refused.length > 0) {
+    const priorFlags = Array.isArray(gsStats._flags) ? (gsStats._flags as unknown[]) : [];
+    gsStats._flags = [...priorFlags, ...refused];
   }
 
   const row: Record<string, unknown> = {

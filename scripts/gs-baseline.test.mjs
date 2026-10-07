@@ -25,6 +25,7 @@ import {
   MIGRATION_REQUIRED,
   POISON_CAPS,
   REBASELINE_CONSECUTIVE,
+  SENTINEL_HIT_THRESHOLD,
 } from '../lib/gs-baseline.ts';
 import { computeAggregates } from '../lib/milestones.ts';
 
@@ -95,10 +96,10 @@ function payload({
 }
 
 /** parse + apply a stored baseline, exactly as /api/gs-ingest does. */
-function ingest(body, storedBaseline, at = '2026-08-23T12:00:00.000Z') {
+function ingest(body, storedBaseline, at = '2026-08-23T12:00:00.000Z', opts = undefined) {
   const s = parseSelfSnapshot(body);
   assert.ok(s, 'payload parses');
-  return applyBaseline(s, parseSelfDistances(body), storedBaseline, at);
+  return applyBaseline(s, parseSelfDistances(body), storedBaseline, at, opts);
 }
 
 /**
@@ -1945,6 +1946,142 @@ assert.equal(parseSelfSnapshot({ players: [] }), null);
   assert.equal(check.reset, false, 'a holed counter never reads as a collapse');
   assert.equal(check.baseSignature, 52, 'kills 50 + deaths 2 — the holed itemsCrafted is out of both sums');
   assert.equal(check.rawSignature, 4783, '50 + 2 + 4,731 pickups, and NOT the 140 crafts');
+}
+
+// ── SENTINEL DAMAGE GUARD (2026-10-07) ───────────────────────────────────────
+// Yosh, 09-24: 21 hits of exactly 9,999,999 (a mod's sentinel) posted under
+// World = Eilif → damage_dealt 210 M, the per-weapon maps, the records and the
+// Heavy-Handed title. The weapons group of such a snapshot is refused; every
+// other group still credits; the jump is absorbed into the weapon zero-points so
+// the very next post (whose raw STILL carries the sentinel) credits normally.
+{
+  const SENTINEL = 9_999_999;
+  assert.ok(SENTINEL_HIT_THRESHOLD === 99_999, 'the threshold is the named constant');
+  const yosh = (o) => payload({ reporter: 'Yosh', deaths: 1, ...o });
+
+  // (1) capture.
+  const cap = ingest(
+    yosh({ kills: 5, builds: 10, weapons: [
+      { weapon: 'Spears', damageDealt: 1000, kills: 5, hardestHit: 120, biggestSwing: 120 },
+      { weapon: 'Bows', damageDealt: 100, kills: 0, hardestHit: 40, biggestSwing: 40 },
+    ] }),
+    null,
+  );
+  assert.equal(cap.change, 'capture');
+  assert.deepEqual(cap.quarantined, []);
+  const row1 = mergeRow(null, cap.effective, { nextBaseline: cap.nextBaseline });
+
+  // (2) a NORMAL 2,000-damage delta still credits, in full.
+  const normal = ingest(
+    yosh({ kills: 7, builds: 20, weapons: [
+      { weapon: 'Spears', damageDealt: 3000, kills: 7, hardestHit: 150, biggestSwing: 160 },
+      { weapon: 'Bows', damageDealt: 100, kills: 0, hardestHit: 40, biggestSwing: 40 },
+    ] }),
+    row1.gs_baseline,
+    '2026-10-07T12:00:00.000Z',
+    { prevGsStats: row1.gs_stats },
+  );
+  assert.deepEqual(normal.quarantined, [], 'a 2,000-damage delta is play, not a sentinel');
+  assert.equal(normal.effective.damageDealt, 2000);
+  const row2 = mergeRow(row1, normal.effective, { nextBaseline: normal.nextBaseline, quarantined: normal.quarantined });
+  assert.equal(row2.damage_dealt, 2000);
+  assert.equal(row2.gs_stats.records.topWeapon, 'Spears');
+  assert.equal(row2.gs_stats.records.topWeaponDamage, 2000);
+  assert.equal(row2.gs_stats.records.hardestHit, 150);
+
+  // (3) ONE 9,999,999 hit on Spears (plus real Bows growth and real builds/kills).
+  const rawSpears3 = 3000 + SENTINEL + 500;
+  const sent = ingest(
+    yosh({ kills: 9, builds: 35, weapons: [
+      { weapon: 'Spears', damageDealt: rawSpears3, kills: 8, hardestHit: SENTINEL, biggestSwing: SENTINEL },
+      { weapon: 'Bows', damageDealt: 400, kills: 1, hardestHit: 60, biggestSwing: 60 },
+    ] }),
+    row2.gs_baseline ?? row1.gs_baseline,
+    '2026-10-07T12:02:00.000Z',
+    { prevGsStats: row2.gs_stats },
+  );
+  assert.equal(sent.quarantined.length, 1, 'exactly the sentinel weapon is quarantined');
+  assert.equal(sent.quarantined[0].weapon, 'Spears');
+  assert.ok(sent.quarantined[0].why.some((w) => /hardest hit 9999999/.test(w)), sent.quarantined[0].why.join());
+  assert.ok(sent.quarantined[0].why.some((w) => /damage \+/.test(w)), 'the per-post delta trips too');
+  assert.equal(sent.change, 'repair', 'the absorbed jump is a zero-point repair');
+  assert.match(sent.reason, /SENTINEL DAMAGE refused for Spears/);
+  // weapons group refused …
+  assert.equal(sent.effective.damageDealt, 0, 'the damage counter credits nothing this post');
+  assert.deepEqual(sent.effective.gsStats.weapons, [], 'no weapon credits this post');
+  assert.equal(sent.effective.gsStats.records.topWeaponDamage, 0);
+  // … every other group still credits.
+  assert.equal(sent.effective.structuresBuilt, 25, 'builds 35 − 10 still credit');
+  assert.equal(sent.effective.kills, 4, 'kills 9 − 5 still credit');
+  // the zero-point absorbed exactly the jump: raw − what the row already held.
+  const nb = sent.nextBaseline;
+  assert.equal(nb.counterMaps.weaponDamage.Spears, rawSpears3 - 2000);
+  assert.equal(nb.counterMaps.weaponDamage.Bows, 100, 'an untripped weapon keeps its zero-point');
+  assert.equal(nb.recordMaps.weaponHardestHit.Spears, SENTINEL, 'the sentinel record is gated from now on');
+  assert.equal(nb.counters.damageDealt, 1100 + (rawSpears3 - 2000 - 1000), 'scalar moves by the weapon offset');
+  assert.equal(nb.unusable, undefined, 'in-memory bookkeeping is never persisted');
+
+  const row3 = mergeRow(row2, sent.effective, { nextBaseline: nb, quarantined: sent.quarantined });
+  assert.equal(row3.damage_dealt, 2000, 'damage_dealt unchanged by the refused snapshot');
+  assert.equal(row3.gs_stats.records.topWeaponDamage, 2000, 'topWeaponDamage unchanged after a refused snapshot');
+  assert.equal(row3.gs_stats.records.topWeapon, 'Spears');
+  assert.equal(row3.gs_stats.records.hardestHit, 150, 'the sentinel never becomes the hardest hit');
+  assert.equal(row3.gs_stats.records.biggestSwing, 160);
+  assert.equal(row3.structures_built, 25);
+  assert.equal(row3.kills, 4);
+  const flag = row3.gs_stats._flags?.find((f) => f.kind === 'sentinelDamage');
+  assert.ok(flag, 'the refusal is recorded in gs_stats._flags');
+  assert.equal(flag.field, 'weapon:Spears');
+  assert.equal(flag.prev, 2000);
+
+  // (4) next post: the sentinel is STILL in the raw (the client's weapons file
+  // keeps it), plus 1,000 real Spears damage and the Bows growth from (3).
+  const next = ingest(
+    yosh({ kills: 10, builds: 36, weapons: [
+      { weapon: 'Spears', damageDealt: rawSpears3 + 1000, kills: 9, hardestHit: SENTINEL, biggestSwing: SENTINEL },
+      { weapon: 'Bows', damageDealt: 400, kills: 1, hardestHit: 60, biggestSwing: 60 },
+    ] }),
+    row3.gs_baseline,
+    '2026-10-07T12:04:00.000Z',
+    { prevGsStats: row3.gs_stats },
+  );
+  assert.deepEqual(next.quarantined, [], 'the absorbed sentinel does not re-trip — the viking is not muted');
+  const spears = next.effective.gsStats.weapons.find((w) => w.weapon === 'Spears');
+  const bows = next.effective.gsStats.weapons.find((w) => w.weapon === 'Bows');
+  assert.equal(spears.damageDealt, 3000, '2,000 held + 1,000 real growth');
+  assert.equal(spears.hardestHit, 0, 'the sentinel record stays gated');
+  assert.equal(bows.damageDealt, 300, "the untripped weapon's growth from the refused post is credited now");
+  assert.equal(next.effective.damageDealt, 3300);
+  const row4 = mergeRow(row3, next.effective, { nextBaseline: next.nextBaseline, quarantined: next.quarantined });
+  assert.equal(row4.damage_dealt, 3300);
+  assert.equal(row4.gs_stats.records.topWeaponDamage, 3000);
+  assert.equal(row4.gs_stats.records.hardestHit, 150);
+
+  // (5) no stored row to measure against (opts omitted): the per-hit record
+  // check alone still refuses a sentinel the gate would surface.
+  const noPrev = ingest(
+    yosh({ kills: 9, builds: 35, weapons: [
+      { weapon: 'Spears', damageDealt: rawSpears3, kills: 8, hardestHit: SENTINEL, biggestSwing: SENTINEL },
+    ] }),
+    row1.gs_baseline,
+  );
+  assert.equal(noPrev.quarantined.length, 1);
+  assert.deepEqual(noPrev.quarantined[0].why, ['hardest hit 9999999', 'biggest swing 9999999']);
+  assert.equal(noPrev.effective.damageDealt, 0);
+  assert.equal(noPrev.effective.structuresBuilt, 25);
+
+  // (6) a VETERAN's large but ordinary effective weapon totals do not trip the
+  // delta rule when the row already holds them.
+  const vet = ingest(
+    yosh({ kills: 9, builds: 35, weapons: [
+      { weapon: 'Spears', damageDealt: 1000 + 250_000, kills: 8, hardestHit: 900, biggestSwing: 900 },
+    ] }),
+    row1.gs_baseline,
+    '2026-10-07T12:06:00.000Z',
+    { prevGsStats: { weapons: [{ weapon: 'Spears', damageDealt: 248_500, kills: 7, hardestHit: 800, biggestSwing: 800 }] } },
+  );
+  assert.deepEqual(vet.quarantined, [], 'a 1,500-damage step on a 248 k career is play');
+  assert.equal(vet.effective.damageDealt, 249_900, 'scalar: 251,000 raw − 1,100 zero-point (Bows absent this post)');
 }
 
 console.log('OK — all world-baseline assertions passed');

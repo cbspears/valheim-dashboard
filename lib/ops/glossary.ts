@@ -715,7 +715,7 @@ export const GLOSSARY = {
     id: 'check:stat-poison-flags',
     title: 'Stat-poison flags recorded',
     what:
-      'One or more player_stats rows carry gs_stats._flags, which the ingest guard writes when a client posts an implausible counter jump. The value it flagged was merged and marked rather than dropped.',
+      'One or more player_stats rows carry gs_stats._flags, which the ingest guard writes when a client posts an implausible counter jump. A plain flag means the value was merged and marked rather than dropped; a flag of kind sentinelDamage (2026-10-07) means a per-weapon hit or jump of 99,999+ was REFUSED: the weapons group credited nothing that post and the jump was absorbed into that weapon\'s zero-point.',
     why:
       'It is the guard telling you it caught something, not an error. Two people sharing a Steam profile, a client bug, or a genuine outlier all land here, and the difference matters for the leaderboards.',
     healthy: 'No reporters flagged. A single flag on a new player is worth one look and rarely more.',
