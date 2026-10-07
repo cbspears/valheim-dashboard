@@ -398,17 +398,53 @@ export function buildEpisodes(
   // which is another thing that can only be known from the whole list.
   const deathPeaks = assignDeathPeaks(cores, days);
 
+  // NO TWO NIGHTS IN A ROW SHARE A TITLE (2026-10-07: three "The Siege"
+  // nights running). Each night is titled knowing the previous night's final
+  // title; on a match it is re-titled with a bumped attempt (seed + attempt for
+  // the pick() pools, index + attempt for QUIET_TITLES). Titles that ARE a fact
+  // (a boss, a specific discovery or raid kind, a lone viking's name) come back
+  // unchanged on every attempt, so they simply stand. Still deterministic: the
+  // same nights in the same order give the same titles.
+  let previousTitle: string | null = null;
   return cores.map((core, i) => {
     const seed = hashString(days[i]);
     const tier = tiers[i];
     const peak = deathPeaks[i];
+    const title = titleAvoiding(core, tier, peak, previousTitle);
+    previousTitle = title;
     return {
       ...core,
       tier,
-      title: titleFor(core, tier, peak),
+      title,
       description: describeEpisode(core, seed, tier, peak),
     };
   });
+}
+
+const TITLE_REPICK_ATTEMPTS = 4;
+
+function sameTitle(a: string | null, b: string | null): boolean {
+  return a !== null && b !== null && a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * titleFor, re-picked until it differs from `previous`. Gives up after a few
+ * attempts and keeps the FIRST choice — a repeat that names a fact beats an
+ * arbitrary pool entry.
+ */
+function titleAvoiding(
+  e: EpisodeCore,
+  tier: EpisodeTier,
+  deathsPeak: boolean,
+  previous: string | null
+): string {
+  const first = titleFor(e, tier, deathsPeak, 0);
+  if (!sameTitle(first, previous)) return first;
+  for (let attempt = 1; attempt <= TITLE_REPICK_ATTEMPTS; attempt++) {
+    const t = titleFor(e, tier, deathsPeak, attempt);
+    if (!sameTitle(t, previous)) return t;
+  }
+  return first;
 }
 
 /** The sixth argument after buildEpisodes has reduced it once, not per day. */
@@ -684,8 +720,15 @@ function discoveryTitle(detail: string): string {
   return 'Into Unknown Lands';
 }
 
+// The raid rung's fallback, for a raid whose detail names no particular kind.
+// It used to be the single string 'The Siege', which gave three nights running
+// the same headline (and, with a fixed first entry, every other night after
+// that). Picked per night from the date's seed like the other pools; a re-pick
+// (seed + attempt) walks to the next entry.
+const RAID_TITLES = ['The Siege', 'Raiders at the Walls', 'The Walls Held', 'A Night Under Siege', 'Shields to the Palisade'];
+
 /** Turn a raw raid detail into a saga chapter title. */
-function raidTitle(detail: string): string {
+function raidTitle(detail: string, seed: number): string {
   const d = detail.toLowerCase();
   if (d.includes('forest is moving') || d.includes('greydwarf')) return 'The Forest Marched';
   if (d.includes('foul smell') || d.includes('swamp')) return 'A Stench from the Swamp';
@@ -693,7 +736,7 @@ function raidTitle(detail: string): string {
   if (d.includes('ground is shaking') || d.includes('troll')) return 'The Ground Shook';
   if (d.includes('cold wind') || d.includes('wolves') || d.includes('wolf')) return 'The Wolves Came';
   if (d.includes('surtling') || d.includes('fire')) return 'A Night of Embers';
-  return 'The Siege';
+  return pick(RAID_TITLES, seed, 24);
 }
 
 const FIRST_PIN_TITLES = ['A Place with a Name', 'New Ground, Newly Named', 'The Map Grew'];
@@ -789,6 +832,7 @@ const DEED_TITLES = ['{title}, Achieved', 'The Night of {title}', '{title}, At L
 
 const NEWCOMER_TITLES = ["{name}'s First Night", '{name} Came to the Realm', '{name} at the Gate'];
 const TURNOUT_TITLES = ['{n} at the Benches', 'A Hall of {n}', '{n} Answered the Horn'];
+const FULL_HALL_TITLES = ['A Full Hall', 'Every Bench Taken', 'The Benches Filled'];
 const HOURS_TITLES = ['{h} Hours by the Fire', '{h} Hours Between Them'];
 const TITLE_AWARD_TITLES_ONE = ['{name} Took Up {title}', 'A New Name for {name}'];
 const TITLE_AWARD_TITLES_MANY = ['{n} Titles Changed Hands', 'New Names by Firelight'];
@@ -820,7 +864,8 @@ function turnoutTitle(e: EpisodeCore, seed: number): string | null {
   // as the same headline five nights running.
   if (hours >= 40 && (seed & 1) === 0) return fill(pick(HOURS_TITLES, seed, 22), { h: numTitle(hours) });
   if (heads >= 8) return fill(pick(TURNOUT_TITLES, seed, 22), { n: numTitle(heads) });
-  return 'A Full Hall';
+  // Seeded like the other pools; a re-pick (seed + attempt) walks to the next entry.
+  return pick(FULL_HALL_TITLES, seed, 26);
 }
 
 /** The death-count rung, in each tier's own register. */
@@ -833,8 +878,14 @@ function deathTitle(e: EpisodeCore, tier: EpisodeTier): string {
   return `The Day of ${e.deaths.length} Deaths`;
 }
 
-function titleFor(e: EpisodeCore, tier: EpisodeTier, deathsPeak: boolean): string {
-  const seed = hashString(e.date.slice(0, 10));
+/**
+ * `attempt` > 0 is a re-pick (titleAvoiding): every pool rotates by it, while
+ * the boss rung deliberately keeps the date's own seed so a boss night always
+ * carries the same boss title.
+ */
+function titleFor(e: EpisodeCore, tier: EpisodeTier, deathsPeak: boolean, attempt = 0): string {
+  const dateSeed = hashString(e.date.slice(0, 10));
+  const seed = dateSeed + attempt;
   const loud = tier === 'expressive';
 
   // THE SHARED LADDER (leadKind), in each tier's own register. An expressive
@@ -846,7 +897,7 @@ function titleFor(e: EpisodeCore, tier: EpisodeTier, deathsPeak: boolean): strin
       // keeps the title it has always had.
       const fight = e.bossFights[0];
       if (fight) {
-        const t = bossNightTitle(fight, seed);
+        const t = bossNightTitle(fight, dateSeed);
         if (t) return t;
       }
       const boss = plainText(e.bossKills[0]);
@@ -871,7 +922,7 @@ function titleFor(e: EpisodeCore, tier: EpisodeTier, deathsPeak: boolean): strin
     case 'discovery':
       return discoveryTitle(e.discoveries[0]);
     case 'raid':
-      return raidTitle(e.raids[0]);
+      return raidTitle(e.raids[0], seed);
     case 'places':
       return pick(FIRST_PIN_TITLES, seed);
     case 'oaths':
@@ -890,7 +941,7 @@ function titleFor(e: EpisodeCore, tier: EpisodeTier, deathsPeak: boolean): strin
   if (turnout) return turnout;
   if (e.deaths.length >= 30) return deathTitle(e, tier);
   if (e.participants.length === 1) return `${firstName(e.participants[0]?.name)}'s Lone Vigil`;
-  return QUIET_TITLES[(e.number - 1) % QUIET_TITLES.length];
+  return QUIET_TITLES[(e.number - 1 + attempt) % QUIET_TITLES.length];
 }
 
 // ── description derivation (template pools, seeded per day) ────────────

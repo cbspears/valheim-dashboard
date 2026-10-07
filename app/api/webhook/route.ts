@@ -42,6 +42,7 @@ import { shouldReplayGuard, planJoinSession, sessionDurationMinutes } from '@/li
 import { planRosterSync, type RosterRow } from '@/lib/webhook/roster';
 import { shouldDedupeDeath, deathDedupeBounds } from '@/lib/webhook/dedupe';
 import { clampEventTime } from '@/lib/event-time';
+import { hasWorldDay, worldDayFromStatus, stampWorldDay } from '@/lib/webhook/world-day';
 
 /**
  * How many `players` rows one roster sync will read. Fifty times the twenty-seat
@@ -1014,13 +1015,39 @@ export async function POST(request: Request) {
     }
 
     // ---- 4. Record the event ------------------------------------------------
+    // WORLD DAY (lib/webhook/world-day.ts): the Story's "Day N" phrasing reads
+    // metadata.world_day. Producer's own value wins, then body.worldDay, then
+    // ONE single-row server_status read — used only when its updated_at is
+    // within 15 min of this event. Best effort: a failed or thrown read means
+    // no stamp, never a failed insert.
+    let stampDay: number | undefined;
+    if (!hasWorldDay(metadata as Record<string, unknown>)) {
+      if (worldDay !== undefined && worldDay >= 1) {
+        stampDay = worldDay;
+      } else {
+        try {
+          const { data: status, error: statusErr } = await db
+            .from('server_status')
+            .select('world_day, updated_at')
+            .eq('id', 1)
+            .limit(1)
+            .maybeSingle();
+          if (statusErr) console.warn(`[webhook] world_day stamp skipped — ${statusErr.message}`);
+          else stampDay = worldDayFromStatus(status, occurredAt.getTime());
+        } catch (err) {
+          console.warn(`[webhook] world_day stamp skipped — ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+    const eventMeta = stampWorldDay(metadata as Record<string, unknown>, stampDay);
+
     // A mismatched join carries the evidence in its metadata, so the row itself
     // says which account was bound and which one showed up (§3b).
     await db.from('events').insert({
       type,
       player_id: playerId,
       character_name: characterName,
-      metadata: identityMeta ? { ...metadata, ...identityMeta } : metadata,
+      metadata: identityMeta ? { ...eventMeta, ...identityMeta } : eventMeta,
       created_at: occurredIso,
     });
 
