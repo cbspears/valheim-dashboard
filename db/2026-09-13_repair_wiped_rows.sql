@@ -1,4 +1,5 @@
 -- STATUS: APPLIED 2026-09-13 ~11:25 CT via the Supabase MCP, with ONE deviation from the text
+-- BACKUP TABLE(S) DROPPED 2026-10-07: player_stats_wiped_rows_bak_2026_09_13 — repairs stood 3+ weeks; JSON copy at ~/valheim-db-backups/bak-tables-2026-10-07/.
 -- below: Rosir's restored blob took its builds/distance groups (structuresBuilt 2469, the
 -- distances maps) from the LIVE zero-point instead of the lineage holes, so his builds keep
 -- counting exactly as before the repair instead of re-filling at today's lifetime and

@@ -81,14 +81,21 @@ const KEEP = {
   ops_heartbeats: 'ops telemetry about the SERVICES, which are the same services after the wipe',
   ops_heartbeat_log: 'ops telemetry history; keeping it is how the launch-night graph has a before',
   ops_alerts: 'the watchdog’s dedupe memory -- clearing it would re-alert on a state it already announced',
-  // One-off repair backups from the 2026-09-13 stats audit (db/2026-09-13_*.sql). The
-  // scan truncates the date suffix at the first digit. They hold pre-repair copies of
-  // rows for rollback and nothing the site reads; drop them by hand once the repairs
-  // have stood for a week. A future wipe recreates nothing here.
-  player_stats_gs_baseline_bak_: 'rollback copy for db/2026-09-13_drop_profile_zero_points.sql',
-  player_stats_wiped_rows_bak_: 'rollback copy for db/2026-09-13_repair_wiped_rows.sql',
-  players_steam_rebind_bak_: 'rollback copy for db/2026-09-13_rebind_steam_backfill_sessions.sql',
-  sessions_backfill_: 'log of the sessions that same file inserted, for rollback',
+};
+
+// ── 3b. tables the schema once created that no longer exist ─────────────────
+// One-off repair backups from the 2026-09-13 stats audit (db/2026-09-13_*.sql;
+// the scan truncates the date suffix at the first digit). They held pre-repair
+// copies for rollback and nothing the site read. DROPPED by hand 2026-10-07 after
+// the repairs had stood 3+ weeks; a JSON copy of each (3 / 32 / 45 / 4 rows) is
+// at ~/valheim-db-backups/bak-tables-2026-10-07/. The files that created them
+// stay in db/ as the record of the repair, so the scan still sees them; a wipe
+// has nothing to do with a table that is gone.
+const DROPPED = {
+  player_stats_gs_baseline_bak_: 'dropped 2026-10-07 (was: rollback copy for db/2026-09-13_drop_profile_zero_points.sql)',
+  player_stats_wiped_rows_bak_: 'dropped 2026-10-07 (was: rollback copy for db/2026-09-13_repair_wiped_rows.sql)',
+  players_steam_rebind_bak_: 'dropped 2026-10-07 (was: rollback copy for db/2026-09-13_rebind_steam_backfill_sessions.sql)',
+  sessions_backfill_: 'dropped 2026-10-07 (was: log of the sessions that same file inserted)',
 };
 
 // ── 4. the join ─────────────────────────────────────────────────────────────
@@ -102,6 +109,10 @@ for (const t of Object.keys(KEEP)) {
   check(`${t} keep-list entry is not also wiped`, !declared.has(t), `also in ${declared.get(t)}`);
   declared.set(t, 'KEEP');
 }
+for (const t of Object.keys(DROPPED)) {
+  check(`${t} dropped-list entry is not also wiped or kept`, !declared.has(t), `also in ${declared.get(t)}`);
+  declared.set(t, 'DROPPED');
+}
 
 const undecided = [...created].filter((t) => !declared.has(t)).sort();
 check(
@@ -109,7 +120,7 @@ check(
   undecided.length === 0,
   undecided.length
     ? `undecided: ${undecided.join(', ')}. Add each to DELETE_TABLES or UPDATE_TARGETS in ` +
-      'scripts/launch-wipe.mjs, or to KEEP in this file with the reason it survives a wipe.'
+      'scripts/launch-wipe.mjs, to KEEP in this file with the reason it survives a wipe, or to DROPPED if it no longer exists.'
     : '',
 );
 

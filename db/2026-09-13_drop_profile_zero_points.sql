@@ -1,4 +1,5 @@
 -- STATUS: APPLIED 2026-09-13 13:07 CT via the Supabase MCP (Charlie's yes, crew updating to Client 0.4.5).
+-- BACKUP TABLE(S) DROPPED 2026-10-07: player_stats_gs_baseline_bak_2026_09_13 — repairs stood 3+ weeks; JSON copy at ~/valheim-db-backups/bak-tables-2026-10-07/.
 -- Verify query returned zero rows; backup table player_stats_gs_baseline_bak_2026_09_13 holds the old zero-points.
 --
 -- Drops the builds / crafts / distance / pickups / kills zero-points so a launch-fresh

@@ -7,8 +7,10 @@
 #
 # Checks, in the order launch night needs them:
 #   0. Valheim version from console.log — the proof no unplanned Steam update ran. The box went
-#      to 1.0 on launch day 2026-09-09 and must now read 1.0.7; a number that is neither 1.0.7
-#      nor a deliberate upgrade means Steam moved the build under us again.
+#      to 1.0 on launch day 2026-09-09 and has followed the hotfixes since (1.0.15 as of
+#      2026-09-19, applied with the panel's own Steam Update). EXPECT_VALHEIM_VERSION (default
+#      below) is the build the box is SUPPOSED to be on; a number that is neither that nor a
+#      deliberate upgrade means Steam moved the build under us again.
 #   1. ValheimPlus loaded by THIS boot's chainloader, and both fallbacks standing down
 #      (BepInEx/LogOutput.log). V+ 10.0.2 replaced AzuCraftyBoxes on 2026-09-10: its own
 #      CraftFromChest does that job, so Azu is off the box and out of the pack.
@@ -79,13 +81,14 @@ else
 fi
 grep -i -- "$WORLD" "$OUT/sftp-ls.txt" | grep -v "^sftp>" | head -8 || true
 
-echo "== ⓪ Valheim version (console.log — proof no unplanned Steam update ran; expect 1.0.7) =="
+EXPECT_VER="${EXPECT_VALHEIM_VERSION:-1.0.15}"
+echo "== ⓪ Valheim version (console.log — proof no unplanned Steam update ran; expect $EXPECT_VER) =="
 VER_LINE="$(grep -a -m1 "Valheim version:" "$OUT/console.log" || true)"
 if [ -n "$VER_LINE" ]; then
   echo "  $VER_LINE"
   case "$VER_LINE" in
-    *1.0.7*) echo "  → 1.0.7, the build the box was cut over to on 2026-09-09. Good." ;;
-    *) echo "  ⚠️  NOT 1.0.7. Steam moved the build, or this boot is older than the cutover." ;;
+    *"$EXPECT_VER"*) echo "  → $EXPECT_VER, the build the box is meant to be on. Good." ;;
+    *) echo "  ⚠️  NOT $EXPECT_VER. Steam moved the build, this boot predates the last deliberate update, or EXPECT_VALHEIM_VERSION needs bumping." ;;
   esac
 else
   echo "  (no 'Valheim version:' line in this console.log)"

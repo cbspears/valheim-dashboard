@@ -1,4 +1,5 @@
 -- STATUS: APPLIED 2026-09-13 ~11:25 CT via the Supabase MCP. Backfilled 45 sessions: Mikael 20
+-- BACKUP TABLE(S) DROPPED 2026-10-07: players_steam_rebind_bak_2026_09_13 + sessions_backfill_2026_09_13 — repairs stood 3+ weeks; JSON copy at ~/valheim-db-backups/bak-tables-2026-10-07/.
 -- (1,145 min), Æymundr 11 (635), Lóa 9 (796), Psifour 3 (102), Ræginál 1 (120), Charleif 1 (145).
 -- Two data repairs from the 2026-09-13 stats audit.
 --
