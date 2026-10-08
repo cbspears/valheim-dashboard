@@ -1,0 +1,1084 @@
+## Settings file was created by plugin HalloweenPieces v1.2.0
+## Plugin GUID: blacks7ar.HalloweenPieces
+
+[1- ServerSync]
+
+## If On, the configuration is locked and can be changed by server admins only. [Synced with Server]
+# Setting type: Toggle
+# Default value: On
+# Acceptable values: Off, On
+Lock Configuration = On
+
+[2- General]
+
+## Minimum drop amount.
+## (Needs logout to take effect) [Synced with Server]
+# Setting type: Int32
+# Default value: 1
+# Acceptable value range: From 0 to 25
+Drop Min = 1
+
+## Maximum drop amount.
+## (Needs logout to take effect) [Synced with Server]
+# Setting type: Int32
+# Default value: 3
+# Acceptable value range: From 0 to 25
+Drop Max = 3
+
+## Percentage chance that a monster will drop the loot.
+## Set to 0 disable pumpkin drop from creatures.
+## (Needs logout to take effect) [Synced with Server]
+# Setting type: Single
+# Default value: 1
+# Acceptable value range: From 0 to 1
+Drop Chance = 1
+
+## Whether to drop one per player.
+## (Needs logout to take effect) [Synced with Server]
+# Setting type: Boolean
+# Default value: false
+One Per Player = false
+
+## Should drop be multiplied by monsters level.
+## (Needs logout to take effect) [Synced with Server]
+# Setting type: Boolean
+# Default value: true
+Level Multiplier = true
+
+## Still no idea about this one, probably dont change it.
+## (Needs logout to take effect) [Synced with Server]
+# Setting type: Boolean
+# Default value: false
+Scale = false
+
+[Bench]
+
+## Build Category where Bench is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Bench is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Bench is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Bench is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Bench
+# Setting type: String
+# Default value: Wood:8:True,Iron:4:True
+Crafting Costs = Wood:8:True,Iron:4:True
+
+[Bones]
+
+## Build Category where Bones is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Bones is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Bones is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Bones is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Bones
+# Setting type: String
+# Default value: TrophySkeleton:1:True,BoneFragments:2:True
+Crafting Costs = TrophySkeleton:1:True,BoneFragments:2:True
+
+[Broken Bench]
+
+## Build Category where Broken Bench is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Broken Bench is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Broken Bench is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Broken Bench is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Broken Bench
+# Setting type: String
+# Default value: Wood:2:True
+Crafting Costs = Wood:2:True
+
+[Candle]
+
+## Build Category where Candle is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Candle is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Candle is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Candle is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Candle
+# Setting type: String
+# Default value: Honey:1:True,Resin:1:True
+Crafting Costs = Honey:1:True,Resin:1:True
+
+[Cemetery Gate]
+
+## Build Category where Cemetery Gate is available.
+# Setting type: BuildPieceCategory
+# Default value: Misc
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = Misc
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Cemetery Gate is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Doors
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Doors
+
+## Comma separated list of tools where Cemetery Gate is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Cemetery Gate is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Cemetery Gate
+# Setting type: String
+# Default value: Wood:12:True
+Crafting Costs = Wood:12:True
+
+[Coffin]
+
+## Build Category where Coffin is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Coffin is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Coffin is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Coffin is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Coffin
+# Setting type: String
+# Default value: Wood:22:True
+Crafting Costs = Wood:22:True
+
+[Creepy Hand]
+
+## Build Category where Creepy Hand is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Creepy Hand is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Creepy Hand is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Creepy Hand is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Creepy Hand
+# Setting type: String
+# Default value: Stone:2:True,BoneFragments:2:True
+Crafting Costs = Stone:2:True,BoneFragments:2:True
+
+[Cursed Doll]
+
+## Build Category where Cursed Doll is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Cursed Doll is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Cursed Doll is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Cursed Doll is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Cursed Doll
+# Setting type: String
+# Default value: DeerHide:12:True
+Crafting Costs = DeerHide:12:True
+
+[Dead Bush]
+
+## Build Category where Dead Bush is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Dead Bush is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Dead Bush is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Dead Bush is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Dead Bush
+# Setting type: String
+# Default value: Wood:2:True
+Crafting Costs = Wood:2:True
+
+[Dead Tree]
+
+## Build Category where Dead Tree is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Dead Tree is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Dead Tree is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Dead Tree is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Dead Tree
+# Setting type: String
+# Default value: Wood:12:True
+Crafting Costs = Wood:12:True
+
+[Fence Pillar]
+
+## Build Category where Fence Pillar is available.
+# Setting type: BuildPieceCategory
+# Default value: Misc
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = Misc
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Fence Pillar is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Architecture
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Architecture
+
+## Comma separated list of tools where Fence Pillar is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Fence Pillar is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Fence Pillar
+# Setting type: String
+# Default value: Wood:2:True
+Crafting Costs = Wood:2:True
+
+[Fence Tile]
+
+## Build Category where Fence Tile is available.
+# Setting type: BuildPieceCategory
+# Default value: Misc
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = Misc
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Fence Tile is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Architecture
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Architecture
+
+## Comma separated list of tools where Fence Tile is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Fence Tile is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Fence Tile
+# Setting type: String
+# Default value: Wood:2:True
+Crafting Costs = Wood:2:True
+
+[Gravestone]
+
+## Build Category where Gravestone is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Gravestone is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Gravestone is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Gravestone is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Gravestone
+# Setting type: String
+# Default value: Stone:12:True
+Crafting Costs = Stone:12:True
+
+[Hanging Pumpkin]
+
+## Build Category where Hanging Pumpkin is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Hanging Pumpkin is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Hanging Pumpkin is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Hanging Pumpkin is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Hanging Pumpkin
+# Setting type: String
+# Default value: BHP_PumpkinDrop:1:True
+Crafting Costs = BHP_PumpkinDrop:1:True
+
+[Odins Hand]
+
+## Crafting station where Odins Hand is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: Disabled, Inventory, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Required crafting station level to craft Odins Hand.
+# Setting type: Int32
+# Default value: 1
+Crafting Station Level = 1
+
+## Maximum crafting station level to upgrade and repair Odins Hand.
+# Setting type: Int32
+# Default value: 4
+Maximum Crafting Station Level = 4
+
+## Whether only one of the ingredients is needed to craft Odins Hand
+# Setting type: Toggle
+# Default value: Off
+# Acceptable values: Off, On
+Require only one resource = Off
+
+## Multiplies the crafted amount based on the quality of the resources when crafting Odins Hand. Only works, if Require Only One Resource is true.
+# Setting type: Single
+# Default value: 1
+Quality Multiplier = 1
+
+## Item costs to craft Odins Hand
+# Setting type: String
+# Default value: BoneFragments:2
+Crafting Costs = BoneFragments:2
+
+## Item costs per level to upgrade Odins Hand
+# Setting type: String
+# Default value: BoneFragments:1
+Upgrading Costs = BoneFragments:1
+
+[Pumpkin]
+
+## Build Category where Pumpkin is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Pumpkin is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Pumpkin is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Pumpkin is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Pumpkin
+# Setting type: String
+# Default value: BHP_PumpkinDrop:1:True
+Crafting Costs = BHP_PumpkinDrop:1:True
+
+## Weight of Pumpkin.
+# Setting type: Single
+# Default value: 0.3
+Weight = 0.3
+
+## Trader value of Pumpkin.
+# Setting type: Int32
+# Default value: 0
+Trader Value = 0
+
+## Health value of Pumpkin.
+# Setting type: Single
+# Default value: 12
+Health = 12
+
+## Stamina value of Pumpkin.
+# Setting type: Single
+# Default value: 34
+Stamina = 34
+
+## Eitr value of Pumpkin.
+# Setting type: Single
+# Default value: 0
+Eitr = 0
+
+## Duration of Pumpkin.
+# Setting type: Single
+# Default value: 1500
+Duration = 1500
+
+## Health regen value of Pumpkin.
+# Setting type: Single
+# Default value: 1
+Health Regen = 1
+
+[Pumpkin Bread]
+
+## Weight of Pumpkin Bread.
+# Setting type: Single
+# Default value: 0.5
+Weight = 0.5
+
+## Trader value of Pumpkin Bread.
+# Setting type: Int32
+# Default value: 0
+Trader Value = 0
+
+## Health value of Pumpkin Bread.
+# Setting type: Single
+# Default value: 28
+Health = 28
+
+## Stamina value of Pumpkin Bread.
+# Setting type: Single
+# Default value: 42
+Stamina = 42
+
+## Eitr value of Pumpkin Bread.
+# Setting type: Single
+# Default value: 0
+Eitr = 0
+
+## Duration of Pumpkin Bread.
+# Setting type: Single
+# Default value: 1500
+Duration = 1500
+
+## Health regen value of Pumpkin Bread.
+# Setting type: Single
+# Default value: 2
+Health Regen = 2
+
+[Pumpkin Bread Dough]
+
+## Crafting station where Pumpkin Bread Dough is available.
+# Setting type: CraftingTable
+# Default value: Cauldron
+# Acceptable values: Disabled, Inventory, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Cauldron
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Required crafting station level to craft Pumpkin Bread Dough.
+# Setting type: Int32
+# Default value: 1
+Crafting Station Level = 1
+
+## Whether only one of the ingredients is needed to craft Pumpkin Bread Dough
+# Setting type: Toggle
+# Default value: Off
+# Acceptable values: Off, On
+Require only one resource = Off
+
+## Multiplies the crafted amount based on the quality of the resources when crafting Pumpkin Bread Dough. Only works, if Require Only One Resource is true.
+# Setting type: Single
+# Default value: 1
+Quality Multiplier = 1
+
+## Item costs to craft Pumpkin Bread Dough
+# Setting type: String
+# Default value: BarleyFlour:4,BHP_PumpkinDrop:2
+Crafting Costs = BarleyFlour:4,BHP_PumpkinDrop:2
+
+[Pumpkin Monster]
+
+## Build Category where Pumpkin Monster is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Pumpkin Monster is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Pumpkin Monster is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Pumpkin Monster is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Pumpkin Monster
+# Setting type: String
+# Default value: BHP_PumpkinDrop:1:True
+Crafting Costs = BHP_PumpkinDrop:1:True
+
+[Pumpkin Pie]
+
+## Weight of Pumpkin Pie.
+# Setting type: Single
+# Default value: 1
+Weight = 1
+
+## Trader value of Pumpkin Pie.
+# Setting type: Int32
+# Default value: 0
+Trader Value = 0
+
+## Health value of Pumpkin Pie.
+# Setting type: Single
+# Default value: 55
+Health = 55
+
+## Stamina value of Pumpkin Pie.
+# Setting type: Single
+# Default value: 34
+Stamina = 34
+
+## Eitr value of Pumpkin Pie.
+# Setting type: Single
+# Default value: 0
+Eitr = 0
+
+## Duration of Pumpkin Pie.
+# Setting type: Single
+# Default value: 1800
+Duration = 1800
+
+## Health regen value of Pumpkin Pie.
+# Setting type: Single
+# Default value: 3
+Health Regen = 3
+
+[Pumpkin Pie Uncooked]
+
+## Crafting station where Pumpkin Pie Uncooked is available.
+# Setting type: CraftingTable
+# Default value: Cauldron
+# Acceptable values: Disabled, Inventory, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Cauldron
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Required crafting station level to craft Pumpkin Pie Uncooked.
+# Setting type: Int32
+# Default value: 1
+Crafting Station Level = 1
+
+## Whether only one of the ingredients is needed to craft Pumpkin Pie Uncooked
+# Setting type: Toggle
+# Default value: Off
+# Acceptable values: Off, On
+Require only one resource = Off
+
+## Multiplies the crafted amount based on the quality of the resources when crafting Pumpkin Pie Uncooked. Only works, if Require Only One Resource is true.
+# Setting type: Single
+# Default value: 1
+Quality Multiplier = 1
+
+## Item costs to craft Pumpkin Pie Uncooked
+# Setting type: String
+# Default value: BarleyFlour:4,BHP_PumpkinDrop:2,Raspberry:6,Dandelion:6
+Crafting Costs = BarleyFlour:4,BHP_PumpkinDrop:2,Raspberry:6,Dandelion:6
+
+[Pumpkin Tree]
+
+## Build Category where Pumpkin Tree is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Pumpkin Tree is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Pumpkin Tree is available.
+# Setting type: String
+# Default value: Hammer
+Tools = Hammer
+
+## Crafting station where Pumpkin Tree is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Pumpkin Tree
+# Setting type: String
+# Default value: Wood:12:True,BHP_PumpkinDrop:3:True
+Crafting Costs = Wood:12:True,BHP_PumpkinDrop:3:True
+
+[Pumpkin Wine Base]
+
+## Crafting station where Pumpkin Wine Base is available.
+# Setting type: CraftingTable
+# Default value: Cauldron
+# Acceptable values: Disabled, Inventory, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Cauldron
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Required crafting station level to craft Pumpkin Wine Base.
+# Setting type: Int32
+# Default value: 1
+Crafting Station Level = 1
+
+## Whether only one of the ingredients is needed to craft Pumpkin Wine Base
+# Setting type: Toggle
+# Default value: Off
+# Acceptable values: Off, On
+Require only one resource = Off
+
+## Multiplies the crafted amount based on the quality of the resources when crafting Pumpkin Wine Base. Only works, if Require Only One Resource is true.
+# Setting type: Single
+# Default value: 1
+Quality Multiplier = 1
+
+## Item costs to craft Pumpkin Wine Base
+# Setting type: String
+# Default value: BHP_PumpkinDrop:12,Raspberry:24
+Crafting Costs = BHP_PumpkinDrop:12,Raspberry:24
+
+[Tomb]
+
+## Build Category where Tomb is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Tomb is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Tomb is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Tomb is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Tomb
+# Setting type: String
+# Default value: Stone:24:True
+Crafting Costs = Stone:24:True
+
+[Tombstone Cross]
+
+## Build Category where Tombstone Cross is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Tombstone Cross is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Tombstone Cross is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Tombstone Cross is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Tombstone Cross
+# Setting type: String
+# Default value: Stone:14:True
+Crafting Costs = Stone:14:True
+
+[Tree Monster]
+
+## Build Category where Tree Monster is available.
+# Setting type: BuildPieceCategory
+# Default value: BuildingWorkbench
+# Acceptable values: Misc, Crafting, BuildingWorkbench, BuildingStonecutter, Furniture, DeepNorth, Feasts, Food, Meads, Custom, All
+Build Table Category = BuildingWorkbench
+
+# Setting type: String
+# Default value: 
+Custom Build Category = 
+
+## Tags Tree Monster is listed under in the build menu.
+# Setting type: UsageTagFlags
+# Default value: Decor
+# Acceptable values: Misc, Crafting, Building, Floor, Wall, Roof, Architecture, Furniture, Lighting, Decor, Storage, Transport, Food, Meads, Feasts, Defense, Stacks, Stairs, Doors, Seasonal
+# Multiple values can be set at the same time by separating them with , (e.g. Debug, Warning)
+Build Menu Tags = Decor
+
+## Comma separated list of tools where Tree Monster is available.
+# Setting type: String
+# Default value: BHP_OdinsHand
+Tools = BHP_OdinsHand
+
+## Crafting station where Tree Monster is available.
+# Setting type: CraftingTable
+# Default value: Workbench
+# Acceptable values: None, Workbench, Cauldron, Forge, ArtisanTable, StoneCutter, MageTable, BlackForge, FoodPreparationTable, MeadKetill, Custom
+Crafting Station = Workbench
+
+# Setting type: String
+# Default value: 
+Custom Crafting Station = 
+
+## Item costs to craft Tree Monster
+# Setting type: String
+# Default value: Wood:8:True
+Crafting Costs = Wood:8:True
+

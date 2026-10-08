@@ -123,6 +123,11 @@ const PACK_V16_PINS = [
   // that DOES ship it has to resolve it like any other pin, so it is checked here
   // whenever v15 is the candidate set. Client-only: nothing on the box runs it.
   'Azumatt-Unshamed-1.0.2',
+  // Optional in the minter (`--halloween 1.2.0`, absent unless asked; added for pack
+  // v24 on 2026-10-08). ServerSync REQUIRED: the box runs it too, so a pack that ships
+  // it must resolve it, and a pack that does not is refused by the box. The pins above
+  // are still the v16 candidate set; pass --pins for today's shape.
+  'blacks7ar-HalloweenPieces-1.2.0',
 ];
 
 const UA = 'eilif-launch-preflight/1.0';

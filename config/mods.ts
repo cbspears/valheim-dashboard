@@ -27,6 +27,13 @@
 // with the fedorovdgap author, version and url. It is an INTERIM pin: when Advize publishes
 // an official 1.21.x the row moves back to his namespace. Pack v15 pins it.
 //
+// HALLOWEENPIECES ADDED (2026-10-08). `blacks7ar/HalloweenPieces` 1.2.0, at Rose's
+// suggestion, approved by Charlie the same day. 78 seasonal build pieces, client and
+// server both: it ships ServerSync in required mode, so the box refuses anyone without
+// it, and pack v24 (`--halloween 1.2.0`) is the pack that carries it. Pieces built with
+// it vanish if the mod is ever removed, so taking it out later is not a free choice.
+// Its row sits at the end of the client-side block below.
+//
 // HIDDEN (`hidden: true`, bottom of ALL_MODS) SINCE 2026-09-09, and why. These are not
 // deleted: each comes back by removing its `hidden` line once there is a reason to.
 //   • PlantEverything was here until 2026-09-10; see the paragraph above.
@@ -228,6 +235,22 @@ name: 'Unshamed',
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
+  },
+  {
+    // Added 2026-10-08 (Rose suggested it, Charlie approved). OPTIONAL in the minter:
+    // absent unless `--halloween <ver>` is passed, like Unshamed; pack v24 carries it.
+    // ServerSync REQUIRED, so the box and the pack must move together and this row's
+    // version must match both. Its cfg is server-locked (Lock Configuration = On), so
+    // the pack ships the mod's own defaults and the server's values win. One-way door:
+    // removing the mod deletes every piece built with it.
+    name: 'HalloweenPieces',
+    author: 'blacks7ar',
+    description:
+      'Adds 78 Halloween build pieces for the season: pumpkins, bones, cobwebs, candles and the like. You build them with the OdinsHands tool, which you craft at a workbench. Monsters can drop pumpkins, and those go into two pumpkin foods and a wine. The server runs it too and checks the version, so anyone without it cannot join. Pieces built with it only exist while the mod is installed. Ships in the modpack.',
+    version: '1.2.0', // 2026-10-08: blacks7ar's 1.2.0 (published 2026-09-20); server DLL on the box 2026-10-08; pack v24 pins it.
+    category: 'Content',
+    clientRequired: true,
+    url: 'https://thunderstore.io/c/valheim/p/blacks7ar/HalloweenPieces/',
   },
   // ── Hidden since 2026-09-09: not running on the 1.0 box, not in pack v15 ────
   // Each row keeps its last known-good pin and copy. Remove `hidden: true` (and

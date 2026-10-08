@@ -25,6 +25,7 @@
 // Run: npx tsx scripts/mint-pack.test.mjs
 import assert from 'node:assert';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 
 import {
   MODS, CFG_FILES, DEFAULT_INGEST_URL, DEFAULT_FALLBACK, FALLBACK_MODES, OMITTABLE_MODS,
@@ -858,8 +859,8 @@ assert.doesNotThrow(
 // have quietly re-baselined it.
 const unshamedMod = MODS.find((m) => m.key === 'unshamed');
 assert.deepEqual(
-  OPTIONAL_MODS.map((m) => m.key), ['plantFork', 'unshamed'],
-  'the optional set is the PlantEverything rebuild and Unshamed, in MODS order',
+  OPTIONAL_MODS.map((m) => m.key), ['plantFork', 'unshamed', 'halloween'],
+  'the optional set is the PlantEverything rebuild, Unshamed and HalloweenPieces, in MODS order',
 );
 assert.equal(unshamedMod.baseline, null, 'an optional mod has no baseline: there is no v11 pin to fall back to');
 assert.ok(!unshamedMod.omitFlag, 'and no --no- flag, because absent is already its default');
@@ -1224,6 +1225,171 @@ assert.equal(
   "--world 'Eilif' --bepinex 5.4.2350 --vplus 10.0.2 --plant-fork 1.21.1 --paths 1.7.1 "
   + '--companion-client 0.4.2 --unshamed 1.0.0 --no-plant --no-azu --fallback off',
   'the printed bundle command carries both halves of the swap, so the Mac bundle cannot lose either',
+);
+
+// ── HalloweenPieces: the third OPTIONAL mod (2026-10-08) ────────────────────
+// 78 seasonal build pieces, suggested by a player and approved for pack v24. It is
+// optional for the same reason Unshamed is (v11 never shipped it), and heavier than
+// it looks: ServerSync REQUIRED (the box refuses a client without it) and a one-way
+// door for builds. Its cfg is server-locked, so the template is the mod's own 1.2.0
+// defaults, verbatim.
+const halloweenMod = MODS.find((m) => m.key === 'halloween');
+assert.ok(halloweenMod, 'HalloweenPieces has a MODS row');
+assert.equal(halloweenMod.flag, '--halloween', 'pinned with --halloween');
+assert.equal(halloweenMod.ns, 'blacks7ar', 'under the blacks7ar namespace');
+assert.equal(halloweenMod.name, 'HalloweenPieces', 'as the HalloweenPieces package');
+assert.equal(halloweenMod.tmpl, 'HALLOWEEN', 'with HALLOWEEN_* version placeholders');
+assert.equal(halloweenMod.baseline, null, 'optional, so no v11 pin');
+assert.ok(halloweenMod.optional && !halloweenMod.omitFlag, 'and no --no-halloween: absent is already its default');
+assert.equal(halloweenMod.section, 'HALLOWEEN', 'its {{#HALLOWEEN}} block holds the export.r2x entry');
+assert.equal(halloweenMod.cfg, 'blacks7ar.HalloweenPieces.cfg', 'and the cfg that arrives with it');
+assert.ok(!CFG_FILES.includes(halloweenMod.cfg), 'which v11 never shipped');
+assert.equal(MODS.at(-1).key, 'halloween', 'the row sits last, after Unshamed');
+
+// Absent by default, everywhere.
+assert.ok(!v11.has(`config/${halloweenMod.cfg}`), 'a default render ships no HalloweenPieces cfg');
+assert.doesNotMatch(v11.get('export.r2x').toString('latin1'), /Halloween/, 'and no export.r2x entry');
+assert.ok(
+  !renderReadme({ packNumber: 11, packDate: 'Aug 27, 2026' }).toString('latin1').includes('Halloween'),
+  'and the v11 Mac README never mentions it',
+);
+assert.deepEqual(
+  cfgFilesFor({ halloween: '1.2.0' }),
+  [...CFG_FILES, 'blacks7ar.HalloweenPieces.cfg'],
+  'a pin APPENDS its cfg, so the v11 entries keep their positions in the zip',
+);
+assert.deepEqual(
+  cfgFilesFor({ unshamed: '1.0.5', halloween: '1.2.0' }),
+  [...CFG_FILES, 'Azumatt.Unshamed.cfg', 'blacks7ar.HalloweenPieces.cfg'],
+  'and two optional cfgs append in MODS order',
+);
+assert.throws(
+  () => renderPack({ world: 'Eilif', omit: ['halloween'] }),
+  /cannot be dropped/,
+  'omitting it is refused: leaving out its pin is the way to not have it',
+);
+
+// Present the moment it is pinned, entry and cfg together, nothing else touched.
+const { files: withHalloween } = renderPack({ world: 'EilifRehearsal', versions: { halloween: '1.2.0' } });
+assert.deepEqual(
+  [...withHalloween.keys()].sort(),
+  [...v11.keys(), 'config/blacks7ar.HalloweenPieces.cfg'].sort(),
+  '--halloween 1.2.0 adds exactly one file to the v11 set',
+);
+const halloweenR2x = withHalloween.get('export.r2x').toString('latin1');
+assert.match(
+  halloweenR2x,
+  /- name: blacks7ar-HalloweenPieces\n {4}version:\n {6}major: 1\n {6}minor: 2\n {6}patch: 0\n {4}enabled: true\n$/,
+  'the 1.2.0 pin lands in export.r2x as blacks7ar-HalloweenPieces, last',
+);
+assert.equal(
+  (halloweenR2x.match(/- name: /g) || []).length, DEFAULT_MOD_COUNT + 1,
+  'and it is an addition, not a replacement',
+);
+assert.doesNotMatch(halloweenR2x, /\{\{|\}\}/, 'no marker residue when its block is kept');
+for (const [rel, data] of withHalloween) {
+  if (rel === 'export.r2x' || rel === 'config/blacks7ar.HalloweenPieces.cfg') continue;
+  assert.ok(data.equals(v11.get(rel)), `${rel} is untouched by --halloween: ${firstDiff(v11.get(rel), data)}`);
+}
+
+// The cfg is the mod's own defaults, rendered byte for byte: the server locks and
+// syncs every value, so the pack has nothing to decide and must not pretend to.
+const halloweenTmpl = fs.readFileSync(
+  new URL('./pack-templates/config/blacks7ar.HalloweenPieces.cfg.tmpl', import.meta.url),
+);
+const halloweenCfgBuf = withHalloween.get('config/blacks7ar.HalloweenPieces.cfg');
+assert.ok(halloweenCfgBuf.equals(halloweenTmpl), 'the rendered cfg is the template verbatim (no placeholders in it)');
+const halloweenCfg = halloweenCfgBuf.toString('latin1');
+assert.match(
+  halloweenCfg, /^## Settings file was created by plugin HalloweenPieces v1\.2\.0$/m,
+  'it carries the writer header of the 1.2.0 build that wrote it',
+);
+assert.match(halloweenCfg, /^## Plugin GUID: blacks7ar\.HalloweenPieces$/m, 'and the plugin GUID');
+assert.match(halloweenCfg, /^Lock Configuration = On$/m, 'and the server lock is on, which is why defaults are enough');
+
+// ── the v23 shape, and v24 = v23 plus HalloweenPieces ───────────────────────
+const V23 = {
+  versions: {
+    paths: '1.7.1', companionClient: '0.4.5', vplus: '10.2.0', bepinex: '5.4.2351',
+    unshamed: '1.0.5', plant: '1.21.3',
+  },
+  omit: ['azu'],
+  fallback: 'off',
+};
+const V24 = { ...V23, versions: { ...V23.versions, halloween: '1.2.0' } };
+const { files: v23 } = renderPack({ world: 'Eilif', ...V23 });
+const { files: v24 } = renderPack({ world: 'Eilif', ...V24 });
+for (const [rel, data] of v23) {
+  assert.ok(!data.toString('latin1').includes('Halloween'), `v23 ${rel} never names HalloweenPieces`);
+}
+assert.deepEqual(
+  [...v24.keys()].sort(),
+  [...v23.keys(), 'config/blacks7ar.HalloweenPieces.cfg'].sort(),
+  'v24 adds exactly one file to the v23 set',
+);
+for (const [rel, data] of v24) {
+  if (rel === 'export.r2x' || rel === 'config/blacks7ar.HalloweenPieces.cfg') continue;
+  assert.ok(data.equals(v23.get(rel)), `${rel} is the same file v23 ships: ${firstDiff(v23.get(rel), data)}`);
+}
+assert.deepEqual(
+  [...v24.get('export.r2x').toString('latin1').matchAll(/^ {2}- name: (.+)$/gm)].map((m) => m[1]),
+  [
+    'denikson-BepInExPack_Valheim',
+    'Grantapher-ValheimPlus_Grantapher_Temporary',
+    'Advize-PlantEverything',
+    'Proudlock_Technology-GsValheimStatsClient',
+    'Eilif-EilifPaths',
+    'Eilif-EilifCompanionClient',
+    'Azumatt-Unshamed',
+    'blacks7ar-HalloweenPieces',
+  ],
+  'eight mods in v24, HalloweenPieces last, where its block was appended',
+);
+assert.ok(
+  v24.get('export.r2x').toString('latin1').startsWith(v23.get('export.r2x').toString('latin1')),
+  'and the v24 export.r2x is the v23 one with the HalloweenPieces entry appended',
+);
+assert.deepEqual(
+  centralNames(zipSync([...v24].map(([name, data]) => ({ name, data })))).slice(-2),
+  ['config/Azumatt.Unshamed.cfg', 'config/blacks7ar.HalloweenPieces.cfg'],
+  'in the zip its cfg follows Unshamed, after every v11 slot',
+);
+
+// The Mac bundle and its README follow the pin, count word included.
+const v23Bundle = buildBundle({
+  world: 'Eilif', versions: V23.versions, cfgVersions: {}, ingestUrl: undefined,
+  packNumber: 23, packDate: 'Sep 25, 2026', omit: V23.omit, fallback: V23.fallback,
+});
+const v24Bundle = buildBundle({
+  world: 'Eilif', versions: V24.versions, cfgVersions: {}, ingestUrl: undefined,
+  packNumber: 24, packDate: 'Oct 8, 2026', omit: V24.omit, fallback: V24.fallback,
+});
+assert.deepEqual(
+  v24Bundle.entries.map((e) => e.name),
+  [...v23Bundle.entries.slice(0, -1).map((e) => e.name), 'blacks7ar.HalloweenPieces.cfg'].sort()
+    .concat('README.txt'),
+  'the v24 Mac bundle is the v23 one plus the HalloweenPieces cfg, README last',
+);
+const v23Readme = v23Bundle.entries.at(-1).data.toString('latin1');
+const v24Readme = v24Bundle.entries.at(-1).data.toString('latin1');
+assert.ok(!v23Readme.includes('Halloween'), 'a bundle built without the pin never names HalloweenPieces');
+assert.equal((v23Readme.match(/\bseven\b/g) || []).length, 2, 'v23 says seven, in both places that count');
+assert.equal((v24Readme.match(/\beight\b/g) || []).length, 2, 'v24 says eight, in both places that count');
+assert.doesNotMatch(v24Readme, /\bseven\b|\bsix\b|\bnine\b/, 'and no stale count survives');
+assert.match(
+  v24Readme,
+  /^ {2}blacks7ar\.HalloweenPieces\.cfg {13}seasonal build pieces; the server\n {44}overrides this$/m,
+  'the README names the cfg, aligned at column 44 like the rest',
+);
+assert.doesNotMatch(v24Readme, /\{\{|\}\}/, 'no marker or placeholder residue survives into the README');
+
+assert.equal(
+  bundleArgs({ world: 'Eilif', ingestUrl: DEFAULT_INGEST_URL, cfgVersions: {}, omit: V24.omit, fallback: V24.fallback },
+    MODS.filter((m) => !V24.omit.includes(m.key) && (!m.optional || V24.versions[m.key]))
+      .map((mod) => ({ mod, version: V24.versions[mod.key] ?? mod.baseline }))),
+  "--world 'Eilif' --bepinex 5.4.2351 --vplus 10.2.0 --plant 1.21.3 --paths 1.7.1 "
+  + '--companion-client 0.4.5 --unshamed 1.0.5 --halloween 1.2.0 --no-azu --fallback off',
+  'the printed bundle command carries --halloween, so the Mac bundle cannot lose it',
 );
 
 console.log('OK — all pack minter assertions passed');

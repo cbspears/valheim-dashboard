@@ -35,6 +35,12 @@ drop, so read the table, not the number.
 | EilifPaths | `Eilif/EilifPaths` | **1.7.1** | yes |
 | EilifCompanionClient | `Eilif/EilifCompanionClient` | **0.4.2** | yes (ingest URL) |
 | Unshamed | `Azumatt/Unshamed` | **1.0.0** | yes (`Azumatt.Unshamed.cfg`), and the pinned values are the point. See rule 7 |
+| HalloweenPieces (optional, from pack v24) | `blacks7ar/HalloweenPieces` | **1.2.0** (`--halloween 1.2.0`) | yes (`blacks7ar.HalloweenPieces.cfg`), server-locked; template = mod defaults. See rule 9 |
+
+The table is the v15 snapshot plus the v24 addition. Today's pins (pack v23, 2026-09-25) are
+BepInExPack 5.4.2351, ValheimPlus 10.2.0, `Advize/PlantEverything` 1.21.3 (the fedorovdgap
+rebuild is a contingency again), EilifCompanionClient 0.4.5 and Unshamed 1.0.5; the flag set
+under "Re-minting: the sequence" is the current one.
 
 **Gone, and not waiting on anything:** AzuCraftyBoxes (`Azumatt/AzuCraftyBoxes` 1.8.15),
 dropped on launch morning 2026-09-09. It embeds a ServerSync build that reads
@@ -57,18 +63,18 @@ so the box is left alone.
 
 `config/mods.ts` lists more than this: it also covers server-side mods (Eilif Companion,
 Eilif Boards, ServersideQoL, WebMap, the stats emitter) that players never install. Only
-the seven above belong in the pack. Two of its rows have to be re-checked at every mint for
+the mods in the table above belong in the pack. Two of its rows have to be re-checked at every mint for
 the same reason: the **ValheimPlus** row (10.0.2, deleted on launch night and put back) and
 the **PlantEverything** row, which now has to read the fedorovdgap author, version and url
 rather than Advize's. Get either wrong and `/resources#mods` names a build nobody is
 running.
 
-**Two mods are OPTIONAL rather than droppable** (both added 2026-09-10): Unshamed
-(`--unshamed 1.0.0`, rule 7) and the PlantEverything rebuild (`--plant-fork 1.21.1`,
-rule 8). Neither is in a render unless its flag is passed, because pack v11 shipped
-neither and the default render has to keep reproducing v11 byte for byte. Everything
-else about them works like a droppable mod - one `export.r2x` entry and one cfg,
-together.
+**Three mods are OPTIONAL rather than droppable**: Unshamed (`--unshamed <ver>`, rule 7)
+and the PlantEverything rebuild (`--plant-fork 1.21.1`, rule 8), both added 2026-09-10, and
+HalloweenPieces (`--halloween 1.2.0`, rule 9), added 2026-10-08 for pack v24. None is in a
+render unless its flag is passed, because pack v11 shipped none of them and the default
+render has to keep reproducing v11 byte for byte. Everything else about them works like a
+droppable mod: one `export.r2x` entry and one cfg, together.
 
 Of the rest, only ValheimPlus is a decision. **It is the one the pack can be minted without**
 (`--no-vplus`), and pack v13 was exactly that: launch night ran with no V+ at all, because
@@ -85,7 +91,7 @@ preflight can green-light a pin the minter refuses, or `/resources#mods` can cla
 is running. Folding preflight's list into an `import { MODS }` is the obvious fix and is
 not done yet.
 
-## Eight rules
+## Nine rules
 
 **1. The listing index lags uploads by 40 to 80 minutes.** Thunderstore's package API
 knows about a new version the instant it uploads, but mod managers resolve a profile code
@@ -262,7 +268,11 @@ switches the whole section, and `--paths` must pin 1.7.0 or newer for these four
 ### The flags
 
 ```bash
-# pack v15, the current shape
+# pack v24, the current shape (v23 plus HalloweenPieces; v23 is the same line without --halloween)
+node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.5 \
+  --vplus 10.2.0 --bepinex 5.4.2351 --unshamed 1.0.5 --plant 1.21.3 --halloween 1.2.0 \
+  --no-azu --fallback off --cap 24 ...
+# pack v15, the shape with the fedorovdgap PlantEverything rebuild
 node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.2 \
   --vplus 10.0.2 --bepinex 5.4.2350 --unshamed 1.0.0 --plant-fork 1.21.1 \
   --no-plant --no-azu --fallback off --cap 24 ...
@@ -384,6 +394,32 @@ his namespace in one commit: the `plantFork` row goes out of `MODS`, `PACK_V15_P
 `config/mods.ts` row's author, version and url follow. The mint flags become `--plant <ver>`
 and `--plant-fork` stops existing.
 
+**9. HalloweenPieces is optional, ServerSync-required, and a one-way door for builds.**
+Added 2026-10-08, at Rose's suggestion, approved by Charlie. `blacks7ar/HalloweenPieces`
+**1.2.0** (published 2026-09-20, dependency `denikson-BepInExPack_Valheim-5.4.2350`, one DLL,
+plugin GUID `blacks7ar.HalloweenPieces`) adds 78 seasonal build pieces behind an OdinsHands
+tool crafted at the workbench, a pumpkin drop from monsters, two foods and a wine.
+
+**It is OPTIONAL**, for the same reason as rule 7: v11 never shipped it, so `MODS` carries
+`optional: true` and `baseline: null`, `--halloween 1.2.0` brings in its `export.r2x` entry
+and its cfg together, and there is no `--no-halloween`.
+
+**It ships ServerSync in REQUIRED mode**, like ValheimPlus and PlantEverything: once the box
+runs it, every client without it is refused, and a client that has it is refused by a box
+that does not. So adding it is a pack bump, never a quiet change on the box. The DLL goes up
+and the `--halloween` pack is minted in the same window (the DLL went up 2026-10-08; pack v24
+is the mint).
+
+**Its cfg is server-locked.** `Lock Configuration = On` and every value is synced from the
+server, so whatever the client file says, the box wins. That is why
+`scripts/pack-templates/config/blacks7ar.HalloweenPieces.cfg.tmpl` is just the mod's own 1.2.0
+defaults, captured verbatim from a local 1.0.15 boot on 2026-10-01: there is nothing in it for
+the pack to decide. Tune the box's copy, not the template.
+
+**Removing it later deletes every piece built with it.** The pieces are the mod's prefabs, and
+a world loaded without the mod drops them. Taking it out of the pack is therefore not a free
+rollback the way dropping a comfort mod is; say so in Discord before it ever leaves.
+
 ## Re-minting: the sequence
 
 **On 2026-09-09 do not run the launch from this section.** The launch morning is
@@ -396,12 +432,13 @@ Assume the four plugins have been rebuilt for Valheim 1.0 and the two Eilif clie
 are uploaded to Thunderstore.
 
 The worked examples below leave the client pin as `<ver>`, because a published Thunderstore
-version is immutable and that number moves on its own. **Today's flags are the v15 set** and
-they go on **every** command in this section, including step 6's bundle rebuild:
+version is immutable and that number moves on its own. **Today's flags are the v24 set** (the
+v23 pins plus `--halloween 1.2.0`, 2026-10-08) and they go on **every** command in this
+section, including step 6's bundle rebuild:
 
 ```
---paths 1.7.1 --companion-client <ver> --vplus 10.0.2 --bepinex 5.4.2350 \
-  --unshamed 1.0.0 --plant-fork 1.21.1 --no-plant --no-azu --fallback off --cap 24
+--paths 1.7.1 --companion-client 0.4.5 --vplus 10.2.0 --bepinex 5.4.2351 \
+  --unshamed 1.0.5 --plant 1.21.3 --halloween 1.2.0 --no-azu --fallback off --cap 24
 ```
 
 Pass them every time or the two artifacts disagree. `--vplus` in particular decides the NAME of

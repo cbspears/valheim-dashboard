@@ -46,6 +46,13 @@
 // template both rows point at. Pinning both is refused, in renderPack and at the
 // CLI. When Advize ships an official 1.21.x the pin moves back to his namespace.
 //
+// HalloweenPieces (blacks7ar, 2026-10-08) is the third optional mod, and the first
+// that is content rather than a fix: 78 seasonal build pieces, added at a player's
+// suggestion for pack v24 with `--halloween 1.2.0`. It ships ServerSync in REQUIRED
+// mode, so the box refuses any client without it: adding it is a pack bump, never
+// a quiet change on the box. It is also a one-way door for builds, because taking
+// it out later deletes every piece built with it. See the MODS row and docs/PACK.md.
+//
 // This script never edits config/server.ts and never deploys. It prints the
 // exact lines to change; publishing the code is Charlie's call.
 //
@@ -78,7 +85,7 @@ export const TEMPLATE_DIR = path.join(__dirname, 'pack-templates');
 //                    `cfgVersionFlag`, and only when the template is re-captured
 //                    from a real r2modman run of that build.
 //
-// NOTE: scripts/launch-preflight.mjs keeps its own PACK_V14_PINS list and walks
+// NOTE: scripts/launch-preflight.mjs keeps its own PACK_V16_PINS list and walks
 // the same Thunderstore endpoints. It is the twin of this table - if you change
 // a `baseline` here, change that list in the same commit (or better, have it
 // import MODS from this file), or preflight will green-light a pin the minter
@@ -90,9 +97,10 @@ export const TEMPLATE_DIR = path.join(__dirname, 'pack-templates');
 //                    `flag` is passed. Such a mod has `baseline: null`, because
 //                    pack v11 never shipped it and there is no version to fall
 //                    back to - passing no pin is the whole "leave it out"
-//                    instruction. Unshamed is the only user; everything else
-//                    about it (its {{#SECTION}} block, its cfg) works exactly
-//                    like a droppable mod's, just decided the other way round.
+//                    instruction. Unshamed, the PlantEverything fork and
+//                    HalloweenPieces use it; everything else about such a mod
+//                    (its {{#SECTION}} block, its cfg) works exactly like a
+//                    droppable mod's, just decided the other way round.
 // `cfgByVersion`     for a mod that RENAMED its cfg between builds. Each rule is
 //                    { minVersion, cfg, tmpl }: the newest rule whose minVersion
 //                    the pin satisfies wins, otherwise `cfg` above. ValheimPlus
@@ -236,6 +244,31 @@ export const MODS = [
     key: 'unshamed', flag: '--unshamed', label: 'Unshamed (achievements while modded)',
     ns: 'Azumatt', name: 'Unshamed', tmpl: 'UNSHAMED', baseline: null,
     optional: true, cfg: 'Azumatt.Unshamed.cfg', section: 'UNSHAMED',
+  },
+  {
+    // OPTIONAL, and the first optional mod that adds content rather than fixing
+    // something (2026-10-08). 78 Halloween build pieces behind an OdinsHands tool
+    // (BHP_OdinsHand) crafted at the workbench, a pumpkin drop from monsters, two
+    // foods and a wine. A player (Rose) suggested it; Charlie approved it for pack v24.
+    //
+    // `optional: true` for the same reason as the two rows above: pack v11 never
+    // shipped it, so absent is the only default that keeps the v11 byte-for-byte
+    // tripwire in mint-pack.test.mjs green. There is no `--no-halloween`, because
+    // absent is already its default.
+    //
+    // Two things make it heavier than its size suggests. It ships ServerSync in
+    // REQUIRED mode, like ValheimPlus and PlantEverything: once the box runs it, a
+    // client without it is refused, so it goes onto the box and into a pack bump in
+    // the same window, never one without the other. And it is a one-way door for
+    // builds: removing the mod later deletes every piece built with it.
+    //
+    // The cfg is server-synced with Lock Configuration = On, so whatever the client
+    // file says, the server's values win. The template is therefore just the mod's
+    // own 1.2.0 defaults, captured verbatim from a local 1.0.15 boot on 2026-10-01;
+    // there is nothing in it for the pack to decide.
+    key: 'halloween', flag: '--halloween', label: 'HalloweenPieces (seasonal build pieces)',
+    ns: 'blacks7ar', name: 'HalloweenPieces', tmpl: 'HALLOWEEN', baseline: null,
+    optional: true, cfg: 'blacks7ar.HalloweenPieces.cfg', section: 'HALLOWEEN',
   },
 ];
 
