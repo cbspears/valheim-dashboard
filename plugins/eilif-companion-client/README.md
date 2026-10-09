@@ -42,7 +42,7 @@ The list is in `net.eilif.companionclient.cfg` under `[Halloween]`:
 
 ```ini
 [Halloween]
-PumpkinDropCreatures = Skeleton,Skeleton_Poison,Draugr,Draugr_Ranged,Draugr_Elite,Wraith,Ghost,Greydwarf,Greydwarf_Elite,Greydwarf_Shaman
+PumpkinDropCreatures = Draugr,Draugr_Ranged,Draugr_Elite
 ```
 
 Those are creature **prefab** names (`Draugr_Elite`, not "Draugr Elite"), matched without regard to case or surrounding spaces. **`*` means every creature** (the filter is off), and **an empty value means no creature drops pumpkins**. On a server without HalloweenPieces there is no pumpkin drop to remove, so the key does nothing.

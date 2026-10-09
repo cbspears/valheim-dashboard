@@ -1402,7 +1402,7 @@ assert.equal(
 // it is the only difference.
 assert.equal(PUMPKIN_FILTER_MIN_CLIENT, '0.4.6', 'the key arrived in Companion Client 0.4.6');
 const PUMPKIN_DEFAULT =
-  'Skeleton,Skeleton_Poison,Draugr,Draugr_Ranged,Draugr_Elite,Wraith,Ghost,Greydwarf,Greydwarf_Elite,Greydwarf_Shaman';
+  'Draugr,Draugr_Ranged,Draugr_Elite';
 const compOf = (files) => files.get('config/net.eilif.companionclient.cfg').toString('latin1');
 const V25ISH = { ...V24, versions: { ...V24.versions, companionClient: '0.4.6' } };
 const pumpkinComp = compOf(renderPack({ world: 'Eilif', ...V25ISH }).files);

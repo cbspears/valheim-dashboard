@@ -37,7 +37,7 @@ namespace EilifCompanionClient
         internal const string PumpkinPrefab = "BHP_PumpkinDrop";
 
         internal const string DefaultCreatures =
-            "Skeleton,Skeleton_Poison,Draugr,Draugr_Ranged,Draugr_Elite,Wraith,Ghost,Greydwarf,Greydwarf_Elite,Greydwarf_Shaman";
+            "Draugr,Draugr_Ranged,Draugr_Elite";
 
         // Mirrored from config in Awake (main thread), read on the loot path. Active = false means
         // "*" (every creature keeps its pumpkin); Active with an empty set means none do.
