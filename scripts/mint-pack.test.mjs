@@ -31,7 +31,7 @@ import {
   MODS, CFG_FILES, DEFAULT_INGEST_URL, DEFAULT_FALLBACK, FALLBACK_MODES, OMITTABLE_MODS,
   OPTIONAL_MODS, SECTIONED_MODS,
   renderPack, renderReadme, parseSemver, compareSemver, zipSync, unzipSync, crc32, firstDiff,
-  bundleArgs, applySections, cfgFor, cfgFilesFor, cfgNamesFor,
+  bundleArgs, applySections, cfgFor, cfgFilesFor, cfgNamesFor, PUMPKIN_FILTER_MIN_CLIENT,
 } from './mint-pack.mjs';
 import { buildBundle } from './build-config-bundle.mjs';
 
@@ -1292,6 +1292,7 @@ for (const [rel, data] of withHalloween) {
   assert.ok(data.equals(v11.get(rel)), `${rel} is untouched by --halloween: ${firstDiff(v11.get(rel), data)}`);
 }
 
+
 // The cfg is the mod's own defaults, rendered byte for byte: the server locks and
 // syncs every value, so the pack has nothing to decide and must not pretend to.
 const halloweenTmpl = fs.readFileSync(
@@ -1390,6 +1391,46 @@ assert.equal(
   "--world 'Eilif' --bepinex 5.4.2351 --vplus 10.2.0 --plant 1.21.3 --paths 1.7.1 "
   + '--companion-client 0.4.5 --unshamed 1.0.5 --halloween 1.2.0 --no-azu --fallback off',
   'the printed bundle command carries --halloween, so the Mac bundle cannot lose it',
+);
+
+// ── Companion Client 0.4.6: [Halloween] PumpkinDropCreatures (2026-10-09) ────
+// The client cfg's {{#PUMPKINFILTER}} block ships the pumpkin creature list visibly
+// in the pack. It is written only when the pack carries HalloweenPieces (without it
+// the key filters nothing) AND pins a client that has the key (0.4.6+), so v24
+// (Client 0.4.5 + --halloween) and every other minted pack re-render unchanged; the
+// v24 loop above already proves that. Here: the section appears with both, and
+// it is the only difference.
+assert.equal(PUMPKIN_FILTER_MIN_CLIENT, '0.4.6', 'the key arrived in Companion Client 0.4.6');
+const PUMPKIN_DEFAULT =
+  'Skeleton,Skeleton_Poison,Draugr,Draugr_Ranged,Draugr_Elite,Wraith,Ghost,Greydwarf,Greydwarf_Elite,Greydwarf_Shaman';
+const compOf = (files) => files.get('config/net.eilif.companionclient.cfg').toString('latin1');
+const V25ISH = { ...V24, versions: { ...V24.versions, companionClient: '0.4.6' } };
+const pumpkinComp = compOf(renderPack({ world: 'Eilif', ...V25ISH }).files);
+const noHalloween046 = renderPack({
+  world: 'Eilif', ...V23, versions: { ...V23.versions, companionClient: '0.4.6' },
+}).files;
+assert.match(
+  pumpkinComp,
+  new RegExp(`^\\[Halloween\\]\n\n## [^\n]+\n# Setting type: String\n# Default value: ${PUMPKIN_DEFAULT}\nPumpkinDropCreatures = ${PUMPKIN_DEFAULT}\n\n\\[Map\\]$`, 'm'),
+  'Client 0.4.6 + --halloween: [Halloween] PumpkinDropCreatures at its default, before [Map] (BepInEx name order)',
+);
+assert.match(pumpkinComp, /^## [^\n]*\* = every creature[^\n]*Empty = no creature drops pumpkins/m,
+  'its description states the * and empty semantics');
+assert.equal(
+  pumpkinComp.replace(/\[Halloween\]\n[\s\S]*?\n\n(?=\[Map\])/, ''),
+  compOf(v23),
+  'and the companion cfg differs from v23/v24 by exactly that section',
+);
+assert.doesNotMatch(pumpkinComp, /\{\{|\}\}/, 'no marker residue in the companion cfg');
+assert.doesNotMatch(compOf(noHalloween046), /Halloween|PumpkinDrop/,
+  'Client 0.4.6 without --halloween: no [Halloween] section');
+assert.doesNotMatch(compOf(v24), /Halloween|PumpkinDrop/,
+  'Client 0.4.5 with --halloween (pack v24): no [Halloween] section');
+assert.doesNotMatch(compOf(v11), /Halloween|PumpkinDrop/, 'and the v11 default render has none');
+assert.ok(
+  !renderPack({ world: 'Eilif', ...V25ISH, omit: [...V25ISH.omit, 'companionClient'] })
+    .files.has('config/net.eilif.companionclient.cfg'),
+  '--no-companion-client still drops the whole cfg, section and all',
 );
 
 console.log('OK — all pack minter assertions passed');

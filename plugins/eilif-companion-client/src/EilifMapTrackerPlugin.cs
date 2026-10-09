@@ -40,7 +40,7 @@ namespace EilifCompanionClient
     {
         public const string PluginGuid = "net.eilif.companionclient";
         public const string PluginName = "Eilif Companion Client";
-        public const string PluginVersion = "0.4.5"; // Keep this in lockstep with the csproj <Version>. (0.3.4 shipped with this const still reading "0.3.3", so its BepInEx load line said 0.3.3 while the manifest/assembly were 0.3.4 — do not repeat that drift.)
+        public const string PluginVersion = "0.4.6"; // Keep this in lockstep with the csproj <Version>. (0.3.4 shipped with this const still reading "0.3.3", so its BepInEx load line said 0.3.3 while the manifest/assembly were 0.3.4: do not repeat that drift.)
 
         internal static ManualLogSource Log;
         internal static EilifMapTrackerPlugin Instance;
@@ -57,6 +57,7 @@ namespace EilifCompanionClient
         private ConfigEntry<int> _intervalSeconds;
         private ConfigEntry<string> _keepItemTypes;
         private ConfigEntry<bool> _statsEnabled;
+        private ConfigEntry<string> _pumpkinCreatures;
 
         // ---- State (main thread unless noted) ----
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
@@ -105,10 +106,18 @@ namespace EilifCompanionClient
                 "GsValheimStatsClient no longer fills the stats map. Posts source:'client' to the same " +
                 "Url/Token above.");
 
+            _pumpkinCreatures = Config.Bind("Halloween", "PumpkinDropCreatures", PumpkinDropFilter.DefaultCreatures,
+                "Which creatures can drop HalloweenPieces pumpkins (BHP_PumpkinDrop): a comma-separated list of " +
+                "creature PREFAB names (Skeleton, Draugr_Elite, Greydwarf_Shaman), not display names; case and " +
+                "spaces around names are ignored. * = every creature (HalloweenPieces' own behaviour, filter off). " +
+                "Empty = no creature drops pumpkins. Only matters on a server running HalloweenPieces: anywhere " +
+                "else there is no pumpkin drop to remove, so this does nothing.");
+
             IngestUrl = _url.Value;
             IngestToken = _token.Value;
             EilifStatsReporter.Enabled = _statsEnabled.Value;
             TombstoneKeeper.Configure(_keepItemTypes.Value);
+            PumpkinDropFilter.Configure(_pumpkinCreatures.Value);
 
             try
             {
@@ -117,13 +126,15 @@ namespace EilifCompanionClient
             }
             catch { /* older runtimes may not expose Tls12 explicitly; ignore */ }
 
-            // Three independent hooks, applied ONE AT A TIME (v0.3.1, audit plugins-6):
+            // Independent hooks (three until 0.4.6, four since), applied ONE AT A TIME (v0.3.1, audit plugins-6):
             //
             //   • Patch_GameLogout          — a FRESH final map reading on a clean quit-to-menu /
             //     log out (Minimap + local player are still alive inside Game.Logout; hard
             //     disconnects that skip Logout are covered by the fallback in Update()).
             //   • Patch_PlayerOnDeath       — the local player's death cause (DeathReporter.cs).
             //   • Patch_MoveInventoryToGrave — the tombstone keep-list (TombstoneKeeper.cs).
+            //   • Patch_PumpkinDropFilter: (0.4.6, a fourth hook) HalloweenPieces pumpkins only
+            //     from the creatures in [Halloween] PumpkinDropCreatures (PumpkinDropFilter.cs).
             //
             // WHY ONE AT A TIME. These used to be three bare PatchAll(type) calls with nothing
             // around them. Harmony throws when it cannot resolve a target method, so if ONE of
@@ -168,7 +179,8 @@ namespace EilifCompanionClient
                                  " -> " + FeatureOf(cname) + ".");
                 }
             }
-            // The one unambiguous grep for a post-rebuild verification: 3/3 is healthy, anything
+            // The one unambiguous grep for a post-rebuild verification: 4/4 is healthy (3/3 before
+            // 0.4.6 added Patch_PumpkinDropFilter), anything
             // else means read the "could not apply" / MISSING line(s) around it.
             Log.LogInfo($"[EilifDeath] patch classes applied: {CountApplied(applied)}/{ExpectedPatchClasses.Length}");
             ReportMissing(applied);
@@ -178,6 +190,7 @@ namespace EilifCompanionClient
 
             Log.LogInfo($"[EilifMap] {PluginName} v{PluginVersion} loaded. Posting explored-map % to {_url.Value} every {_intervalSeconds.Value}s while on a server.");
             Log.LogInfo($"[EilifDeath] death-cause reporter armed (posts source:'eilif-death' to {_url.Value} when the local player dies on a server).");
+            Log.LogInfo($"[EilifHalloween] pumpkin drop filter: {PumpkinDropFilter.Describe()} (inert without HalloweenPieces).");
             Log.LogInfo($"[EilifStats] raw profile-stats reporter {(_statsEnabled.Value ? "armed" : "DISABLED")} (posts source:'client' builds/crafts/distance/pickups/fish to {_url.Value} every {_intervalSeconds.Value}s and on logout while on a server).");
         }
 
@@ -187,6 +200,7 @@ namespace EilifCompanionClient
             "Patch_GameLogout",             // the fresh final map reading on a clean quit
             "Patch_PlayerOnDeath",          // the authoritative death-cause report
             "Patch_MoveInventoryToGrave",   // the tombstone keep-list
+            "Patch_PumpkinDropFilter",      // 0.4.6: HalloweenPieces pumpkins only from listed creatures
         };
 
         private static string FeatureOf(string patchClass)
@@ -199,6 +213,8 @@ namespace EilifCompanionClient
                     return "the authoritative death cause; the dashboard falls back to the third-party 'enemyhit' catch-all for every death";
                 case "Patch_MoveInventoryToGrave":
                     return "the tombstone keep-list; deaths drop everything vanilla would drop";
+                case "Patch_PumpkinDropFilter":
+                    return "the [Halloween] PumpkinDropCreatures filter; on a HalloweenPieces server every creature can drop pumpkins";
                 default:
                     return "an unnamed feature";
             }

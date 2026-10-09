@@ -17,9 +17,9 @@ While you are connected to a server, this plugin sends three kinds of data to th
 - **Where:** only to the endpoint in `net.eilif.companionclient.cfg`. The Eilif modpack pre-fills the community dashboard URL. **With no URL configured the plugin sends nothing at all.**
 - **Source:** fully open on [GitHub](https://github.com/cbspears/valheim-dashboard/tree/main/plugins/eilif-companion-client).
 
-## It also changes one gameplay rule: read this before installing (new in 0.3.0)
+## It also changes two gameplay rules: read this before installing
 
-Version 0.3.0 added a **client-side tombstone keep-list**, and it is the only part of this plugin that touches gameplay rather than just reporting on it. (0.3.1, 0.3.2 and 0.3.3 changed nothing about it; 0.3.4 is the same code rebuilt for Valheim 1.0 so that the key check works there, and 0.4.0 adds only the profile-stats reporter above, 0.4.1 only fixes the map percentage on 1.0, 0.4.3 only changes which counters are read, 0.4.4 only adds the fishing counters, 0.4.5 only adds the kills counter, and all of them leave the tombstone rule untouched; see the changelog.)
+Version 0.3.0 added a **client-side tombstone keep-list**, and until 0.4.6 it was the only part of this plugin that touches gameplay rather than just reporting on it (0.4.6 adds the Halloween pumpkin filter below). (0.3.1, 0.3.2 and 0.3.3 changed nothing about it; 0.3.4 is the same code rebuilt for Valheim 1.0 so that the key check works there, and 0.4.0 adds only the profile-stats reporter above, 0.4.1 only fixes the map percentage on 1.0, 0.4.3 only changes which counters are read, 0.4.4 only adds the fishing counters, 0.4.5 only adds the kills counter, 0.4.6 only adds the pumpkin filter, and all of them leave the tombstone rule untouched; see the changelog.)
 
 Valheim decides what goes into your tombstone on **your own machine**, in `Inventory.MoveInventoryToGrave`, which spares quest items and whatever you had equipped. This plugin adds a Harmony **prefix** on that method which briefly marks keep-listed items as equipped so the game's own filter spares them, and a **finalizer** that unmarks them immediately afterwards. The flag never outlives that single call, and if the patch ever fails to apply you simply get exact vanilla behaviour. The result: your tools, weapons, shield, torch and ammo stay on you when you die, while resources, food and loot still drop into the grave, so a death stays a corpse run without becoming a re-gearing chore.
 
@@ -33,6 +33,19 @@ KeepItemTypes = OneHandedWeapon, TwoHandedWeapon, TwoHandedWeaponLeft, Bow, Shie
 ```
 
 Those are `ItemDrop.ItemData.ItemType` names. **Blank the value to turn the feature off entirely** and get vanilla tombstones back even on a `deathkeepequip` world.
+
+## Halloween pumpkins: only from listed creatures (new in 0.4.6)
+
+The Eilif server runs **HalloweenPieces**, which makes its pumpkin item (`BHP_PumpkinDrop`) drop from every enemy. Loot is rolled on the client that owns the dying creature, normally the killer's, so this plugin is where the choice is made: a Harmony **postfix** on `CharacterDrop.GenerateDropList` removes the rolled pumpkin entries unless the creature is on the list. Nothing else in the drop list is touched, and if the patch ever fails to apply you get HalloweenPieces' own behaviour.
+
+The list is in `net.eilif.companionclient.cfg` under `[Halloween]`:
+
+```ini
+[Halloween]
+PumpkinDropCreatures = Skeleton,Skeleton_Poison,Draugr,Draugr_Ranged,Draugr_Elite,Wraith,Ghost,Greydwarf,Greydwarf_Elite,Greydwarf_Shaman
+```
+
+Those are creature **prefab** names (`Draugr_Elite`, not "Draugr Elite"), matched without regard to case or surrounding spaces. **`*` means every creature** (the filter is off), and **an empty value means no creature drops pumpkins**. On a server without HalloweenPieces there is no pumpkin drop to remove, so the key does nothing.
 
 Intended for members of the Eilif server; harmless but useless anywhere else.
 

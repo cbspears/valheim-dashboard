@@ -89,10 +89,10 @@ dotnet build -c Release        # outputs + OVERWRITES dist/EilifCompanionClient.
      its `Loading [...]` line whether or not its Harmony patches went on, so `Loading` proves the
      DLL was chainloaded and nothing more. Each hit names the class **and the feature that died
      with it** (`EilifMapTrackerPlugin.cs:206`).
-   - **`[EilifDeath] patch classes applied: 3/3`** — the logout map post, the death-cause report and
-     the tombstone keep-list. The denominator is a fixed roster in the source, never a count of what
+   - **`[EilifDeath] patch classes applied: 4/4`** (3/3 before 0.4.6): the logout map post, the
+     death-cause report, the tombstone keep-list and, since 0.4.6, the Halloween pumpkin filter. The denominator is a fixed roster in the source, never a count of what
      loaded, so a class the runtime could not enumerate still shows as a shortfall. Anything under
-     3/3 means one of those three is gone with nothing else saying so.
+     4/4 means one of those four is gone with nothing else saying so.
    - `[EilifDeath] tombstone keep-list armed (N item types; …)` and the two `loaded` lines.
 4. **Only then** export the pack code, and wait for the Thunderstore listing index if any pinned
    version is newly published. **0.3.3 is already published** (2026-09-06 10:01 CT) and a published

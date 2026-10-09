@@ -1,6 +1,15 @@
 ## Settings file was created by plugin Eilif Companion Client v{{COMPANION_CFG_VERSION}}
 ## Plugin GUID: net.eilif.companionclient
 
+{{#PUMPKINFILTER}}
+[Halloween]
+
+## Which creatures can drop HalloweenPieces pumpkins (BHP_PumpkinDrop): a comma-separated list of creature PREFAB names (Skeleton, Draugr_Elite, Greydwarf_Shaman), not display names; case and spaces around names are ignored. * = every creature (HalloweenPieces' own behaviour, filter off). Empty = no creature drops pumpkins. Only matters on a server running HalloweenPieces: anywhere else there is no pumpkin drop to remove, so this does nothing.
+# Setting type: String
+# Default value: Skeleton,Skeleton_Poison,Draugr,Draugr_Ranged,Draugr_Elite,Wraith,Ghost,Greydwarf,Greydwarf_Elite,Greydwarf_Shaman
+PumpkinDropCreatures = Skeleton,Skeleton_Poison,Draugr,Draugr_Ranged,Draugr_Elite,Wraith,Ghost,Greydwarf,Greydwarf_Elite,Greydwarf_Shaman
+
+{{/PUMPKINFILTER}}
 [Map]
 
 ## Dashboard ingest endpoint. The explored-map % is POSTed here as source:'client-map'.

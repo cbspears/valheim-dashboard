@@ -318,6 +318,9 @@ export const FALLBACK_MODES = ['on', 'off', 'none'];
 export const DEFAULT_FALLBACK = 'none';
 
 /** The mods this pack can be minted without, in MODS order. */
+/** The first EilifCompanionClient build with [Halloween] PumpkinDropCreatures. */
+export const PUMPKIN_FILTER_MIN_CLIENT = '0.4.6';
+
 export const OMITTABLE_MODS = MODS.filter((m) => m.omitFlag);
 
 /** The mods this pack is minted WITHOUT unless asked, in MODS order. */
@@ -609,6 +612,16 @@ export function renderPack({
   // configured, and a cfg with no entry is a file r2modman writes into the
   // profile for a mod that is not there.
   const sections = { FALLBACK: fallback !== 'none', ...omitSections(dropped) };
+  // [Halloween] PumpkinDropCreatures in net.eilif.companionclient.cfg (2026-10-09). The
+  // key exists from EilifCompanionClient 0.4.6 and only filters anything when the pack
+  // carries HalloweenPieces, so the section is written only when both hold. Gating on
+  // the client pin as well keeps every pack already minted (v24 pins Client 0.4.5 with
+  // --halloween) reproducible byte for byte, and keeps a key the pinned build would
+  // ignore out of the shipped cfg.
+  const companionPin = dropped.has('companionClient')
+    ? null : (versions.companionClient ?? MODS.find((m) => m.key === 'companionClient').baseline);
+  sections.PUMPKINFILTER = !dropped.has('halloween') && companionPin != null
+    && compareSemver(companionPin, PUMPKIN_FILTER_MIN_CLIENT) >= 0;
   // Resolved against this render's pins, not the baselines: dropping V+ 10 has to
   // drop org.bepinex.plugins.valheim_plus.cfg, not the legacy name it no longer
   // ships.
