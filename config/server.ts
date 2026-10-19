@@ -31,12 +31,12 @@ export const SERVER_PASSWORD = 'Leroy';
 // Shared r2modman / Thunderstore Mod Manager profile code. Once you publish the
 // version-pinned modpack, paste its code here and the Get Started page switches
 // to the one-click "import this code" flow. Leave '' until then.
-export const MODPACK_PROFILE_CODE = '01a145ac-c742-8946-bdf1-60e68c67805b';
+export const MODPACK_PROFILE_CODE = '01a151b2-bd56-a47f-3bd6-80b1d8d27afa';
 
 // Human-readable name for the pack the code above points at. Shown next to
 // every copy of the code so a returning player can tell at a glance whether
 // they are current. BUMP THIS EVERY TIME THE CODE IS RE-MINTED.
-export const MODPACK_VERSION_LABEL = 'Pack v25 · Oct 16';
+export const MODPACK_VERSION_LABEL = 'Pack v26 · Oct 18';
 
 // A short, urgent notice shown as a gold banner at the top of the Hall and Get
 // Started. Leave '' and no banner renders anywhere. Set it for launch week

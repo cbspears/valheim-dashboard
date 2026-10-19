@@ -231,7 +231,7 @@ name: 'Unshamed',
     author: 'Advize',
     description:
       'Plant and harvest every flower, sapling, and crop with the cultivator, so you can raise proper farms and managed forests. Yields stay vanilla. The server runs it too and checks the version, so anyone without it cannot join. Ships in the modpack.',
-    version: '1.21.3', // 2026-09-25 09:34 CT: Advize's 1.21.3 (Valheim 1.0.15 + BepInEx 5.4.2351 build; init-during-config-sync fix) on the box, boot verified; pack v23 pins it. Previous: 1.21.2 — 2026-09-12 15:19 CT: Advize's 1.21.2 ("Fixed seed drops for poteitrs") on the box; pack v19 pins it (v16–v18 pinned 1.21.0, r2modman installed the newest anyway).
+    version: '1.21.4', // 2026-10-18 20:06 CT: Advize's 1.21.4 (compiled against Valheim 1.0.20; default allowed biomes for crops + timberwood sapling fixed so crops grow in the Ashlands under EnforceBiomesVanilla; no cfg key change); on the box since the 20:06 CT window, pack v26 pins it. PE does not enforce version equality. Previous: 1.21.3 — 2026-09-25 09:34 CT: Advize's 1.21.3 (Valheim 1.0.15 + BepInEx 5.4.2351 build; init-during-config-sync fix) on the box, boot verified; pack v23 pins it. Previous: 1.21.2 — 2026-09-12 15:19 CT: Advize's 1.21.2 ("Fixed seed drops for poteitrs") on the box; pack v19 pins it (v16–v18 pinned 1.21.0, r2modman installed the newest anyway).
     category: 'QoL',
     clientRequired: true,
     url: 'https://thunderstore.io/c/valheim/p/Advize/PlantEverything/',
