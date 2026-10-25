@@ -37,8 +37,9 @@ drop, so read the table, not the number.
 | Unshamed | `Azumatt/Unshamed` | **1.0.0** | yes (`Azumatt.Unshamed.cfg`), and the pinned values are the point. See rule 7 |
 | HalloweenPieces (optional, from pack v24) | `blacks7ar/HalloweenPieces` | **1.2.0** (`--halloween 1.2.0`) | yes (`blacks7ar.HalloweenPieces.cfg`), server-locked; template = mod defaults. See rule 9 |
 
-The table is the v15 snapshot plus the v24 addition. Today's pins (pack v26, 2026-10-18) are
-BepInExPack 5.4.2351, ValheimPlus 10.3.0 (the Valheim 1.0.20 build), `Advize/PlantEverything`
+The table is the v15 snapshot plus the v24 addition. Today's pins (pack v27, 2026-10-25) are
+BepInExPack 5.4.2351, ValheimPlus 10.4.0 (the first release on Grantapher's new numbering, still the
+Valheim 1.0.20 line), `Advize/PlantEverything`
 1.21.4 (the fedorovdgap rebuild is a contingency again), EilifCompanionClient 0.4.6,
 Unshamed 1.0.5 and HalloweenPieces 1.2.0; the flag set under "Re-minting: the sequence" is
 the current one.
@@ -269,10 +270,10 @@ switches the whole section, and `--paths` must pin 1.7.0 or newer for these four
 ### The flags
 
 ```bash
-# pack v26, the current shape (v25 with PlantEverything 1.21.4; v25 = --plant 1.21.3;
+# pack v27, the current shape (v26 with ValheimPlus 10.4.0; v26 = --vplus 10.3.0; v25 = --plant 1.21.3;
 # v24 = that with --companion-client 0.4.5 --vplus 10.2.0, v23 that minus --halloween)
 node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.6 \
-  --vplus 10.3.0 --bepinex 5.4.2351 --unshamed 1.0.5 --plant 1.21.4 --halloween 1.2.0 \
+  --vplus 10.4.0 --bepinex 5.4.2351 --unshamed 1.0.5 --plant 1.21.4 --halloween 1.2.0 \
   --no-azu --fallback off --cap 24 ...
 # pack v15, the shape with the fedorovdgap PlantEverything rebuild
 node scripts/mint-pack.mjs --world Eilif --paths 1.7.1 --companion-client 0.4.2 \
@@ -434,8 +435,8 @@ Assume the four plugins have been rebuilt for Valheim 1.0 and the two Eilif clie
 are uploaded to Thunderstore.
 
 The worked examples below leave the client pin as `<ver>`, because a published Thunderstore
-version is immutable and that number moves on its own. **Today's flags are the v26 set** (the
-v25 pins with `--plant 1.21.4`, 2026-10-18) and they go on
+version is immutable and that number moves on its own. **Today's flags are the v27 set** (the
+v26 pins with `--vplus 10.4.0`, 2026-10-25) and they go on
 **every** command in this section, including step 6's bundle rebuild:
 
 ```
