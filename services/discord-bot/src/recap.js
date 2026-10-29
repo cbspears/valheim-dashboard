@@ -67,6 +67,7 @@
 // capped at DAY_DELTA_DAYS and appended ONLY by the evening recap (a morning
 // render must never poison the personal baseline). See appendDayDeltas.
 import cron from 'node-cron';
+import { readFile, unlink } from 'node:fs/promises';
 import { formatRecap } from './format.js';
 import { isExcluded, isExcludedName, withoutExcluded } from './excluded.js';
 
@@ -175,6 +176,9 @@ const ANGLES = [
 
 const BOSS_ANGLE = { key: 'boss_kill', label: '👑 Bane of Beasts (Boss-Slayer)' };
 const EXPLORE_ANGLE = { key: 'most_explored', label: '🧭 Trailblazer' };
+// The operator's-pick fallback only: a named viking who cleared no floor is
+// crowned for the hours themselves (format.js keeps the `most_hours` blurbs).
+const HOURS_ANGLE = { key: 'most_hours', label: '⏳ Keeper of the Hall' };
 const IRONHIDE = {
   key: 'ironhide',
   label: '🛡️ Ironhide',
@@ -296,6 +300,7 @@ function rotationFactor(name, key, history) {
  *   progression,      // { name: map_explored_pct + normalised kills } clan-wide
  *   history,          // [{ name, key }] from poty_history, NEWEST FIRST
  *   lastCat, lastWinner, winStreak, forceUnderdog, seed,
+ *   pick,             // operator's pick for tonight (a character name) or null
  * }
  */
 export function selectPlayerOfDay(ctx = {}) {
@@ -310,7 +315,7 @@ export function selectPlayerOfDay(ctx = {}) {
     dayDeltas = [], attendanceDays: attendanceDays_ = {}, progression: progression_ = {},
     history = [],
     lastCat = null, lastWinner = null, winStreak = 0, forceUnderdog = false,
-    seed = 0,
+    seed = 0, pick = null,
   } = ctx;
 
   // THE CROWN IS NEVER OFFERED TO AN EXCLUDED CHARACTER. buildStats already drops
@@ -508,31 +513,62 @@ export function selectPlayerOfDay(ctx = {}) {
     if (u) return u;
   }
 
-  if (!candidates.length) return null;
-
-  let winner = candidates[0];
-
-  // Anti-monopoly backstop: block a 3rd straight crown for the same person.
-  // The rotation discount usually gets there first; this is the hard stop.
-  const blocked = winStreak >= MAX_WIN_STREAK && lastWinner ? lastWinner : null;
-  if (blocked && winner.name === blocked && !winner.epic) {
-    const alt = candidates.find((c) => c.name !== blocked);
-    if (alt) {
-      winner = alt;
-    } else {
-      // Only the streak-holder qualifies for anything tonight — spotlight a quiet
-      // viking instead if we can; else let the streak stand (better than no crown).
-      const u = underdogPick();
-      if (u) return u;
+  // ── The operator's pick ──────────────────────────────────────────────────
+  // Charlie names tonight's viking (poty-pick.json next to state.json; one
+  // night, consumed by postRecap). The pick still has to have PLAYED tonight:
+  // it is matched against the 20-minute eligible set only, takes that viking's
+  // best-ranked angle so the blurb tells a true story, and falls back to the
+  // plain hours angle when they cleared no floor. A pick who never passed the
+  // gate is ignored with an operator line and the draw runs as usual. The
+  // streak block and the category anti-repeat are skipped on purpose: the
+  // operator asked for this name, not for the fairest name.
+  const pickWanted = typeof pick === 'string' ? pick.trim() : '';
+  const pickName = pickWanted
+    ? eligible.find((n) => n.toLowerCase() === pickWanted.toLowerCase()) || null
+    : null;
+  if (pickWanted && !pickName) {
+    console.log(`[recap] poty pick "${pickWanted}" ignored: not on the world 20 minutes tonight`);
+  }
+  let picked = null;
+  if (pickName) {
+    picked = candidates.find((c) => c.name === pickName) || null;
+    if (!picked) {
+      picked = {
+        key: HOURS_ANGLE.key, label: HOURS_ANGLE.label, name: pickName, tier: 0,
+        metricKey: 'hours', value: Number(hr[pickName]) || 0,
+        surprise: 1, share: 0, rot: 1, score: 0, epic: false,
+      };
+      candidates.push(picked);
     }
   }
 
-  // Last-resort category anti-repeat: the rotation discount already halves a
-  // repeat, so this only fires when the same angle still wins outright and a
-  // different one is genuinely available.
-  if (!winner.epic && winner.key === lastCat) {
-    const alt = candidates.find((c) => c.key !== winner.key && c.name !== blocked);
-    if (alt) winner = alt;
+  let winner = picked;
+  if (!winner) {
+    if (!candidates.length) return null;
+    winner = candidates[0];
+
+    // Anti-monopoly backstop: block a 3rd straight crown for the same person.
+    // The rotation discount usually gets there first; this is the hard stop.
+    const blocked = winStreak >= MAX_WIN_STREAK && lastWinner ? lastWinner : null;
+    if (blocked && winner.name === blocked && !winner.epic) {
+      const alt = candidates.find((c) => c.name !== blocked);
+      if (alt) {
+        winner = alt;
+      } else {
+        // Only the streak-holder qualifies for anything tonight — spotlight a quiet
+        // viking instead if we can; else let the streak stand (better than no crown).
+        const u = underdogPick();
+        if (u) return u;
+      }
+    }
+
+    // Last-resort category anti-repeat: the rotation discount already halves a
+    // repeat, so this only fires when the same angle still wins outright and a
+    // different one is genuinely available.
+    if (!winner.epic && winner.key === lastCat) {
+      const alt = candidates.find((c) => c.key !== winner.key && c.name !== blocked);
+      if (alt) winner = alt;
+    }
   }
 
   const name = winner.name;
@@ -569,6 +605,7 @@ export function selectPlayerOfDay(ctx = {}) {
   };
 
   const why =
+    (picked ? 'operator pick; ' : '') +
     `${winner.key}, surprise ${winner.surprise.toFixed(1)}x, ` +
     `share ${winner.share.toFixed(2)}, rot ${winner.rot.toFixed(2)}`;
 
@@ -920,6 +957,8 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
     if (period === 'evening') {
       // Unsung-Hero spotlight comes due once the dry spell reaches the cadence.
       const underdogDue = (state.eveningsSinceUnderdog || 0) >= UNDERDOG.everyEvenings - 1;
+      const pickFile = await readPick(dayKey(now));
+      if (pickFile) console.log(`[recap] poty pick tonight: ${pickFile.name}${pickFile.by ? ` (by ${pickFile.by})` : ''}`);
       poty = selectPlayerOfDay({
         windowDeaths, lastCause, hours, bossesPresent, latestBoss,
         killsDelta, resourcesDelta, craftsDelta, buildsDelta,
@@ -930,6 +969,7 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
         winStreak: state.potyWinStreak || 0,
         forceUnderdog: underdogDue,
         seed: worldDay,
+        pick: pickFile ? pickFile.name : null,
       });
       // One operator line, never posted: why this viking and not the runner-up.
       if (poty) console.log(`[recap] poty: ${poty.name} — ${poty.why}`);
@@ -980,6 +1020,34 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
       _statsSnapshotNext: statsSnapshotNext,
       _dayDeltaEntry: dayDeltaEntry,
     };
+  }
+
+  // ── The operator's pick file ─────────────────────────────────────────────
+  // services/discord-bot/poty-pick.json, written by hand:
+  //   { "name": "Rosir", "date": "2026-10-28", "by": "Charlie" }
+  // `date` is the recap's own calendar day (dayKey); a stale or malformed file
+  // is ignored. Read fresh at every evening build (no restart needed to set
+  // it) and DELETED by postRecap once the evening has run, honoured or not,
+  // so a pick can never carry over to a second night.
+  const PICK_PATH = new URL('../poty-pick.json', import.meta.url);
+  async function readPick(todayKey) {
+    let raw;
+    try { raw = await readFile(PICK_PATH, 'utf8'); } catch { return null; }
+    try {
+      const p = JSON.parse(raw);
+      if (!p || typeof p.name !== 'string' || !p.name.trim()) return null;
+      if (p.date && p.date !== todayKey) {
+        console.log(`[recap] poty pick "${p.name}" is dated ${p.date}, not ${todayKey}: ignored`);
+        return null;
+      }
+      return p;
+    } catch (e) {
+      console.error('[recap] poty-pick.json unreadable:', e.message);
+      return null;
+    }
+  }
+  async function clearPick() {
+    try { await unlink(PICK_PATH); console.log('[recap] poty pick file consumed'); } catch { /* none */ }
   }
 
   async function postRecap(period) {
@@ -1033,6 +1101,7 @@ export function createRecap({ db, post, state, saveState, writeDb = null, tz = '
         console.error('[recap] poty voice hook failed:', e.message);
       }
     }
+    if (period === 'evening') await clearPick();
     await saveState();
     return stats;
   }

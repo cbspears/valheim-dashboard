@@ -485,4 +485,63 @@ const priorDays = (n, byName) =>
     `the why-line is one operator-readable line, got: ${crown.why}`);
 }
 
+// ── the operator's pick (2026-10-28, "make sure Rosir gets player of the day") ──
+{
+  // A named viking takes the night from a stronger candidate, on their OWN
+  // best angle, and the why-line says so.
+  const picked = selectPlayerOfDay({
+    hours: { Buildy: 2, Rosir: 2 },
+    buildsDelta: { Buildy: 400 },
+    killsDelta: { Rosir: 20 },
+    dayDeltas: priorDays(3, { Buildy: { builds: 80 }, Rosir: { kills: 20 } }),
+    pick: 'Rosir',
+  });
+  eq(picked?.name, 'Rosir', 'the pick wins over a 5x builds spike');
+  eq(picked?.key, 'hunter', 'on the angle they actually cleared');
+  ok(/^operator pick; hunter,/.test(picked.why), `why-line names the pick, got: ${picked.why}`);
+  eq(picked.alternatives[0]?.name, 'Buildy', 'the displaced winner is the first runner-up');
+
+  // No floor cleared tonight -> crowned for the hours themselves.
+  const hoursOnly = selectPlayerOfDay({
+    hours: { Buildy: 2, Rosir: 3.2 },
+    buildsDelta: { Buildy: 400 },
+    dayDeltas: priorDays(3, { Buildy: { builds: 80 } }),
+    pick: 'rosir',
+  });
+  eq(hoursOnly?.name, 'Rosir', 'the match is case-insensitive');
+  eq(hoursOnly?.key, 'most_hours', 'a pick with no cleared floor gets the hours angle');
+  ok(POTY_TEMPLATES.most_hours.length > 0, 'and format.js still has blurbs for it');
+  eq(hoursOnly.fields.hours, 3.2, 'with their real hours in the story fields');
+
+  // Never on the strength of a name alone: under 20 minutes tonight, the pick
+  // is ignored and the ordinary draw runs.
+  const absent = selectPlayerOfDay({
+    hours: { Buildy: 2, Rosir: 0.2 },
+    buildsDelta: { Buildy: 400 },
+    dayDeltas: priorDays(3, { Buildy: { builds: 80 } }),
+    pick: 'Rosir',
+  });
+  eq(absent?.name, 'Buildy', 'a pick who did not pass the activity gate changes nothing');
+  ok(!/operator pick/.test(absent.why), 'and the why-line does not claim a pick');
+
+  // The streak backstop does not apply to a pick.
+  const streak = selectPlayerOfDay({
+    hours: { Buildy: 2, Rosir: 2 },
+    buildsDelta: { Buildy: 400 },
+    killsDelta: { Rosir: 20 },
+    dayDeltas: priorDays(3, { Buildy: { builds: 80 }, Rosir: { kills: 20 } }),
+    lastWinner: 'Rosir', winStreak: 2,
+    pick: 'Rosir',
+  });
+  eq(streak?.name, 'Rosir', 'a pick overrides the third-night streak block');
+
+  // No pick, nothing changes.
+  const plain = selectPlayerOfDay({
+    hours: { Buildy: 2, Rosir: 2 },
+    buildsDelta: { Buildy: 400 },
+    dayDeltas: priorDays(3, { Buildy: { builds: 80 } }),
+  });
+  eq(plain?.name, 'Buildy', 'without a pick the draw is untouched');
+}
+
 console.log(`recap.test: ${passed} assertions passed`);
