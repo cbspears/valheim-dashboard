@@ -22,6 +22,9 @@ export const MAP_ENABLED = true;
 
 // The bot's @handle in Discord — shown in the Gallery's "how to add" explainer.
 export const DISCORD_BOT_HANDLE = '@Eilif';
+// Photos per page of /gallery (2026-11-03). Eight rows of three on a desktop.
+// Page 1 is /gallery and the rest are /gallery/2, /gallery/3 and so on.
+export const GALLERY_PAGE_SIZE = 24;
 // Public connect address shown on the Hall + Get Started page.
 export const SERVER_ADDRESS = '191.101.30.229:6028';
 // Join password, shown on Get Started. Charlie's call (2026-08-22): the page is

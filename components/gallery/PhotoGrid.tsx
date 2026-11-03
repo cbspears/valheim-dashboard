@@ -28,9 +28,10 @@ const LIGHTBOX_SIZES = '(min-width: 1024px) 1024px, 100vw';
 
 /**
  * How many tiles load eagerly. Three is the first row on a desktop and more
- * than the first row anywhere narrower; everything after it is lazy, which on
- * a wall of 132 photos is the difference between a page view costing three
- * images and a page view costing all of them.
+ * than the first row anywhere narrower; everything after it is lazy. The grid
+ * gets one page of 24 now (2026-11-03, see getGalleryPage), not the wall of 132
+ * it was written for, but lazy still means a reader who never scrolls pays for
+ * three images rather than twenty-four.
  */
 const EAGER_TILES = 3;
 

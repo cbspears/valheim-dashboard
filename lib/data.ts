@@ -1445,6 +1445,51 @@ export const getGalleryPhotos = cache(async (limit?: number): Promise<GalleryPho
   return typeof limit === 'number' ? rows.slice(0, limit) : rows;
 });
 
+/**
+ * ONE PAGE OF THE GALLERY, newest first, and how many photos there are in all.
+ *
+ * WHY THE GALLERY PAGES INSTEAD OF WALKING THE TABLE (2026-11-03). /gallery
+ * used to take the whole collection from getGalleryPhotos and pour it into one
+ * CSS multi-column masonry. At 193 photos that was a page about 20,000 px tall,
+ * and because columns fill top to bottom before they move right, the newest
+ * photos ran down the left column while the middle and right columns opened
+ * two months back. The owner asked for pages, so the gallery now reads 24 at a
+ * time and the path says which 24 (/gallery, /gallery/2, ...; never a query
+ * string, see app/events/page.tsx for what `searchParams` costs a route).
+ *
+ * One request per page: the rows and the exact total come back together
+ * (`count: 'exact'` rides on the same response as `Content-Range`), so the
+ * pager knows the last page without a second read. The pin embed is tried
+ * first and the plain select is the fallback, the same probe the whole-
+ * collection read below makes, so a database without the pin link still shows
+ * photos. getGalleryPhotos stays as it was, because /viking/[slug] and
+ * /boss/[slug] filter the whole collection and need every row.
+ *
+ * A page past the end is an error from PostgREST (416, the range starts beyond
+ * the last row), and every error lands on `{ photos: [], total: 0 }`, which
+ * the page turns into a 404 rather than an empty wall.
+ */
+export const getGalleryPage = cache(
+  async (page: number, perPage: number): Promise<{ photos: GalleryPhoto[]; total: number }> => {
+    const from = (page - 1) * perPage;
+    const to = from + perPage - 1;
+    const read = (cols: string) =>
+      db()
+        .from('gallery_photos')
+        .select(cols, { count: 'exact' })
+        .order('posted_at', { ascending: false })
+        .range(from, to) as unknown as PromiseLike<{
+        data: GalleryPhoto[] | null;
+        error: unknown;
+        count: number | null;
+      }>;
+    let res = await read('*, pin:pins(name, kind)');
+    if (res.error) res = await read('*');
+    if (res.error || !res.data) return { photos: [], total: 0 };
+    return { photos: res.data, total: res.count ?? res.data.length };
+  }
+);
+
 export interface PinPhoto {
   id: string;
   url: string;
